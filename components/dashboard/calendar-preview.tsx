@@ -1,0 +1,86 @@
+"use client"
+
+import { useState } from "react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
+import { packages } from "@/lib/data"
+
+export function CalendarPreview() {
+  const [currentMonth, setCurrentMonth] = useState(new Date(2026, 4, 1)) // May 2026
+
+  const monthName = currentMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" })
+
+  const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate()
+
+  const firstDayOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay()
+
+  const eventDays = packages
+    .filter((pkg) => {
+      const pkgDate = new Date(pkg.date)
+      return pkgDate.getMonth() === currentMonth.getMonth() && pkgDate.getFullYear() === currentMonth.getFullYear()
+    })
+    .map((pkg) => new Date(pkg.date).getDate())
+
+  const prevMonth = () => {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))
+  }
+
+  const nextMonth = () => {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))
+  }
+
+  return (
+    <div className="bg-card rounded-2xl border border-border p-6">
+      <div className="flex items-center justify-between mb-6">
+        <h3 className="text-lg font-semibold text-foreground">Race Calendar</h3>
+        <div className="flex items-center gap-2">
+          <button onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <span className="text-sm font-medium w-32 text-center">{monthName}</span>
+          <button onClick={nextMonth} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-7 gap-1">
+        {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
+          <div key={day} className="text-center text-xs font-medium text-muted-foreground py-2">
+            {day}
+          </div>
+        ))}
+
+        {Array.from({ length: firstDayOfMonth }).map((_, i) => (
+          <div key={`empty-${i}`} />
+        ))}
+
+        {Array.from({ length: daysInMonth }).map((_, i) => {
+          const day = i + 1
+          const hasEvent = eventDays.includes(day)
+
+          return (
+            <div
+              key={day}
+              className={`
+                relative text-center py-2 text-sm rounded-lg cursor-pointer transition-colors
+                ${hasEvent ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted"}
+              `}
+            >
+              {day}
+              {hasEvent && (
+                <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white" />
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="mt-4 pt-4 border-t border-border">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="w-3 h-3 rounded bg-primary" />
+          <span>Race Weekend</span>
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -1,0 +1,62 @@
+import Link from "next/link"
+import { Plus, Search, FileText, MessageSquare } from "lucide-react"
+
+const actions = [
+  {
+    title: "New Booking",
+    description: "Create a booking for your client",
+    icon: Plus,
+    href: "/packages",
+    primary: true,
+  },
+  {
+    title: "Search Packages",
+    description: "Browse available experiences",
+    icon: Search,
+    href: "/packages",
+  },
+  {
+    title: "View Invoices",
+    description: "Check payment status",
+    icon: FileText,
+    href: "/invoices",
+  },
+  {
+    title: "Get Support",
+    description: "Chat with our team",
+    icon: MessageSquare,
+    href: "/faqs",
+  },
+]
+
+export function QuickActions() {
+  return (
+    <div className="space-y-4">
+      <h3 className="text-lg font-semibold text-foreground">Quick Actions</h3>
+      <div className="grid grid-cols-2 gap-3">
+        {actions.map((action) => (
+          <Link
+            key={action.title}
+            href={action.href}
+            className={`
+              flex flex-col gap-2 p-4 rounded-xl transition-all
+              ${
+                action.primary
+                  ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                  : "bg-muted hover:bg-muted/80 text-foreground"
+              }
+            `}
+          >
+            <action.icon className={`h-5 w-5 ${action.primary ? "text-white" : "text-primary"}`} />
+            <div>
+              <p className="font-semibold text-sm">{action.title}</p>
+              <p className={`text-xs ${action.primary ? "text-white/70" : "text-muted-foreground"}`}>
+                {action.description}
+              </p>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </div>
+  )
+}
