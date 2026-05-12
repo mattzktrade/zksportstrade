@@ -31,15 +31,15 @@ const actions = [
 
 export function QuickActions() {
   return (
-    <div className="space-y-4">
-      <h3 className="text-lg font-semibold text-foreground">Quick Actions</h3>
-      <div className="grid grid-cols-2 gap-3">
+    <div className="space-y-3 sm:space-y-4">
+      <h3 className="text-base sm:text-lg font-semibold text-foreground">Quick Actions</h3>
+      <div className="grid grid-cols-2 gap-2 sm:gap-3">
         {actions.map((action) => (
           <Link
             key={action.title}
             href={action.href}
             className={`
-              flex flex-col gap-2 p-4 rounded-xl transition-all
+              flex flex-col gap-1.5 sm:gap-2 p-3 sm:p-4 rounded-xl transition-all
               ${
                 action.primary
                   ? "bg-primary text-primary-foreground hover:bg-primary/90"
@@ -47,10 +47,10 @@ export function QuickActions() {
               }
             `}
           >
-            <action.icon className={`h-5 w-5 ${action.primary ? "text-white" : "text-primary"}`} />
+            <action.icon className={`h-4 w-4 sm:h-5 sm:w-5 ${action.primary ? "text-white" : "text-primary"}`} />
             <div>
-              <p className="font-semibold text-sm">{action.title}</p>
-              <p className={`text-xs ${action.primary ? "text-white/70" : "text-muted-foreground"}`}>
+              <p className="font-semibold text-xs sm:text-sm">{action.title}</p>
+              <p className={`text-[10px] sm:text-xs ${action.primary ? "text-white/70" : "text-muted-foreground"}`}>
                 {action.description}
               </p>
             </div>

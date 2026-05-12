@@ -16,7 +16,7 @@ function StatCard({ title, value, change, icon: Icon, accent }: StatCardProps) {
   return (
     <div
       className={cn(
-        "relative p-6 rounded-2xl overflow-hidden",
+        "relative p-4 sm:p-6 rounded-2xl overflow-hidden",
         accent ? "bg-primary text-primary-foreground" : "bg-card border border-border",
       )}
     >
@@ -26,21 +26,21 @@ function StatCard({ title, value, change, icon: Icon, accent }: StatCardProps) {
       <div className="relative">
         <div
           className={cn(
-            "inline-flex items-center justify-center h-12 w-12 rounded-xl mb-4",
+            "inline-flex items-center justify-center h-10 w-10 sm:h-12 sm:w-12 rounded-xl mb-3 sm:mb-4",
             accent ? "bg-white/20" : "bg-muted",
           )}
         >
-          <Icon className={cn("h-6 w-6", accent ? "text-white" : "text-primary")} />
+          <Icon className={cn("h-5 w-5 sm:h-6 sm:w-6", accent ? "text-white" : "text-primary")} />
         </div>
-        <p className={cn("text-sm font-medium mb-1", accent ? "text-white/80" : "text-muted-foreground")}>{title}</p>
-        <p className={cn("text-3xl font-bold tracking-tight", accent ? "text-white" : "text-foreground")}>{value}</p>
+        <p className={cn("text-xs sm:text-sm font-medium mb-1", accent ? "text-white/80" : "text-muted-foreground")}>{title}</p>
+        <p className={cn("text-2xl sm:text-3xl font-bold tracking-tight", accent ? "text-white" : "text-foreground")}>{value}</p>
         <div
           className={cn(
-            "flex items-center gap-1 mt-2 text-sm font-medium",
+            "flex items-center gap-1 mt-2 text-xs sm:text-sm font-medium",
             accent ? "text-white/80" : isPositive ? "text-emerald-600" : "text-red-500",
           )}
         >
-          {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+          {isPositive ? <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4" /> : <TrendingDown className="h-3 w-3 sm:h-4 sm:w-4" />}
           <span>
             {isPositive ? "+" : ""}
             {change}% vs last month
@@ -53,7 +53,7 @@ function StatCard({ title, value, change, icon: Icon, accent }: StatCardProps) {
 
 export function StatsGrid() {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6">
       <StatCard title="Total Bookings" value="47" change={12} icon={Ticket} accent />
       <StatCard title="Revenue (YTD)" value="$892.5K" change={8} icon={DollarSign} />
       <StatCard title="Active Clients" value="23" change={-3} icon={Users} />

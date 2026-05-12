@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { PortalLayout } from "@/components/portal-layout"
-import { ChevronDown, Search, MessageSquare, Phone, Mail } from "lucide-react"
+import { ChevronDown, Search, MessageCircle, Mail } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const faqs = [
@@ -78,33 +78,33 @@ export default function FAQsPage() {
 
   return (
     <PortalLayout>
-      <div className="p-8 space-y-8">
+      <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8">
         {/* Header */}
         <div className="text-center max-w-2xl mx-auto">
-          <h1 className="text-3xl font-bold text-foreground">Frequently Asked Questions</h1>
-          <p className="text-muted-foreground mt-2">
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Frequently Asked Questions</h1>
+          <p className="text-sm sm:text-base text-muted-foreground mt-2">
             Find answers to common questions about bookings, payments, and our F1 hospitality packages
           </p>
 
           {/* Search */}
-          <div className="relative mt-6">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+          <div className="relative mt-4 sm:mt-6">
+            <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground" />
             <input
               type="text"
               placeholder="Search for answers..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-12 pr-4 py-4 bg-card border border-border rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+              className="w-full pl-10 sm:pl-12 pr-4 py-3 sm:py-4 bg-card border border-border rounded-2xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
             />
           </div>
         </div>
 
         {/* FAQ Categories */}
-        <div className="space-y-8 max-w-3xl mx-auto">
+        <div className="space-y-6 sm:space-y-8 max-w-3xl mx-auto">
           {filteredFaqs.map((category) => (
             <div key={category.category}>
-              <h2 className="text-lg font-semibold text-foreground mb-4">{category.category}</h2>
-              <div className="space-y-3">
+              <h2 className="text-base sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">{category.category}</h2>
+              <div className="space-y-2 sm:space-y-3">
                 {category.questions.map((faq, idx) => {
                   const id = `${category.category}-${idx}`
                   const isOpen = openItems.includes(id)
@@ -113,19 +113,19 @@ export default function FAQsPage() {
                     <div key={id} className="bg-card border border-border rounded-2xl overflow-hidden">
                       <button
                         onClick={() => toggleItem(id)}
-                        className="flex items-center justify-between w-full p-5 text-left"
+                        className="flex items-center justify-between w-full p-3 sm:p-4 lg:p-5 text-left"
                       >
-                        <span className="font-medium text-foreground pr-4">{faq.q}</span>
+                        <span className="text-sm sm:text-base font-medium text-foreground pr-3 sm:pr-4">{faq.q}</span>
                         <ChevronDown
                           className={cn(
-                            "h-5 w-5 text-muted-foreground flex-shrink-0 transition-transform",
+                            "h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground flex-shrink-0 transition-transform",
                             isOpen && "rotate-180",
                           )}
                         />
                       </button>
                       {isOpen && (
-                        <div className="px-5 pb-5 pt-0">
-                          <p className="text-muted-foreground leading-relaxed">{faq.a}</p>
+                        <div className="px-3 sm:px-4 lg:px-5 pb-3 sm:pb-4 lg:pb-5 pt-0">
+                          <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">{faq.a}</p>
                         </div>
                       )}
                     </div>
@@ -137,59 +137,48 @@ export default function FAQsPage() {
         </div>
 
         {filteredFaqs.length === 0 && (
-          <div className="text-center py-12">
-            <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-              <Search className="h-8 w-8 text-muted-foreground" />
+          <div className="text-center py-8 sm:py-12">
+            <div className="w-12 h-12 sm:w-16 sm:h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+              <Search className="h-6 w-6 sm:h-8 sm:w-8 text-muted-foreground" />
             </div>
-            <h3 className="text-lg font-semibold text-foreground mb-2">No results found</h3>
-            <p className="text-muted-foreground">Try a different search term or contact our support team</p>
+            <h3 className="text-base sm:text-lg font-semibold text-foreground mb-2">No results found</h3>
+            <p className="text-sm sm:text-base text-muted-foreground">Try a different search term or contact our support team</p>
           </div>
         )}
 
         {/* Contact Support */}
-        <div className="bg-card border border-border rounded-2xl p-8 max-w-3xl mx-auto">
-          <div className="text-center mb-6">
-            <h2 className="text-xl font-bold text-foreground">Still have questions?</h2>
-            <p className="text-muted-foreground mt-1">Our support team is here to help</p>
+        <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto">
+          <div className="text-center mb-4 sm:mb-6">
+            <h2 className="text-lg sm:text-xl font-bold text-foreground">Still have questions?</h2>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">Our team is here to help</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 max-w-xl mx-auto">
             <a
-              href="#"
-              className="flex flex-col items-center gap-3 p-5 bg-muted/50 rounded-xl hover:bg-muted transition-colors"
+              href="https://wa.me/441234567890"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-col items-center gap-2 sm:gap-3 p-4 sm:p-5 bg-muted/50 rounded-xl hover:bg-muted transition-colors"
             >
-              <div className="p-3 bg-primary/10 rounded-xl">
-                <MessageSquare className="h-6 w-6 text-primary" />
+              <div className="p-2 sm:p-3 bg-primary/10 rounded-xl">
+                <MessageCircle className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
               </div>
               <div className="text-center">
-                <p className="font-semibold text-foreground">Live Chat</p>
-                <p className="text-sm text-muted-foreground">Chat with us now</p>
-              </div>
-            </a>
-
-            <a
-              href="tel:+441234567890"
-              className="flex flex-col items-center gap-3 p-5 bg-muted/50 rounded-xl hover:bg-muted transition-colors"
-            >
-              <div className="p-3 bg-primary/10 rounded-xl">
-                <Phone className="h-6 w-6 text-primary" />
-              </div>
-              <div className="text-center">
-                <p className="font-semibold text-foreground">Call Us</p>
-                <p className="text-sm text-muted-foreground">+44 123 456 789</p>
+                <p className="text-sm sm:text-base font-semibold text-foreground">WhatsApp Us</p>
+                <p className="text-xs sm:text-sm text-muted-foreground">+44 123 456 789</p>
               </div>
             </a>
 
             <a
               href="mailto:trade@zksports.com"
-              className="flex flex-col items-center gap-3 p-5 bg-muted/50 rounded-xl hover:bg-muted transition-colors"
+              className="flex flex-col items-center gap-2 sm:gap-3 p-4 sm:p-5 bg-muted/50 rounded-xl hover:bg-muted transition-colors"
             >
-              <div className="p-3 bg-primary/10 rounded-xl">
-                <Mail className="h-6 w-6 text-primary" />
+              <div className="p-2 sm:p-3 bg-primary/10 rounded-xl">
+                <Mail className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
               </div>
               <div className="text-center">
-                <p className="font-semibold text-foreground">Email</p>
-                <p className="text-sm text-muted-foreground">trade@zksports.com</p>
+                <p className="text-sm sm:text-base font-semibold text-foreground">Email</p>
+                <p className="text-xs sm:text-sm text-muted-foreground">trade@zksports.com</p>
               </div>
             </a>
           </div>

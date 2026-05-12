@@ -15,25 +15,25 @@ export function FeaturedPackages() {
   const featuredPackages = packages.filter((p) => p.featured).slice(0, 4)
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 rounded-full">
-            <Flame className="h-4 w-4 text-primary" />
-            <span className="text-sm font-semibold text-primary">Hot Right Now</span>
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 bg-primary/10 rounded-full">
+            <Flame className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary" />
+            <span className="text-xs sm:text-sm font-semibold text-primary">Hot Right Now</span>
           </div>
-          <h2 className="text-2xl font-bold text-foreground">Featured Packages</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-foreground">Featured Packages</h2>
         </div>
         <Link
           href="/packages"
-          className="flex items-center gap-2 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
+          className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
         >
           View All
-          <ArrowRight className="h-4 w-4" />
+          <ArrowRight className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6">
         {featuredPackages.map((pkg) => (
           <Link
             key={pkg.id}
@@ -53,7 +53,7 @@ export function FeaturedPackages() {
               {/* Tier Badge */}
               <div
                 className={cn(
-                  "absolute top-4 left-4 px-3 py-1 rounded-full text-xs font-bold text-white uppercase tracking-wider",
+                  "absolute top-2 sm:top-4 left-2 sm:left-4 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-bold text-white uppercase tracking-wider",
                   tierColors[pkg.tier],
                 )}
               >
@@ -61,15 +61,15 @@ export function FeaturedPackages() {
               </div>
 
               {/* Availability */}
-              <div className="absolute top-4 right-4 px-2 py-1 bg-white/90 backdrop-blur-sm rounded text-xs font-semibold text-foreground">
-                {pkg.availability} left
+              <div className="absolute top-2 sm:top-4 right-2 sm:right-4 px-1.5 sm:px-2 py-0.5 sm:py-1 bg-white/90 backdrop-blur-sm rounded text-[10px] sm:text-xs font-semibold text-foreground">
+                {typeof pkg.availability === "number" ? `${pkg.availability} left` : pkg.availability}
               </div>
 
               {/* Circuit Name Overlay */}
-              <div className="absolute bottom-4 left-4 right-4">
-                <p className="text-white font-bold text-lg leading-tight">{pkg.circuit}</p>
-                <div className="flex items-center gap-1 text-white/80 text-sm mt-1">
-                  <MapPin className="h-3.5 w-3.5" />
+              <div className="absolute bottom-3 sm:bottom-4 left-3 sm:left-4 right-3 sm:right-4">
+                <p className="text-white font-bold text-sm sm:text-base lg:text-lg leading-tight">{pkg.circuit}</p>
+                <div className="flex items-center gap-1 text-white/80 text-xs sm:text-sm mt-0.5 sm:mt-1">
+                  <MapPin className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                   <span>
                     {pkg.location}, {pkg.country}
                   </span>
@@ -78,23 +78,29 @@ export function FeaturedPackages() {
             </div>
 
             {/* Details */}
-            <div className="p-5">
-              <div className="flex items-center justify-between mb-4">
+            <div className="p-4 sm:p-5">
+              <div className="flex items-center justify-between mb-3 sm:mb-4">
                 <div>
-                  <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium">{pkg.name}</p>
-                  <div className="flex items-center gap-1.5 text-sm text-muted-foreground mt-1">
-                    <Calendar className="h-3.5 w-3.5" />
+                  <p className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-wider font-medium">{pkg.name}</p>
+                  <div className="flex items-center gap-1.5 text-xs sm:text-sm text-muted-foreground mt-0.5 sm:mt-1">
+                    <Calendar className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                     <span>{pkg.dateRange}</span>
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-end justify-between pt-4 border-t border-border">
+              <div className="flex items-end justify-between pt-3 sm:pt-4 border-t border-border">
                 <div>
-                  <p className="text-xs text-muted-foreground">From</p>
-                  <p className="text-2xl font-bold text-foreground">${pkg.price.toLocaleString()}</p>
+                  {pkg.price !== null ? (
+                    <>
+                      <p className="text-[10px] sm:text-xs text-muted-foreground">From</p>
+                      <p className="text-xl sm:text-2xl font-bold text-foreground">${pkg.price.toLocaleString()}</p>
+                    </>
+                  ) : (
+                    <p className="text-sm sm:text-base text-muted-foreground">Enquire</p>
+                  )}
                 </div>
-                <button className="px-4 py-2 bg-foreground text-background text-sm font-semibold rounded-lg hover:bg-foreground/90 transition-colors">
+                <button className="px-3 sm:px-4 py-1.5 sm:py-2 bg-foreground text-background text-xs sm:text-sm font-semibold rounded-lg hover:bg-foreground/90 transition-colors">
                   Book Now
                 </button>
               </div>
