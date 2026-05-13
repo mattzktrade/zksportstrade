@@ -14,6 +14,10 @@ export type SubmitCheckoutResult =
       totalAmount: number
       currency: string
       guests: number
+      /** Whether Resend accepted the confirmation email */
+      confirmationEmailSent: boolean
+      /** User-safe hint when email was not sent (e.g. missing Vercel env) */
+      confirmationEmailNotice?: string
     }
   | { ok: false; error: string }
 
@@ -111,6 +115,17 @@ export async function submitCheckoutOrder(input: {
     console.warn("[checkout] order saved; email skipped:", emailResult.skipped)
   }
 
+  let confirmationEmailSent = emailResult.ok
+  let confirmationEmailNotice: string | undefined
+  if (!emailResult.ok) {
+    if (emailResult.skipped) {
+      confirmationEmailNotice =
+        "Your booking was saved, but confirmation email is not configured on this server. In Vercel → Project → Settings → Environment Variables, set RESEND_API_KEY and ORDER_EMAIL_FROM for Production, then redeploy."
+    } else if (emailResult.error) {
+      confirmationEmailNotice = `Your booking was saved, but the confirmation email could not be sent (${emailResult.error}). Check Vercel logs, Resend domain verification, and spam.`
+    }
+  }
+
   return {
     ok: true,
     orderReference,
@@ -119,5 +134,7 @@ export async function submitCheckoutOrder(input: {
     totalAmount,
     currency,
     guests: guestCount,
+    confirmationEmailSent,
+    confirmationEmailNotice,
   }
 }

@@ -4,6 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
+import { AuthCardBrand } from "@/components/auth-card-brand"
 import { Loader2 } from "lucide-react"
 
 export default function SignupPage() {
@@ -47,7 +48,8 @@ export default function SignupPage() {
 
   if (checkEmail) {
     return (
-      <div className="bg-card border border-border rounded-2xl shadow-sm p-6 sm:p-8 space-y-4 text-center">
+      <div className="bg-card border border-border rounded-2xl shadow-sm p-6 sm:p-8 space-y-5 text-center">
+        <AuthCardBrand />
         <h1 className="text-xl font-bold text-foreground">Confirm your email</h1>
         <p className="text-sm text-muted-foreground">
           We sent a link to <span className="font-medium text-foreground">{email}</span>. Open it to activate your account, then sign in.
@@ -61,6 +63,7 @@ export default function SignupPage() {
 
   return (
     <div className="bg-card border border-border rounded-2xl shadow-sm p-6 sm:p-8 space-y-6">
+      <AuthCardBrand />
       <div>
         <h1 className="text-xl sm:text-2xl font-bold text-foreground">Request trade access</h1>
         <p className="text-sm text-muted-foreground mt-1">

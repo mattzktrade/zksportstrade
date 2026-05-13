@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { Loader2 } from "lucide-react"
+import { AuthCardBrand } from "@/components/auth-card-brand"
 
 export function LoginForm() {
   const router = useRouter()
@@ -34,6 +35,7 @@ export function LoginForm() {
 
   return (
     <div className="bg-card border border-border rounded-2xl shadow-sm p-6 sm:p-8 space-y-6">
+      <AuthCardBrand />
       <div>
         <h1 className="text-xl sm:text-2xl font-bold text-foreground">Sign in</h1>
         <p className="text-sm text-muted-foreground mt-1">Use the email and password for your trade portal account.</p>

@@ -39,6 +39,8 @@ export function CheckoutClient({ pkg, initialGuests }: { pkg: Package; initialGu
     totalAmount: number
     currency: string
     guests: number
+    confirmationEmailSent: boolean
+    confirmationEmailNotice?: string
   } | null>(null)
 
   const [formData, setFormData] = useState({
@@ -96,6 +98,8 @@ export function CheckoutClient({ pkg, initialGuests }: { pkg: Package; initialGu
       totalAmount: result.totalAmount,
       currency: result.currency,
       guests: result.guests,
+      confirmationEmailSent: result.confirmationEmailSent,
+      confirmationEmailNotice: result.confirmationEmailNotice,
     })
     setIsComplete(true)
   }
@@ -115,9 +119,16 @@ export function CheckoutClient({ pkg, initialGuests }: { pkg: Package; initialGu
             <CheckCircle2 className="h-8 w-8 sm:h-10 sm:w-10 text-emerald-600" />
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-2 sm:mb-3">Booking request received</h1>
-          <p className="text-sm sm:text-base text-muted-foreground mb-6 sm:mb-8">
-            Your request for {pkg.circuit} is saved. A confirmation email has been sent to you with finance copied in, so they can record the booking and send your client a formal invoice with payment terms.
-          </p>
+          {completedSummary.confirmationEmailNotice ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 text-amber-950 text-left text-sm px-4 py-3 mb-6 sm:mb-8 space-y-2">
+              <p className="font-medium">Booking saved — email not sent</p>
+              <p className="text-amber-900/90 leading-relaxed">{completedSummary.confirmationEmailNotice}</p>
+            </div>
+          ) : (
+            <p className="text-sm sm:text-base text-muted-foreground mb-6 sm:mb-8">
+              Your request for {pkg.circuit} is saved. A confirmation email has been sent to you with finance copied in, so they can record the booking and send your client a formal invoice with payment terms.
+            </p>
+          )}
 
           <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 text-left mb-6 sm:mb-8">
             <h3 className="text-sm sm:text-base font-semibold text-foreground mb-3 sm:mb-4">Summary</h3>

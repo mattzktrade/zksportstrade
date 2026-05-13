@@ -73,8 +73,8 @@ function parseFinanceCc(): string[] {
 }
 
 export async function sendOrderPlacedEmail(p: OrderEmailPayload): Promise<{ ok: boolean; skipped?: string; error?: string }> {
-  const apiKey = process.env.RESEND_API_KEY
-  const from = process.env.ORDER_EMAIL_FROM
+  const apiKey = process.env.RESEND_API_KEY?.trim()
+  const from = process.env.ORDER_EMAIL_FROM?.trim()
   if (!apiKey || !from) {
     return { ok: false, skipped: "RESEND_API_KEY or ORDER_EMAIL_FROM not configured" }
   }
