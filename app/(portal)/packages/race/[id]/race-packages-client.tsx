@@ -1,0 +1,399 @@
+"use client"
+
+import { useState } from "react"
+import Image from "next/image"
+import Link from "next/link"
+import type { Package, Race } from "@/lib/data"
+import { ArrowLeft, MapPin, Calendar, Users, Check, ArrowRight, ChevronDown, Minus, Plus, ChevronLeft, ChevronRight } from "lucide-react"
+import { cn } from "@/lib/utils"
+
+export function RacePackagesClient({ race, racePackages }: { race: Race; racePackages: Package[] }) {
+  const [expandedPackage, setExpandedPackage] = useState<string | null>(null)
+
+  return (
+    <>
+      <div className="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
+        {/* Back Button */}
+        <Link
+          href="/packages"
+          className="inline-flex items-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+          Back to all races
+        </Link>
+
+        {/* Race Header */}
+        <div className="relative rounded-2xl overflow-hidden bg-foreground min-h-[200px] sm:min-h-[240px] md:min-h-[280px] lg:min-h-[320px] group">
+          <div className="absolute inset-0">
+            <Image
+              src={race.image || "/placeholder.svg"}
+              alt={race.name}
+              fill
+              className="object-cover group-hover:scale-105 transition-transform duration-700"
+            />
+          </div>
+          <div className="absolute inset-0 bg-gradient-to-b from-black/85 via-black/75 to-black/85" />
+
+          <div className="relative p-4 sm:p-6 md:p-8 lg:p-10 xl:p-12">
+            <div className="max-w-3xl">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-bold text-white mb-4 sm:mb-6 leading-tight tracking-tight">
+                {race.name}
+              </h1>
+              
+              <div className="flex flex-wrap items-center gap-4 sm:gap-6 md:gap-8">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div className="flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-white/10 backdrop-blur-sm border border-white/20">
+                    <MapPin className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] sm:text-xs text-white/70 uppercase tracking-wider mb-0.5">Location</p>
+                    <p className="text-sm sm:text-base md:text-lg font-semibold text-white">{race.location}, {race.country}</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div className="flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-white/10 backdrop-blur-sm border border-white/20">
+                    <Calendar className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] sm:text-xs text-white/70 uppercase tracking-wider mb-0.5">Date</p>
+                    <p className="text-sm sm:text-base md:text-lg font-semibold text-white">{race.dateRange}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Packages Section */}
+        <div>
+          <div className="flex items-center justify-between mb-4 sm:mb-6">
+            <div>
+              <h2 className="text-xl sm:text-2xl font-bold text-foreground">Available Packages</h2>
+              <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+                {racePackages.length} package{racePackages.length !== 1 ? "s" : ""} available
+              </p>
+            </div>
+          </div>
+
+          {racePackages.length === 0 ? (
+            <div className="bg-card border border-border rounded-2xl p-8 sm:p-12 text-center">
+              <p className="text-sm sm:text-base text-muted-foreground">No packages available for this race.</p>
+            </div>
+          ) : (
+            <div className="bg-card rounded-2xl border border-border overflow-hidden">
+              {/* Table Header - Desktop */}
+              <div className="hidden lg:grid grid-cols-[2fr_1fr_140px_80px] gap-4 p-4 bg-muted/30 border-b border-border text-sm font-medium text-muted-foreground">
+                <div>Package</div>
+                <div>Price</div>
+                <div className="text-center">Stock</div>
+                <div></div>
+              </div>
+
+              {/* Packages List */}
+              <div className="divide-y divide-border">
+                {racePackages.map((pkg) => (
+                  <PackageRow
+                    key={pkg.id}
+                    pkg={pkg}
+                    isExpanded={expandedPackage === pkg.id}
+                    onToggle={() => setExpandedPackage(expandedPackage === pkg.id ? null : pkg.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  )
+}
+
+function PackageRow({
+  pkg,
+  isExpanded,
+  onToggle,
+}: {
+  pkg: Package
+  isExpanded: boolean
+  onToggle: () => void
+}) {
+  const [guestCount, setGuestCount] = useState(1)
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0)
+  const isAvailabilityString = typeof pkg.availability === "string"
+  const totalPrice = pkg.price ? pkg.price * guestCount : 0
+  const sellable = typeof pkg.availability === "number" ? pkg.availability : 0
+  const maxGuests = isAvailabilityString ? 1 : Math.min(sellable, pkg.totalCapacity)
+  const canBook = !isAvailabilityString && pkg.price !== null && sellable > 0
+  
+  // Create array of images - main image plus additional placeholder images for gallery
+  const packageImages = [
+    pkg.image || "/placeholder.svg",
+    pkg.image || "/placeholder.svg", // Additional images would come from package data
+    pkg.image || "/placeholder.svg",
+  ]
+
+  return (
+    <div>
+      {/* Desktop Row */}
+      <div
+        className={cn(
+          "hidden lg:grid grid-cols-[2fr_1fr_140px_80px] gap-4 p-4 items-center hover:bg-muted/30 transition-colors cursor-pointer",
+          isExpanded && "bg-muted/30",
+        )}
+        onClick={onToggle}
+      >
+        <div>
+          <p className="font-semibold text-foreground">{pkg.name}</p>
+        </div>
+        <div>
+          {pkg.price !== null ? (
+            <>
+              <p className="font-bold text-foreground">${pkg.price.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground">per person</p>
+            </>
+          ) : (
+            <p className="font-bold text-muted-foreground">-</p>
+          )}
+        </div>
+        <div className="text-center">
+          <span className="text-base font-semibold text-foreground">
+            {isAvailabilityString ? pkg.availability : pkg.availability}
+          </span>
+        </div>
+        <div className="flex items-center justify-end">
+          <ChevronDown
+            className={cn("h-4 w-4 text-muted-foreground transition-transform", isExpanded && "rotate-180")}
+          />
+        </div>
+      </div>
+
+      {/* Mobile Row */}
+      <div
+        className={cn(
+          "lg:hidden p-3 sm:p-4 border-b border-border hover:bg-muted/30 transition-colors cursor-pointer",
+          isExpanded && "bg-muted/30",
+        )}
+        onClick={onToggle}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex-1 min-w-0 pr-2">
+            <p className="text-sm sm:text-base font-semibold text-foreground truncate">{pkg.name}</p>
+          </div>
+          <ChevronDown
+            className={cn("h-4 w-4 text-muted-foreground transition-transform flex-shrink-0", isExpanded && "rotate-180")}
+          />
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            {pkg.price !== null ? (
+              <>
+                <p className="text-sm sm:text-base font-bold text-foreground">${pkg.price.toLocaleString()}</p>
+                <p className="text-[10px] sm:text-xs text-muted-foreground">per person</p>
+              </>
+            ) : (
+              <p className="text-sm sm:text-base font-bold text-muted-foreground">-</p>
+            )}
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] sm:text-xs text-muted-foreground mb-0.5">Stock</p>
+            <p className="text-sm sm:text-base font-semibold text-foreground">
+              {isAvailabilityString ? pkg.availability : pkg.availability}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Expanded Details */}
+      {isExpanded && (
+        <div className="px-3 sm:px-4 pb-3 sm:pb-4 lg:px-6 lg:pb-6">
+          <div className="pt-3 sm:pt-4 border-t border-border">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+              {/* Left Column - Image Gallery */}
+              <div className="lg:col-span-1">
+                <div className="relative aspect-[16/10] rounded-xl overflow-hidden group">
+                  <Image
+                    src={packageImages[selectedImageIndex]}
+                    alt={pkg.name}
+                    fill
+                    className="object-cover"
+                  />
+                  {/* Navigation Arrows */}
+                  {packageImages.length > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedImageIndex((prev) => (prev === 0 ? packageImages.length - 1 : prev - 1))
+                        }}
+                        className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 sm:p-2 bg-black/50 hover:bg-black/70 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedImageIndex((prev) => (prev === packageImages.length - 1 ? 0 : prev + 1))
+                        }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 sm:p-2 bg-black/50 hover:bg-black/70 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
+                      </button>
+                    </>
+                  )}
+                  {/* Image Counter */}
+                  {packageImages.length > 1 && (
+                    <div className="absolute bottom-2 right-2 px-2 py-1 bg-black/50 rounded text-[10px] sm:text-xs text-white">
+                      {selectedImageIndex + 1} / {packageImages.length}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Middle Column - Package Details */}
+              <div className="lg:col-span-1 flex flex-col lg:aspect-[16/10]">
+                {/* Package Info */}
+                <div>
+                  <h3 className="text-lg sm:text-xl font-bold text-foreground mb-2 sm:mb-3">{pkg.name}</h3>
+                  <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs sm:text-sm text-muted-foreground mb-3 sm:mb-4">
+                    <div className="flex items-center gap-1.5">
+                      <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      <span>{pkg.dateRange}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      <span>Suite Capacity: {pkg.totalCapacity}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Package Description */}
+                <div className="mb-3 sm:mb-4">
+                  <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                    Experience the ultimate Formula 1 hospitality with this premium package. Enjoy exclusive access to the paddock area, world-class dining, and unforgettable moments with the sport's elite. This package includes all race weekend sessions - Friday practice, Saturday qualifying, and Sunday's main event.
+                  </p>
+                </div>
+
+                {/* Package Inclusions */}
+                <div className="mt-auto">
+                  <h4 className="text-xs sm:text-sm font-semibold text-foreground mb-2 sm:mb-3">Package Includes</h4>
+                  <div className="space-y-1.5 sm:space-y-2">
+                    {pkg.includes.map((item) => (
+                      <div key={item} className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground">
+                        <Check className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary flex-shrink-0" />
+                        <span>{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column - Booking Section */}
+              <div className="lg:col-span-1">
+                <div className="lg:sticky lg:top-6">
+                  <div className="bg-card border border-border rounded-xl p-3 sm:p-4 space-y-3 sm:space-y-4">
+                    {/* Price */}
+                    <div>
+                      <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Price per person</p>
+                      {pkg.price !== null ? (
+                        <p className="text-xl sm:text-2xl font-bold text-foreground">${pkg.price.toLocaleString()}</p>
+                      ) : (
+                        <p className="text-xl sm:text-2xl font-bold text-muted-foreground">-</p>
+                      )}
+                    </div>
+
+                    {/* Guest Selector - Only show if can book */}
+                    {canBook && (
+                      <>
+                        <div>
+                          <label className="block text-xs sm:text-sm font-medium text-foreground mb-2">Number of Guests</label>
+                          <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setGuestCount(Math.max(1, guestCount - 1))
+                              }}
+                              disabled={guestCount <= 1}
+                              className={cn(
+                                "p-1.5 sm:p-2 rounded-lg border border-border hover:bg-muted transition-colors",
+                                guestCount <= 1 && "opacity-50 cursor-not-allowed"
+                              )}
+                            >
+                              <Minus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                            </button>
+                            <div className="flex-1 text-center">
+                              <span className="text-base sm:text-lg font-semibold text-foreground">{guestCount}</span>
+                              <span className="text-xs sm:text-sm text-muted-foreground ml-1.5">
+                                {guestCount === 1 ? "guest" : "guests"}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setGuestCount(Math.min(maxGuests, guestCount + 1))
+                              }}
+                              disabled={guestCount >= maxGuests}
+                              className={cn(
+                                "p-1.5 sm:p-2 rounded-lg border border-border hover:bg-muted transition-colors",
+                                guestCount >= maxGuests && "opacity-50 cursor-not-allowed"
+                              )}
+                            >
+                              <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                            </button>
+                          </div>
+                          <p className="text-[10px] sm:text-xs text-muted-foreground text-center">
+                            {typeof pkg.availability === "number" ? `${pkg.availability} available` : String(pkg.availability)}
+                          </p>
+                        </div>
+
+                        {/* Total Price */}
+                        {pkg.price !== null && (
+                          <div className="pt-2 sm:pt-3 border-t border-border">
+                            <div className="flex items-center justify-between text-xs sm:text-sm mb-2">
+                              <span className="text-muted-foreground">
+                                ${pkg.price.toLocaleString()} × {guestCount} {guestCount === 1 ? "guest" : "guests"}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between pt-2 border-t border-border">
+                              <span className="text-xs sm:text-sm font-semibold text-foreground">Total</span>
+                              <span className="text-lg sm:text-xl font-bold text-primary">${totalPrice.toLocaleString()}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Book Button */}
+                        <Link
+                          href={`/checkout?package=${pkg.id}&guests=${guestCount}`}
+                          className="w-full inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 bg-primary text-white rounded-xl font-semibold hover:bg-primary/90 transition-colors text-xs sm:text-sm"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Proceed to Checkout
+                          <ArrowRight className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                        </Link>
+                      </>
+                    )}
+                    {!canBook && (
+                      <div className="pt-2 sm:pt-3 border-t border-border">
+                        <p className="text-xs sm:text-sm text-muted-foreground text-center">
+                          {isAvailabilityString 
+                            ? `Please contact us for availability and pricing`
+                            : pkg.price === null
+                            ? "Pricing available upon request"
+                            : "Not available for booking"}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

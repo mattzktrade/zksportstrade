@@ -17,6 +17,8 @@ export interface Package {
   tier: "paddock" | "champions" | "legend" | "hero"
   includes: string[]
   featured?: boolean
+  /** Set when loaded from Supabase (used for navigation) */
+  raceId?: string
 }
 
 export interface Race {
@@ -35,6 +37,8 @@ export interface Race {
 
 export interface Booking {
   id: string
+  /** Human-readable order reference from the database (e.g. ZK-2026-…) */
+  orderReference?: string
   packageId: string
   packageName: string
   circuit: string
@@ -46,11 +50,15 @@ export interface Booking {
   createdAt: string
   clientName: string
   clientEmail: string
+  /** When loaded from Supabase */
+  packageTier?: string
 }
 
 export interface Invoice {
   id: string
   bookingId: string
+  /** Internal order id for deep links from bookings */
+  orderId?: string
   amount: number
   currency: string
   status: "paid" | "pending" | "overdue"
@@ -3690,14 +3698,3 @@ export const invoices: Invoice[] = [
     packageName: "Abu Dhabi GP - Legend Package",
   },
 ]
-
-export const currentAgent = {
-  id: "agent-001",
-  name: "Alex Thompson",
-  email: "alex@premiumtravel.co.uk",
-  company: "Premium Travel Solutions",
-  tier: "Gold Partner",
-  commission: 12,
-  totalBookings: 47,
-  totalRevenue: 892500,
-}

@@ -3,7 +3,7 @@
 import Image from "next/image"
 import Link from "next/link"
 import { ArrowRight } from "lucide-react"
-import { races2026 } from "@/lib/data"
+import type { Race } from "@/lib/data"
 import { useState } from "react"
 
 const regions = [
@@ -17,14 +17,14 @@ const regions = [
   { id: "americas", name: "Americas", countries: ["USA", "Canada", "Mexico", "Brazil"] },
 ]
 
-export function RacesGrid() {
+export function RacesGrid({ races }: { races: Race[] }) {
   const [activeFilter, setActiveFilter] = useState<string>("all")
 
   // Filter races based on region
   const filteredRaces =
     activeFilter === "all"
-      ? races2026
-      : races2026.filter((race) => {
+      ? races
+      : races.filter((race) => {
           const region = regions.find((r) => r.id === activeFilter)
           return region?.countries.some((country) => race.location.includes(country) || race.country === country)
         })
@@ -125,7 +125,7 @@ export function RacesGrid() {
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
         {filteredRaces.map((race) => {
-          const globalIndex = races2026.findIndex((r) => r.id === race.id)
+          const globalIndex = races.findIndex((r) => r.id === race.id)
           return (
             <Link
               key={race.id}
