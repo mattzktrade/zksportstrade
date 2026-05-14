@@ -4,6 +4,24 @@ import type { OrderRow, PackageSnippet } from "@/lib/orders/types"
 
 type OrderWithPackage = OrderRow & { packages: PackageSnippet | null }
 
+export type AdminOrderAgent = {
+  full_name: string | null
+  company_name: string | null
+  email: string
+}
+
+export type AdminOrderInvoice = {
+  id: string
+  reference: string
+  status: string
+}
+
+export type AdminOrderListRow = OrderRow & {
+  packages: PackageSnippet | null
+  agent: AdminOrderAgent | null
+  invoice: AdminOrderInvoice | null
+}
+
 function one<T>(value: T | T[] | null | undefined): T | null {
   if (value == null) return null
   return Array.isArray(value) ? (value[0] ?? null) : value
@@ -47,10 +65,20 @@ export async function getMyBookings(): Promise<Booking[]> {
       client_name,
       client_email,
       client_phone,
-      client_company,
+      client_nationality,
       dietary_requirements,
       special_requests,
       po_number,
+      shipping_address_line1,
+      shipping_address_line2,
+      shipping_city,
+      shipping_postcode,
+      shipping_country,
+      billing_address_line1,
+      billing_address_line2,
+      billing_city,
+      billing_postcode,
+      billing_country,
       created_at,
       packages (
         name,
@@ -74,7 +102,13 @@ export async function getMyBookings(): Promise<Booking[]> {
   })
 }
 
-export async function getAllOrdersForAdmin(): Promise<OrderWithPackage[]> {
+type RawAdminOrder = OrderRow & {
+  packages?: PackageSnippet | PackageSnippet[] | null
+  profiles?: AdminOrderAgent | AdminOrderAgent[] | null
+  invoices?: AdminOrderInvoice | AdminOrderInvoice[] | null
+}
+
+export async function getAllOrdersForAdmin(): Promise<AdminOrderListRow[]> {
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("orders")
@@ -92,10 +126,20 @@ export async function getAllOrdersForAdmin(): Promise<OrderWithPackage[]> {
       client_name,
       client_email,
       client_phone,
-      client_company,
+      client_nationality,
       dietary_requirements,
       special_requests,
       po_number,
+      shipping_address_line1,
+      shipping_address_line2,
+      shipping_city,
+      shipping_postcode,
+      shipping_country,
+      billing_address_line1,
+      billing_address_line2,
+      billing_city,
+      billing_postcode,
+      billing_country,
       created_at,
       packages (
         name,
@@ -103,16 +147,28 @@ export async function getAllOrdersForAdmin(): Promise<OrderWithPackage[]> {
         event_date,
         tier,
         total_capacity
+      ),
+      profiles (
+        full_name,
+        company_name,
+        email
+      ),
+      invoices (
+        id,
+        reference,
+        status
       )
     `,
     )
     .order("created_at", { ascending: false })
-    .limit(200)
+    .limit(5000)
 
   if (error || !data) return []
 
-  return (data as (OrderRow & { packages?: PackageSnippet | PackageSnippet[] | null })[]).map((row) => ({
+  return (data as RawAdminOrder[]).map((row) => ({
     ...(row as OrderRow),
     packages: one(row.packages),
+    agent: one(row.profiles),
+    invoice: one(row.invoices),
   }))
 }

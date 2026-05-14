@@ -55,11 +55,11 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
         <div className="border-b border-slate-800 p-5">
           <Link href="/admin" className="block">
             <Image
-              src="/images/image.png"
+              src="/images/ZK%20white%20logo.png"
               alt="ZK Sports & Entertainment"
-              width={160}
-              height={40}
-              className="h-9 w-auto brightness-0 invert"
+              width={180}
+              height={48}
+              className="h-9 w-auto"
               priority
             />
             <p className="text-[9px] uppercase tracking-widest text-red-400 font-semibold mt-1.5">Admin</p>

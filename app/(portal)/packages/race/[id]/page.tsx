@@ -1,10 +1,12 @@
 import { notFound } from "next/navigation"
 import { getCatalog } from "@/lib/catalog/queries"
+import { getPortalProfile } from "@/lib/supabase/profile"
 import { RacePackagesClient } from "./race-packages-client"
 
 export default async function RacePackagesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const catalog = await getCatalog()
+  const profile = await getPortalProfile()
+  const catalog = await getCatalog(profile?.id ?? null)
   if (!catalog || catalog.races.length === 0) {
     notFound()
   }

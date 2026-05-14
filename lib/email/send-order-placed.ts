@@ -13,10 +13,20 @@ export type OrderEmailPayload = {
   clientName: string
   clientEmail: string
   clientPhone: string
-  clientCompany: string
+  clientNationality: string
   poNumber: string | null
   dietary: string | null
   specialRequests: string | null
+  shippingAddressLine1: string
+  shippingAddressLine2: string
+  shippingCity: string
+  shippingPostcode: string
+  shippingCountry: string
+  billingAddressLine1: string
+  billingAddressLine2: string
+  billingCity: string
+  billingPostcode: string
+  billingCountry: string
 }
 
 function escapeHtml(s: string): string {
@@ -38,28 +48,49 @@ function formatMoney(amount: number, currency: string): string {
 function buildHtml(p: OrderEmailPayload): string {
   const lines = [
     `<p>Hi ${escapeHtml(p.agentName)},</p>`,
-    `<p>Your booking request has been recorded in the trade portal.</p>`,
+    `<p>Please see below confirmation of your order. We will send you an invoice separately shortly.</p>`,
     `<p><strong>Order reference:</strong> ${escapeHtml(p.orderReference)}<br/>`,
     `<strong>Invoice reference (pending):</strong> ${escapeHtml(p.invoiceReference)}</p>`,
     `<p><strong>Experience</strong><br/>${escapeHtml(p.packageName)} — ${escapeHtml(p.circuit)}<br/>`,
     `Guests: ${p.guests}<br/>`,
-    `Total (trade): ${escapeHtml(formatMoney(p.totalAmount, p.currency))}</p>`,
+    `Total: ${escapeHtml(formatMoney(p.totalAmount, p.currency))}</p>`,
     `<p><strong>Client / lead guest</strong><br/>`,
     `${escapeHtml(p.clientName)}<br/>`,
     `${escapeHtml(p.clientEmail)}<br/>`,
     `${escapeHtml(p.clientPhone)}`,
-    p.clientCompany ? `<br/>${escapeHtml(p.clientCompany)}` : "",
+    p.clientNationality ? `<br/>Nationality: ${escapeHtml(p.clientNationality)}` : "",
     "</p>",
   ]
+
+  const shipLines = [
+    p.shippingAddressLine1,
+    p.shippingAddressLine2,
+    [p.shippingCity, p.shippingPostcode].filter(Boolean).join(", "),
+    p.shippingCountry,
+  ].filter((s) => s.length > 0)
+  if (shipLines.length > 0) {
+    lines.push(
+      `<p><strong>Shipping address</strong><br/>${shipLines.map((s) => escapeHtml(s)).join("<br/>")}</p>`,
+    )
+  }
+
+  const billLines = [
+    p.billingAddressLine1,
+    p.billingAddressLine2,
+    [p.billingCity, p.billingPostcode].filter(Boolean).join(", "),
+    p.billingCountry,
+  ].filter((s) => s.length > 0)
+  if (billLines.length > 0) {
+    lines.push(
+      `<p><strong>Billing address</strong><br/>${billLines.map((s) => escapeHtml(s)).join("<br/>")}</p>`,
+    )
+  }
 
   if (p.poNumber) lines.push(`<p><strong>PO number:</strong> ${escapeHtml(p.poNumber)}</p>`)
   if (p.dietary) lines.push(`<p><strong>Dietary:</strong> ${escapeHtml(p.dietary)}</p>`)
   if (p.specialRequests) lines.push(`<p><strong>Special requests:</strong> ${escapeHtml(p.specialRequests)}</p>`)
 
-  lines.push(
-    `<p>Our finance team has been copied on this message. They will record the opportunity in Salesforce and send your client a formal invoice with payment terms.</p>`,
-    `<p>Thank you,<br/>ZK Sports &amp; Entertainment</p>`,
-  )
+  lines.push(`<p>Thank you,<br/>ZK Sports &amp; Entertainment</p>`)
 
   return lines.join("")
 }
@@ -93,18 +124,13 @@ export async function sendOrderPlacedEmail(p: OrderEmailPayload): Promise<{ ok: 
 
   const cc = parseFinanceCc()
   const resend = new Resend(apiKey)
-  const subject = `New portal order ${p.orderReference} — ${p.circuit}`
+  const subject = `Booking Confirmation ${p.orderReference} — ${p.circuit}`
 
-  const financeNote =
-    cc.length === 0
-      ? "<p><strong>Note:</strong> Finance notification emails are not configured on the server yet. Please forward this confirmation internally.</p>"
-      : "<p>Our finance team has been copied on this message. They will record the opportunity in Salesforce and send your client a formal invoice with payment terms.</p>"
-
-  const body =
-    buildHtml(p).replace(
-      "<p>Our finance team has been copied on this message. They will record the opportunity in Salesforce and send your client a formal invoice with payment terms.</p>",
-      financeNote,
-    )
+  let body = buildHtml(p)
+  if (cc.length === 0) {
+    body +=
+      "<p><strong>Note:</strong> Finance notification emails are not configured on the server yet. Please forward this confirmation internally.</p>"
+  }
 
   const { error } = await resend.emails.send({
     from,

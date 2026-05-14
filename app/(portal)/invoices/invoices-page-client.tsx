@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react"
 import type { Invoice } from "@/lib/data"
+import { invoiceWorkflowStatusLabels, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
 import {
   Search,
   Download,
@@ -9,33 +10,43 @@ import {
   Filter,
   CheckCircle2,
   Clock,
-  AlertCircle,
   FileText,
   DollarSign,
   ExternalLink,
+  Send,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const statusConfig = {
-  paid: {
-    label: "Paid",
-    icon: CheckCircle2,
-    className: "text-emerald-700 bg-emerald-50/50",
-    dotColor: "bg-emerald-600",
+const statusConfig: Record<
+  InvoiceWorkflowStatus,
+  { label: string; icon: typeof CheckCircle2; className: string; dotColor: string }
+> = {
+  awaiting_invoice: {
+    label: invoiceWorkflowStatusLabels.awaiting_invoice,
+    icon: Send,
+    className: "text-slate-700 bg-slate-50/50 dark:text-slate-200 dark:bg-slate-900/40",
+    dotColor: "bg-slate-500",
   },
-  pending: {
-    label: "Pending",
+  awaiting_payment: {
+    label: invoiceWorkflowStatusLabels.awaiting_payment,
     icon: Clock,
     className: "text-amber-700 bg-amber-50/50",
     dotColor: "bg-amber-600",
   },
-  overdue: {
-    label: "Overdue",
-    icon: AlertCircle,
-    className: "text-red-700 bg-red-50/50",
-    dotColor: "bg-red-600",
+  paid: {
+    label: invoiceWorkflowStatusLabels.paid,
+    icon: CheckCircle2,
+    className: "text-emerald-700 bg-emerald-50/50",
+    dotColor: "bg-emerald-600",
   },
 }
+
+const filterTabs: { value: "all" | InvoiceWorkflowStatus; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "awaiting_invoice", label: "To invoice" },
+  { value: "awaiting_payment", label: "Awaiting payment" },
+  { value: "paid", label: "Paid" },
+]
 
 export function InvoicesPageClient({
   initialInvoices,
@@ -45,7 +56,7 @@ export function InvoicesPageClient({
   highlightOrderId?: string
 }) {
   const [search, setSearch] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState<(typeof filterTabs)[number]["value"]>("all")
 
   const filteredInvoices = useMemo(() => {
     return initialInvoices.filter((invoice) => {
@@ -65,9 +76,13 @@ export function InvoicesPageClient({
 
   const stats = useMemo(() => {
     const paid = initialInvoices.filter((i) => i.status === "paid").reduce((sum, i) => sum + i.amount, 0)
-    const pending = initialInvoices.filter((i) => i.status === "pending").reduce((sum, i) => sum + i.amount, 0)
-    const overdue = initialInvoices.filter((i) => i.status === "overdue").reduce((sum, i) => sum + i.amount, 0)
-    return { paid, pending, overdue }
+    const awaitingInvoice = initialInvoices
+      .filter((i) => i.status === "awaiting_invoice")
+      .reduce((sum, i) => sum + i.amount, 0)
+    const awaitingPayment = initialInvoices
+      .filter((i) => i.status === "awaiting_payment")
+      .reduce((sum, i) => sum + i.amount, 0)
+    return { paid, awaitingInvoice, awaitingPayment }
   }, [initialInvoices])
 
   return (
@@ -81,29 +96,33 @@ export function InvoicesPageClient({
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         <div className="bg-card border border-border rounded-xl p-4 sm:p-6">
-          <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1 sm:mb-2">Paid</p>
+          <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1 sm:mb-2">
+            {invoiceWorkflowStatusLabels.awaiting_invoice}
+          </p>
+          <p className="text-2xl sm:text-3xl font-bold text-foreground mb-1">${stats.awaitingInvoice.toLocaleString()}</p>
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            {initialInvoices.filter((i) => i.status === "awaiting_invoice").length} invoice
+            {initialInvoices.filter((i) => i.status === "awaiting_invoice").length !== 1 ? "s" : ""}
+          </p>
+        </div>
+
+        <div className="bg-card border border-border rounded-xl p-4 sm:p-6">
+          <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1 sm:mb-2">
+            {invoiceWorkflowStatusLabels.awaiting_payment}
+          </p>
+          <p className="text-2xl sm:text-3xl font-bold text-foreground mb-1">${stats.awaitingPayment.toLocaleString()}</p>
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            {initialInvoices.filter((i) => i.status === "awaiting_payment").length} invoice
+            {initialInvoices.filter((i) => i.status === "awaiting_payment").length !== 1 ? "s" : ""}
+          </p>
+        </div>
+
+        <div className="bg-card border border-border rounded-xl p-4 sm:p-6">
+          <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1 sm:mb-2">{invoiceWorkflowStatusLabels.paid}</p>
           <p className="text-2xl sm:text-3xl font-bold text-foreground mb-1">${stats.paid.toLocaleString()}</p>
           <p className="text-xs sm:text-sm text-muted-foreground">
             {initialInvoices.filter((i) => i.status === "paid").length} invoice
             {initialInvoices.filter((i) => i.status === "paid").length !== 1 ? "s" : ""}
-          </p>
-        </div>
-
-        <div className="bg-card border border-border rounded-xl p-4 sm:p-6">
-          <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1 sm:mb-2">Pending</p>
-          <p className="text-2xl sm:text-3xl font-bold text-foreground mb-1">${stats.pending.toLocaleString()}</p>
-          <p className="text-xs sm:text-sm text-muted-foreground">
-            {initialInvoices.filter((i) => i.status === "pending").length} invoice
-            {initialInvoices.filter((i) => i.status === "pending").length !== 1 ? "s" : ""}
-          </p>
-        </div>
-
-        <div className="bg-card border border-border rounded-xl p-4 sm:p-6">
-          <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1 sm:mb-2">Overdue</p>
-          <p className="text-2xl sm:text-3xl font-bold text-foreground mb-1">${stats.overdue.toLocaleString()}</p>
-          <p className="text-xs sm:text-sm text-muted-foreground">
-            {initialInvoices.filter((i) => i.status === "overdue").length} invoice
-            {initialInvoices.filter((i) => i.status === "overdue").length !== 1 ? "s" : ""}
           </p>
         </div>
       </div>
@@ -122,19 +141,19 @@ export function InvoicesPageClient({
 
         <div className="flex items-center gap-2 overflow-x-auto">
           <Filter className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground flex-shrink-0" />
-          {["all", "paid", "pending", "overdue"].map((status) => (
+          {filterTabs.map((tab) => (
             <button
-              key={status}
+              key={tab.value}
               type="button"
-              onClick={() => setStatusFilter(status)}
+              onClick={() => setStatusFilter(tab.value)}
               className={cn(
-                "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium capitalize transition-all whitespace-nowrap",
-                statusFilter === status
+                "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all whitespace-nowrap",
+                statusFilter === tab.value
                   ? "bg-foreground text-background"
                   : "bg-muted text-muted-foreground hover:text-foreground",
               )}
             >
-              {status === "all" ? "All" : status}
+              {tab.label}
             </button>
           ))}
         </div>

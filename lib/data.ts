@@ -1,5 +1,7 @@
 // Mock data for the trade portal - replace with database queries later
 
+import type { InvoiceWorkflowStatus } from "@/lib/invoices/status"
+
 export interface Package {
   id: string
   name: string
@@ -16,9 +18,19 @@ export interface Package {
   image: string
   tier: "paddock" | "champions" | "legend" | "hero"
   includes: string[]
+  /** Marketing body shown on package detail; falls back to default copy when empty */
+  description?: string | null
+  /** Extra gallery image URLs (primary `image` is always first slide) */
+  galleryImages?: string[]
   featured?: boolean
+  /** HTTPS URL to brochure PDF or page for agents to share (from Supabase when set) */
+  brochureUrl?: string | null
   /** Set when loaded from Supabase (used for navigation) */
   raceId?: string
+  /** Active inventory held for you (unexpired); already included in numeric `availability` when loaded signed-in. */
+  agentHoldUnits?: number
+  /** Earliest expiry among your active holds on this package (ISO). */
+  agentHoldExpiresAt?: string | null
 }
 
 export interface Race {
@@ -61,7 +73,7 @@ export interface Invoice {
   orderId?: string
   amount: number
   currency: string
-  status: "paid" | "pending" | "overdue"
+  status: InvoiceWorkflowStatus
   issuedAt: string
   dueDate: string
   packageName: string
@@ -3682,7 +3694,7 @@ export const invoices: Invoice[] = [
     bookingId: "BK-2026-002",
     amount: 31200,
     currency: "USD",
-    status: "pending",
+    status: "awaiting_invoice",
     issuedAt: "2026-01-18",
     dueDate: "2026-02-18",
     packageName: "British GP - Champions Club",
@@ -3692,7 +3704,7 @@ export const invoices: Invoice[] = [
     bookingId: "BK-2026-003",
     amount: 18400,
     currency: "USD",
-    status: "overdue",
+    status: "awaiting_payment",
     issuedAt: "2025-12-20",
     dueDate: "2026-01-10",
     packageName: "Abu Dhabi GP - Legend Package",

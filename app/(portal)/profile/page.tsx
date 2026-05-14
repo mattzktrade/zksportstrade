@@ -4,6 +4,8 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { usePortalUser } from "@/components/portal-user-provider"
 import { createClient } from "@/lib/supabase/client"
+import { checkoutDefaultsFromProfile } from "@/lib/types/checkout-addresses"
+import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
 import { User, Mail, Building2, Edit3, Save, X, Lock } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -17,13 +19,29 @@ export default function ProfilePage() {
 
   const [fullName, setFullName] = useState(portalUser.full_name)
   const [companyName, setCompanyName] = useState(portalUser.company_name)
+  const [addresses, setAddresses] = useState<CheckoutAddressFields>(() => checkoutDefaultsFromProfile(portalUser))
 
   useEffect(() => {
     if (!isEditing) {
       setFullName(portalUser.full_name)
       setCompanyName(portalUser.company_name)
+      setAddresses(checkoutDefaultsFromProfile(portalUser))
     }
-  }, [portalUser.full_name, portalUser.company_name, isEditing])
+  }, [
+    portalUser.full_name,
+    portalUser.company_name,
+    portalUser.shipping_address_line1,
+    portalUser.shipping_address_line2,
+    portalUser.shipping_city,
+    portalUser.shipping_postcode,
+    portalUser.shipping_country,
+    portalUser.billing_address_line1,
+    portalUser.billing_address_line2,
+    portalUser.billing_city,
+    portalUser.billing_postcode,
+    portalUser.billing_country,
+    isEditing,
+  ])
 
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
@@ -33,7 +51,20 @@ export default function ProfilePage() {
     const supabase = createClient()
     const { error } = await supabase
       .from("profiles")
-      .update({ full_name: fullName.trim(), company_name: companyName.trim() })
+      .update({
+        full_name: fullName.trim(),
+        company_name: companyName.trim(),
+        shipping_address_line1: addresses.shippingAddressLine1.trim(),
+        shipping_address_line2: addresses.shippingAddressLine2.trim(),
+        shipping_city: addresses.shippingCity.trim(),
+        shipping_postcode: addresses.shippingPostcode.trim(),
+        shipping_country: addresses.shippingCountry.trim(),
+        billing_address_line1: addresses.billingAddressLine1.trim(),
+        billing_address_line2: addresses.billingAddressLine2.trim(),
+        billing_city: addresses.billingCity.trim(),
+        billing_postcode: addresses.billingPostcode.trim(),
+        billing_country: addresses.billingCountry.trim(),
+      })
       .eq("id", portalUser.id)
     setSaving(false)
     if (error) {
@@ -102,7 +133,7 @@ export default function ProfilePage() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
             <div>
               <h2 className="text-lg sm:text-xl font-semibold text-foreground">Account</h2>
-              <p className="text-xs sm:text-sm text-muted-foreground mt-1">Name and company shown in the portal</p>
+              <p className="text-xs sm:text-sm text-muted-foreground mt-1">Name, company, and saved checkout addresses</p>
             </div>
             <button
               type="button"
@@ -110,6 +141,7 @@ export default function ProfilePage() {
                 if (isEditing) {
                   setFullName(portalUser.full_name)
                   setCompanyName(portalUser.company_name)
+                  setAddresses(checkoutDefaultsFromProfile(portalUser))
                 }
                 setIsEditing(!isEditing)
               }}
@@ -186,6 +218,171 @@ export default function ProfilePage() {
             </div>
           </div>
 
+          <div className="border-t border-border pt-6 space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Default shipping address</h3>
+              <p className="text-xs text-muted-foreground mt-1">Pre-filled on checkout; you can change per order.</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-foreground mb-2">Address line 1</label>
+                <input
+                  type="text"
+                  value={addresses.shippingAddressLine1}
+                  onChange={(e) => setAddresses({ ...addresses, shippingAddressLine1: e.target.value })}
+                  disabled={!isEditing}
+                  className={cn(
+                    "w-full px-4 py-3 rounded-xl text-sm transition-all",
+                    isEditing
+                      ? "bg-muted/50 border border-border focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      : "bg-transparent border border-border",
+                  )}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-foreground mb-2">Address line 2</label>
+                <input
+                  type="text"
+                  value={addresses.shippingAddressLine2}
+                  onChange={(e) => setAddresses({ ...addresses, shippingAddressLine2: e.target.value })}
+                  disabled={!isEditing}
+                  className={cn(
+                    "w-full px-4 py-3 rounded-xl text-sm transition-all",
+                    isEditing
+                      ? "bg-muted/50 border border-border focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      : "bg-transparent border border-border",
+                  )}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">City</label>
+                <input
+                  type="text"
+                  value={addresses.shippingCity}
+                  onChange={(e) => setAddresses({ ...addresses, shippingCity: e.target.value })}
+                  disabled={!isEditing}
+                  className={cn(
+                    "w-full px-4 py-3 rounded-xl text-sm transition-all",
+                    isEditing
+                      ? "bg-muted/50 border border-border focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      : "bg-transparent border border-border",
+                  )}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">Postcode / ZIP</label>
+                <input
+                  type="text"
+                  value={addresses.shippingPostcode}
+                  onChange={(e) => setAddresses({ ...addresses, shippingPostcode: e.target.value })}
+                  disabled={!isEditing}
+                  className={cn(
+                    "w-full px-4 py-3 rounded-xl text-sm transition-all",
+                    isEditing
+                      ? "bg-muted/50 border border-border focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      : "bg-transparent border border-border",
+                  )}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-foreground mb-2">Country</label>
+                <input
+                  type="text"
+                  value={addresses.shippingCountry}
+                  onChange={(e) => setAddresses({ ...addresses, shippingCountry: e.target.value })}
+                  disabled={!isEditing}
+                  className={cn(
+                    "w-full px-4 py-3 rounded-xl text-sm transition-all",
+                    isEditing
+                      ? "bg-muted/50 border border-border focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      : "bg-transparent border border-border",
+                  )}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-border pt-6 space-y-4">
+            <h3 className="text-sm font-semibold text-foreground">Default billing address</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-foreground mb-2">Address line 1</label>
+                <input
+                  type="text"
+                  value={addresses.billingAddressLine1}
+                  onChange={(e) => setAddresses({ ...addresses, billingAddressLine1: e.target.value })}
+                  disabled={!isEditing}
+                  className={cn(
+                    "w-full px-4 py-3 rounded-xl text-sm transition-all",
+                    isEditing
+                      ? "bg-muted/50 border border-border focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      : "bg-transparent border border-border",
+                  )}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-foreground mb-2">Address line 2</label>
+                <input
+                  type="text"
+                  value={addresses.billingAddressLine2}
+                  onChange={(e) => setAddresses({ ...addresses, billingAddressLine2: e.target.value })}
+                  disabled={!isEditing}
+                  className={cn(
+                    "w-full px-4 py-3 rounded-xl text-sm transition-all",
+                    isEditing
+                      ? "bg-muted/50 border border-border focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      : "bg-transparent border border-border",
+                  )}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">City</label>
+                <input
+                  type="text"
+                  value={addresses.billingCity}
+                  onChange={(e) => setAddresses({ ...addresses, billingCity: e.target.value })}
+                  disabled={!isEditing}
+                  className={cn(
+                    "w-full px-4 py-3 rounded-xl text-sm transition-all",
+                    isEditing
+                      ? "bg-muted/50 border border-border focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      : "bg-transparent border border-border",
+                  )}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">Postcode / ZIP</label>
+                <input
+                  type="text"
+                  value={addresses.billingPostcode}
+                  onChange={(e) => setAddresses({ ...addresses, billingPostcode: e.target.value })}
+                  disabled={!isEditing}
+                  className={cn(
+                    "w-full px-4 py-3 rounded-xl text-sm transition-all",
+                    isEditing
+                      ? "bg-muted/50 border border-border focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      : "bg-transparent border border-border",
+                  )}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-foreground mb-2">Country</label>
+                <input
+                  type="text"
+                  value={addresses.billingCountry}
+                  onChange={(e) => setAddresses({ ...addresses, billingCountry: e.target.value })}
+                  disabled={!isEditing}
+                  className={cn(
+                    "w-full px-4 py-3 rounded-xl text-sm transition-all",
+                    isEditing
+                      ? "bg-muted/50 border border-border focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      : "bg-transparent border border-border",
+                  )}
+                />
+              </div>
+            </div>
+          </div>
+
           {isEditing && (
             <div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3 pt-4 border-t border-border">
               <button
@@ -193,6 +390,7 @@ export default function ProfilePage() {
                 onClick={() => {
                   setFullName(portalUser.full_name)
                   setCompanyName(portalUser.company_name)
+                  setAddresses(checkoutDefaultsFromProfile(portalUser))
                   setIsEditing(false)
                 }}
                 className="w-full sm:w-auto px-4 sm:px-5 py-2 sm:py-2.5 border border-border rounded-xl text-sm sm:text-base font-semibold hover:bg-muted transition-colors"

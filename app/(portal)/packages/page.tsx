@@ -1,8 +1,10 @@
 import { getCatalog } from "@/lib/catalog/queries"
+import { getPortalProfile } from "@/lib/supabase/profile"
 import { PackagesPageClient } from "./packages-page-client"
 
 export default async function PackagesPage() {
-  const catalog = await getCatalog()
+  const profile = await getPortalProfile()
+  const catalog = await getCatalog(profile?.id ?? null)
   if (!catalog || catalog.races.length === 0) {
     return (
       <div className="p-6 lg:p-8 max-w-lg">

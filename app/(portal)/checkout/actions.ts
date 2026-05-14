@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { sendOrderPlacedEmail } from "@/lib/email/send-order-placed"
+import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
 
 export type SubmitCheckoutResult =
   | {
@@ -34,17 +35,19 @@ function mapRpcError(message: string): string {
   return "Could not complete the booking. Please try again or contact support."
 }
 
-export async function submitCheckoutOrder(input: {
-  packageId: string
-  guests: number
-  clientName: string
-  clientEmail: string
-  clientPhone: string
-  clientCompany: string
-  dietaryRequirements: string
-  specialRequests: string
-  poNumber: string
-}): Promise<SubmitCheckoutResult> {
+export async function submitCheckoutOrder(
+  input: {
+    packageId: string
+    guests: number
+    clientName: string
+    clientEmail: string
+    clientPhone: string
+    clientNationality: string
+    dietaryRequirements: string
+    specialRequests: string
+    poNumber: string
+  } & CheckoutAddressFields,
+): Promise<SubmitCheckoutResult> {
   const profile = await getPortalProfile()
   if (!profile || profile.approval_status !== "approved") {
     return { ok: false, error: "Your account is not approved to place orders yet." }
@@ -62,10 +65,20 @@ export async function submitCheckoutOrder(input: {
     p_client_name: input.clientName,
     p_client_email: input.clientEmail,
     p_client_phone: input.clientPhone,
-    p_client_company: input.clientCompany,
+    p_client_nationality: input.clientNationality,
     p_dietary: input.dietaryRequirements,
     p_special: input.specialRequests,
     p_po: input.poNumber,
+    p_ship_line1: input.shippingAddressLine1,
+    p_ship_line2: input.shippingAddressLine2,
+    p_ship_city: input.shippingCity,
+    p_ship_postcode: input.shippingPostcode,
+    p_ship_country: input.shippingCountry,
+    p_bill_line1: input.billingAddressLine1,
+    p_bill_line2: input.billingAddressLine2,
+    p_bill_city: input.billingCity,
+    p_bill_postcode: input.billingPostcode,
+    p_bill_country: input.billingCountry,
   })
 
   if (error) {
@@ -84,8 +97,32 @@ export async function submitCheckoutOrder(input: {
   const currency = String(row.currency ?? "USD")
   const guestCount = Number(row.guests ?? guests)
 
+  const { error: profileErr } = await supabase
+    .from("profiles")
+    .update({
+      shipping_address_line1: input.shippingAddressLine1.trim(),
+      shipping_address_line2: input.shippingAddressLine2.trim(),
+      shipping_city: input.shippingCity.trim(),
+      shipping_postcode: input.shippingPostcode.trim(),
+      shipping_country: input.shippingCountry.trim(),
+      billing_address_line1: input.billingAddressLine1.trim(),
+      billing_address_line2: input.billingAddressLine2.trim(),
+      billing_city: input.billingCity.trim(),
+      billing_postcode: input.billingPostcode.trim(),
+      billing_country: input.billingCountry.trim(),
+    })
+    .eq("id", profile.id)
+
+  if (profileErr) {
+    console.error("[checkout] order saved but profile address defaults not updated:", profileErr.message)
+  }
+
   revalidatePath("/bookings")
   revalidatePath("/invoices")
+  revalidatePath("/profile")
+  revalidatePath("/packages")
+  revalidatePath("/admin/inventory")
+  revalidatePath("/admin/catalog")
 
   const agentEmail = profile.email
   const agentName = profile.full_name || profile.email.split("@")[0] || "Partner"
@@ -103,10 +140,20 @@ export async function submitCheckoutOrder(input: {
     clientName: input.clientName.trim(),
     clientEmail: input.clientEmail.trim(),
     clientPhone: input.clientPhone.trim(),
-    clientCompany: input.clientCompany.trim(),
+    clientNationality: input.clientNationality.trim(),
     poNumber: input.poNumber.trim() || null,
     dietary: input.dietaryRequirements.trim() || null,
     specialRequests: input.specialRequests.trim() || null,
+    shippingAddressLine1: input.shippingAddressLine1.trim(),
+    shippingAddressLine2: input.shippingAddressLine2.trim(),
+    shippingCity: input.shippingCity.trim(),
+    shippingPostcode: input.shippingPostcode.trim(),
+    shippingCountry: input.shippingCountry.trim(),
+    billingAddressLine1: input.billingAddressLine1.trim(),
+    billingAddressLine2: input.billingAddressLine2.trim(),
+    billingCity: input.billingCity.trim(),
+    billingPostcode: input.billingPostcode.trim(),
+    billingCountry: input.billingCountry.trim(),
   })
 
   if (!emailResult.ok && emailResult.error) {

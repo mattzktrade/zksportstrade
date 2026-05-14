@@ -1,5 +1,7 @@
 import Link from "next/link"
 import { getPackageById } from "@/lib/catalog/queries"
+import { getPortalProfile } from "@/lib/supabase/profile"
+import { checkoutDefaultsFromProfile, emptyCheckoutAddressFields } from "@/lib/types/checkout-addresses"
 import { CheckoutClient } from "./checkout-client"
 
 export default async function CheckoutPage({
@@ -20,7 +22,8 @@ export default async function CheckoutPage({
     )
   }
 
-  const pkg = await getPackageById(packageId)
+  const profile = await getPortalProfile()
+  const pkg = await getPackageById(packageId, profile?.id ?? null)
   if (!pkg) {
     return (
       <div className="p-8 text-center">
@@ -34,6 +37,7 @@ export default async function CheckoutPage({
 
   const rawGuests = sp.guests ? Number.parseInt(sp.guests, 10) : 2
   const initialGuests = Number.isFinite(rawGuests) && rawGuests > 0 ? rawGuests : 2
+  const savedAddresses = profile ? checkoutDefaultsFromProfile(profile) : emptyCheckoutAddressFields()
 
-  return <CheckoutClient pkg={pkg} initialGuests={initialGuests} />
+  return <CheckoutClient pkg={pkg} initialGuests={initialGuests} savedAddresses={savedAddresses} />
 }

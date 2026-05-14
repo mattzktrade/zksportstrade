@@ -11,10 +11,20 @@ export type OrderRow = {
   client_name: string
   client_email: string
   client_phone: string
-  client_company: string
+  client_nationality: string
   dietary_requirements: string | null
   special_requests: string | null
   po_number: string | null
+  shipping_address_line1: string
+  shipping_address_line2: string
+  shipping_city: string
+  shipping_postcode: string
+  shipping_country: string
+  billing_address_line1: string
+  billing_address_line2: string
+  billing_city: string
+  billing_postcode: string
+  billing_country: string
   created_at: string
 }
 

@@ -32,6 +32,18 @@ type DbPackage = {
   includes: unknown
   featured: boolean
   sort_order: number
+  brochure_url?: string | null
+  description?: string | null
+  gallery_images?: unknown
+}
+
+function parseGalleryImages(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  for (const x of raw) {
+    if (typeof x === "string" && x.trim().length > 0) out.push(x.trim())
+  }
+  return out
 }
 
 type DbInventory = {
@@ -44,6 +56,11 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
   const includes = Array.isArray(p.includes) ? (p.includes as string[]) : []
   const price = p.trade_price != null ? Number(p.trade_price) : null
   const tier = (["paddock", "champions", "legend", "hero"].includes(p.tier) ? p.tier : "paddock") as Package["tier"]
+  const brochureRaw = p.brochure_url
+  const brochureUrl =
+    typeof brochureRaw === "string" && brochureRaw.trim().length > 0 ? brochureRaw.trim() : null
+  const description = typeof p.description === "string" ? p.description : ""
+  const galleryImages = parseGalleryImages(p.gallery_images)
 
   if (p.is_enquiry) {
   return {
@@ -62,7 +79,10 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     image: p.image ?? "/placeholder.svg",
     tier,
     includes,
+    description: description.trim() ? description : null,
+    galleryImages: galleryImages.length > 0 ? galleryImages : undefined,
     featured: p.featured,
+    brochureUrl,
     raceId: p.race_id,
   }
   }
@@ -87,7 +107,10 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     image: p.image ?? "/placeholder.svg",
     tier,
     includes,
+    description: description.trim() ? description : null,
+    galleryImages: galleryImages.length > 0 ? galleryImages : undefined,
     featured: p.featured,
+    brochureUrl,
     raceId: p.race_id,
   }
 }

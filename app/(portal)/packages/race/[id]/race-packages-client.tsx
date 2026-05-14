@@ -4,8 +4,28 @@ import { useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import type { Package, Race } from "@/lib/data"
-import { ArrowLeft, MapPin, Calendar, Users, Check, ArrowRight, ChevronDown, Minus, Plus, ChevronLeft, ChevronRight } from "lucide-react"
+import { ArrowLeft, MapPin, Calendar, Users, Check, ArrowRight, ChevronDown, Minus, Plus, ChevronLeft, ChevronRight, FileDown, Link2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
+
+const DEFAULT_PACKAGE_DESCRIPTION =
+  "Experience the ultimate Formula 1 hospitality with this premium package. Enjoy exclusive access to the paddock area, world-class dining, and unforgettable moments with the sport's elite. This package includes all race weekend sessions - Friday practice, Saturday qualifying, and Sunday's main event."
+
+const PACKAGE_ENQUIRY_EMAIL = "matt@zk-sports.com"
+
+function packageEnquireMailto(pkg: Package): string {
+  const subject = `Enquiry: ${pkg.name} (${pkg.circuit})`
+  const body = `Hi,
+
+I would like to enquire about the following package:
+
+Package: ${pkg.name}
+Event: ${pkg.circuit}
+Dates: ${pkg.dateRange}
+
+`
+  return `mailto:${PACKAGE_ENQUIRY_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+}
 
 export function RacePackagesClient({ race, racePackages }: { race: Race; racePackages: Package[] }) {
   const [expandedPackage, setExpandedPackage] = useState<string | null>(null)
@@ -125,13 +145,10 @@ function PackageRow({
   const sellable = typeof pkg.availability === "number" ? pkg.availability : 0
   const maxGuests = isAvailabilityString ? 1 : Math.min(sellable, pkg.totalCapacity)
   const canBook = !isAvailabilityString && pkg.price !== null && sellable > 0
-  
-  // Create array of images - main image plus additional placeholder images for gallery
-  const packageImages = [
-    pkg.image || "/placeholder.svg",
-    pkg.image || "/placeholder.svg", // Additional images would come from package data
-    pkg.image || "/placeholder.svg",
-  ]
+
+  const primaryImage = pkg.image?.trim() || "/placeholder.svg"
+  const extras = (pkg.galleryImages ?? []).filter((u) => typeof u === "string" && u.trim().length > 0 && u.trim() !== primaryImage)
+  const packageImages = [primaryImage, ...extras.map((u) => u.trim())]
 
   return (
     <div>
@@ -271,8 +288,8 @@ function PackageRow({
 
                 {/* Package Description */}
                 <div className="mb-3 sm:mb-4">
-                  <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
-                    Experience the ultimate Formula 1 hospitality with this premium package. Enjoy exclusive access to the paddock area, world-class dining, and unforgettable moments with the sport's elite. This package includes all race weekend sessions - Friday practice, Saturday qualifying, and Sunday's main event.
+                  <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                    {pkg.description?.trim() ? pkg.description.trim() : DEFAULT_PACKAGE_DESCRIPTION}
                   </p>
                 </div>
 
@@ -287,6 +304,40 @@ function PackageRow({
                       </div>
                     ))}
                   </div>
+                  {pkg.brochureUrl ? (
+                    <div className="mt-4 rounded-xl border border-border bg-muted/20 p-3 sm:p-4 space-y-2">
+                      <p className="text-xs font-semibold text-foreground uppercase tracking-wide">Brochure</p>
+                      <p className="text-[11px] sm:text-xs text-muted-foreground leading-relaxed">
+                        Share this PDF or page with your client. Opens in a new tab — use your browser to download or share.
+                      </p>
+                      <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+                        <a
+                          href={pkg.brochureUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center justify-center gap-2 px-3 sm:px-4 py-2 rounded-xl bg-primary text-primary-foreground text-xs sm:text-sm font-semibold hover:bg-primary/90 transition-colors"
+                        >
+                          <FileDown className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+                          View brochure
+                        </a>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void navigator.clipboard.writeText(pkg.brochureUrl!).then(
+                              () => toast.success("Link copied"),
+                              () => toast.error("Could not copy — open the brochure and copy from the address bar"),
+                            )
+                          }}
+                          className="inline-flex items-center justify-center gap-2 px-3 sm:px-4 py-2 rounded-xl border border-border bg-background text-xs sm:text-sm font-semibold text-foreground hover:bg-muted transition-colors"
+                        >
+                          <Link2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+                          Copy link
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -307,6 +358,16 @@ function PackageRow({
                     {/* Guest Selector - Only show if can book */}
                     {canBook && (
                       <>
+                        {pkg.agentHoldUnits != null && pkg.agentHoldUnits > 0 && pkg.agentHoldExpiresAt ? (
+                          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100 mb-3">
+                            <p className="font-semibold">Your active hold</p>
+                            <p className="mt-0.5 leading-relaxed">
+                              {pkg.agentHoldUnits} seat{pkg.agentHoldUnits !== 1 ? "s" : ""} reserved until{" "}
+                              {new Date(pkg.agentHoldExpiresAt).toLocaleString()}. Stock shown includes your hold so you
+                              can proceed to checkout.
+                            </p>
+                          </div>
+                        ) : null}
                         <div>
                           <label className="block text-xs sm:text-sm font-medium text-foreground mb-2">Number of Guests</label>
                           <div className="flex items-center gap-2 sm:gap-3 mb-2">
@@ -346,7 +407,11 @@ function PackageRow({
                             </button>
                           </div>
                           <p className="text-[10px] sm:text-xs text-muted-foreground text-center">
-                            {typeof pkg.availability === "number" ? `${pkg.availability} available` : String(pkg.availability)}
+                            {typeof pkg.availability === "number"
+                              ? `${pkg.availability} available${
+                                  pkg.agentHoldUnits != null && pkg.agentHoldUnits > 0 ? " (includes your hold)" : ""
+                                }`
+                              : String(pkg.availability)}
                           </p>
                         </div>
 
@@ -377,14 +442,21 @@ function PackageRow({
                       </>
                     )}
                     {!canBook && (
-                      <div className="pt-2 sm:pt-3 border-t border-border">
+                      <div className="pt-2 sm:pt-3 border-t border-border space-y-3">
                         <p className="text-xs sm:text-sm text-muted-foreground text-center">
-                          {isAvailabilityString 
+                          {isAvailabilityString
                             ? `Please contact us for availability and pricing`
                             : pkg.price === null
-                            ? "Pricing available upon request"
-                            : "Not available for booking"}
+                              ? "Pricing available upon request"
+                              : "Not available for booking"}
                         </p>
+                        <a
+                          href={packageEnquireMailto(pkg)}
+                          className="w-full inline-flex items-center justify-center px-4 sm:px-5 py-2 sm:py-2.5 bg-primary text-primary-foreground rounded-xl text-xs sm:text-sm font-semibold hover:bg-primary/90 transition-colors"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Enquire
+                        </a>
                       </div>
                     )}
                   </div>

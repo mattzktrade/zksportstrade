@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import type { Invoice } from "@/lib/data"
+import { normalizeInvoiceStatus } from "@/lib/invoices/status"
 
 type OrderJoin = {
   id: string
@@ -13,7 +14,7 @@ type RawInvoiceRow = {
   reference: string
   amount: number
   currency: string
-  status: "paid" | "pending" | "overdue"
+  status: string
   issued_at: string
   due_date: string | null
   orders?: OrderJoin | OrderJoin[] | null
@@ -63,7 +64,7 @@ export async function getMyInvoices(): Promise<Invoice[]> {
       orderId: order?.id,
       amount: Number(row.amount),
       currency: row.currency,
-      status: row.status,
+      status: normalizeInvoiceStatus(row.status),
       issuedAt: row.issued_at,
       dueDate: due,
       packageName: pkgName,

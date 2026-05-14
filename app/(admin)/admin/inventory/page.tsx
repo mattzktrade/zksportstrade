@@ -1,6 +1,27 @@
 import { requireAdmin } from "@/lib/admin/require-admin"
-import { getAdminPackageRows, getApprovedAgents, getInventoryHoldsWithDetails } from "@/lib/admin/queries"
+import {
+  getAdminPackageRows,
+  getApprovedAgents,
+  getInventoryHoldsWithDetails,
+  type InventoryPackageOption,
+} from "@/lib/admin/queries"
 import { InventoryAdminClient } from "./inventory-admin-client"
+
+function toInventoryOptions(pkgRows: Awaited<ReturnType<typeof getAdminPackageRows>>): InventoryPackageOption[] {
+  return pkgRows
+    .filter((p) => p.inventory != null)
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      race_name: p.race_name,
+      circuit: p.circuit,
+      date_range: p.date_range,
+      location: p.location,
+      qty_available: p.inventory!.qty_available,
+      qty_held: p.inventory!.qty_held,
+    }))
+    .sort((a, b) => a.race_name.localeCompare(b.race_name) || a.name.localeCompare(b.name))
+}
 
 export default async function AdminInventoryPage() {
   await requireAdmin()
@@ -9,15 +30,15 @@ export default async function AdminInventoryPage() {
     getApprovedAgents(),
     getAdminPackageRows(),
   ])
-  const packages = pkgRows.map((p) => ({ id: p.id, name: p.name }))
+  const packages = toInventoryOptions(pkgRows)
 
   return (
     <div className="p-6 lg:p-8 max-w-5xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Inventory & holds</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Create client holds tied to agents, or release them when the allocation is no longer needed. Capacity edits live
-          on the catalog page.
+          Create client holds tied to agents (with an auto-release timer), or release them manually. Expired holds return
+          stock automatically (cron + catalog/checkout). Capacity edits live on the catalog page.
         </p>
       </div>
       <InventoryAdminClient holds={holds} agents={agents} packages={packages} />
