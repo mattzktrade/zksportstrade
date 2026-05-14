@@ -1,8 +1,0 @@
-{
-  "crons": [
-    {
-      "path": "/api/cron/release-expired-holds",
-      "schedule": "*/15 * * * *"
-    }
-  ]
-}

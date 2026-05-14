@@ -163,7 +163,7 @@ export function InventoryAdminClient({
         <p className="text-sm text-muted-foreground">
           Reserves units against an agent for a specific catalog package (inventory row required). Stock checks run in
           the database; held counts must stay within capacity. Holds auto-release after the duration you set if the
-          agent does not check out (also released every 15 minutes via server cron when configured).
+          agent does not check out (expired rows are also cleared when stock is read or at checkout).
         </p>
         <form onSubmit={(e) => void submitHold(e)} className="space-y-3">
           <div ref={packagePickerRef} className="block text-xs text-muted-foreground">

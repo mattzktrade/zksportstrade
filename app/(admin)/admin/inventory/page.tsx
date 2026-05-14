@@ -38,7 +38,8 @@ export default async function AdminInventoryPage() {
         <h1 className="text-2xl font-bold text-foreground">Inventory & holds</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Create client holds tied to agents (with an auto-release timer), or release them manually. Expired holds return
-          stock automatically (cron + catalog/checkout). Capacity edits live on the catalog page.
+          stock when agents browse packages or complete checkout (the database clears past-due holds then). Capacity
+          edits live on the catalog page.
         </p>
       </div>
       <InventoryAdminClient holds={holds} agents={agents} packages={packages} />
