@@ -125,7 +125,6 @@ export function RacesGrid({ races }: { races: Race[] }) {
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
         {filteredRaces.map((race) => {
-          const globalIndex = races.findIndex((r) => r.id === race.id)
           return (
             <Link
               key={race.id}
@@ -141,13 +140,6 @@ export function RacesGrid({ races }: { races: Race[] }) {
                   className="object-cover group-hover:scale-110 transition-transform duration-500"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/10" />
-
-                {/* Round badge */}
-                <div className="absolute top-2 left-2 sm:top-3 sm:left-3">
-                  <span className="text-[9px] sm:text-[10px] font-bold text-white bg-primary px-1.5 sm:px-2 py-0.5 sm:py-1 rounded">
-                    R{String(globalIndex + 1).padStart(2, "0")}
-                  </span>
-                </div>
 
                 {/* Arrow on hover */}
                 <div className="absolute top-2 right-2 sm:top-3 sm:right-3 opacity-0 group-hover:opacity-100 transition-opacity">
