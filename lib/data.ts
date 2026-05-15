@@ -56,7 +56,8 @@ export interface Booking {
   circuit: string
   date: string
   guests: number
-  status: "confirmed" | "pending" | "cancelled"
+  /** Invoice workflow status (admin-controlled); mirrors Invoices page */
+  invoiceStatus: InvoiceWorkflowStatus
   totalAmount: number
   currency: string
   createdAt: string
@@ -74,8 +75,8 @@ export interface Invoice {
   amount: number
   currency: string
   status: InvoiceWorkflowStatus
-  issuedAt: string
-  dueDate: string
+  /** Set when admin moves to awaiting_payment; null while awaiting_invoice */
+  issuedAt: string | null
   packageName: string
 }
 
@@ -3641,7 +3642,7 @@ export const bookings: Booking[] = [
     circuit: "Monaco Grand Prix",
     date: "2026-05-24",
     guests: 4,
-    status: "confirmed",
+    invoiceStatus: "paid",
     totalAmount: 34000,
     currency: "USD",
     createdAt: "2026-01-15",
@@ -3655,7 +3656,7 @@ export const bookings: Booking[] = [
     circuit: "British Grand Prix",
     date: "2026-07-05",
     guests: 6,
-    status: "pending",
+    invoiceStatus: "awaiting_invoice",
     totalAmount: 31200,
     currency: "USD",
     createdAt: "2026-01-18",
@@ -3669,7 +3670,7 @@ export const bookings: Booking[] = [
     circuit: "Abu Dhabi Grand Prix",
     date: "2026-12-06",
     guests: 2,
-    status: "confirmed",
+    invoiceStatus: "awaiting_payment",
     totalAmount: 18400,
     currency: "USD",
     createdAt: "2026-01-20",
@@ -3686,7 +3687,6 @@ export const invoices: Invoice[] = [
     currency: "USD",
     status: "paid",
     issuedAt: "2026-01-15",
-    dueDate: "2026-02-15",
     packageName: "Monaco GP - Paddock Club",
   },
   {
@@ -3695,8 +3695,7 @@ export const invoices: Invoice[] = [
     amount: 31200,
     currency: "USD",
     status: "awaiting_invoice",
-    issuedAt: "2026-01-18",
-    dueDate: "2026-02-18",
+    issuedAt: null,
     packageName: "British GP - Champions Club",
   },
   {
@@ -3706,7 +3705,6 @@ export const invoices: Invoice[] = [
     currency: "USD",
     status: "awaiting_payment",
     issuedAt: "2025-12-20",
-    dueDate: "2026-01-10",
     packageName: "Abu Dhabi GP - Legend Package",
   },
 ]

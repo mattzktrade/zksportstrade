@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import { getPortalProfile } from "@/lib/supabase/profile"
-import { isInvoiceWorkflowStatus, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
+import { isInvoiceWorkflowStatus, normalizeInvoiceStatus, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
 
 type ActionResult = { ok: true } | { ok: false; message: string }
 
@@ -32,12 +32,35 @@ export async function updateInvoiceStatus(
   if (!isInvoiceWorkflowStatus(status)) return { ok: false, message: "Invalid status." }
 
   const { supabase } = gate
-  const { error } = await supabase.from("invoices").update({ status }).eq("id", id)
+
+  const { data: current, error: fetchError } = await supabase
+    .from("invoices")
+    .select("status, issued_at")
+    .eq("id", id)
+    .maybeSingle()
+  if (fetchError) return { ok: false, message: fetchError.message }
+  if (!current) return { ok: false, message: "Invoice not found." }
+
+  const previousStatus = normalizeInvoiceStatus(current.status)
+  const patch: { status: InvoiceWorkflowStatus; issued_at?: string | null } = { status }
+
+  if (
+    (status === "awaiting_payment" || status === "paid") &&
+    (previousStatus === "awaiting_invoice" || current.issued_at == null)
+  ) {
+    patch.issued_at = new Date().toISOString()
+  }
+  if (status === "awaiting_invoice") {
+    patch.issued_at = null
+  }
+
+  const { error } = await supabase.from("invoices").update(patch).eq("id", id)
   if (error) return { ok: false, message: error.message }
 
   revalidatePath("/admin/agents")
   revalidatePath("/admin/orders")
   revalidatePath("/invoices")
+  revalidatePath("/bookings")
   return { ok: true }
 }
 

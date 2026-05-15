@@ -3,19 +3,8 @@
 import { useState, useMemo } from "react"
 import type { Invoice } from "@/lib/data"
 import { invoiceWorkflowStatusLabels, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
-import {
-  Search,
-  Download,
-  Eye,
-  Filter,
-  CheckCircle2,
-  Clock,
-  FileText,
-  DollarSign,
-  ExternalLink,
-  Send,
-} from "lucide-react"
-import { cn } from "@/lib/utils"
+import { Search, Filter, CheckCircle2, Clock, FileText, Send } from "lucide-react"
+import { cn, formatMoney } from "@/lib/utils"
 
 const statusConfig: Record<
   InvoiceWorkflowStatus,
@@ -47,6 +36,15 @@ const filterTabs: { value: "all" | InvoiceWorkflowStatus; label: string }[] = [
   { value: "awaiting_payment", label: "Awaiting payment" },
   { value: "paid", label: "Paid" },
 ]
+
+function formatIssueDate(issuedAt: string | null) {
+  if (!issuedAt) return "—"
+  return new Date(issuedAt).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  })
+}
 
 export function InvoicesPageClient({
   initialInvoices,
@@ -89,9 +87,6 @@ export function InvoicesPageClient({
     <div className="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
       <div>
         <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Invoices</h1>
-        <p className="text-sm sm:text-base text-muted-foreground mt-1">
-          Formal invoices are raised by finance. This list shows what is on record for your portal orders.
-        </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
@@ -99,7 +94,7 @@ export function InvoicesPageClient({
           <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1 sm:mb-2">
             {invoiceWorkflowStatusLabels.awaiting_invoice}
           </p>
-          <p className="text-2xl sm:text-3xl font-bold text-foreground mb-1">${stats.awaitingInvoice.toLocaleString()}</p>
+          <p className="text-2xl sm:text-3xl font-bold text-foreground mb-1">{formatMoney(stats.awaitingInvoice)}</p>
           <p className="text-xs sm:text-sm text-muted-foreground">
             {initialInvoices.filter((i) => i.status === "awaiting_invoice").length} invoice
             {initialInvoices.filter((i) => i.status === "awaiting_invoice").length !== 1 ? "s" : ""}
@@ -110,7 +105,7 @@ export function InvoicesPageClient({
           <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1 sm:mb-2">
             {invoiceWorkflowStatusLabels.awaiting_payment}
           </p>
-          <p className="text-2xl sm:text-3xl font-bold text-foreground mb-1">${stats.awaitingPayment.toLocaleString()}</p>
+          <p className="text-2xl sm:text-3xl font-bold text-foreground mb-1">{formatMoney(stats.awaitingPayment)}</p>
           <p className="text-xs sm:text-sm text-muted-foreground">
             {initialInvoices.filter((i) => i.status === "awaiting_payment").length} invoice
             {initialInvoices.filter((i) => i.status === "awaiting_payment").length !== 1 ? "s" : ""}
@@ -119,7 +114,7 @@ export function InvoicesPageClient({
 
         <div className="bg-card border border-border rounded-xl p-4 sm:p-6">
           <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1 sm:mb-2">{invoiceWorkflowStatusLabels.paid}</p>
-          <p className="text-2xl sm:text-3xl font-bold text-foreground mb-1">${stats.paid.toLocaleString()}</p>
+          <p className="text-2xl sm:text-3xl font-bold text-foreground mb-1">{formatMoney(stats.paid)}</p>
           <p className="text-xs sm:text-sm text-muted-foreground">
             {initialInvoices.filter((i) => i.status === "paid").length} invoice
             {initialInvoices.filter((i) => i.status === "paid").length !== 1 ? "s" : ""}
@@ -171,10 +166,6 @@ export function InvoicesPageClient({
                 <th className="text-left px-3 sm:px-4 lg:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-muted-foreground hidden md:table-cell">
                   Issue Date
                 </th>
-                <th className="text-left px-3 sm:px-4 lg:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-muted-foreground hidden md:table-cell">
-                  Due Date
-                </th>
-                <th className="text-right px-3 sm:px-4 lg:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -200,10 +191,9 @@ export function InvoicesPageClient({
                       <p className="text-[10px] sm:text-xs text-muted-foreground">Order: {invoice.bookingId}</p>
                     </td>
                     <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
-                      <div className="flex items-center gap-1">
-                        <DollarSign className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
-                        <span className="text-sm sm:text-base font-bold text-foreground">${invoice.amount.toLocaleString()}</span>
-                      </div>
+                      <span className="text-sm sm:text-base font-bold text-foreground">
+                        {formatMoney(invoice.amount, invoice.currency)}
+                      </span>
                     </td>
                     <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
                       <span
@@ -217,31 +207,7 @@ export function InvoicesPageClient({
                       </span>
                     </td>
                     <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 text-xs sm:text-sm text-muted-foreground hidden md:table-cell">
-                      {new Date(invoice.issuedAt).toLocaleDateString("en-GB", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}
-                    </td>
-                    <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 text-xs sm:text-sm text-muted-foreground hidden md:table-cell">
-                      {new Date(invoice.dueDate).toLocaleDateString("en-GB", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}
-                    </td>
-                    <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
-                      <div className="flex items-center justify-end gap-0.5 sm:gap-1">
-                        <button type="button" className="p-1.5 sm:p-2 rounded-lg hover:bg-muted transition-colors" title="View Invoice">
-                          <Eye className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
-                        </button>
-                        <button type="button" className="p-1.5 sm:p-2 rounded-lg hover:bg-muted transition-colors" title="Download PDF">
-                          <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
-                        </button>
-                        <button type="button" className="p-1.5 sm:p-2 rounded-lg hover:bg-muted transition-colors" title="Open in New Tab">
-                          <ExternalLink className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
-                        </button>
-                      </div>
+                      {formatIssueDate(invoice.issuedAt)}
                     </td>
                   </tr>
                 )

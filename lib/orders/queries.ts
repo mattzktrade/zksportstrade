@@ -1,8 +1,14 @@
 import { createClient } from "@/lib/supabase/server"
 import type { Booking } from "@/lib/data"
+import { normalizeInvoiceStatus } from "@/lib/invoices/status"
 import type { OrderRow, PackageSnippet } from "@/lib/orders/types"
 
-type OrderWithPackage = OrderRow & { packages: PackageSnippet | null }
+type OrderInvoiceSnippet = { status: string }
+
+type OrderWithPackage = OrderRow & {
+  packages: PackageSnippet | null
+  invoices?: OrderInvoiceSnippet | OrderInvoiceSnippet[] | null
+}
 
 export type AdminOrderAgent = {
   full_name: string | null
@@ -29,6 +35,7 @@ function one<T>(value: T | T[] | null | undefined): T | null {
 
 function mapOrderToBooking(row: OrderWithPackage): Booking {
   const pkg = row.packages
+  const invoice = one(row.invoices)
   return {
     id: row.id,
     orderReference: row.reference,
@@ -37,7 +44,7 @@ function mapOrderToBooking(row: OrderWithPackage): Booking {
     circuit: pkg?.circuit ?? "",
     date: pkg?.event_date ?? row.created_at,
     guests: row.guests,
-    status: row.status,
+    invoiceStatus: normalizeInvoiceStatus(invoice?.status ?? "awaiting_invoice"),
     totalAmount: Number(row.total_amount),
     currency: row.currency,
     createdAt: row.created_at,
@@ -86,6 +93,9 @@ export async function getMyBookings(): Promise<Booking[]> {
         event_date,
         tier,
         total_capacity
+      ),
+      invoices (
+        status
       )
     `,
     )
@@ -93,10 +103,14 @@ export async function getMyBookings(): Promise<Booking[]> {
 
   if (error || !data) return []
 
-  return (data as (OrderRow & { packages?: PackageSnippet | PackageSnippet[] | null })[]).map((row) => {
+  return (data as (OrderRow & {
+    packages?: PackageSnippet | PackageSnippet[] | null
+    invoices?: OrderInvoiceSnippet | OrderInvoiceSnippet[] | null
+  })[]).map((row) => {
     const normalized: OrderWithPackage = {
       ...(row as OrderRow),
       packages: one(row.packages),
+      invoices: one(row.invoices),
     }
     return mapOrderToBooking(normalized)
   })

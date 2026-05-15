@@ -3,47 +3,36 @@
 import { useState, useMemo } from "react"
 import Link from "next/link"
 import type { Booking } from "@/lib/data"
-import {
-  Search,
-  Calendar,
-  Users,
-  Clock,
-  CheckCircle2,
-  XCircle,
-  Download,
-  Eye,
-  Filter,
-  ArrowUpDown,
-  ChevronDown,
-} from "lucide-react"
+import { invoiceWorkflowStatusLabels, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
+import { Search, Calendar, Users, Filter, ArrowUpDown, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const statusConfig = {
-  confirmed: {
-    label: "Confirmed",
-    icon: CheckCircle2,
-    className: "text-emerald-700 bg-emerald-50 border-emerald-200",
-    dotColor: "bg-emerald-500",
+const paymentStatusConfig: Record<
+  InvoiceWorkflowStatus,
+  { label: string; className: string; dotColor: string }
+> = {
+  awaiting_invoice: {
+    label: invoiceWorkflowStatusLabels.awaiting_invoice,
+    className: "text-slate-700 bg-slate-50/50 dark:text-slate-200 dark:bg-slate-900/40",
+    dotColor: "bg-slate-500",
   },
-  pending: {
-    label: "Pending",
-    icon: Clock,
-    className: "text-amber-700 bg-amber-50 border-amber-200",
-    dotColor: "bg-amber-500",
+  awaiting_payment: {
+    label: invoiceWorkflowStatusLabels.awaiting_payment,
+    className: "text-amber-700 bg-amber-50/50",
+    dotColor: "bg-amber-600",
   },
-  cancelled: {
-    label: "Cancelled",
-    icon: XCircle,
-    className: "text-red-700 bg-red-50 border-red-200",
-    dotColor: "bg-red-500",
+  paid: {
+    label: invoiceWorkflowStatusLabels.paid,
+    className: "text-emerald-700 bg-emerald-50/50",
+    dotColor: "bg-emerald-600",
   },
 }
 
-const statusFilters = [
+const paymentFilters: { value: "all" | InvoiceWorkflowStatus; label: string }[] = [
   { value: "all", label: "All Bookings" },
-  { value: "confirmed", label: "Confirmed" },
-  { value: "pending", label: "Pending" },
-  { value: "cancelled", label: "Cancelled" },
+  { value: "awaiting_invoice", label: "To invoice" },
+  { value: "awaiting_payment", label: "Awaiting payment" },
+  { value: "paid", label: "Paid" },
 ]
 
 export function BookingsPageClient({ initialBookings }: { initialBookings: Booking[] }) {
@@ -64,7 +53,7 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
         booking.id.toLowerCase().includes(q) ||
         ref.includes(q)
 
-      const statusMatch = statusFilter === "all" || booking.status === statusFilter
+      const statusMatch = statusFilter === "all" || booking.invoiceStatus === statusFilter
 
       return searchMatch && statusMatch
     })
@@ -85,11 +74,14 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
   }, [initialBookings, search, statusFilter, sortBy, sortOrder])
 
   const stats = useMemo(() => {
-    const confirmed = initialBookings.filter((b) => b.status === "confirmed").length
-    const pending = initialBookings.filter((b) => b.status === "pending").length
+    const awaitingPayment = initialBookings.filter((b) => b.invoiceStatus === "awaiting_payment").length
+    const paid = initialBookings.filter((b) => b.invoiceStatus === "paid").length
     const totalValue = initialBookings.reduce((sum, b) => sum + b.totalAmount, 0)
-    return { confirmed, pending, totalValue }
+    return { awaitingPayment, paid, totalValue }
   }, [initialBookings])
+
+  const tableGrid =
+    "grid-cols-[100px_2fr_1.5fr_80px_140px_1fr_120px_40px]"
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
@@ -101,12 +93,12 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
 
         <div className="flex items-center gap-2 sm:gap-3">
           <div className="px-3 sm:px-4 lg:px-5 py-2 sm:py-3 bg-card border border-border rounded-lg min-w-[90px] sm:min-w-[120px]">
-            <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-0.5 sm:mb-1">Confirmed</p>
-            <p className="text-xl sm:text-2xl font-bold text-foreground">{stats.confirmed}</p>
+            <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-0.5 sm:mb-1">Awaiting payment</p>
+            <p className="text-xl sm:text-2xl font-bold text-foreground">{stats.awaitingPayment}</p>
           </div>
           <div className="px-3 sm:px-4 lg:px-5 py-2 sm:py-3 bg-card border border-border rounded-lg min-w-[90px] sm:min-w-[120px]">
-            <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-0.5 sm:mb-1">Pending</p>
-            <p className="text-xl sm:text-2xl font-bold text-foreground">{stats.pending}</p>
+            <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-0.5 sm:mb-1">Paid</p>
+            <p className="text-xl sm:text-2xl font-bold text-foreground">{stats.paid}</p>
           </div>
           <div className="px-3 sm:px-4 lg:px-5 py-2 sm:py-3 bg-card border border-border rounded-lg min-w-[110px] sm:min-w-[160px]">
             <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-0.5 sm:mb-1">Total Value</p>
@@ -130,7 +122,7 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
         <div className="flex items-center gap-2">
           <Filter className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground flex-shrink-0" />
           <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-lg overflow-x-auto">
-            {statusFilters.map((filter) => (
+            {paymentFilters.map((filter) => (
               <button
                 key={filter.value}
                 type="button"
@@ -168,20 +160,20 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
       </div>
 
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
-        <div className="hidden lg:grid grid-cols-[100px_2fr_1.5fr_80px_140px_110px_120px_80px] gap-3 p-4 bg-muted/30 border-b border-border text-sm font-medium text-muted-foreground">
+        <div className={cn("hidden lg:grid gap-3 p-4 bg-muted/30 border-b border-border text-sm font-medium text-muted-foreground", tableGrid)}>
           <div>Ref</div>
           <div>Package</div>
           <div>Client</div>
           <div>Guests</div>
           <div>Event Date</div>
-          <div>Status</div>
+          <div>Payment</div>
           <div className="text-right">Amount</div>
-          <div className="text-right">Actions</div>
+          <div />
         </div>
 
         <div className="divide-y divide-border">
           {filteredBookings.map((booking) => {
-            const status = statusConfig[booking.status]
+            const paymentStatus = paymentStatusConfig[booking.invoiceStatus]
             const isExpanded = expandedBooking === booking.id
             const shortRef = (booking.orderReference ?? booking.id).replace(/^ZK-\d{4}-/i, "").slice(0, 8)
 
@@ -189,7 +181,8 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
               <div key={booking.id}>
                 <div
                   className={cn(
-                    "hidden lg:grid grid-cols-[100px_2fr_1.5fr_80px_140px_110px_120px_80px] gap-3 p-4 items-center hover:bg-muted/30 transition-colors cursor-pointer",
+                    "hidden lg:grid gap-3 p-4 items-center hover:bg-muted/30 transition-colors cursor-pointer",
+                    tableGrid,
                     isExpanded && "bg-muted/30",
                   )}
                   onClick={() => setExpandedBooking(isExpanded ? null : booking.id)}
@@ -229,35 +222,17 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
                     <span
                       className={cn(
                         "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap",
-                        status.className,
+                        paymentStatus.className,
                       )}
                     >
-                      <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", status.dotColor)} />
-                      {status.label}
+                      <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", paymentStatus.dotColor)} />
+                      {paymentStatus.label}
                     </span>
                   </div>
                   <div className="text-right">
                     <p className="font-bold text-foreground whitespace-nowrap">${booking.totalAmount.toLocaleString()}</p>
                   </div>
-                  <div className="flex items-center justify-end gap-1">
-                    <button
-                      type="button"
-                      className="p-2 rounded-lg hover:bg-muted transition-colors flex-shrink-0"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                      }}
-                    >
-                      <Eye className="h-4 w-4 text-muted-foreground" />
-                    </button>
-                    <button
-                      type="button"
-                      className="p-2 rounded-lg hover:bg-muted transition-colors flex-shrink-0"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                      }}
-                    >
-                      <Download className="h-4 w-4 text-muted-foreground" />
-                    </button>
+                  <div className="flex items-center justify-end">
                     <ChevronDown
                       className={cn("h-4 w-4 text-muted-foreground transition-transform flex-shrink-0", isExpanded && "rotate-180")}
                     />
@@ -266,7 +241,7 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
 
                 <div
                   className={cn(
-                    "md:hidden p-3 sm:p-4 border-b border-border hover:bg-muted/30 transition-colors cursor-pointer",
+                    "lg:hidden p-3 sm:p-4 border-b border-border hover:bg-muted/30 transition-colors cursor-pointer",
                     isExpanded && "bg-muted/30",
                   )}
                   onClick={() => setExpandedBooking(isExpanded ? null : booking.id)}
@@ -280,11 +255,11 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
                       <span
                         className={cn(
                           "inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md text-[10px] sm:text-xs font-medium whitespace-nowrap",
-                          status.className,
+                          paymentStatus.className,
                         )}
                       >
-                        <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", status.dotColor)} />
-                        {status.label}
+                        <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", paymentStatus.dotColor)} />
+                        {paymentStatus.label}
                       </span>
                       <p className="text-sm sm:text-base font-bold text-foreground">${booking.totalAmount.toLocaleString()}</p>
                     </div>
@@ -321,10 +296,6 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
                             <div className="flex justify-between gap-2">
                               <dt className="text-muted-foreground shrink-0">Reference</dt>
                               <dd className="font-mono font-medium text-right">{booking.orderReference ?? booking.id}</dd>
-                            </div>
-                            <div className="flex justify-between">
-                              <dt className="text-muted-foreground">Internal ID</dt>
-                              <dd className="font-mono text-xs text-muted-foreground">{booking.id}</dd>
                             </div>
                             <div className="flex justify-between">
                               <dt className="text-muted-foreground">Created</dt>
@@ -364,6 +335,20 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
                         <div>
                           <h4 className="text-sm font-semibold text-foreground mb-3">Payment Summary</h4>
                           <dl className="space-y-2 text-sm">
+                            <div className="flex justify-between gap-2">
+                              <dt className="text-muted-foreground shrink-0">Status</dt>
+                              <dd>
+                                <span
+                                  className={cn(
+                                    "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium",
+                                    paymentStatus.className,
+                                  )}
+                                >
+                                  <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", paymentStatus.dotColor)} />
+                                  {paymentStatus.label}
+                                </span>
+                              </dd>
+                            </div>
                             <div className="flex justify-between">
                               <dt className="text-muted-foreground">Per Person</dt>
                               <dd className="font-medium">${(booking.totalAmount / booking.guests).toLocaleString()}</dd>
@@ -378,29 +363,6 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
                             </div>
                           </dl>
                         </div>
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 mt-4 sm:mt-6 pt-3 sm:pt-4 border-t border-border">
-                        <Link
-                          href={`/invoices?orderId=${encodeURIComponent(booking.id)}`}
-                          className="w-full sm:w-auto px-3 sm:px-4 py-2 bg-foreground text-background rounded-lg text-xs sm:text-sm font-semibold hover:bg-foreground/90 transition-colors text-center"
-                        >
-                          View Invoice
-                        </Link>
-                        <button
-                          type="button"
-                          className="w-full sm:w-auto px-3 sm:px-4 py-2 border border-border rounded-lg text-xs sm:text-sm font-medium hover:bg-muted transition-colors"
-                        >
-                          Download PDF
-                        </button>
-                        {booking.status === "pending" && (
-                          <button
-                            type="button"
-                            className="w-full sm:w-auto px-3 sm:px-4 py-2 bg-primary text-white rounded-lg text-xs sm:text-sm font-semibold hover:bg-primary/90 transition-colors sm:ml-auto"
-                          >
-                            Send Reminder
-                          </button>
-                        )}
                       </div>
                     </div>
                   </div>

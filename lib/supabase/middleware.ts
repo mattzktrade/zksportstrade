@@ -31,11 +31,13 @@ export async function updateSession(request: NextRequest) {
 
   const path = request.nextUrl.pathname
   const isAuthRoute = path === "/login" || path === "/signup"
+  const isResetPasswordPage = path === "/reset-password"
   const isUnderAuthPath = path.startsWith("/auth/")
   const isPendingPage = path === "/pending-approval"
 
   if (!user) {
-    const isPublic = path === "/login" || path === "/signup" || path.startsWith("/auth/")
+    const isPublic =
+      path === "/login" || path === "/signup" || path.startsWith("/auth/") || isResetPasswordPage
     if (isPublic) {
       return supabaseResponse
     }
@@ -85,7 +87,7 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
-  if (isPending && !isPendingPage && !isUnderAuthPath) {
+  if (isPending && !isPendingPage && !isUnderAuthPath && !isResetPasswordPage) {
     const url = request.nextUrl.clone()
     url.pathname = "/pending-approval"
     return NextResponse.redirect(url)

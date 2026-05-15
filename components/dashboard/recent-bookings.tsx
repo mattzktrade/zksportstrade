@@ -1,23 +1,27 @@
 import Link from "next/link"
-import { ArrowRight, Clock, CheckCircle2, XCircle } from "lucide-react"
+import { ArrowRight, Clock, CheckCircle2, FileText } from "lucide-react"
 import { bookings } from "@/lib/data"
+import { invoiceWorkflowStatusLabels, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
 import { cn } from "@/lib/utils"
 
-const statusConfig = {
-  confirmed: {
-    label: "Confirmed",
-    icon: CheckCircle2,
-    className: "text-emerald-600 bg-emerald-50",
+const statusConfig: Record<
+  InvoiceWorkflowStatus,
+  { label: string; icon: typeof CheckCircle2; className: string }
+> = {
+  awaiting_invoice: {
+    label: invoiceWorkflowStatusLabels.awaiting_invoice,
+    icon: FileText,
+    className: "text-slate-600 bg-slate-50",
   },
-  pending: {
-    label: "Pending",
+  awaiting_payment: {
+    label: invoiceWorkflowStatusLabels.awaiting_payment,
     icon: Clock,
     className: "text-amber-600 bg-amber-50",
   },
-  cancelled: {
-    label: "Cancelled",
-    icon: XCircle,
-    className: "text-red-600 bg-red-50",
+  paid: {
+    label: invoiceWorkflowStatusLabels.paid,
+    icon: CheckCircle2,
+    className: "text-emerald-600 bg-emerald-50",
   },
 }
 
@@ -37,7 +41,7 @@ export function RecentBookings() {
 
       <div className="divide-y divide-border">
         {bookings.map((booking) => {
-          const status = statusConfig[booking.status]
+          const status = statusConfig[booking.invoiceStatus]
           const StatusIcon = status.icon
 
           return (

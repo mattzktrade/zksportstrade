@@ -95,17 +95,7 @@ function buildHtml(p: OrderEmailPayload): string {
   return lines.join("")
 }
 
-/** Env values pasted with JSON-style wrapping break Resend (`from` must not include literal quote chars). */
-function stripSurroundingQuotes(value: string): string {
-  let v = value.trim()
-  while (
-    v.length >= 2 &&
-    ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
-  ) {
-    v = v.slice(1, -1).trim()
-  }
-  return v
-}
+import { stripSurroundingQuotes } from "@/lib/email/config"
 
 function parseFinanceCc(): string[] {
   const raw = process.env.FINANCE_NOTIFICATION_EMAILS ?? process.env.FINANCE_TEAM_EMAIL ?? ""
@@ -117,7 +107,8 @@ function parseFinanceCc(): string[] {
 
 export async function sendOrderPlacedEmail(p: OrderEmailPayload): Promise<{ ok: boolean; skipped?: string; error?: string }> {
   const apiKey = process.env.RESEND_API_KEY?.trim()
-  const from = stripSurroundingQuotes(process.env.ORDER_EMAIL_FROM?.trim() ?? "")
+  const from = stripSurroundingQuotes(process.env.ORDER_EMAIL_FROM?.trim() ?? "") ||
+    stripSurroundingQuotes(process.env.AUTH_EMAIL_FROM?.trim() ?? "")
   if (!apiKey || !from) {
     return { ok: false, skipped: "RESEND_API_KEY or ORDER_EMAIL_FROM not configured" }
   }

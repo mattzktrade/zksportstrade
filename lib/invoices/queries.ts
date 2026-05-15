@@ -15,8 +15,7 @@ type RawInvoiceRow = {
   amount: number
   currency: string
   status: string
-  issued_at: string
-  due_date: string | null
+  issued_at: string | null
   orders?: OrderJoin | OrderJoin[] | null
 }
 
@@ -37,7 +36,6 @@ export async function getMyInvoices(): Promise<Invoice[]> {
       currency,
       status,
       issued_at,
-      due_date,
       orders (
         id,
         reference,
@@ -46,7 +44,7 @@ export async function getMyInvoices(): Promise<Invoice[]> {
       )
     `,
     )
-    .order("issued_at", { ascending: false })
+    .order("issued_at", { ascending: false, nullsFirst: false })
 
   if (error || !data) return []
 
@@ -54,10 +52,6 @@ export async function getMyInvoices(): Promise<Invoice[]> {
     const order = one(row.orders)
     const pkg = order ? one(order.packages) : null
     const pkgName = pkg?.name ?? "Package"
-    const due =
-      row.due_date ??
-      new Date(new Date(row.issued_at).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-
     return {
       id: row.reference,
       bookingId: order?.reference ?? "",
@@ -66,7 +60,6 @@ export async function getMyInvoices(): Promise<Invoice[]> {
       currency: row.currency,
       status: normalizeInvoiceStatus(row.status),
       issuedAt: row.issued_at,
-      dueDate: due,
       packageName: pkgName,
     }
   })

@@ -4,6 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
+import { requestPasswordReset } from "./actions"
 import { Loader2 } from "lucide-react"
 import { AuthCardBrand } from "@/components/auth-card-brand"
 
@@ -17,8 +18,11 @@ export function LoginForm() {
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [resendLoading, setResendLoading] = useState(false)
+  const [resetLoading, setResetLoading] = useState(false)
+  const [mode, setMode] = useState<"signin" | "forgot">("signin")
   const [message, setMessage] = useState<string | null>(null)
   const [resendSuccess, setResendSuccess] = useState<string | null>(null)
+  const [resetSuccess, setResetSuccess] = useState<string | null>(null)
 
   const emailNotConfirmed =
     message != null &&
@@ -64,12 +68,47 @@ export function LoginForm() {
     setResendSuccess("We sent a new verification link. Check your inbox and spam folder.")
   }
 
+  async function handleForgotPassword(e: React.FormEvent) {
+    e.preventDefault()
+    const trimmed = email.trim()
+    if (!trimmed) {
+      setMessage("Enter your email address and we will send you a reset link.")
+      return
+    }
+    setResetLoading(true)
+    setMessage(null)
+    setResetSuccess(null)
+    setResendSuccess(null)
+    const result = await requestPasswordReset(trimmed, window.location.origin)
+    setResetLoading(false)
+    if (!result.ok) {
+      setMessage(result.message)
+      return
+    }
+    setResetSuccess(
+      "If an account exists for that email, we sent a password reset link. Check your inbox and spam folder — the link expires after a short time.",
+    )
+  }
+
+  function switchMode(next: "signin" | "forgot") {
+    setMode(next)
+    setMessage(null)
+    setResendSuccess(null)
+    setResetSuccess(null)
+  }
+
   return (
     <div className="bg-card border border-border rounded-2xl shadow-sm p-6 sm:p-8 space-y-6">
       <AuthCardBrand />
       <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-foreground">Sign in</h1>
-        <p className="text-sm text-muted-foreground mt-1">Use the email and password for your trade portal account.</p>
+        <h1 className="text-xl sm:text-2xl font-bold text-foreground">
+          {mode === "signin" ? "Sign in" : "Reset password"}
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          {mode === "signin"
+            ? "Use the email and password for your trade portal account."
+            : "Enter your account email and we will send you a link to choose a new password."}
+        </p>
       </div>
 
       {error === "account_rejected" && (
@@ -89,6 +128,9 @@ export function LoginForm() {
       )}
       {resendSuccess && (
         <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">{resendSuccess}</p>
+      )}
+      {resetSuccess && (
+        <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">{resetSuccess}</p>
       )}
       {message && (
         <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 space-y-2">
@@ -112,51 +154,96 @@ export function LoginForm() {
         </div>
       )}
 
-      <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
-        <div>
-          <label htmlFor="email" className="block text-sm font-medium text-foreground mb-1.5">
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            autoComplete="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-          />
-        </div>
-        <div>
-          <label htmlFor="password" className="block text-sm font-medium text-foreground mb-1.5">
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full py-2.5 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-2"
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          Sign in
-        </button>
-      </form>
+      {mode === "signin" ? (
+        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-foreground mb-1.5">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <label htmlFor="password" className="block text-sm font-medium text-foreground">
+                Password
+              </label>
+              <button
+                type="button"
+                onClick={() => switchMode("forgot")}
+                className="text-xs sm:text-sm text-primary font-medium hover:underline"
+              >
+                Forgot password?
+              </button>
+            </div>
+            <input
+              id="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2.5 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Sign in
+          </button>
+        </form>
+      ) : (
+        <form onSubmit={(e) => void handleForgotPassword(e)} className="space-y-4">
+          <div>
+            <label htmlFor="reset-email" className="block text-sm font-medium text-foreground mb-1.5">
+              Email
+            </label>
+            <input
+              id="reset-email"
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={resetLoading}
+            className="w-full py-2.5 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {resetLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Send reset link
+          </button>
+          <button
+            type="button"
+            onClick={() => switchMode("signin")}
+            className="w-full py-2.5 rounded-xl border border-border text-sm font-medium hover:bg-muted/50 transition-colors"
+          >
+            Back to sign in
+          </button>
+        </form>
+      )}
 
-      <p className="text-center text-sm text-muted-foreground">
-        Need access?{" "}
-        <Link href="/signup" className="text-primary font-medium hover:underline">
-          Request access
-        </Link>
-      </p>
+      {mode === "signin" && (
+        <p className="text-center text-sm text-muted-foreground">
+          Need access?{" "}
+          <Link href="/signup" className="text-primary font-medium hover:underline">
+            Request access
+          </Link>
+        </p>
+      )}
     </div>
   )
 }
