@@ -1,4 +1,5 @@
 import type { Package, Race } from "@/lib/types/catalog"
+import { bookableEventDateFrom } from "@/lib/catalog/bookable-events"
 import { INVENTORY_COLUMNS, PACKAGE_COLUMNS, RACE_COLUMNS } from "@/lib/catalog/columns"
 import { createClient } from "@/lib/supabase/server"
 import {
@@ -72,9 +73,18 @@ async function fetchInventoryForPackages(
 
 export async function getCatalog(agentProfileId?: string | null): Promise<{ races: Race[]; packages: Package[] } | null> {
   const supabase = await createClient()
+  const bookableFrom = bookableEventDateFrom()
 
-  const { data: races, error: racesError } = await supabase.from("races").select(RACE_COLUMNS).order("event_date")
-  const { data: packages, error: packagesError } = await supabase.from("packages").select(PACKAGE_COLUMNS).order("sort_order")
+  const { data: races, error: racesError } = await supabase
+    .from("races")
+    .select(RACE_COLUMNS)
+    .gte("event_date", bookableFrom)
+    .order("event_date")
+  const { data: packages, error: packagesError } = await supabase
+    .from("packages")
+    .select(PACKAGE_COLUMNS)
+    .gte("event_date", bookableFrom)
+    .order("sort_order")
   const { data: inventory, error: invError } = await supabase.from("package_inventory").select(INVENTORY_COLUMNS)
 
   if (racesError || packagesError || invError) return null
@@ -104,6 +114,9 @@ export async function getRaceCatalog(
     .eq("id", raceId)
     .maybeSingle()
   if (raceError || !raceRow) return null
+
+  const dbRace = raceRow as DbRace
+  if (dbRace.event_date < bookableEventDateFrom()) return null
 
   const { data: packageRows, error: pkgError } = await supabase
     .from("packages")
@@ -135,8 +148,11 @@ export async function getPackageById(id: string, agentProfileId?: string | null)
   const { data: p, error } = await supabase.from("packages").select(PACKAGE_COLUMNS).eq("id", id).maybeSingle()
   if (error || !p) return null
 
+  const dbPkg = p as DbPackage
+  if (dbPkg.event_date < bookableEventDateFrom()) return null
+
   const { data: inv } = await supabase.from("package_inventory").select(INVENTORY_COLUMNS).eq("package_id", id).maybeSingle()
-  let pkg = mapPackageRow(p as DbPackage, inv as DbInventory | undefined)
+  let pkg = mapPackageRow(dbPkg, inv as DbInventory | undefined)
 
   if (agentProfileId && typeof pkg.availability === "number") {
     const holdAgg = await fetchAgentHoldAggregates(supabase, agentProfileId, [id])

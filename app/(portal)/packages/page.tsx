@@ -5,7 +5,7 @@ import { PackagesPageClient } from "./packages-page-client"
 export default async function PackagesPage() {
   const profile = await getPortalProfile()
   const catalog = await getCatalog(profile?.id ?? null)
-  if (!catalog || catalog.races.length === 0) {
+  if (!catalog) {
     return (
       <div className="p-6 lg:p-8 max-w-lg">
         <h1 className="text-xl font-bold text-foreground">Catalog not available</h1>
@@ -13,6 +13,17 @@ export default async function PackagesPage() {
           Connect Supabase (see <code className="text-xs bg-muted px-1 rounded">.env.example</code>), run the SQL migration in{" "}
           <code className="text-xs bg-muted px-1 rounded">supabase/migrations</code>, then run{" "}
           <code className="text-xs bg-muted px-1 rounded">npm run seed:catalog</code>.
+        </p>
+      </div>
+    )
+  }
+  if (catalog.races.length === 0) {
+    return (
+      <div className="p-6 lg:p-8 max-w-lg space-y-2">
+        <h1 className="text-xl font-bold text-foreground">No upcoming events</h1>
+        <p className="text-sm text-muted-foreground">
+          There are no races open for booking right now. Past events are hidden from the catalog, but your bookings and
+          invoices are still available in the menu.
         </p>
       </div>
     )

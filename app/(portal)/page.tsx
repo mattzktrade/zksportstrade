@@ -6,7 +6,7 @@ export default async function DashboardPage() {
   const profile = await getPortalProfile()
   const catalog = await getCatalog(profile?.id ?? null)
 
-  if (!catalog || catalog.races.length === 0) {
+  if (!catalog) {
     return (
       <div className="p-6 lg:p-8 max-w-xl space-y-3">
         <h1 className="text-2xl font-bold text-foreground">Welcome</h1>
@@ -15,6 +15,16 @@ export default async function DashboardPage() {
           <code className="text-xs bg-muted px-1.5 py-0.5 rounded">npm run seed:catalog</code> (with{" "}
           <code className="text-xs bg-muted px-1.5 py-0.5 rounded">SUPABASE_SERVICE_ROLE_KEY</code> set). See{" "}
           <code className="text-xs bg-muted px-1.5 py-0.5 rounded">.env.example</code>.
+        </p>
+      </div>
+    )
+  }
+  if (catalog.races.length === 0) {
+    return (
+      <div className="p-6 lg:p-8 max-w-xl space-y-3">
+        <h1 className="text-2xl font-bold text-foreground">Welcome</h1>
+        <p className="text-sm text-muted-foreground">
+          There are no upcoming races open for booking. Your past bookings and invoices are still available from the menu.
         </p>
       </div>
     )

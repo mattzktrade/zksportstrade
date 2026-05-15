@@ -32,6 +32,7 @@ function mapRpcError(message: string): string {
   if (m.includes("package_not_found")) return "Package was not found."
   if (m.includes("inventory_missing")) return "Inventory is not set up for this package."
   if (m.includes("invalid_guests")) return "Guest count is invalid."
+  if (m.includes("event_has_ended")) return "This event has finished and is no longer available to book."
   return "Could not complete the booking. Please try again or contact support."
 }
 
