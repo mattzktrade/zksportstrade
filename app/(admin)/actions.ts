@@ -1,8 +1,10 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
+import { revalidateAdminProfitPaths } from "@/lib/admin/revalidate-profit"
 import { createClient } from "@/lib/supabase/server"
 import { sanitizeHttpsUrl, sanitizeHttpsUrlList } from "@/lib/auth/safe-url"
+import { isValidPackageDuration } from "@/lib/catalog/package-duration"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { isInvoiceWorkflowStatus, normalizeInvoiceStatus, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
 
@@ -100,7 +102,7 @@ export async function updatePackageFields(input: {
   gallery_images: string[]
   currency: string
   total_capacity: number
-  tier: string
+  duration: string
   includes: string[]
   trade_price: number | null
   is_enquiry: boolean
@@ -115,7 +117,10 @@ export async function updatePackageFields(input: {
   const id = input.packageId.trim()
   if (!id) return { ok: false, message: "Package id is missing." }
 
-  const tier = ["paddock", "champions", "legend", "hero"].includes(input.tier) ? input.tier : "paddock"
+  const duration = input.duration.trim()
+  if (duration && !isValidPackageDuration(duration)) {
+    return { ok: false, message: "Invalid package duration." }
+  }
   const cap = Math.floor(Number(input.total_capacity))
   if (!Number.isFinite(cap) || cap < 0) return { ok: false, message: "Total capacity must be a non-negative whole number." }
 
@@ -145,7 +150,7 @@ export async function updatePackageFields(input: {
       gallery_images: gallery,
       currency: (input.currency.trim() || "USD").slice(0, 8),
       total_capacity: cap,
-      tier,
+      duration: duration || null,
       includes: input.includes,
       trade_price: input.trade_price,
       is_enquiry: input.is_enquiry,
@@ -183,7 +188,7 @@ export async function createPackage(input: {
   gallery_images: string[]
   currency: string
   total_capacity: number
-  tier: string
+  duration: string
   includes: string[]
   trade_price: number | null
   is_enquiry: boolean
@@ -191,6 +196,8 @@ export async function createPackage(input: {
   sort_order: number
   brochure_url: string | null
   initial_qty_available: number
+  initial_unit_cost: number | null
+  initial_cost_note: string | null
 }): Promise<ActionResult> {
   const gate = await requireAdminAction()
   if (!gate.ok) return gate
@@ -211,12 +218,24 @@ export async function createPackage(input: {
   if (rErr) return { ok: false, message: rErr.message }
   if (!race) return { ok: false, message: "Race not found." }
 
-  const tier = ["paddock", "champions", "legend", "hero"].includes(input.tier) ? input.tier : "paddock"
+  const duration = input.duration.trim()
+  if (duration && !isValidPackageDuration(duration)) {
+    return { ok: false, message: "Invalid package duration." }
+  }
   const cap = Math.floor(Number(input.total_capacity))
   if (!Number.isFinite(cap) || cap < 0) return { ok: false, message: "Total capacity must be a non-negative whole number." }
 
   let qty = Math.floor(Number(input.initial_qty_available))
   if (!Number.isFinite(qty) || qty < 0) qty = 0
+
+  let unitCost: number | null = null
+  if (input.initial_unit_cost != null) {
+    const c = Number(input.initial_unit_cost)
+    if (!Number.isFinite(c) || c < 0) {
+      return { ok: false, message: "Initial buy price must be a non-negative number." }
+    }
+    unitCost = c
+  }
 
   const brochure = sanitizeHttpsUrl(input.brochure_url)
   const image = sanitizeHttpsUrl(input.image)
@@ -239,7 +258,8 @@ export async function createPackage(input: {
     currency: (input.currency.trim() || "USD").slice(0, 8),
     total_capacity: cap,
     is_enquiry: input.is_enquiry,
-    tier,
+    tier: "paddock",
+    duration: duration || null,
     includes: input.includes,
     featured: input.featured,
     sort_order: Math.floor(Number(input.sort_order)) || 0,
@@ -249,9 +269,12 @@ export async function createPackage(input: {
 
   if (insErr) return { ok: false, message: insErr.message }
 
+  // Always create an empty inventory row; if there's initial stock, route it
+  // through admin_add_cost_layer so qty_available and the cost layer move
+  // together (and the COGS basis is recorded from day one).
   const { error: invErr } = await supabase.from("package_inventory").insert({
     package_id: id,
-    qty_available: qty,
+    qty_available: 0,
     qty_held: 0,
   })
   if (invErr) {
@@ -259,8 +282,29 @@ export async function createPackage(input: {
     return { ok: false, message: invErr.message }
   }
 
+  if (qty > 0) {
+    const cost = unitCost ?? 0
+    const note = unitCost != null
+      ? (input.initial_cost_note?.trim() || "Initial stock")
+      : "Initial stock — buy price not yet recorded"
+    const { error: layerErr } = await supabase.rpc("admin_add_cost_layer", {
+      p_package_id: id,
+      p_quantity: qty,
+      p_unit_cost: cost,
+      p_currency: input.currency.trim() || "USD",
+      p_note: note,
+      p_received_at: null,
+    })
+    if (layerErr) {
+      await supabase.from("package_inventory").delete().eq("package_id", id)
+      await supabase.from("packages").delete().eq("id", id)
+      return { ok: false, message: layerErr.message }
+    }
+  }
+
   revalidatePath("/admin/catalog")
   revalidatePath("/admin/inventory")
+  revalidatePath("/admin")
   revalidatePath("/packages")
   revalidatePath("/")
   revalidatePath(`/packages/race/${input.race_id.trim()}`)
@@ -341,6 +385,153 @@ export async function releaseInventoryHold(holdId: string): Promise<ActionResult
   revalidatePath("/admin/catalog")
   revalidatePath("/packages")
   revalidatePath("/")
+  return { ok: true }
+}
+
+export async function addCostLayer(input: {
+  packageId: string
+  quantity: number
+  unitCost: number
+  currency?: string | null
+  note?: string | null
+  receivedAt?: string | null
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  const q = Math.floor(Number(input.quantity))
+  if (!Number.isFinite(q) || q <= 0) {
+    return { ok: false, message: "Quantity must be a positive whole number." }
+  }
+  const c = Number(input.unitCost)
+  if (!Number.isFinite(c) || c < 0) {
+    return { ok: false, message: "Unit cost must be a non-negative number." }
+  }
+  let received: string | null = null
+  if (input.receivedAt && input.receivedAt.trim()) {
+    const d = new Date(input.receivedAt)
+    if (Number.isNaN(d.getTime())) {
+      return { ok: false, message: "Received date is not a valid date." }
+    }
+    received = d.toISOString()
+  }
+  const { supabase } = gate
+  const { error } = await supabase.rpc("admin_add_cost_layer", {
+    p_package_id: input.packageId,
+    p_quantity: q,
+    p_unit_cost: c,
+    p_currency: input.currency?.trim() || null,
+    p_note: input.note ?? null,
+    p_received_at: received,
+  })
+  if (error) return { ok: false, message: error.message }
+  revalidateAdminProfitPaths(input.packageId)
+  revalidatePath("/admin/inventory")
+  revalidatePath("/packages")
+  revalidatePath("/")
+  const { error: bfErr } = await supabase.rpc("admin_backfill_package_order_costs", {
+    p_package_id: input.packageId,
+  })
+  if (bfErr) return { ok: false, message: bfErr.message }
+  return { ok: true }
+}
+
+export async function updateCostLayer(input: {
+  layerId: string
+  packageId?: string | null
+  unitCost?: number | null
+  currency?: string | null
+  note?: string | null
+  receivedAt?: string | null
+  cascadeToConsumptions?: boolean
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  if (!UUID_RE.test(input.layerId.trim())) {
+    return { ok: false, message: "Invalid cost layer id." }
+  }
+  let cost: number | null = null
+  if (input.unitCost != null) {
+    const c = Number(input.unitCost)
+    if (!Number.isFinite(c) || c < 0) {
+      return { ok: false, message: "Unit cost must be a non-negative number." }
+    }
+    cost = c
+  }
+  let received: string | null = null
+  if (input.receivedAt && input.receivedAt.trim()) {
+    const d = new Date(input.receivedAt)
+    if (Number.isNaN(d.getTime())) {
+      return { ok: false, message: "Received date is not a valid date." }
+    }
+    received = d.toISOString()
+  }
+  const { supabase } = gate
+  const { error } = await supabase.rpc("admin_update_cost_layer", {
+    p_layer_id: input.layerId.trim(),
+    p_unit_cost: cost,
+    p_currency: input.currency?.trim() || null,
+    p_note: input.note ?? null,
+    p_received_at: received,
+    p_cascade_to_consumptions: input.cascadeToConsumptions ?? true,
+  })
+  if (error) return { ok: false, message: error.message }
+  revalidateAdminProfitPaths(input.packageId?.trim() || undefined)
+  revalidatePath("/admin/inventory")
+  return { ok: true }
+}
+
+export async function deleteCostLayer(layerId: string): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  if (!UUID_RE.test(layerId.trim())) {
+    return { ok: false, message: "Invalid cost layer id." }
+  }
+  const { supabase } = gate
+  const { error } = await supabase.rpc("admin_delete_cost_layer", { p_layer_id: layerId.trim() })
+  if (error) return { ok: false, message: error.message }
+  revalidatePath("/admin/catalog")
+  revalidatePath("/admin/inventory")
+  revalidatePath("/admin")
+  revalidatePath("/packages")
+  revalidatePath("/")
+  return { ok: true }
+}
+
+export async function deletePackage(packageId: string): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  const id = packageId.trim()
+  if (!id) return { ok: false, message: "Package id is missing." }
+
+  const { supabase } = gate
+
+  const { data: pkg, error: pkgErr } = await supabase.from("packages").select("id, race_id").eq("id", id).maybeSingle()
+  if (pkgErr) return { ok: false, message: pkgErr.message }
+  if (!pkg) return { ok: false, message: "Package not found." }
+
+  const { count, error: orderErr } = await supabase
+    .from("orders")
+    .select("id", { count: "exact", head: true })
+    .eq("package_id", id)
+  if (orderErr) return { ok: false, message: orderErr.message }
+  if ((count ?? 0) > 0) {
+    return {
+      ok: false,
+      message: `Cannot delete: ${count} order${count === 1 ? "" : "s"} reference this package. Cancel or keep the package for records.`,
+    }
+  }
+
+  const { error } = await supabase.from("packages").delete().eq("id", id)
+  if (error) return { ok: false, message: error.message }
+
+  const raceId = (pkg as { race_id: string }).race_id
+  revalidatePath("/admin/catalog")
+  revalidatePath("/admin/inventory")
+  revalidatePath("/admin/orders")
+  revalidatePath("/admin")
+  revalidatePath("/packages")
+  revalidatePath("/")
+  revalidatePath(`/packages/race/${raceId}`)
   return { ok: true }
 }
 

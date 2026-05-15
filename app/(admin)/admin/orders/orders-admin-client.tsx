@@ -1,11 +1,14 @@
 "use client"
 
+import Link from "next/link"
 import { useMemo, useState } from "react"
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react"
+import { adminPackagePath } from "@/lib/admin/package-link"
 import { cn } from "@/lib/utils"
 import type { AdminOrderListRow } from "@/lib/orders/queries"
 import { AdminInvoiceStatusSelect } from "@/components/admin-invoice-status-select"
 import { normalizeInvoiceStatus, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
+import { formatMoney } from "@/lib/format/money"
 
 type InvoiceFilter = "all" | "open" | InvoiceWorkflowStatus | "none"
 
@@ -16,15 +19,14 @@ type SortKey =
   | "agent"
   | "guests"
   | "total"
+  | "cogs"
+  | "profit"
+  | "margin"
   | "invoice_ref"
   | "invoice_status"
 
-function formatMoney(currency: string, amount: number): string {
-  try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amount)
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`
-  }
+function formatPct(value: number): string {
+  return `${(value * 100).toFixed(1)}%`
 }
 
 function agentPrimary(agent: AdminOrderListRow["agent"]): string {
@@ -91,6 +93,21 @@ function compare(a: AdminOrderListRow, b: AdminOrderListRow, key: SortKey, dir: 
       return (a.guests - b.guests) * m
     case "total":
       return (Number(a.total_amount) - Number(b.total_amount)) * m
+    case "cogs": {
+      const ca = a.profit.cogs ?? Number.POSITIVE_INFINITY
+      const cb = b.profit.cogs ?? Number.POSITIVE_INFINITY
+      return (ca - cb) * m
+    }
+    case "profit": {
+      const pa = a.profit.gross_profit ?? Number.NEGATIVE_INFINITY
+      const pb = b.profit.gross_profit ?? Number.NEGATIVE_INFINITY
+      return (pa - pb) * m
+    }
+    case "margin": {
+      const ma = a.profit.margin ?? Number.NEGATIVE_INFINITY
+      const mb = b.profit.margin ?? Number.NEGATIVE_INFINITY
+      return (ma - mb) * m
+    }
     case "invoice_ref":
       return (a.invoice?.reference ?? "").localeCompare(b.invoice?.reference ?? "") * m
     case "invoice_status": {
@@ -176,6 +193,48 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
     return [...rows].sort((a, b) => compare(a, b, sortKey, sortDir))
   }, [orders, search, invoiceFilter, sortKey, sortDir])
 
+  const totals = useMemo(() => {
+    type Bucket = {
+      currency: string
+      revenue: number
+      pricedRevenue: number
+      cogs: number
+      profit: number
+      ordersTotal: number
+      ordersMissing: number
+    }
+    const map = new Map<string, Bucket>()
+    let missing = 0
+    for (const o of visible) {
+      if (o.status === "cancelled") continue
+      const cur = (o.currency || "USD").trim() || "USD"
+      const b = map.get(cur) ?? {
+        currency: cur,
+        revenue: 0,
+        pricedRevenue: 0,
+        cogs: 0,
+        profit: 0,
+        ordersTotal: 0,
+        ordersMissing: 0,
+      }
+      b.revenue += Number(o.total_amount)
+      b.ordersTotal += 1
+      if (o.profit.cost_known && o.profit.cogs != null && o.profit.gross_profit != null) {
+        b.pricedRevenue += Number(o.total_amount)
+        b.cogs += o.profit.cogs
+        b.profit += o.profit.gross_profit
+      } else {
+        b.ordersMissing += 1
+        missing += 1
+      }
+      map.set(cur, b)
+    }
+    return {
+      buckets: [...map.values()].sort((a, b) => b.revenue - a.revenue),
+      missing,
+    }
+  }, [visible])
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col xl:flex-row gap-4 xl:items-end xl:justify-between">
@@ -220,9 +279,41 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
         <span className="font-medium text-foreground">waiting to be invoiced</span> until you advance them.
       </p>
 
+      {totals.buckets.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {totals.buckets.map((b) => {
+            const margin = b.pricedRevenue > 0 ? b.profit / b.pricedRevenue : null
+            return (
+              <div key={b.currency} className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-1">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Gross profit · {b.currency}</p>
+                <p
+                  className={cn(
+                    "text-xl font-bold tabular-nums",
+                    b.profit >= 0 ? "text-emerald-600" : "text-red-600",
+                  )}
+                >
+                  {formatMoney(b.currency, b.profit)}
+                  {margin != null ? (
+                    <span className="text-xs text-muted-foreground ml-2">({formatPct(margin)})</span>
+                  ) : null}
+                </p>
+                <p className="text-[11px] text-muted-foreground tabular-nums">
+                  Revenue {formatMoney(b.currency, b.revenue)} · COGS {formatMoney(b.currency, b.cogs)}
+                </p>
+                {b.ordersMissing > 0 && (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                    {b.ordersMissing} order{b.ordersMissing === 1 ? "" : "s"} missing buy price
+                  </p>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[960px]">
+          <table className="w-full text-sm min-w-[1280px]">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-left">
                 <SortTh label="Reference" activeKey={sortKey} sortKey="reference" sortDir={sortDir} onSort={toggleSort} />
@@ -246,6 +337,33 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
                   className="text-right"
                   alignRight
                 />
+                <SortTh
+                  label="COGS"
+                  activeKey={sortKey}
+                  sortKey="cogs"
+                  sortDir={sortDir}
+                  onSort={toggleSort}
+                  className="text-right"
+                  alignRight
+                />
+                <SortTh
+                  label="Gross profit"
+                  activeKey={sortKey}
+                  sortKey="profit"
+                  sortDir={sortDir}
+                  onSort={toggleSort}
+                  className="text-right"
+                  alignRight
+                />
+                <SortTh
+                  label="Margin"
+                  activeKey={sortKey}
+                  sortKey="margin"
+                  sortDir={sortDir}
+                  onSort={toggleSort}
+                  className="text-right"
+                  alignRight
+                />
                 <SortTh label="Invoice" activeKey={sortKey} sortKey="invoice_ref" sortDir={sortDir} onSort={toggleSort} />
                 <SortTh
                   label="Inv. status"
@@ -264,8 +382,14 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
                   <tr key={o.id} className="hover:bg-muted/30">
                     <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">{o.reference}</td>
                     <td className="px-4 py-3">
-                      <p className="font-medium text-foreground">{pkg?.name ?? o.package_id}</p>
+                      <Link
+                        href={adminPackagePath(o.package_id, "orders")}
+                        className="font-medium text-foreground hover:text-primary hover:underline"
+                      >
+                        {pkg?.name ?? o.package_id}
+                      </Link>
                       <p className="text-xs text-muted-foreground">{pkg?.circuit}</p>
+                      <p className="text-[11px] text-primary mt-0.5">View product →</p>
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-medium text-foreground">{agentPrimary(o.agent)}</p>
@@ -275,6 +399,35 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums">{o.guests}</td>
                     <td className="px-4 py-3 text-right tabular-nums font-medium">{formatMoney(o.currency, Number(o.total_amount))}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+                      {o.profit.cost_known && o.profit.cogs != null
+                        ? formatMoney(o.profit.currency, o.profit.cogs)
+                        : "—"}
+                    </td>
+                    <td
+                      className={cn(
+                        "px-4 py-3 text-right tabular-nums font-medium",
+                        o.profit.cost_known && o.profit.gross_profit != null
+                          ? o.profit.gross_profit >= 0
+                            ? "text-emerald-600"
+                            : "text-red-600"
+                          : "text-muted-foreground",
+                      )}
+                      title={
+                        !o.profit.cost_known
+                          ? "Cost basis missing for one or more units on this order. Add a buy price on the package cost layers."
+                          : !o.profit.currency_consistent
+                            ? "Some cost layers are in a different currency than the order; figures may be off."
+                            : undefined
+                      }
+                    >
+                      {o.profit.cost_known && o.profit.gross_profit != null
+                        ? formatMoney(o.profit.currency, o.profit.gross_profit)
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+                      {o.profit.margin != null ? formatPct(o.profit.margin) : "—"}
+                    </td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap">
                       {o.invoice?.reference ?? "—"}
                     </td>

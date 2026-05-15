@@ -3,16 +3,10 @@
 import { Fragment, useState } from "react"
 import Link from "next/link"
 import { ChevronDown, ChevronRight } from "lucide-react"
+import { adminPackagePath } from "@/lib/admin/package-link"
 import type { AdminAgentWithStats } from "@/lib/admin/queries"
 import { AdminInvoiceStatusSelect } from "@/components/admin-invoice-status-select"
-
-function formatMoney(currency: string, amount: number): string {
-  try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amount)
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`
-  }
-}
+import { formatMoney } from "@/lib/format/money"
 
 export function AgentsAdminClient({ rows }: { rows: AdminAgentWithStats[] }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -105,8 +99,13 @@ export function AgentsAdminClient({ rows }: { rows: AdminAgentWithStats[] }) {
                                       {new Date(o.createdAt).toLocaleString()}
                                     </td>
                                     <td className="px-3 py-2">
-                                      <div className="font-medium text-foreground">{o.packageName}</div>
-                                      <div className="text-[11px] text-muted-foreground">{o.circuit}</div>
+                                      <Link
+                                        href={adminPackagePath(o.packageId, "orders")}
+                                        className="font-medium text-foreground hover:text-primary hover:underline"
+                                      >
+                                        {o.packageName}
+                                      </Link>
+                                      <p className="text-[11px] text-muted-foreground">{o.circuit}</p>
                                     </td>
                                     <td className="px-3 py-2 text-right tabular-nums font-medium">
                                       {formatMoney(o.currency, o.totalAmount)}

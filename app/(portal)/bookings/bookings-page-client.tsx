@@ -307,10 +307,12 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
                                 })}
                               </dd>
                             </div>
-                            <div className="flex justify-between">
-                              <dt className="text-muted-foreground">Package Tier</dt>
-                              <dd className="font-medium capitalize">{booking.packageTier ?? "—"}</dd>
-                            </div>
+                            {booking.packageDuration ? (
+                              <div className="flex justify-between">
+                                <dt className="text-muted-foreground">Duration</dt>
+                                <dd className="font-medium">{booking.packageDuration}</dd>
+                              </div>
+                            ) : null}
                           </dl>
                         </div>
 

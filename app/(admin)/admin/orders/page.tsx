@@ -1,10 +1,12 @@
 import Link from "next/link"
-import dynamic from "next/dynamic"
+import nextDynamic from "next/dynamic"
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { getAllOrdersForAdmin } from "@/lib/orders/queries"
 import { PageLoadingSpinner } from "@/components/page-loading-spinner"
 
-const OrdersAdminClient = dynamic(
+export const dynamic = "force-dynamic"
+
+const OrdersAdminClient = nextDynamic(
   () => import("./orders-admin-client").then((m) => ({ default: m.OrdersAdminClient })),
   { loading: () => <PageLoadingSpinner /> },
 )

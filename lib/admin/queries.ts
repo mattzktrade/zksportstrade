@@ -3,12 +3,18 @@ import { isOutstandingInvoiceStatus } from "@/lib/invoices/status"
 import type { PortalProfile } from "@/lib/types/profile"
 import { INVENTORY_COLUMNS, PACKAGE_COLUMNS } from "@/lib/catalog/columns"
 import type { DbInventory, DbPackage } from "@/lib/catalog/map-rows"
+import { getCostLayersByPackage, summarizePackageCost, type CostLayerRow, type PackageCostSummary } from "@/lib/admin/cost-layers"
 
 const AGENT_PROFILE_COLUMNS = "id, email, full_name, company_name, mobile, role, approval_status, created_at" as const
 const PENDING_PROFILE_COLUMNS =
   "id, email, full_name, company_name, approval_status, created_at, approval_note" as const
 
-export type AdminPackageRow = DbPackage & { inventory: DbInventory | null; race_name: string }
+export type AdminPackageRow = DbPackage & {
+  inventory: DbInventory | null
+  race_name: string
+  cost_layers: CostLayerRow[]
+  cost_summary: PackageCostSummary | null
+}
 
 export type AdminRaceOption = {
   id: string
@@ -65,6 +71,7 @@ export type AdminAgentOrderRow = {
   createdAt: string
   totalAmount: number
   currency: string
+  packageId: string
   packageName: string
   circuit: string
   invoiceReference: string | null
@@ -106,6 +113,7 @@ type RawOrderForAgent = {
   id: string
   reference: string
   agent_profile_id: string
+  package_id: string
   status: string
   guests: number
   total_amount: number
@@ -132,6 +140,7 @@ export async function getAdminAgentsWithOrderStats(): Promise<AdminAgentWithStat
       id,
       reference,
       agent_profile_id,
+      package_id,
       status,
       total_amount,
       currency,
@@ -191,6 +200,7 @@ export async function getAdminAgentsWithOrderStats(): Promise<AdminAgentWithStat
         createdAt: r.created_at,
         totalAmount: Number(r.total_amount),
         currency: (r.currency ?? "USD").trim() || "USD",
+        packageId: r.package_id,
         packageName: pkg?.name ?? "—",
         circuit: pkg?.circuit ?? "—",
         invoiceReference: inv?.reference ?? null,
@@ -218,6 +228,11 @@ export async function getAdminAgentsWithOrderStats(): Promise<AdminAgentWithStat
   })
 }
 
+export async function getAdminPackageById(packageId: string): Promise<AdminPackageRow | null> {
+  const rows = await getAdminPackageRows()
+  return rows.find((p) => p.id === packageId) ?? null
+}
+
 export async function getAdminPackageRows(): Promise<AdminPackageRow[]> {
   const supabase = await createClient()
   const [{ data: races, error: re }, { data: packages, error: pe }, { data: inv, error: ie }] = await Promise.all([
@@ -228,11 +243,20 @@ export async function getAdminPackageRows(): Promise<AdminPackageRow[]> {
   if (re || pe || ie || !packages) return []
   const raceName = new Map((races ?? []).map((r: { id: string; name: string }) => [r.id, r.name]))
   const invBy = new Map((inv ?? []).map((i: DbInventory) => [i.package_id, i]))
-  return packages.map((p: DbPackage) => ({
-    ...p,
-    inventory: invBy.get(p.id) ?? null,
-    race_name: raceName.get(p.race_id) ?? p.race_id,
-  }))
+  const packageIds = (packages as DbPackage[]).map((p) => p.id)
+  const layersByPkg = await getCostLayersByPackage(packageIds)
+  return (packages as DbPackage[]).map((p) => {
+    const layers = layersByPkg.get(p.id) ?? []
+    const summary = summarizePackageCost(p.currency || "USD", layers)
+    if (summary) summary.package_id = p.id
+    return {
+      ...p,
+      inventory: invBy.get(p.id) ?? null,
+      race_name: raceName.get(p.race_id) ?? p.race_id,
+      cost_layers: layers,
+      cost_summary: summary,
+    }
+  })
 }
 
 export type InventoryHoldRow = {

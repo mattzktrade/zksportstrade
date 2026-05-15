@@ -33,5 +33,6 @@ export type PackageSnippet = {
   circuit: string
   event_date: string
   tier: string
+  duration?: string | null
   total_capacity: number
 }

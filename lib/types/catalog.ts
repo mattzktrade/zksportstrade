@@ -15,6 +15,8 @@ export interface Package {
   totalCapacity: number
   image: string
   tier: "paddock" | "champions" | "legend" | "hero"
+  /** e.g. 3_day, friday_only — human label via packageDurationLabel */
+  duration?: string | null
   includes: string[]
   /** Marketing body shown on package detail; falls back to default copy when empty */
   description?: string | null
@@ -63,6 +65,7 @@ export interface Booking {
   clientEmail: string
   /** When loaded from Supabase */
   packageTier?: string
+  packageDuration?: string | null
 }
 
 export interface Invoice {

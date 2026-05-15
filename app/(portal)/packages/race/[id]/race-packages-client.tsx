@@ -4,6 +4,7 @@ import { useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import type { Package, Race } from "@/lib/types/catalog"
+import { packageDurationLabel } from "@/lib/catalog/package-duration"
 import { ArrowLeft, MapPin, Calendar, Users, Check, ArrowRight, ChevronDown, Minus, Plus, ChevronLeft, ChevronRight, FileDown, Link2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -279,6 +280,11 @@ function PackageRow({
                       <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       <span>{pkg.dateRange}</span>
                     </div>
+                    {packageDurationLabel(pkg.duration) ? (
+                      <span className="rounded-md border border-border bg-muted/50 px-2 py-0.5 text-foreground font-medium">
+                        {packageDurationLabel(pkg.duration)}
+                      </span>
+                    ) : null}
                     <div className="flex items-center gap-1.5">
                       <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       <span>Suite Capacity: {pkg.totalCapacity}</span>

@@ -1,7 +1,10 @@
+import { unstable_noStore as noStore } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import type { Booking } from "@/lib/types/catalog"
 import { normalizeInvoiceStatus } from "@/lib/invoices/status"
 import type { OrderRow, PackageSnippet } from "@/lib/orders/types"
+import { computeOrderProfit, getConsumptionsForOrders, type OrderProfit } from "@/lib/admin/cost-layers"
+import { packageDurationLabel } from "@/lib/catalog/package-duration"
 
 type OrderInvoiceSnippet = { status: string }
 
@@ -26,6 +29,7 @@ export type AdminOrderListRow = OrderRow & {
   packages: PackageSnippet | null
   agent: AdminOrderAgent | null
   invoice: AdminOrderInvoice | null
+  profit: OrderProfit
 }
 
 function one<T>(value: T | T[] | null | undefined): T | null {
@@ -51,6 +55,7 @@ function mapOrderToBooking(row: OrderWithPackage): Booking {
     clientName: row.client_name,
     clientEmail: row.client_email,
     packageTier: pkg?.tier,
+    packageDuration: packageDurationLabel(pkg?.duration) ?? null,
   }
 }
 
@@ -77,6 +82,7 @@ export async function getMyBookings(): Promise<Booking[]> {
         circuit,
         event_date,
         tier,
+        duration,
         total_capacity
       ),
       invoices (
@@ -107,7 +113,13 @@ type RawAdminOrder = OrderRow & {
   invoices?: AdminOrderInvoice | AdminOrderInvoice[] | null
 }
 
+export async function getOrdersForPackage(packageId: string): Promise<AdminOrderListRow[]> {
+  const all = await getAllOrdersForAdmin()
+  return all.filter((o) => o.package_id === packageId)
+}
+
 export async function getAllOrdersForAdmin(): Promise<AdminOrderListRow[]> {
+  noStore()
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("orders")
@@ -145,6 +157,7 @@ export async function getAllOrdersForAdmin(): Promise<AdminOrderListRow[]> {
         circuit,
         event_date,
         tier,
+        duration,
         total_capacity
       ),
       profiles (
@@ -164,10 +177,25 @@ export async function getAllOrdersForAdmin(): Promise<AdminOrderListRow[]> {
 
   if (error || !data) return []
 
-  return (data as RawAdminOrder[]).map((row) => ({
-    ...(row as OrderRow),
-    packages: one(row.packages),
-    agent: one(row.profiles),
-    invoice: one(row.invoices),
-  }))
+  const rows = data as RawAdminOrder[]
+  const orderIds = rows.map((r) => r.id)
+  const consumptionsByOrder = await getConsumptionsForOrders(orderIds)
+
+  return rows.map((row) => {
+    const orderCurrency = (row.currency ?? "USD").trim() || "USD"
+    const guests = Math.max(0, Math.floor(Number(row.guests)))
+    const profit = computeOrderProfit(
+      orderCurrency,
+      Number(row.total_amount),
+      consumptionsByOrder.get(row.id),
+      guests > 0 ? guests : undefined,
+    )
+    return {
+      ...(row as OrderRow),
+      packages: one(row.packages),
+      agent: one(row.profiles),
+      invoice: one(row.invoices),
+      profit,
+    }
+  })
 }

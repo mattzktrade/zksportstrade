@@ -29,6 +29,7 @@ type DbPackage = {
   is_enquiry: boolean
   image: string | null
   tier: string
+  duration?: string | null
   includes: unknown
   featured: boolean
   sort_order: number
@@ -56,6 +57,7 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
   const includes = Array.isArray(p.includes) ? (p.includes as string[]) : []
   const price = p.trade_price != null ? Number(p.trade_price) : null
   const tier = (["paddock", "champions", "legend", "hero"].includes(p.tier) ? p.tier : "paddock") as Package["tier"]
+  const durationRaw = typeof p.duration === "string" && p.duration.trim() ? p.duration.trim() : null
   const brochureRaw = p.brochure_url
   const brochureUrl =
     typeof brochureRaw === "string" && brochureRaw.trim().length > 0 ? brochureRaw.trim() : null
@@ -78,6 +80,7 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     totalCapacity: p.total_capacity,
     image: p.image ?? "/placeholder.svg",
     tier,
+    duration: durationRaw,
     includes,
     description: description.trim() ? description : null,
     galleryImages: galleryImages.length > 0 ? galleryImages : undefined,
@@ -106,6 +109,7 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     totalCapacity: p.total_capacity,
     image: p.image ?? "/placeholder.svg",
     tier,
+    duration: durationRaw,
     includes,
     description: description.trim() ? description : null,
     galleryImages: galleryImages.length > 0 ? galleryImages : undefined,

@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createPackage } from "@/app/(admin)/actions"
 import type { AdminRaceOption } from "@/lib/admin/queries"
+import { PACKAGE_DURATION_OPTIONS } from "@/lib/catalog/package-duration"
+
+function currencyHint(currency: string): string {
+  const c = (currency || "USD").trim() || "USD"
+  return `Amount in ${c}`
+}
 
 function linesToList(s: string): string[] {
   return s
@@ -32,7 +38,7 @@ export function CatalogNewPackage({ races }: { races: AdminRaceOption[] }) {
   const [galleryText, setGalleryText] = useState("")
   const [currency, setCurrency] = useState("USD")
   const [totalCapacity, setTotalCapacity] = useState("30")
-  const [tier, setTier] = useState("paddock")
+  const [duration, setDuration] = useState("")
   const [includesText, setIncludesText] = useState("Paddock Club Access\nPremium Dining")
   const [tradePrice, setTradePrice] = useState("")
   const [isEnquiry, setIsEnquiry] = useState(false)
@@ -40,6 +46,7 @@ export function CatalogNewPackage({ races }: { races: AdminRaceOption[] }) {
   const [sortOrder, setSortOrder] = useState("100")
   const [brochureUrl, setBrochureUrl] = useState("")
   const [initialQty, setInitialQty] = useState("0")
+  const [initialUnitCost, setInitialUnitCost] = useState("")
 
   const selectedRace = races.find((r) => r.id === raceId)
 
@@ -94,6 +101,15 @@ export function CatalogNewPackage({ races }: { races: AdminRaceOption[] }) {
         toast.error("Initial stock must be a non-negative whole number.")
         return
       }
+      let initialCost: number | null = null
+      if (initialUnitCost.trim() !== "") {
+        const c = Number(initialUnitCost)
+        if (!Number.isFinite(c) || c < 0) {
+          toast.error("Initial buy price must be a non-negative number.")
+          return
+        }
+        initialCost = c
+      }
 
       const res = await createPackage({
         id: id.trim(),
@@ -110,7 +126,7 @@ export function CatalogNewPackage({ races }: { races: AdminRaceOption[] }) {
         gallery_images: linesToList(galleryText),
         currency: currency.trim() || "USD",
         total_capacity: cap,
-        tier,
+        duration,
         includes: linesToList(includesText),
         trade_price: price,
         is_enquiry: isEnquiry,
@@ -118,6 +134,8 @@ export function CatalogNewPackage({ races }: { races: AdminRaceOption[] }) {
         sort_order: so,
         brochure_url: brochureUrl.trim() || null,
         initial_qty_available: qty,
+        initial_unit_cost: initialCost,
+        initial_cost_note: null,
       })
       if (!res.ok) {
         toast.error(res.message)
@@ -128,6 +146,7 @@ export function CatalogNewPackage({ races }: { races: AdminRaceOption[] }) {
       setId("")
       setName("")
       setTradePrice("")
+      setInitialUnitCost("")
       router.refresh()
     })
   }
@@ -260,17 +279,18 @@ export function CatalogNewPackage({ races }: { races: AdminRaceOption[] }) {
                 className="mt-1 w-full max-w-[120px] px-3 py-2 rounded-lg border border-border bg-background text-sm"
               />
             </label>
-            <label className="block text-xs text-muted-foreground">
-              Tier
+            <label className="block text-xs text-muted-foreground sm:col-span-2">
+              Package duration
               <select
-                value={tier}
-                onChange={(e) => setTier(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+                className="mt-1 w-full max-w-md px-3 py-2 rounded-lg border border-border bg-background text-sm"
               >
-                <option value="paddock">paddock</option>
-                <option value="champions">champions</option>
-                <option value="legend">legend</option>
-                <option value="hero">hero</option>
+                {PACKAGE_DURATION_OPTIONS.map((o) => (
+                  <option key={o.value || "none"} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="block text-xs text-muted-foreground">
@@ -280,6 +300,7 @@ export function CatalogNewPackage({ races }: { races: AdminRaceOption[] }) {
                 onChange={(e) => setTradePrice(e.target.value)}
                 className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
               />
+              <span className="block text-[11px] text-muted-foreground/80 mt-1">{currencyHint(currency)}</span>
             </label>
             <label className="block text-xs text-muted-foreground">
               Sort order
@@ -296,6 +317,20 @@ export function CatalogNewPackage({ races }: { races: AdminRaceOption[] }) {
                 onChange={(e) => setInitialQty(e.target.value)}
                 className="mt-1 w-full max-w-[120px] px-3 py-2 rounded-lg border border-border bg-background text-sm"
               />
+            </label>
+            <label className="block text-xs text-muted-foreground">
+              Initial buy price (per unit)
+              <input
+                inputMode="decimal"
+                value={initialUnitCost}
+                onChange={(e) => setInitialUnitCost(e.target.value)}
+                placeholder="Leave blank if unknown"
+                className="mt-1 w-full max-w-[160px] px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              />
+              <span className="block text-[11px] text-muted-foreground/80 mt-1">
+                {currencyHint(currency)}. Used as the cost basis for the initial batch. You can add more cost layers when
+                restocking.
+              </span>
             </label>
             <label className="flex items-center gap-2 text-sm sm:col-span-2">
               <input type="checkbox" checked={isEnquiry} onChange={(e) => setIsEnquiry(e.target.checked)} />
