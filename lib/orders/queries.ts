@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server"
-import type { Booking } from "@/lib/data"
+import type { Booking } from "@/lib/types/catalog"
 import { normalizeInvoiceStatus } from "@/lib/invoices/status"
 import type { OrderRow, PackageSnippet } from "@/lib/orders/types"
 

@@ -1,4 +1,4 @@
-import type { Package, Race } from "@/lib/data"
+import type { Package, Race } from "@/lib/types/catalog"
 import { INVENTORY_COLUMNS, PACKAGE_COLUMNS, RACE_COLUMNS } from "@/lib/catalog/columns"
 import { createClient } from "@/lib/supabase/server"
 import {

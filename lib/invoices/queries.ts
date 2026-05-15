@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server"
-import type { Invoice } from "@/lib/data"
+import type { Invoice } from "@/lib/types/catalog"
 import { normalizeInvoiceStatus } from "@/lib/invoices/status"
 
 type OrderJoin = {

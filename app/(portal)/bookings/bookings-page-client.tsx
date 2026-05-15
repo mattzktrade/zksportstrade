@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react"
 import Link from "next/link"
-import type { Booking } from "@/lib/data"
+import type { Booking } from "@/lib/types/catalog"
 import { invoiceWorkflowStatusLabels, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
 import { Search, Calendar, Users, Filter, ArrowUpDown, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"

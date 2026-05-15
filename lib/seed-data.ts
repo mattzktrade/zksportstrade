@@ -1,84 +1,5 @@
-// Mock data for the trade portal - replace with database queries later
-
-import type { InvoiceWorkflowStatus } from "@/lib/invoices/status"
-
-export interface Package {
-  id: string
-  name: string
-  circuit: string
-  location: string
-  country: string
-  countryCode: string
-  date: string
-  dateRange: string
-  price: number | null
-  currency: string
-  availability: number | string
-  totalCapacity: number
-  image: string
-  tier: "paddock" | "champions" | "legend" | "hero"
-  includes: string[]
-  /** Marketing body shown on package detail; falls back to default copy when empty */
-  description?: string | null
-  /** Extra gallery image URLs (primary `image` is always first slide) */
-  galleryImages?: string[]
-  featured?: boolean
-  /** HTTPS URL to brochure PDF or page for agents to share (from Supabase when set) */
-  brochureUrl?: string | null
-  /** Set when loaded from Supabase (used for navigation) */
-  raceId?: string
-  /** Active inventory held for you (unexpired); already included in numeric `availability` when loaded signed-in. */
-  agentHoldUnits?: number
-  /** Earliest expiry among your active holds on this package (ISO). */
-  agentHoldExpiresAt?: string | null
-}
-
-export interface Race {
-  id: string
-  name: string
-  shortName: string
-  location: string
-  country: string
-  countryCode: string
-  date: string
-  dateRange: string
-  image: string
-  packagesAvailable: number
-  lowestPrice: number
-}
-
-export interface Booking {
-  id: string
-  /** Human-readable order reference from the database (e.g. ZK-2026-â€¦) */
-  orderReference?: string
-  packageId: string
-  packageName: string
-  circuit: string
-  date: string
-  guests: number
-  /** Invoice workflow status (admin-controlled); mirrors Invoices page */
-  invoiceStatus: InvoiceWorkflowStatus
-  totalAmount: number
-  currency: string
-  createdAt: string
-  clientName: string
-  clientEmail: string
-  /** When loaded from Supabase */
-  packageTier?: string
-}
-
-export interface Invoice {
-  id: string
-  bookingId: string
-  /** Internal order id for deep links from bookings */
-  orderId?: string
-  amount: number
-  currency: string
-  status: InvoiceWorkflowStatus
-  /** Set when admin moves to awaiting_payment; null while awaiting_invoice */
-  issuedAt: string | null
-  packageName: string
-}
+/** Mock catalog seed data — used only by `scripts/seed-catalog.ts`. */
+import type { Booking, Invoice, Package, Race } from "./types/catalog"
 
 export const races2026: Race[] = [
   {
@@ -343,9 +264,9 @@ export const races2026: Race[] = [
   },
   {
     id: "brazil-2026",
-    name: "SÃ£o Paulo Grand Prix",
+    name: "São Paulo Grand Prix",
     shortName: "Brazil",
-    location: "SÃ£o Paulo",
+    location: "São Paulo",
     country: "Brazil",
     countryCode: "BR",
     date: "2026-11-08",
@@ -2544,8 +2465,8 @@ export const packages: Package[] = [
   {
     id: "brazil-legend-paddock-club-2026",
     name: "Legend Paddock Club",
-    circuit: "SÃ£o Paulo Grand Prix",
-    location: "SÃ£o Paulo",
+    circuit: "São Paulo Grand Prix",
+    location: "São Paulo",
     country: "Brazil",
     countryCode: "BR",
     date: "2026-11-08",
@@ -2561,8 +2482,8 @@ export const packages: Package[] = [
   {
     id: "brazil-paddock-club-red-bull-2026",
     name: "Paddock Club - Red Bull",
-    circuit: "SÃ£o Paulo Grand Prix",
-    location: "SÃ£o Paulo",
+    circuit: "São Paulo Grand Prix",
+    location: "São Paulo",
     country: "Brazil",
     countryCode: "BR",
     date: "2026-11-08",
@@ -2578,8 +2499,8 @@ export const packages: Package[] = [
   {
     id: "brazil-f1-experiences-paddock-club-2026",
     name: "F1 Experiences Paddock Club",
-    circuit: "SÃ£o Paulo Grand Prix",
-    location: "SÃ£o Paulo",
+    circuit: "São Paulo Grand Prix",
+    location: "São Paulo",
     country: "Brazil",
     countryCode: "BR",
     date: "2026-11-08",
@@ -2595,8 +2516,8 @@ export const packages: Package[] = [
   {
     id: "brazil-paddock-club-club-suite-2026",
     name: "Paddock Club - Club Suite",
-    circuit: "SÃ£o Paulo Grand Prix",
-    location: "SÃ£o Paulo",
+    circuit: "São Paulo Grand Prix",
+    location: "São Paulo",
     country: "Brazil",
     countryCode: "BR",
     date: "2026-11-08",
@@ -2612,8 +2533,8 @@ export const packages: Package[] = [
   {
     id: "brazil-f1-experiences-lounge-2026",
     name: "F1 Experiences Lounge",
-    circuit: "SÃ£o Paulo Grand Prix",
-    location: "SÃ£o Paulo",
+    circuit: "São Paulo Grand Prix",
+    location: "São Paulo",
     country: "Brazil",
     countryCode: "BR",
     date: "2026-11-08",
@@ -2629,8 +2550,8 @@ export const packages: Package[] = [
   {
     id: "brazil-champions-club-2026",
     name: "Champions Club",
-    circuit: "SÃ£o Paulo Grand Prix",
-    location: "SÃ£o Paulo",
+    circuit: "São Paulo Grand Prix",
+    location: "São Paulo",
     country: "Brazil",
     countryCode: "BR",
     date: "2026-11-08",

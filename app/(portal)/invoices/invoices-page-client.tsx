@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useMemo } from "react"
-import type { Invoice } from "@/lib/data"
+import type { Invoice } from "@/lib/types/catalog"
 import { invoiceWorkflowStatusLabels, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
 import { Search, Filter, CheckCircle2, Clock, FileText, Send } from "lucide-react"
 import { cn, formatMoney } from "@/lib/utils"

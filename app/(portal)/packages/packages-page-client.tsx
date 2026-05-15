@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react"
 import Image from "next/image"
 import Link from "next/link"
-import type { Package, Race } from "@/lib/data"
+import type { Package, Race } from "@/lib/types/catalog"
 import { Search, MapPin, Calendar, ArrowRight } from "lucide-react"
 
 export function PackagesPageClient({ races, packages }: { races: Race[]; packages: Package[] }) {

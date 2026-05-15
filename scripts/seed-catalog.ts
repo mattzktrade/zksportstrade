@@ -1,5 +1,5 @@
 /**
- * Seeds races, packages, and inventory from lib/data.ts into Supabase.
+ * Seeds races, packages, and inventory from lib/seed-data.ts into Supabase.
  * Requires SUPABASE_SERVICE_ROLE_KEY (service role bypasses RLS).
  *
  * Usage: `npm run seed:catalog` (loads `.env.local` via dotenv)
@@ -8,7 +8,7 @@
 import { config } from "dotenv"
 import { resolve } from "path"
 import { createClient } from "@supabase/supabase-js"
-import { races2026, packages } from "../lib/data"
+import { races2026, packages } from "../lib/seed-data"
 
 config({ path: resolve(process.cwd(), ".env.local") })
 config({ path: resolve(process.cwd(), ".env") })

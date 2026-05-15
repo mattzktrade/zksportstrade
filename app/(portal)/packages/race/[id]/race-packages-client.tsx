@@ -3,7 +3,7 @@
 import { useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
-import type { Package, Race } from "@/lib/data"
+import type { Package, Race } from "@/lib/types/catalog"
 import { ArrowLeft, MapPin, Calendar, Users, Check, ArrowRight, ChevronDown, Minus, Plus, ChevronLeft, ChevronRight, FileDown, Link2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"

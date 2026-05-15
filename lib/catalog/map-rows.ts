@@ -1,4 +1,4 @@
-import type { Package, Race } from "@/lib/data"
+import type { Package, Race } from "@/lib/types/catalog"
 
 type DbRace = {
   id: string

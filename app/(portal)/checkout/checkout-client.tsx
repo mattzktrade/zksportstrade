@@ -3,7 +3,7 @@
 import { useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
-import type { Package } from "@/lib/data"
+import type { Package } from "@/lib/types/catalog"
 import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
 import { submitCheckoutOrder } from "./actions"
 import {
