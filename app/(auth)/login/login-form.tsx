@@ -7,12 +7,14 @@ import { createClient } from "@/lib/supabase/client"
 import { requestPasswordReset } from "./actions"
 import { Loader2 } from "lucide-react"
 import { AuthCardBrand } from "@/components/auth-card-brand"
+import { useHashAuthRedirect } from "@/hooks/use-hash-auth-redirect"
 
 export function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const redirect = searchParams.get("redirect") ?? "/"
   const error = searchParams.get("error")
+  const handlingHash = useHashAuthRedirect(redirect)
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -95,6 +97,15 @@ export function LoginForm() {
     setMessage(null)
     setResendSuccess(null)
     setResetSuccess(null)
+  }
+
+  if (handlingHash) {
+    return (
+      <div className="bg-card border border-border rounded-2xl shadow-sm p-8 flex flex-col items-center justify-center gap-3">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" aria-hidden />
+        <p className="text-sm text-muted-foreground">Opening password reset…</p>
+      </div>
+    )
   }
 
   return (

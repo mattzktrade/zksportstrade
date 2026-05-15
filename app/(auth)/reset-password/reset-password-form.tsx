@@ -6,9 +6,11 @@ import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { AuthCardBrand } from "@/components/auth-card-brand"
 import { Loader2 } from "lucide-react"
+import { useHashAuthRedirect } from "@/hooks/use-hash-auth-redirect"
 
 export function ResetPasswordForm() {
   const router = useRouter()
+  const handlingHash = useHashAuthRedirect("/reset-password")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [loading, setLoading] = useState(false)
@@ -18,12 +20,13 @@ export function ResetPasswordForm() {
   const [hasSession, setHasSession] = useState(false)
 
   useEffect(() => {
+    if (handlingHash) return
     const supabase = createClient()
     void supabase.auth.getSession().then(({ data }) => {
       setHasSession(!!data.session)
       setSessionChecked(true)
     })
-  }, [])
+  }, [handlingHash])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -52,10 +55,13 @@ export function ResetPasswordForm() {
     router.refresh()
   }
 
-  if (!sessionChecked) {
+  if (handlingHash || !sessionChecked) {
     return (
-      <div className="bg-card border border-border rounded-2xl shadow-sm p-8 flex justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <div className="bg-card border border-border rounded-2xl shadow-sm p-8 flex flex-col items-center justify-center gap-3">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden />
+        <p className="text-sm text-muted-foreground">
+          {handlingHash ? "Opening password reset…" : "Loading…"}
+        </p>
       </div>
     )
   }

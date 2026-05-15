@@ -1,6 +1,7 @@
 "use server"
 
 import { createClient } from "@supabase/supabase-js"
+import { buildPasswordResetRedirectUrl } from "@/lib/auth/password-reset-redirect"
 import { sendPasswordResetEmail } from "@/lib/email/send-password-reset"
 
 export type RequestPasswordResetResult = { ok: true } | { ok: false; message: string }
@@ -15,7 +16,7 @@ export async function requestPasswordReset(
   }
 
   const origin = siteOrigin.replace(/\/$/, "")
-  const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent("/reset-password")}`
+  const redirectTo = buildPasswordResetRedirectUrl(origin)
 
   const result = await sendPasswordResetEmail({
     email: trimmed,
