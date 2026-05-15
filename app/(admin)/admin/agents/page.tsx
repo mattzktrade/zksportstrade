@@ -1,7 +1,13 @@
 import Link from "next/link"
+import dynamic from "next/dynamic"
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { getAdminAgentsWithOrderStats } from "@/lib/admin/queries"
-import { AgentsAdminClient } from "./agents-admin-client"
+import { PageLoadingSpinner } from "@/components/page-loading-spinner"
+
+const AgentsAdminClient = dynamic(
+  () => import("./agents-admin-client").then((m) => ({ default: m.AgentsAdminClient })),
+  { loading: () => <PageLoadingSpinner /> },
+)
 
 export default async function AdminAgentsPage({
   searchParams,

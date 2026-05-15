@@ -1,7 +1,13 @@
 import Link from "next/link"
+import dynamic from "next/dynamic"
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { getAllOrdersForAdmin } from "@/lib/orders/queries"
-import { OrdersAdminClient } from "./orders-admin-client"
+import { PageLoadingSpinner } from "@/components/page-loading-spinner"
+
+const OrdersAdminClient = dynamic(
+  () => import("./orders-admin-client").then((m) => ({ default: m.OrdersAdminClient })),
+  { loading: () => <PageLoadingSpinner /> },
+)
 
 export default async function AdminOrdersPage() {
   await requireAdmin()

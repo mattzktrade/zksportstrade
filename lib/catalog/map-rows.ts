@@ -115,7 +115,7 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
   }
 }
 
-function mapRaceRow(r: DbRace, packages: Package[]): Race {
+export function mapRaceRow(r: DbRace, packages: Package[]): Race {
   const racePackages = packages.filter((pkg) => pkg.date === r.event_date || pkg.circuit.includes(r.short_name))
   const validPrices = racePackages.map((p) => p.price).filter((p): p is number => p !== null && p > 0)
   const lowestPrice = validPrices.length > 0 ? Math.min(...validPrices) : 0

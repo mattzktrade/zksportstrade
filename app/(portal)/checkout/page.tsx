@@ -1,8 +1,14 @@
 import Link from "next/link"
+import dynamic from "next/dynamic"
 import { getPackageById } from "@/lib/catalog/queries"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { checkoutDefaultsFromProfile, emptyCheckoutAddressFields } from "@/lib/types/checkout-addresses"
-import { CheckoutClient } from "./checkout-client"
+import { PageLoadingSpinner } from "@/components/page-loading-spinner"
+
+const CheckoutClient = dynamic(
+  () => import("./checkout-client").then((m) => ({ default: m.CheckoutClient })),
+  { loading: () => <PageLoadingSpinner /> },
+)
 
 export default async function CheckoutPage({
   searchParams,

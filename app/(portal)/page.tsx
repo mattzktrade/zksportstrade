@@ -1,8 +1,10 @@
 import { RacesGrid } from "@/components/dashboard/races-grid"
 import { getCatalog } from "@/lib/catalog/queries"
+import { getPortalProfile } from "@/lib/supabase/profile"
 
 export default async function DashboardPage() {
-  const catalog = await getCatalog()
+  const profile = await getPortalProfile()
+  const catalog = await getCatalog(profile?.id ?? null)
 
   if (!catalog || catalog.races.length === 0) {
     return (

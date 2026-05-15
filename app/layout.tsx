@@ -2,7 +2,6 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Inter, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
-import { Toaster } from "sonner"
 import "./globals.css"
 
 const inter = Inter({
@@ -36,7 +35,6 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${inter.variable} ${geistMono.variable} font-sans antialiased`}>
         {children}
-        <Toaster richColors position="top-center" />
         <Analytics />
       </body>
     </html>

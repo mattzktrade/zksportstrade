@@ -1,7 +1,12 @@
 import { createClient } from "@/lib/supabase/server"
 import { isOutstandingInvoiceStatus } from "@/lib/invoices/status"
 import type { PortalProfile } from "@/lib/types/profile"
+import { INVENTORY_COLUMNS, PACKAGE_COLUMNS } from "@/lib/catalog/columns"
 import type { DbInventory, DbPackage } from "@/lib/catalog/map-rows"
+
+const AGENT_PROFILE_COLUMNS = "id, email, full_name, company_name, mobile, role, approval_status, created_at" as const
+const PENDING_PROFILE_COLUMNS =
+  "id, email, full_name, company_name, approval_status, created_at, approval_note" as const
 
 export type AdminPackageRow = DbPackage & { inventory: DbInventory | null; race_name: string }
 
@@ -30,7 +35,7 @@ export async function getPendingProfiles(): Promise<PortalProfile[]> {
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("profiles")
-    .select("*")
+    .select(PENDING_PROFILE_COLUMNS)
     .eq("approval_status", "pending")
     .order("created_at", { ascending: true })
   if (error || !data) return []
@@ -41,7 +46,7 @@ export async function getApprovedAgents(): Promise<PortalProfile[]> {
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("profiles")
-    .select("*")
+    .select(AGENT_PROFILE_COLUMNS)
     .eq("role", "agent")
     .eq("approval_status", "approved")
     .order("company_name", { ascending: true })
@@ -217,8 +222,8 @@ export async function getAdminPackageRows(): Promise<AdminPackageRow[]> {
   const supabase = await createClient()
   const [{ data: races, error: re }, { data: packages, error: pe }, { data: inv, error: ie }] = await Promise.all([
     supabase.from("races").select("id,name").order("event_date"),
-    supabase.from("packages").select("*").order("sort_order"),
-    supabase.from("package_inventory").select("*"),
+    supabase.from("packages").select(PACKAGE_COLUMNS).order("sort_order"),
+    supabase.from("package_inventory").select(INVENTORY_COLUMNS),
   ])
   if (re || pe || ie || !packages) return []
   const raceName = new Map((races ?? []).map((r: { id: string; name: string }) => [r.id, r.name]))

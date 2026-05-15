@@ -1,3 +1,4 @@
+import dynamic from "next/dynamic"
 import { requireAdmin } from "@/lib/admin/require-admin"
 import {
   getAdminPackageRows,
@@ -5,7 +6,12 @@ import {
   getInventoryHoldsWithDetails,
   type InventoryPackageOption,
 } from "@/lib/admin/queries"
-import { InventoryAdminClient } from "./inventory-admin-client"
+import { PageLoadingSpinner } from "@/components/page-loading-spinner"
+
+const InventoryAdminClient = dynamic(
+  () => import("./inventory-admin-client").then((m) => ({ default: m.InventoryAdminClient })),
+  { loading: () => <PageLoadingSpinner /> },
+)
 
 function toInventoryOptions(pkgRows: Awaited<ReturnType<typeof getAdminPackageRows>>): InventoryPackageOption[] {
   return pkgRows

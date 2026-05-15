@@ -1,7 +1,13 @@
+import dynamic from "next/dynamic"
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { getAdminPackageRows, getAdminRaceOptions } from "@/lib/admin/queries"
-import { CatalogAdminTable } from "./catalog-admin-table"
+import { PageLoadingSpinner } from "@/components/page-loading-spinner"
 import { CatalogNewPackage } from "./catalog-new-package"
+
+const CatalogAdminTable = dynamic(
+  () => import("./catalog-admin-table").then((m) => ({ default: m.CatalogAdminTable })),
+  { loading: () => <PageLoadingSpinner /> },
+)
 
 export default async function AdminCatalogPage() {
   await requireAdmin()
