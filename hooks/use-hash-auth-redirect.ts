@@ -1,16 +1,16 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { hasHashAuthTokens, parseHashAuthParams } from "@/lib/supabase/hash-auth"
 
 /**
- * Reads #access_token from the URL (recovery / confirm links), sets session, redirects.
- * Returns true while handling (show a loading state).
+ * Reads #access_token from the URL (Supabase recovery / confirm links),
+ * sets the session via cookies, then does a hard navigation so middleware
+ * re-runs with the new auth cookies. Returns true while it's working so the
+ * caller can show a loading state.
  */
 export function useHashAuthRedirect(defaultNext = "/"): boolean {
-  const router = useRouter()
   const [handling, setHandling] = useState(false)
 
   useEffect(() => {
@@ -19,7 +19,6 @@ export function useHashAuthRedirect(defaultNext = "/"): boolean {
     const hash = window.location.hash
     if (!hasHashAuthTokens(hash)) return
 
-    let cancelled = false
     setHandling(true)
 
     const params = parseHashAuthParams(hash)
@@ -27,43 +26,49 @@ export function useHashAuthRedirect(defaultNext = "/"): boolean {
     const refresh_token = params.refresh_token
     const type = params.type
 
+    const search = new URLSearchParams(window.location.search)
+    const nextParam = search.get("next")
+    const cleanPath = window.location.pathname
+    const cleanSearch = search.toString()
+    const cleanUrl = cleanSearch ? `${cleanPath}?${cleanSearch}` : cleanPath
+    try {
+      window.history.replaceState(null, "", cleanUrl)
+    } catch {
+      // history may not be available; ignore
+    }
+
     if (!access_token || !refresh_token) {
-      setHandling(false)
+      window.location.replace("/login?error=auth_callback")
       return
     }
 
+    const target =
+      type === "recovery"
+        ? "/reset-password"
+        : nextParam && nextParam.startsWith("/")
+          ? nextParam
+          : defaultNext
+
+    const safety = window.setTimeout(() => {
+      window.location.replace("/login?error=auth_callback")
+    }, 10000)
+
     const supabase = createClient()
-    void supabase.auth.setSession({ access_token, refresh_token }).then(({ error }) => {
-      if (cancelled) return
-
-      const search = new URLSearchParams(window.location.search)
-      const nextParam = search.get("next")
-      const cleanPath = window.location.pathname
-      const cleanSearch = search.toString()
-      const cleanUrl = cleanSearch ? `${cleanPath}?${cleanSearch}` : cleanPath
-      window.history.replaceState(null, "", cleanUrl)
-
-      if (error) {
-        router.replace("/login?error=auth_callback")
-        router.refresh()
-        return
-      }
-
-      if (type === "recovery") {
-        router.replace("/reset-password")
-        router.refresh()
-        return
-      }
-
-      const destination = nextParam && nextParam.startsWith("/") ? nextParam : defaultNext
-      router.replace(destination)
-      router.refresh()
-    })
-
-    return () => {
-      cancelled = true
-    }
-  }, [defaultNext, router])
+    supabase.auth
+      .setSession({ access_token, refresh_token })
+      .then(({ error }) => {
+        window.clearTimeout(safety)
+        if (error) {
+          window.location.replace("/login?error=auth_callback")
+          return
+        }
+        window.location.replace(target)
+      })
+      .catch(() => {
+        window.clearTimeout(safety)
+        window.location.replace("/login?error=auth_callback")
+      })
+  }, [defaultNext])
 
   return handling
 }
