@@ -1,19 +1,18 @@
 import { createServerClient, parseCookieHeader } from "@supabase/ssr"
 import { NextResponse } from "next/server"
+import { safeRedirectUrl } from "@/lib/auth/safe-redirect"
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get("code")
-  const next = searchParams.get("next") ?? "/"
+  const next = searchParams.get("next")
 
   if (!code) {
-    const next = searchParams.get("next") ?? "/"
-    return NextResponse.redirect(
-      `${origin}/auth/complete?next=${encodeURIComponent(next.startsWith("/") ? next : `/${next}`)}`,
-    )
+    const safeNext = safeRedirectUrl(next, origin, "/").pathname
+    return NextResponse.redirect(`${origin}/auth/complete?next=${encodeURIComponent(safeNext)}`)
   }
 
-  const redirectUrl = new URL(next, origin)
+  const redirectUrl = safeRedirectUrl(next, origin, "/")
   const response = NextResponse.redirect(redirectUrl)
 
   const supabase = createServerClient(

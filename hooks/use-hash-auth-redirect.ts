@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { safeRedirectPath } from "@/lib/auth/safe-redirect"
 import { hasHashAuthTokens, parseHashAuthParams } from "@/lib/supabase/hash-auth"
 
 /**
@@ -45,9 +46,7 @@ export function useHashAuthRedirect(defaultNext = "/"): boolean {
     const target =
       type === "recovery"
         ? "/reset-password"
-        : nextParam && nextParam.startsWith("/")
-          ? nextParam
-          : defaultNext
+        : safeRedirectPath(nextParam, safeRedirectPath(defaultNext, "/"))
 
     const safety = window.setTimeout(() => {
       window.location.replace("/login?error=auth_callback")

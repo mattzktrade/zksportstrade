@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
+import { sanitizeHttpsUrl, sanitizeHttpsUrlList } from "@/lib/auth/safe-url"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { isInvoiceWorkflowStatus, normalizeInvoiceStatus, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
 
@@ -118,8 +119,9 @@ export async function updatePackageFields(input: {
   const cap = Math.floor(Number(input.total_capacity))
   if (!Number.isFinite(cap) || cap < 0) return { ok: false, message: "Total capacity must be a non-negative whole number." }
 
-  const brochure = input.brochure_url?.trim() ? input.brochure_url.trim() : null
-  const image = input.image?.trim() ? input.image.trim() : null
+  const brochure = sanitizeHttpsUrl(input.brochure_url)
+  const image = sanitizeHttpsUrl(input.image)
+  const gallery = sanitizeHttpsUrlList(input.gallery_images)
   const desc = input.description.trim()
   const cc = input.country_code.trim().toUpperCase().slice(0, 8)
 
@@ -140,7 +142,7 @@ export async function updatePackageFields(input: {
       date_range: input.date_range.trim(),
       description: desc,
       image,
-      gallery_images: input.gallery_images,
+      gallery_images: gallery,
       currency: (input.currency.trim() || "USD").slice(0, 8),
       total_capacity: cap,
       tier,
@@ -216,8 +218,9 @@ export async function createPackage(input: {
   let qty = Math.floor(Number(input.initial_qty_available))
   if (!Number.isFinite(qty) || qty < 0) qty = 0
 
-  const brochure = input.brochure_url?.trim() ? input.brochure_url.trim() : null
-  const image = input.image?.trim() ? input.image.trim() : null
+  const brochure = sanitizeHttpsUrl(input.brochure_url)
+  const image = sanitizeHttpsUrl(input.image)
+  const gallery = sanitizeHttpsUrlList(input.gallery_images)
   const cc = input.country_code.trim().toUpperCase().slice(0, 8)
 
   const { error: insErr } = await supabase.from("packages").insert({
@@ -232,7 +235,7 @@ export async function createPackage(input: {
     date_range: input.date_range.trim(),
     description: input.description.trim(),
     image,
-    gallery_images: input.gallery_images,
+    gallery_images: gallery,
     currency: (input.currency.trim() || "USD").slice(0, 8),
     total_capacity: cap,
     is_enquiry: input.is_enquiry,

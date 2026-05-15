@@ -1,4 +1,5 @@
 import { AuthHashHandler } from "@/components/auth-hash-handler"
+import { safeRedirectPath } from "@/lib/auth/safe-redirect"
 
 type PageProps = {
   searchParams: Promise<{ next?: string }>
@@ -6,7 +7,7 @@ type PageProps = {
 
 export default async function AuthCompletePage({ searchParams }: PageProps) {
   const { next } = await searchParams
-  const defaultNext = next && next.startsWith("/") ? next : "/reset-password"
+  const defaultNext = safeRedirectPath(next, "/reset-password")
 
   return <AuthHashHandler defaultNext={defaultNext} />
 }

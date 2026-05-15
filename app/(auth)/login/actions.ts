@@ -1,21 +1,31 @@
 "use server"
 
+import { headers } from "next/headers"
 import { createClient } from "@supabase/supabase-js"
 import { buildPasswordResetRedirectUrl } from "@/lib/auth/password-reset-redirect"
+import { checkRateLimit } from "@/lib/auth/rate-limit"
+import { getServerSiteOrigin } from "@/lib/auth/site-origin"
 import { sendPasswordResetEmail } from "@/lib/email/send-password-reset"
 
 export type RequestPasswordResetResult = { ok: true } | { ok: false; message: string }
 
-export async function requestPasswordReset(
-  email: string,
-  siteOrigin: string,
-): Promise<RequestPasswordResetResult> {
+export async function requestPasswordReset(email: string): Promise<RequestPasswordResetResult> {
   const trimmed = email.trim().toLowerCase()
   if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
     return { ok: false, message: "Enter a valid email address." }
   }
 
-  const origin = siteOrigin.replace(/\/$/, "")
+  const h = await headers()
+  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? h.get("x-real-ip") ?? "unknown"
+
+  if (!checkRateLimit(`pwreset:ip:${ip}`, 8, 15 * 60 * 1000)) {
+    return { ok: true }
+  }
+  if (!checkRateLimit(`pwreset:email:${trimmed}`, 3, 60 * 60 * 1000)) {
+    return { ok: true }
+  }
+
+  const origin = getServerSiteOrigin()
   const redirectTo = buildPasswordResetRedirectUrl(origin)
 
   const result = await sendPasswordResetEmail({

@@ -22,8 +22,8 @@ export function ResetPasswordForm() {
   useEffect(() => {
     if (handlingHash) return
     const supabase = createClient()
-    void supabase.auth.getSession().then(({ data }) => {
-      setHasSession(!!data.session)
+    void supabase.auth.getUser().then(({ data }) => {
+      setHasSession(!!data.user)
       setSessionChecked(true)
     })
   }, [handlingHash])

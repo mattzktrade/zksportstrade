@@ -4,13 +4,6 @@ import { buildCatalog, mapPackageRow, type DbInventory, type DbPackage, type DbR
 
 type HoldAgg = { qty: number; expiresAtMin: string }
 
-async function releaseExpiredHolds(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const { error } = await supabase.rpc("release_expired_inventory_holds")
-  if (error) {
-    console.error("[catalog] release_expired_inventory_holds:", error.message)
-  }
-}
-
 async function fetchAgentHoldAggregates(
   supabase: Awaited<ReturnType<typeof createClient>>,
   agentProfileId: string,
@@ -55,7 +48,6 @@ function mergeAgentHoldAvailability(packages: Package[], holdAgg: Map<string, Ho
 
 export async function getCatalog(agentProfileId?: string | null): Promise<{ races: Race[]; packages: Package[] } | null> {
   const supabase = await createClient()
-  await releaseExpiredHolds(supabase)
 
   const { data: races, error: racesError } = await supabase.from("races").select("*").order("event_date")
   const { data: packages, error: packagesError } = await supabase.from("packages").select("*").order("sort_order")
@@ -77,7 +69,6 @@ export async function getCatalog(agentProfileId?: string | null): Promise<{ race
 
 export async function getPackageById(id: string, agentProfileId?: string | null): Promise<Package | null> {
   const supabase = await createClient()
-  await releaseExpiredHolds(supabase)
 
   const { data: p, error } = await supabase.from("packages").select("*").eq("id", id).maybeSingle()
   if (error || !p) return null

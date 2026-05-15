@@ -25,6 +25,7 @@ export function AgentsAdminClient({ rows }: { rows: AdminAgentWithStats[] }) {
             <th className="p-3 font-medium w-10" aria-label="Expand" />
             <th className="p-3 font-medium">Company</th>
             <th className="p-3 font-medium">Contact</th>
+            <th className="p-3 font-medium">Mobile</th>
             <th className="p-3 font-medium">Email</th>
             <th className="p-3 font-medium text-right tabular-nums">Orders</th>
             <th className="p-3 font-medium text-right tabular-nums">Unpaid inv.</th>
@@ -51,6 +52,7 @@ export function AgentsAdminClient({ rows }: { rows: AdminAgentWithStats[] }) {
                   </td>
                   <td className="p-3 font-medium text-foreground">{a.company_name || "—"}</td>
                   <td className="p-3 text-muted-foreground">{a.full_name || "—"}</td>
+                  <td className="p-3 text-muted-foreground whitespace-nowrap">{a.mobile?.trim() || "—"}</td>
                   <td className="p-3 text-muted-foreground">{a.email}</td>
                   <td className="p-3 text-right tabular-nums font-medium text-foreground">{a.orderCount}</td>
                   <td className="p-3 text-right tabular-nums">
@@ -67,7 +69,7 @@ export function AgentsAdminClient({ rows }: { rows: AdminAgentWithStats[] }) {
                 </tr>
                 {open && (
                   <tr key={`${a.id}-detail`} className="border-b border-border bg-muted/25">
-                    <td colSpan={8} className="p-0">
+                    <td colSpan={9} className="p-0">
                       <div className="px-4 py-4 sm:px-6 space-y-3">
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-muted-foreground">
                           <p>

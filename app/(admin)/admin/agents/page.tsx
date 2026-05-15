@@ -15,7 +15,7 @@ export default async function AdminAgentsPage({
 
   const filtered = needle
     ? rows.filter((a) => {
-        const blob = `${a.email} ${a.full_name} ${a.company_name} ${a.orderSearchBlob}`.toLowerCase()
+        const blob = `${a.email} ${a.full_name} ${a.company_name} ${a.mobile ?? ""} ${a.orderSearchBlob}`.toLowerCase()
         return blob.includes(needle)
       })
     : rows

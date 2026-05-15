@@ -3,6 +3,7 @@ export type PortalProfile = {
   email: string
   full_name: string
   company_name: string
+  mobile?: string | null
   role: "agent" | "admin"
   approval_status: "pending" | "approved" | "rejected"
   approval_note?: string | null

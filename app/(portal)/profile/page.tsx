@@ -6,7 +6,7 @@ import { usePortalUser } from "@/components/portal-user-provider"
 import { createClient } from "@/lib/supabase/client"
 import { checkoutDefaultsFromProfile } from "@/lib/types/checkout-addresses"
 import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
-import { User, Mail, Building2, Edit3, Save, X, Lock } from "lucide-react"
+import { User, Mail, Building2, Phone, Edit3, Save, X, Lock } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -19,17 +19,20 @@ export default function ProfilePage() {
 
   const [fullName, setFullName] = useState(portalUser.full_name)
   const [companyName, setCompanyName] = useState(portalUser.company_name)
+  const [mobile, setMobile] = useState(portalUser.mobile ?? "")
   const [addresses, setAddresses] = useState<CheckoutAddressFields>(() => checkoutDefaultsFromProfile(portalUser))
 
   useEffect(() => {
     if (!isEditing) {
       setFullName(portalUser.full_name)
       setCompanyName(portalUser.company_name)
+      setMobile(portalUser.mobile ?? "")
       setAddresses(checkoutDefaultsFromProfile(portalUser))
     }
   }, [
     portalUser.full_name,
     portalUser.company_name,
+    portalUser.mobile,
     portalUser.shipping_address_line1,
     portalUser.shipping_address_line2,
     portalUser.shipping_city,
@@ -54,6 +57,7 @@ export default function ProfilePage() {
       .update({
         full_name: fullName.trim(),
         company_name: companyName.trim(),
+        mobile: mobile.trim(),
         shipping_address_line1: addresses.shippingAddressLine1.trim(),
         shipping_address_line2: addresses.shippingAddressLine2.trim(),
         shipping_city: addresses.shippingCity.trim(),
@@ -133,7 +137,9 @@ export default function ProfilePage() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
             <div>
               <h2 className="text-lg sm:text-xl font-semibold text-foreground">Account</h2>
-              <p className="text-xs sm:text-sm text-muted-foreground mt-1">Name, company, and saved checkout addresses</p>
+              <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+                Name, company, mobile number, and saved checkout addresses
+              </p>
             </div>
             <button
               type="button"
@@ -141,6 +147,7 @@ export default function ProfilePage() {
                 if (isEditing) {
                   setFullName(portalUser.full_name)
                   setCompanyName(portalUser.company_name)
+                  setMobile(portalUser.mobile ?? "")
                   setAddresses(checkoutDefaultsFromProfile(portalUser))
                 }
                 setIsEditing(!isEditing)
@@ -201,6 +208,30 @@ export default function ProfilePage() {
                     : "bg-transparent border border-border",
                 )}
               />
+            </div>
+
+            <div>
+              <label className="flex items-center gap-2 text-sm font-medium text-foreground mb-2">
+                <Phone className="h-4 w-4 text-muted-foreground" />
+                Mobile
+              </label>
+              <input
+                type="tel"
+                value={mobile}
+                onChange={(e) => setMobile(e.target.value)}
+                disabled={!isEditing}
+                autoComplete="tel"
+                placeholder={isEditing ? "e.g. +44 7426 610346" : "Not set"}
+                className={cn(
+                  "w-full px-4 py-3 rounded-xl text-sm transition-all",
+                  isEditing
+                    ? "bg-muted/50 border border-border focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    : "bg-transparent border border-border",
+                )}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                For urgent booking or payment matters. Include country code where possible.
+              </p>
             </div>
 
             <div className="md:col-span-2">
@@ -390,6 +421,7 @@ export default function ProfilePage() {
                 onClick={() => {
                   setFullName(portalUser.full_name)
                   setCompanyName(portalUser.company_name)
+                  setMobile(portalUser.mobile ?? "")
                   setAddresses(checkoutDefaultsFromProfile(portalUser))
                   setIsEditing(false)
                 }}
