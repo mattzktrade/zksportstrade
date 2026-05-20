@@ -4,6 +4,7 @@ import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import type { PortalProfile } from "@/lib/types/profile"
+import { getCompanyTypeLabel } from "@/lib/types/profile"
 import { setProfileApproval } from "@/app/(admin)/actions"
 
 export function PendingUsersTable({ profiles }: { profiles: PortalProfile[] }) {
@@ -38,6 +39,7 @@ export function PendingUsersTable({ profiles }: { profiles: PortalProfile[] }) {
             <th className="p-3 font-medium">Name</th>
             <th className="p-3 font-medium">Email</th>
             <th className="p-3 font-medium">Company</th>
+            <th className="p-3 font-medium">Type</th>
             <th className="p-3 font-medium">Joined</th>
             <th className="p-3 font-medium w-[280px]">Actions</th>
           </tr>
@@ -68,6 +70,7 @@ function PendingRow({
       <td className="p-3 font-medium text-foreground">{profile.full_name || "—"}</td>
       <td className="p-3 text-muted-foreground">{profile.email}</td>
       <td className="p-3 text-muted-foreground">{profile.company_name || "—"}</td>
+      <td className="p-3 text-muted-foreground">{getCompanyTypeLabel(profile.company_type)}</td>
       <td className="p-3 text-muted-foreground whitespace-nowrap">
         {profile.created_at ? new Date(profile.created_at).toLocaleDateString() : "—"}
       </td>

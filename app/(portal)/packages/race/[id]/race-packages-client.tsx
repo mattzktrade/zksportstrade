@@ -1,11 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import type { Package, Race } from "@/lib/types/catalog"
-import { packageDurationLabel } from "@/lib/catalog/package-duration"
-import { ArrowLeft, MapPin, Calendar, Users, Check, ArrowRight, ChevronDown, Minus, Plus, ChevronLeft, ChevronRight, FileDown, Link2 } from "lucide-react"
+import { nameIncludesDurationLabel, packageDurationLabel } from "@/lib/catalog/package-duration"
+import { ArrowLeft, MapPin, Calendar, Check, ArrowRight, ChevronDown, Minus, Plus, ChevronLeft, ChevronRight, FileDown, Link2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -28,8 +28,24 @@ Dates: ${pkg.dateRange}
   return `mailto:${PACKAGE_ENQUIRY_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
 }
 
-export function RacePackagesClient({ race, racePackages }: { race: Race; racePackages: Package[] }) {
+export function RacePackagesClient({
+  race,
+  racePackages,
+  highlightPackageId,
+}: {
+  race: Race
+  racePackages: Package[]
+  highlightPackageId?: string
+}) {
   const [expandedPackage, setExpandedPackage] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!highlightPackageId) return
+    if (!racePackages.some((p) => p.id === highlightPackageId)) return
+    setExpandedPackage(highlightPackageId)
+    const el = document.getElementById(`package-${highlightPackageId}`)
+    el?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }, [highlightPackageId, racePackages])
 
   return (
     <>
@@ -117,6 +133,7 @@ export function RacePackagesClient({ race, racePackages }: { race: Race; racePac
                   <PackageRow
                     key={pkg.id}
                     pkg={pkg}
+                    rowId={`package-${pkg.id}`}
                     isExpanded={expandedPackage === pkg.id}
                     onToggle={() => setExpandedPackage(expandedPackage === pkg.id ? null : pkg.id)}
                   />
@@ -132,10 +149,12 @@ export function RacePackagesClient({ race, racePackages }: { race: Race; racePac
 
 function PackageRow({
   pkg,
+  rowId,
   isExpanded,
   onToggle,
 }: {
   pkg: Package
+  rowId: string
   isExpanded: boolean
   onToggle: () => void
 }) {
@@ -152,7 +171,7 @@ function PackageRow({
   const packageImages = [primaryImage, ...extras.map((u) => u.trim())]
 
   return (
-    <div>
+    <div id={rowId} className="scroll-mt-24">
       {/* Desktop Row */}
       <div
         className={cn(
@@ -275,21 +294,13 @@ function PackageRow({
                 {/* Package Info */}
                 <div>
                   <h3 className="text-lg sm:text-xl font-bold text-foreground mb-2 sm:mb-3">{pkg.name}</h3>
-                  <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs sm:text-sm text-muted-foreground mb-3 sm:mb-4">
-                    <div className="flex items-center gap-1.5">
-                      <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span>{pkg.dateRange}</span>
-                    </div>
-                    {packageDurationLabel(pkg.duration) ? (
-                      <span className="rounded-md border border-border bg-muted/50 px-2 py-0.5 text-foreground font-medium">
+                  {packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name) ? (
+                    <div className="mb-3 sm:mb-4">
+                      <span className="inline-flex rounded-md border border-border bg-muted/50 px-2 py-0.5 text-xs sm:text-sm text-foreground font-medium">
                         {packageDurationLabel(pkg.duration)}
                       </span>
-                    ) : null}
-                    <div className="flex items-center gap-1.5">
-                      <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span>Suite Capacity: {pkg.totalCapacity}</span>
                     </div>
-                  </div>
+                  ) : null}
                 </div>
 
                 {/* Package Description */}

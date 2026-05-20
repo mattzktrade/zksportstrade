@@ -5,9 +5,11 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { requestPasswordReset } from "./actions"
+import { signInWithPasswordAction } from "./sign-in-actions"
 import { Loader2 } from "lucide-react"
 import { AuthCardBrand } from "@/components/auth-card-brand"
 import { safeRedirectPath } from "@/lib/auth/safe-redirect"
+import { normalizeSignInEmail } from "@/lib/auth/sign-in-email"
 import { useHashAuthRedirect } from "@/hooks/use-hash-auth-redirect"
 
 export function LoginForm() {
@@ -37,11 +39,10 @@ export function LoginForm() {
     setLoading(true)
     setMessage(null)
     setResendSuccess(null)
-    const supabase = createClient()
-    const { error: signError } = await supabase.auth.signInWithPassword({ email, password })
+    const result = await signInWithPasswordAction(email, password)
     setLoading(false)
-    if (signError) {
-      setMessage(signError.message)
+    if (!result.ok) {
+      setMessage(result.message)
       return
     }
     router.push(redirect)

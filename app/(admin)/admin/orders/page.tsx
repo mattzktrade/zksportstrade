@@ -17,12 +17,20 @@ export default async function AdminOrdersPage() {
 
   return (
     <div className="p-6 lg:p-8 max-w-[1400px] space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Orders</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Live portal checkouts from Supabase. Search and sort the table, filter by invoice workflow, and update invoice
-          status (defaults to waiting to be invoiced). Stock is decremented when an order is placed.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Orders</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Live portal bookings from Supabase. Search and sort the table, filter by payment status, and update workflow
+            (defaults to confirmed). Stock is decremented when a booking is placed.
+          </p>
+        </div>
+        <Link
+          href="/admin/place-order"
+          className="inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90"
+        >
+          Place order for agent
+        </Link>
       </div>
 
       <OrdersAdminClient orders={orders} />

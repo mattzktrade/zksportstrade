@@ -16,10 +16,13 @@ export function normalizeInvoiceStatus(raw: string): InvoiceWorkflowStatus {
 }
 
 export const invoiceWorkflowStatusLabels: Record<InvoiceWorkflowStatus, string> = {
-  awaiting_invoice: "Waiting to be invoiced",
-  awaiting_payment: "Waiting for payment",
+  awaiting_invoice: "Confirmed",
+  awaiting_payment: "Awaiting payment",
   paid: "Paid",
 }
+
+/** Agent-facing payment labels (no separate portal invoice number). */
+export const paymentWorkflowStatusLabels = invoiceWorkflowStatusLabels
 
 export function isOutstandingInvoiceStatus(status: string | null | undefined): boolean {
   if (status == null || status === "") return false

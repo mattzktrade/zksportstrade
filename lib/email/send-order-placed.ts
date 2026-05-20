@@ -4,7 +4,6 @@ export type OrderEmailPayload = {
   agentEmail: string
   agentName: string
   orderReference: string
-  invoiceReference: string
   packageName: string
   circuit: string
   guests: number
@@ -48,9 +47,8 @@ function formatMoney(amount: number, currency: string): string {
 function buildHtml(p: OrderEmailPayload): string {
   const lines = [
     `<p>Hi ${escapeHtml(p.agentName)},</p>`,
-    `<p>Please see below confirmation of your order. We will send you an invoice separately shortly.</p>`,
-    `<p><strong>Order reference:</strong> ${escapeHtml(p.orderReference)}<br/>`,
-    `<strong>Invoice reference (pending):</strong> ${escapeHtml(p.invoiceReference)}</p>`,
+    `<p>Please see below confirmation of your booking. Our finance team will be in touch regarding payment separately.</p>`,
+    `<p><strong>Booking reference:</strong> ${escapeHtml(p.orderReference)}</p>`,
     `<p><strong>Experience</strong><br/>${escapeHtml(p.packageName)} — ${escapeHtml(p.circuit)}<br/>`,
     `Guests: ${p.guests}<br/>`,
     `Total: ${escapeHtml(formatMoney(p.totalAmount, p.currency))}</p>`,

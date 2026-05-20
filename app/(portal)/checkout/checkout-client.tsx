@@ -41,7 +41,6 @@ export function CheckoutClient({
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [completedSummary, setCompletedSummary] = useState<{
     orderReference: string
-    invoiceReference: string
     totalAmount: number
     currency: string
     guests: number
@@ -111,7 +110,6 @@ export function CheckoutClient({
     }
     setCompletedSummary({
       orderReference: result.orderReference,
-      invoiceReference: result.invoiceReference,
       totalAmount: result.totalAmount,
       currency: result.currency,
       guests: result.guests,
@@ -151,7 +149,7 @@ export function CheckoutClient({
             </div>
           ) : (
             <p className="text-sm sm:text-base text-muted-foreground mb-6 sm:mb-8">
-              You should receive a booking confirmation email and an invoice shortly.
+              You should receive a booking confirmation email shortly. Payment details will follow from our team separately.
             </p>
           )}
 
@@ -159,12 +157,8 @@ export function CheckoutClient({
             <h3 className="text-sm sm:text-base font-semibold text-foreground mb-3 sm:mb-4">Summary</h3>
             <dl className="space-y-2 sm:space-y-3 text-xs sm:text-sm">
               <div className="flex justify-between gap-2">
-                <dt className="text-muted-foreground shrink-0">Order reference</dt>
+                <dt className="text-muted-foreground shrink-0">Booking reference</dt>
                 <dd className="font-mono font-semibold text-right">{completedSummary.orderReference}</dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-muted-foreground shrink-0">Invoice reference</dt>
-                <dd className="font-mono font-semibold text-right">{completedSummary.invoiceReference}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">Package</dt>
@@ -424,9 +418,9 @@ export function CheckoutClient({
                 </div>
 
                 <div className="bg-card rounded-2xl border border-border p-4 sm:p-6 space-y-3">
-                  <h3 className="text-sm font-semibold text-foreground">Pay by invoice</h3>
+                  <h3 className="text-sm font-semibold text-foreground">Payment</h3>
                   <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
-                    You will receive an invoice shortly after confirmation. Unless otherwise stated on the invoice, payment is due within{" "}
+                    Payment is arranged offline after confirmation. Our team will contact you with terms; unless otherwise agreed, payment is typically due within{" "}
                     <span className="font-medium text-foreground">7 days</span>. Failure to pay on time may result in your booking being cancelled.
                   </p>
                   <div>

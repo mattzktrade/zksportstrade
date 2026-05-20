@@ -56,28 +56,24 @@ const faqs = [
       },
       {
         q: "What does the payment status on a booking mean?",
-        a: "Each booking is linked to an invoice with one of three statuses: Waiting to be invoiced (order received, finance has not issued the invoice yet), Waiting for payment (invoice issued — payment outstanding), or Paid. This mirrors what you see on the Invoices page and is updated by our team when payments are recorded.",
+        a: "Each booking shows a payment status: Confirmed (booking received, payment not yet due), Awaiting payment (payment outstanding), or Paid. Use the payment filter on My Bookings. Status is updated by our team when payments are recorded in Xero.",
       },
     ],
   },
   {
-    category: "Invoices & payment",
+    category: "Payment",
     questions: [
       {
         q: "How does payment work?",
-        a: "We do not take card payments through this portal. After you book, our team raises an invoice to you. Payment terms are on that invoice — typically payment is due within seven calendar days of the invoice date unless we state otherwise.",
+        a: "We do not take card payments through this portal. After you book, our finance team will contact you with payment terms — typically payment is due within seven calendar days unless we agree otherwise. Your official invoice will come from Xero separately.",
       },
       {
-        q: "Where can I see invoice status?",
-        a: "Open Invoices for a list of all invoices linked to your orders. You can filter by status and see amounts and issue dates. Summary cards at the top show totals for waiting to be invoiced, waiting for payment, and paid.",
-      },
-      {
-        q: "When does an invoice show an issue date?",
-        a: "The issue date appears once our team has issued the invoice (status moves to Waiting for payment). Before that, while status is Waiting to be invoiced, no issue date is shown. The date updates in the portal when we change the status.",
+        q: "Where can I see payment status?",
+        a: "Open My Bookings and use the payment status filter. Each row shows Confirmed, Awaiting payment, or Paid for that booking reference.",
       },
       {
         q: "How do I know when payment has been received?",
-        a: "When we record your payment, the invoice and linked booking will show as Paid. If you have paid but the portal still shows outstanding, contact us with your payment reference and we will update it.",
+        a: "When we record your payment, the booking will show as Paid. If you have paid but the portal still shows outstanding, contact us with your booking reference and payment details and we will update it.",
       },
     ],
   },

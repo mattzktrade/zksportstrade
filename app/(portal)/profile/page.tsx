@@ -6,6 +6,11 @@ import { usePortalUser } from "@/components/portal-user-provider"
 import { createClient } from "@/lib/supabase/client"
 import { checkoutDefaultsFromProfile } from "@/lib/types/checkout-addresses"
 import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
+import {
+  COMPANY_TYPE_OPTIONS,
+  getCompanyTypeLabel,
+  type CompanyType,
+} from "@/lib/types/profile"
 import { User, Mail, Building2, Phone, Edit3, Save, X, Lock } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -19,6 +24,7 @@ export default function ProfilePage() {
 
   const [fullName, setFullName] = useState(portalUser.full_name)
   const [companyName, setCompanyName] = useState(portalUser.company_name)
+  const [companyType, setCompanyType] = useState<CompanyType | "">(portalUser.company_type ?? "")
   const [mobile, setMobile] = useState(portalUser.mobile ?? "")
   const [addresses, setAddresses] = useState<CheckoutAddressFields>(() => checkoutDefaultsFromProfile(portalUser))
 
@@ -26,12 +32,14 @@ export default function ProfilePage() {
     if (!isEditing) {
       setFullName(portalUser.full_name)
       setCompanyName(portalUser.company_name)
+      setCompanyType(portalUser.company_type ?? "")
       setMobile(portalUser.mobile ?? "")
       setAddresses(checkoutDefaultsFromProfile(portalUser))
     }
   }, [
     portalUser.full_name,
     portalUser.company_name,
+    portalUser.company_type,
     portalUser.mobile,
     portalUser.shipping_address_line1,
     portalUser.shipping_address_line2,
@@ -57,6 +65,7 @@ export default function ProfilePage() {
       .update({
         full_name: fullName.trim(),
         company_name: companyName.trim(),
+        company_type: companyType || null,
         mobile: mobile.trim(),
         shipping_address_line1: addresses.shippingAddressLine1.trim(),
         shipping_address_line2: addresses.shippingAddressLine2.trim(),
@@ -138,7 +147,7 @@ export default function ProfilePage() {
             <div>
               <h2 className="text-lg sm:text-xl font-semibold text-foreground">Account</h2>
               <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-                Name, company, mobile number, and saved checkout addresses
+                Name, company, company type, mobile number, and saved checkout addresses
               </p>
             </div>
             <button
@@ -147,6 +156,7 @@ export default function ProfilePage() {
                 if (isEditing) {
                   setFullName(portalUser.full_name)
                   setCompanyName(portalUser.company_name)
+                  setCompanyType(portalUser.company_type ?? "")
                   setMobile(portalUser.mobile ?? "")
                   setAddresses(checkoutDefaultsFromProfile(portalUser))
                 }
@@ -208,6 +218,30 @@ export default function ProfilePage() {
                     : "bg-transparent border border-border",
                 )}
               />
+            </div>
+
+            <div>
+              <label className="flex items-center gap-2 text-sm font-medium text-foreground mb-2">
+                Company type
+              </label>
+              {isEditing ? (
+                <select
+                  value={companyType}
+                  onChange={(e) => setCompanyType(e.target.value as CompanyType)}
+                  className="w-full px-4 py-3 rounded-xl text-sm bg-muted/50 border border-border focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="">Select company type</option>
+                  {COMPANY_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <p className="w-full px-4 py-3 rounded-xl text-sm border border-border text-foreground">
+                  {getCompanyTypeLabel(portalUser.company_type)}
+                </p>
+              )}
             </div>
 
             <div>
@@ -421,6 +455,7 @@ export default function ProfilePage() {
                 onClick={() => {
                   setFullName(portalUser.full_name)
                   setCompanyName(portalUser.company_name)
+                  setCompanyType(portalUser.company_type ?? "")
                   setMobile(portalUser.mobile ?? "")
                   setAddresses(checkoutDefaultsFromProfile(portalUser))
                   setIsEditing(false)

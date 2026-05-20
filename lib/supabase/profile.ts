@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server"
 import type { PortalProfile } from "@/lib/types/profile"
 
 const PROFILE_COLUMNS =
-  "id, email, full_name, company_name, mobile, role, approval_status, approval_note, shipping_address_line1, shipping_address_line2, shipping_city, shipping_postcode, shipping_country, billing_address_line1, billing_address_line2, billing_city, billing_postcode, billing_country" as const
+  "id, email, full_name, company_name, company_type, mobile, role, approval_status, approval_note, shipping_address_line1, shipping_address_line2, shipping_city, shipping_postcode, shipping_country, billing_address_line1, billing_address_line2, billing_city, billing_postcode, billing_country" as const
 
 export const getPortalProfile = cache(async (): Promise<PortalProfile | null> => {
   const supabase = await createClient()

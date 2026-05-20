@@ -5,12 +5,14 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { AuthCardBrand } from "@/components/auth-card-brand"
+import { COMPANY_TYPE_OPTIONS, type CompanyType } from "@/lib/types/profile"
 import { Loader2 } from "lucide-react"
 
 export default function SignupPage() {
   const router = useRouter()
   const [fullName, setFullName] = useState("")
   const [companyName, setCompanyName] = useState("")
+  const [companyType, setCompanyType] = useState<CompanyType | "">("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
@@ -30,6 +32,7 @@ export default function SignupPage() {
         data: {
           full_name: fullName.trim(),
           company_name: companyName.trim(),
+          company_type: companyType,
         },
       },
     })
@@ -99,6 +102,27 @@ export default function SignupPage() {
             onChange={(e) => setCompanyName(e.target.value)}
             className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
           />
+        </div>
+        <div>
+          <label htmlFor="companyType" className="block text-sm font-medium text-foreground mb-1.5">
+            Company type
+          </label>
+          <select
+            id="companyType"
+            required
+            value={companyType}
+            onChange={(e) => setCompanyType(e.target.value as CompanyType)}
+            className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+          >
+            <option value="" disabled>
+              Select company type
+            </option>
+            {COMPANY_TYPE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <label htmlFor="email" className="block text-sm font-medium text-foreground mb-1.5">

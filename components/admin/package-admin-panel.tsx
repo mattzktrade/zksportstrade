@@ -10,9 +10,11 @@ import {
   updatePackageFields,
 } from "@/app/(admin)/actions"
 import type { AdminPackageRow, AdminRaceOption } from "@/lib/admin/queries"
+import { adminRaceLabel } from "@/lib/admin/race-label"
 import { PACKAGE_DURATION_OPTIONS } from "@/lib/catalog/package-duration"
 import { cn } from "@/lib/utils"
 import { PackageCostLayers } from "@/components/admin/package-cost-layers"
+import { PackagePortalVisibilityCheckbox } from "@/components/admin/package-portal-visibility"
 
 function linesToList(s: string): string[] {
   return s
@@ -75,6 +77,7 @@ export function PackageAdminPanel({
   const [tradePrice, setTradePrice] = useState(initial.trade_price != null ? String(initial.trade_price) : "")
   const [isEnquiry, setIsEnquiry] = useState(initial.is_enquiry)
   const [featured, setFeatured] = useState(initial.featured)
+  const [isHidden, setIsHidden] = useState(initial.is_hidden)
   const [sortOrder, setSortOrder] = useState(String(initial.sort_order))
   const [brochureUrl, setBrochureUrl] = useState(typeof initial.brochure_url === "string" ? initial.brochure_url : "")
   const [qtyAvailable, setQtyAvailable] = useState(String(initial.inventory?.qty_available ?? 0))
@@ -99,6 +102,7 @@ export function PackageAdminPanel({
     setTradePrice(initial.trade_price != null ? String(initial.trade_price) : "")
     setIsEnquiry(initial.is_enquiry)
     setFeatured(initial.featured)
+    setIsHidden(initial.is_hidden)
     setSortOrder(String(initial.sort_order))
     setBrochureUrl(typeof initial.brochure_url === "string" ? initial.brochure_url : "")
     setQtyAvailable(String(initial.inventory?.qty_available ?? 0))
@@ -150,6 +154,7 @@ export function PackageAdminPanel({
         trade_price: price,
         is_enquiry: isEnquiry,
         featured,
+        is_hidden: isHidden,
         sort_order: so,
         brochure_url: brochureUrl.trim() || null,
       })
@@ -222,6 +227,7 @@ export function PackageAdminPanel({
       {showDetails ? (
       <div className="space-y-3 min-w-0">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Package details</p>
+        <PackagePortalVisibilityCheckbox packageId={initial.id} isHidden={initial.is_hidden} className="mb-1" />
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-xs text-muted-foreground sm:col-span-2">
             Race
@@ -232,7 +238,7 @@ export function PackageAdminPanel({
             >
               {races.map((r) => (
                 <option key={r.id} value={r.id}>
-                  {r.name} ({r.date_range})
+                  {adminRaceLabel(r)}
                 </option>
               ))}
             </select>

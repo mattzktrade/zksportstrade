@@ -4,8 +4,8 @@ import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import type { AdminPackageRow, AdminRaceOption } from "@/lib/admin/queries"
+import { adminCatalogProductTitleFromPackage } from "@/lib/admin/catalog-product-title"
 import type { AdminOrderListRow } from "@/lib/orders/queries"
-import { packageDurationLabel } from "@/lib/catalog/package-duration"
 import { adminPackagePath, parseAdminPackageTab, type AdminPackageTab } from "@/lib/admin/package-link"
 import { PackageAdminPanel } from "@/components/admin/package-admin-panel"
 import { PackageOrdersTable } from "@/components/admin/package-orders-table"
@@ -38,8 +38,8 @@ export function PackageDetailClient({
     router.replace(adminPackagePath(pkg.id, tab === "details" ? undefined : tab), { scroll: false })
   }
 
-  const raceLabel = races.find((r) => r.id === pkg.race_id)?.name ?? pkg.race_name
-  const durationLabel = packageDurationLabel(pkg.duration)
+  const raceMatch = races.find((r) => r.id === pkg.race_id)
+  const displayTitle = adminCatalogProductTitleFromPackage(pkg, raceMatch)
   const sellable = sellableQty(pkg)
 
   return (
@@ -49,13 +49,10 @@ export function PackageDetailClient({
           <Link href="/admin/catalog" className="text-sm text-primary hover:underline">
             ← Catalog
           </Link>
-          <h1 className="text-2xl font-bold text-foreground truncate">{pkg.name}</h1>
-          <p className="text-sm text-muted-foreground">
-            {raceLabel}
-            {pkg.circuit ? ` · ${pkg.circuit}` : ""}
-            {durationLabel ? ` · ${durationLabel}` : ""}
-          </p>
-          <p className="text-xs font-mono text-muted-foreground">{pkg.id}</p>
+          <h1 className="text-2xl font-bold text-foreground leading-snug">{displayTitle}</h1>
+          {pkg.is_hidden ? (
+            <p className="text-xs text-muted-foreground">Hidden from agent portal</p>
+          ) : null}
         </div>
         <div className="flex flex-col items-end gap-1 text-sm shrink-0 text-right">
           <span className="text-muted-foreground">

@@ -1,5 +1,11 @@
 import type { Package, Race } from "@/lib/types/catalog"
 import { bookableEventDateFrom } from "@/lib/catalog/bookable-events"
+import { seasonFromRaceId } from "@/lib/catalog/season-rollover"
+import {
+  buildPortalSeasonSlices,
+  DEFAULT_PORTAL_SEASON,
+  type PortalCatalog,
+} from "@/lib/catalog/portal-catalog"
 import { INVENTORY_COLUMNS, PACKAGE_COLUMNS, RACE_COLUMNS } from "@/lib/catalog/columns"
 import { createClient } from "@/lib/supabase/server"
 import {
@@ -71,34 +77,53 @@ async function fetchInventoryForPackages(
   return (data ?? []) as DbInventory[]
 }
 
-export async function getCatalog(agentProfileId?: string | null): Promise<{ races: Race[]; packages: Package[] } | null> {
-  const supabase = await createClient()
-  const bookableFrom = bookableEventDateFrom()
+function packageVisibleInPortal(dbPkg: DbPackage, raceSeason: number | null, bookableFrom: string): boolean {
+  const season = raceSeason ?? seasonFromRaceId(dbPkg.race_id)
+  if (season === 2027) return true
+  return dbPkg.event_date >= bookableFrom
+}
 
-  const { data: races, error: racesError } = await supabase
-    .from("races")
-    .select(RACE_COLUMNS)
-    .gte("event_date", bookableFrom)
-    .order("event_date")
-  const { data: packages, error: packagesError } = await supabase
+async function fetchFullCatalogBase(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<{ races: Race[]; packages: Package[] } | null> {
+  const { data: allRaces, error: racesError } = await supabase.from("races").select(RACE_COLUMNS).order("event_date")
+  const { data: allPackages, error: packagesError } = await supabase
     .from("packages")
     .select(PACKAGE_COLUMNS)
-    .gte("event_date", bookableFrom)
     .order("sort_order")
   const { data: inventory, error: invError } = await supabase.from("package_inventory").select(INVENTORY_COLUMNS)
 
   if (racesError || packagesError || invError) return null
-  if (!races || !packages) return null
+  if (!allRaces || !allPackages) return null
 
-  const base = buildCatalog(races as DbRace[], packages as DbPackage[], (inventory ?? []) as DbInventory[])
+  return buildCatalog(allRaces as DbRace[], allPackages as DbPackage[], (inventory ?? []) as DbInventory[])
+}
 
-  if (!agentProfileId) return base
+export async function getPortalCatalog(agentProfileId?: string | null): Promise<PortalCatalog | null> {
+  const supabase = await createClient()
+  const base = await fetchFullCatalogBase(supabase)
+  if (!base) return null
 
-  const holdAgg = await fetchAgentHoldAggregates(supabase, agentProfileId)
-  if (holdAgg.size === 0) return base
+  let { races, packages } = base
 
-  const mergedPackages = mergeAgentHoldAvailability(base.packages, holdAgg)
-  return { races: base.races, packages: mergedPackages }
+  if (agentProfileId) {
+    const holdAgg = await fetchAgentHoldAggregates(supabase, agentProfileId)
+    if (holdAgg.size > 0) {
+      packages = mergeAgentHoldAvailability(packages, holdAgg)
+    }
+  }
+
+  const seasons = buildPortalSeasonSlices(races, packages)
+  return { seasons, defaultSeasonYear: DEFAULT_PORTAL_SEASON }
+}
+
+/** Flat list of all portal seasons (admin place-order, legacy callers). */
+export async function getCatalog(agentProfileId?: string | null): Promise<{ races: Race[]; packages: Package[] } | null> {
+  const portal = await getPortalCatalog(agentProfileId)
+  if (!portal) return null
+  const races = portal.seasons.flatMap((s) => s.races)
+  const packages = portal.seasons.flatMap((s) => s.packages)
+  return { races, packages }
 }
 
 /** One race and its packages only (for `/packages/race/[id]`). */
@@ -116,7 +141,9 @@ export async function getRaceCatalog(
   if (raceError || !raceRow) return null
 
   const dbRace = raceRow as DbRace
-  if (dbRace.event_date < bookableEventDateFrom()) return null
+  const bookableFrom = bookableEventDateFrom()
+  const season = dbRace.season ?? seasonFromRaceId(dbRace.id)
+  if (season === 2026 && dbRace.event_date < bookableFrom) return null
 
   const { data: packageRows, error: pkgError } = await supabase
     .from("packages")
@@ -149,7 +176,16 @@ export async function getPackageById(id: string, agentProfileId?: string | null)
   if (error || !p) return null
 
   const dbPkg = p as DbPackage
-  if (dbPkg.event_date < bookableEventDateFrom()) return null
+  const bookableFrom = bookableEventDateFrom()
+
+  const { data: raceRow } = await supabase
+    .from("races")
+    .select("id, season, event_date")
+    .eq("id", dbPkg.race_id)
+    .maybeSingle()
+  if (!raceRow) return null
+  const raceSeason = (raceRow as DbRace).season ?? seasonFromRaceId(dbPkg.race_id)
+  if (!packageVisibleInPortal(dbPkg, raceSeason, bookableFrom)) return null
 
   const { data: inv } = await supabase.from("package_inventory").select(INVENTORY_COLUMNS).eq("package_id", id).maybeSingle()
   let pkg = mapPackageRow(dbPkg, inv as DbInventory | undefined)

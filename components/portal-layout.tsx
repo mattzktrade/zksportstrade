@@ -4,7 +4,7 @@ import type React from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import Image from "next/image"
-import { LayoutDashboard, Ticket, CalendarCheck, FileText, HelpCircle, LogOut, Menu, Shield } from "lucide-react"
+import { LayoutDashboard, Ticket, CalendarCheck, HelpCircle, LogOut, Menu, Shield } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
 import { createClient } from "@/lib/supabase/client"
@@ -21,7 +21,6 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
     { name: "Dashboard", href: "/", icon: LayoutDashboard },
     { name: "All Packages", href: "/packages", icon: Ticket },
     { name: "My Bookings", href: "/bookings", icon: CalendarCheck },
-    { name: "Invoices", href: "/invoices", icon: FileText },
     { name: "FAQs", href: "/faqs", icon: HelpCircle },
     ...(profile.role === "admin" ? [{ name: "Admin", href: "/admin", icon: Shield }] : []),
   ]

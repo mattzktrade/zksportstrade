@@ -31,8 +31,8 @@ export default async function AdminAgentsPage({
       <div>
         <h1 className="text-2xl font-bold text-foreground">Agents</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Approved trade partners with live order counts, open invoice counts, and net sales from Supabase. Expand a row
-          to set each invoice workflow status (agents see the same values on Invoices).
+          Approved trade partners with live order counts, open payment counts, and net sales from Supabase. Expand a row
+          to set each booking payment status (agents see the same values on My Bookings).
         </p>
       </div>
 

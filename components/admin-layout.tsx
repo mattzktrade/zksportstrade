@@ -14,6 +14,7 @@ import {
   Menu,
   ArrowLeft,
   ClipboardList,
+  ShoppingCart,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
@@ -23,8 +24,9 @@ const navigation = [
   { name: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { name: "Pending users", href: "/admin/pending-users", icon: Users },
   { name: "Catalog", href: "/admin/catalog", icon: Ticket },
-  { name: "Inventory & holds", href: "/admin/inventory", icon: Boxes },
+  { name: "Holds", href: "/admin/inventory", icon: Boxes },
   { name: "Orders", href: "/admin/orders", icon: ClipboardList },
+  { name: "Place order", href: "/admin/place-order", icon: ShoppingCart },
   { name: "Agents", href: "/admin/agents", icon: UserCircle },
 ]
 

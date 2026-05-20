@@ -24,7 +24,7 @@ export default async function AdminDashboardPage() {
   const cards = [
     { label: "Pending signups", value: pending ?? 0, href: "/admin/pending-users" },
     { label: "Packages in catalog", value: packages ?? 0, href: "/admin/catalog" },
-    { label: "Active inventory holds", value: activeHolds ?? 0, href: "/admin/inventory" },
+    { label: "Active holds", value: activeHolds ?? 0, href: "/admin/inventory" },
     { label: "Portal orders", value: orders ?? 0, href: "/admin/orders" },
   ]
 

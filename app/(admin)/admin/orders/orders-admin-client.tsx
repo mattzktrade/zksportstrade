@@ -22,8 +22,7 @@ type SortKey =
   | "cogs"
   | "profit"
   | "margin"
-  | "invoice_ref"
-  | "invoice_status"
+  | "payment_status"
 
 function formatPct(value: number): string {
   return `${(value * 100).toFixed(1)}%`
@@ -50,7 +49,6 @@ function matchesSearch(o: AdminOrderListRow, q: string): boolean {
     o.reference,
     pkg?.name ?? "",
     pkg?.circuit ?? "",
-    o.invoice?.reference ?? "",
     o.agent?.company_name ?? "",
     o.agent?.full_name ?? "",
     o.agent?.email ?? "",
@@ -108,11 +106,9 @@ function compare(a: AdminOrderListRow, b: AdminOrderListRow, key: SortKey, dir: 
       const mb = b.profit.margin ?? Number.NEGATIVE_INFINITY
       return (ma - mb) * m
     }
-    case "invoice_ref":
-      return (a.invoice?.reference ?? "").localeCompare(b.invoice?.reference ?? "") * m
-    case "invoice_status": {
+    case "payment_status": {
       const diff = invoiceStatusRank(a.invoice?.status ?? "") - invoiceStatusRank(b.invoice?.status ?? "")
-      return diff * m || (a.invoice?.reference ?? "").localeCompare(b.invoice?.reference ?? "") * m
+      return diff * m || a.reference.localeCompare(b.reference) * m
     }
     default:
       return 0
@@ -165,7 +161,7 @@ function SortTh({
 const invoiceFilterTabs: { value: InvoiceFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "open", label: "Not paid" },
-  { value: "awaiting_invoice", label: "To invoice" },
+  { value: "awaiting_invoice", label: "Confirmed" },
   { value: "awaiting_payment", label: "Awaiting payment" },
   { value: "paid", label: "Paid" },
   { value: "none", label: "No invoice" },
@@ -245,7 +241,7 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
           <input
             id="orders-search"
             type="search"
-            placeholder="Search reference, package, invoice, agent…"
+            placeholder="Search booking reference, package, agent…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full px-4 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
@@ -364,11 +360,10 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
                   className="text-right"
                   alignRight
                 />
-                <SortTh label="Invoice" activeKey={sortKey} sortKey="invoice_ref" sortDir={sortDir} onSort={toggleSort} />
                 <SortTh
-                  label="Inv. status"
+                  label="Payment"
                   activeKey={sortKey}
-                  sortKey="invoice_status"
+                  sortKey="payment_status"
                   sortDir={sortDir}
                   onSort={toggleSort}
                 />
@@ -427,9 +422,6 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
                       {o.profit.margin != null ? formatPct(o.profit.margin) : "—"}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                      {o.invoice?.reference ?? "—"}
                     </td>
                     <td className="px-4 py-3 min-w-[200px]">
                       <AdminInvoiceStatusSelect

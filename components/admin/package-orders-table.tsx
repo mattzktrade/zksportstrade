@@ -92,8 +92,7 @@ export function PackageOrdersTable({ orders }: { orders: AdminOrderListRow[] }) 
               <th className="px-4 py-3 font-medium text-right">COGS</th>
               <th className="px-4 py-3 font-medium text-right">Gross profit</th>
               <th className="px-4 py-3 font-medium text-right">Margin</th>
-              <th className="px-4 py-3 font-medium">Invoice</th>
-              <th className="px-4 py-3 font-medium min-w-[180px]">Status</th>
+              <th className="px-4 py-3 font-medium min-w-[180px]">Payment</th>
               <th className="px-4 py-3 font-medium">Created</th>
             </tr>
           </thead>
@@ -132,9 +131,6 @@ export function PackageOrdersTable({ orders }: { orders: AdminOrderListRow[] }) 
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
                   {o.profit.margin != null ? formatPct(o.profit.margin) : "—"}
-                </td>
-                <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                  {o.invoice?.reference ?? "—"}
                 </td>
                 <td className="px-4 py-3">
                   <AdminInvoiceStatusSelect

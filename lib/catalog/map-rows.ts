@@ -27,6 +27,7 @@ type DbPackage = {
   currency: string
   total_capacity: number
   is_enquiry: boolean
+  is_hidden: boolean
   image: string | null
   tier: string
   duration?: string | null
@@ -120,7 +121,9 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
 }
 
 export function mapRaceRow(r: DbRace, packages: Package[]): Race {
-  const racePackages = packages.filter((pkg) => pkg.date === r.event_date || pkg.circuit.includes(r.short_name))
+  const racePackages = packages.filter(
+    (pkg) => pkg.raceId === r.id || (!pkg.raceId && (pkg.date === r.event_date || pkg.circuit.includes(r.short_name))),
+  )
   const validPrices = racePackages.map((p) => p.price).filter((p): p is number => p !== null && p > 0)
   const lowestPrice = validPrices.length > 0 ? Math.min(...validPrices) : 0
 
@@ -136,6 +139,7 @@ export function mapRaceRow(r: DbRace, packages: Package[]): Race {
     image: r.image,
     packagesAvailable: racePackages.length,
     lowestPrice,
+    season: r.season,
   }
 }
 

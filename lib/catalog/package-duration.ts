@@ -20,6 +20,36 @@ export function packageDurationLabel(value: string | null | undefined): string |
   return LABEL_BY_VALUE[value] ?? value.replace(/_/g, " ")
 }
 
+/** True when the stored name already includes day / session wording from the sheet. */
+export function nameIncludesDurationLabel(name: string): boolean {
+  const n = name.trim()
+  return (
+    /^\d+\s*Days?\s/i.test(n) ||
+    /^Saturday\s*(?:&|and)\s*Sunday\s/i.test(n) ||
+    /^(?:Friday|Saturday|Sunday)\s+/i.test(n)
+  )
+}
+
+/** Short prefix for admin catalog titles, e.g. "3 Day", "Sunday". */
+export function packageDurationTitlePrefix(value: string | null | undefined): string | null {
+  switch (value) {
+    case "3_day":
+      return "3 Day"
+    case "2_day":
+      return "2 Day"
+    case "thursday_only":
+      return "Thursday"
+    case "friday_only":
+      return "Friday"
+    case "saturday_only":
+      return "Saturday"
+    case "sunday_only":
+      return "Sunday"
+    default:
+      return null
+  }
+}
+
 export function isValidPackageDuration(value: string): boolean {
   return value in LABEL_BY_VALUE
 }

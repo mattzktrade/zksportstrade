@@ -16,10 +16,10 @@ const actions = [
     href: "/packages",
   },
   {
-    title: "View Invoices",
+    title: "My Bookings",
     description: "Check payment status",
     icon: FileText,
-    href: "/invoices",
+    href: "/bookings",
   },
   {
     title: "Get Support",

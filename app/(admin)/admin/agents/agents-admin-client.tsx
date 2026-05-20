@@ -68,9 +68,9 @@ export function AgentsAdminClient({ rows }: { rows: AdminAgentWithStats[] }) {
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-muted-foreground">
                           <p>
                             <span className="font-medium text-foreground">Recent orders</span> (up to 40, newest
-                            first). Net sales exclude cancelled orders. Unpaid counts invoices that are not yet{" "}
-                            <span className="font-medium">paid</span> (waiting to be invoiced or waiting for payment).
-                            Agents see the same status on Invoices.
+                            first). Net sales exclude cancelled orders.                             Unpaid counts bookings that are not yet{" "}
+                            <span className="font-medium">paid</span> (confirmed or awaiting payment).
+                            Agents see the same payment status on My Bookings.
                           </p>
                           <Link href="/admin/orders" className="text-primary font-medium hover:underline shrink-0">
                             View all orders
@@ -87,8 +87,7 @@ export function AgentsAdminClient({ rows }: { rows: AdminAgentWithStats[] }) {
                                   <th className="px-3 py-2 font-medium">Date</th>
                                   <th className="px-3 py-2 font-medium">Package</th>
                                   <th className="px-3 py-2 font-medium text-right">Total</th>
-                                  <th className="px-3 py-2 font-medium">Invoice</th>
-                                  <th className="px-3 py-2 font-medium">Inv. status</th>
+                                  <th className="px-3 py-2 font-medium">Payment</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -109,9 +108,6 @@ export function AgentsAdminClient({ rows }: { rows: AdminAgentWithStats[] }) {
                                     </td>
                                     <td className="px-3 py-2 text-right tabular-nums font-medium">
                                       {formatMoney(o.currency, o.totalAmount)}
-                                    </td>
-                                    <td className="px-3 py-2 font-mono text-[11px] text-muted-foreground">
-                                      {o.invoiceReference ?? "—"}
                                     </td>
                                     <td className="px-3 py-2">
                                       <AdminInvoiceStatusSelect

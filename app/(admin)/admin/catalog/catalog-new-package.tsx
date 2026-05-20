@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createPackage } from "@/app/(admin)/actions"
 import type { AdminRaceOption } from "@/lib/admin/queries"
+import { adminRaceLabel } from "@/lib/admin/race-label"
 import { PACKAGE_DURATION_OPTIONS } from "@/lib/catalog/package-duration"
 
 function currencyHint(currency: string): string {
@@ -189,7 +190,7 @@ export function CatalogNewPackage({ races }: { races: AdminRaceOption[] }) {
               >
                 {races.map((r) => (
                   <option key={r.id} value={r.id}>
-                    {r.name} ({r.date_range})
+                    {adminRaceLabel(r)}
                   </option>
                 ))}
               </select>

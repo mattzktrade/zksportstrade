@@ -5,9 +5,10 @@ import { INVENTORY_COLUMNS, PACKAGE_COLUMNS } from "@/lib/catalog/columns"
 import type { DbInventory, DbPackage } from "@/lib/catalog/map-rows"
 import { getCostLayersByPackage, summarizePackageCost, type CostLayerRow, type PackageCostSummary } from "@/lib/admin/cost-layers"
 
-const AGENT_PROFILE_COLUMNS = "id, email, full_name, company_name, mobile, role, approval_status, created_at" as const
+const AGENT_PROFILE_COLUMNS =
+  "id, email, full_name, company_name, company_type, mobile, role, approval_status, created_at" as const
 const PENDING_PROFILE_COLUMNS =
-  "id, email, full_name, company_name, approval_status, created_at, approval_note" as const
+  "id, email, full_name, company_name, company_type, approval_status, created_at, approval_note" as const
 
 export type AdminPackageRow = DbPackage & {
   inventory: DbInventory | null
@@ -25,13 +26,15 @@ export type AdminRaceOption = {
   location: string
   country: string
   country_code: string
+  season: number
 }
 
 export async function getAdminRaceOptions(): Promise<AdminRaceOption[]> {
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("races")
-    .select("id,name,short_name,date_range,event_date,location,country,country_code")
+    .select("id,name,short_name,date_range,event_date,location,country,country_code,season")
+    .order("season")
     .order("event_date")
   if (error || !data) return []
   return data as AdminRaceOption[]

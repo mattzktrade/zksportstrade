@@ -23,6 +23,8 @@ export interface Package {
   /** Extra gallery image URLs (primary `image` is always first slide) */
   galleryImages?: string[]
   featured?: boolean
+  /** When true, hidden from the agent portal until an admin shows it again. */
+  isHidden?: boolean
   /** HTTPS URL to brochure PDF or page for agents to share (from Supabase when set) */
   brochureUrl?: string | null
   /** Set when loaded from Supabase (used for navigation) */
@@ -45,6 +47,8 @@ export interface Race {
   image: string
   packagesAvailable: number
   lowestPrice: number
+  /** Calendar year from catalog (e.g. 2026, 2027). */
+  season?: number
 }
 
 export interface Booking {

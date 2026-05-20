@@ -10,7 +10,7 @@ import { isInvoiceWorkflowStatus, normalizeInvoiceStatus, type InvoiceWorkflowSt
 
 type ActionResult = { ok: true } | { ok: false; message: string }
 
-async function requireAdminAction(): Promise<
+export async function requireAdminAction(): Promise<
   | { ok: true; supabase: Awaited<ReturnType<typeof createClient>> }
   | { ok: false; message: string }
 > {
@@ -62,7 +62,6 @@ export async function updateInvoiceStatus(
 
   revalidatePath("/admin/agents")
   revalidatePath("/admin/orders")
-  revalidatePath("/invoices")
   revalidatePath("/bookings")
   return { ok: true }
 }
@@ -107,6 +106,7 @@ export async function updatePackageFields(input: {
   trade_price: number | null
   is_enquiry: boolean
   featured: boolean
+  is_hidden: boolean
   sort_order: number
   brochure_url: string | null
 }): Promise<ActionResult> {
@@ -154,6 +154,7 @@ export async function updatePackageFields(input: {
       includes: input.includes,
       trade_price: input.trade_price,
       is_enquiry: input.is_enquiry,
+      is_hidden: input.is_hidden,
       featured: input.featured,
       sort_order: Math.floor(Number(input.sort_order)) || 0,
       brochure_url: brochure,
@@ -162,15 +163,38 @@ export async function updatePackageFields(input: {
 
   if (error) return { ok: false, message: error.message }
 
-  const prevRace = (existing as { race_id: string }).race_id
-  const nextRace = input.race_id.trim()
+  revalidatePackagePaths((existing as { race_id: string }).race_id, input.race_id.trim())
+  return { ok: true }
+}
+
+export async function setPackageHidden(packageId: string, isHidden: boolean): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  const { supabase } = gate
+
+  const id = packageId.trim()
+  if (!id) return { ok: false, message: "Package id is missing." }
+
+  const { data: existing, error: exErr } = await supabase.from("packages").select("race_id").eq("id", id).maybeSingle()
+  if (exErr) return { ok: false, message: exErr.message }
+  if (!existing) return { ok: false, message: "Package not found." }
+
+  const { error } = await supabase.from("packages").update({ is_hidden: isHidden }).eq("id", id)
+  if (error) return { ok: false, message: error.message }
+
+  revalidatePackagePaths((existing as { race_id: string }).race_id)
+  return { ok: true }
+}
+
+function revalidatePackagePaths(...raceIds: string[]) {
   revalidatePath("/admin/catalog")
   revalidatePath("/admin/inventory")
   revalidatePath("/packages")
   revalidatePath("/")
-  revalidatePath(`/packages/race/${prevRace}`)
-  if (nextRace !== prevRace) revalidatePath(`/packages/race/${nextRace}`)
-  return { ok: true }
+  for (const rid of raceIds) {
+    const r = rid?.trim()
+    if (r) revalidatePath(`/packages/race/${r}`)
+  }
 }
 
 export async function createPackage(input: {
@@ -193,6 +217,7 @@ export async function createPackage(input: {
   trade_price: number | null
   is_enquiry: boolean
   featured: boolean
+  is_hidden?: boolean
   sort_order: number
   brochure_url: string | null
   initial_qty_available: number
@@ -258,6 +283,7 @@ export async function createPackage(input: {
     currency: (input.currency.trim() || "USD").slice(0, 8),
     total_capacity: cap,
     is_enquiry: input.is_enquiry,
+    is_hidden: input.is_hidden ?? false,
     tier: "paddock",
     duration: duration || null,
     includes: input.includes,
@@ -302,12 +328,8 @@ export async function createPackage(input: {
     }
   }
 
-  revalidatePath("/admin/catalog")
-  revalidatePath("/admin/inventory")
+  revalidatePackagePaths(input.race_id.trim())
   revalidatePath("/admin")
-  revalidatePath("/packages")
-  revalidatePath("/")
-  revalidatePath(`/packages/race/${input.race_id.trim()}`)
   return { ok: true }
 }
 

@@ -4,13 +4,13 @@ import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { sendOrderPlacedEmail } from "@/lib/email/send-order-placed"
+import { mapPlaceOrderError } from "@/lib/orders/place-order-errors"
 import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
 
 export type SubmitCheckoutResult =
   | {
       ok: true
       orderReference: string
-      invoiceReference: string
       orderId: string
       totalAmount: number
       currency: string
@@ -21,20 +21,6 @@ export type SubmitCheckoutResult =
       confirmationEmailNotice?: string
     }
   | { ok: false; error: string }
-
-function mapRpcError(message: string): string {
-  const m = message.toLowerCase()
-  if (m.includes("insufficient_stock")) return "Not enough capacity left for this package. Try fewer guests or another date."
-  if (m.includes("not_approved")) return "Your account is not approved to place orders yet."
-  if (m.includes("not_authenticated")) return "Please sign in again."
-  if (m.includes("package_enquiry_only")) return "This package cannot be booked online."
-  if (m.includes("package_price_missing")) return "This package has no trade price and cannot be booked online."
-  if (m.includes("package_not_found")) return "Package was not found."
-  if (m.includes("inventory_missing")) return "Inventory is not set up for this package."
-  if (m.includes("invalid_guests")) return "Guest count is invalid."
-  if (m.includes("event_has_ended")) return "This event has finished and is no longer available to book."
-  return "Could not complete the booking. Please try again or contact support."
-}
 
 export async function submitCheckoutOrder(
   input: {
@@ -83,7 +69,7 @@ export async function submitCheckoutOrder(
   })
 
   if (error) {
-    return { ok: false, error: mapRpcError(error.message ?? "") }
+    return { ok: false, error: mapPlaceOrderError(error.message ?? "") }
   }
 
   const row = data as Record<string, unknown> | null
@@ -92,7 +78,6 @@ export async function submitCheckoutOrder(
   }
 
   const orderReference = row.order_reference as string
-  const invoiceReference = (row.invoice_reference as string) ?? ""
   const orderId = String(row.order_id ?? "")
   const totalAmount = Number(row.total_amount ?? 0)
   const currency = String(row.currency ?? "USD")
@@ -119,7 +104,6 @@ export async function submitCheckoutOrder(
   }
 
   revalidatePath("/bookings")
-  revalidatePath("/invoices")
   revalidatePath("/profile")
   revalidatePath("/packages")
   revalidatePath("/admin/inventory")
@@ -132,7 +116,6 @@ export async function submitCheckoutOrder(
     agentEmail,
     agentName,
     orderReference,
-    invoiceReference,
     packageName: String(row.package_name ?? ""),
     circuit: String(row.circuit ?? ""),
     guests: guestCount,
@@ -177,7 +160,6 @@ export async function submitCheckoutOrder(
   return {
     ok: true,
     orderReference,
-    invoiceReference,
     orderId,
     totalAmount,
     currency,
