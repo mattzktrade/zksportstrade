@@ -6,7 +6,7 @@ export const CATALOG_REGIONS = [
   {
     id: "europe",
     name: "Europe",
-    countries: ["Monaco", "Spain", "Austria", "UK", "Belgium", "Hungary", "Netherlands", "Italy", "Azerbaijan"],
+    countries: ["Monaco", "Spain", "Portugal", "Austria", "UK", "Belgium", "Hungary", "Italy", "Türkiye", "Azerbaijan"],
   },
   { id: "americas", name: "Americas", countries: ["USA", "Canada", "Mexico", "Brazil"] },
 ] as const

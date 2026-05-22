@@ -4,8 +4,13 @@ import { useEffect, useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import type { Package, Race } from "@/lib/types/catalog"
+import {
+  clampToAllowedGuestCount,
+  lowStockGuestHint,
+  stepAllowedGuestCount,
+} from "@/lib/catalog/booking-guests"
 import { nameIncludesDurationLabel, packageDurationLabel } from "@/lib/catalog/package-duration"
-import { ArrowLeft, MapPin, Calendar, Check, ArrowRight, ChevronDown, Minus, Plus, ChevronLeft, ChevronRight, FileDown, Link2 } from "lucide-react"
+import { ArrowLeft, MapPin, Calendar, Users, Check, ArrowRight, ChevronDown, Minus, Plus, ChevronLeft, ChevronRight, FileDown, Link2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -158,13 +163,17 @@ function PackageRow({
   isExpanded: boolean
   onToggle: () => void
 }) {
-  const [guestCount, setGuestCount] = useState(1)
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const isAvailabilityString = typeof pkg.availability === "string"
-  const totalPrice = pkg.price ? pkg.price * guestCount : 0
   const sellable = typeof pkg.availability === "number" ? pkg.availability : 0
   const maxGuests = isAvailabilityString ? 1 : Math.min(sellable, pkg.totalCapacity)
+  const [guestCount, setGuestCount] = useState(() =>
+    isAvailabilityString ? 1 : clampToAllowedGuestCount(sellable, 1),
+  )
+  const totalPrice = pkg.price ? pkg.price * guestCount : 0
   const canBook = !isAvailabilityString && pkg.price !== null && sellable > 0
+  const stockHint = !isAvailabilityString ? lowStockGuestHint(sellable) : null
+  const includeItems = pkg.includes.map((item) => item.trim()).filter(Boolean)
 
   const primaryImage = pkg.image?.trim() || "/placeholder.svg"
   const extras = (pkg.galleryImages ?? []).filter((u) => typeof u === "string" && u.trim().length > 0 && u.trim() !== primaryImage)
@@ -294,13 +303,17 @@ function PackageRow({
                 {/* Package Info */}
                 <div>
                   <h3 className="text-lg sm:text-xl font-bold text-foreground mb-2 sm:mb-3">{pkg.name}</h3>
-                  {packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name) ? (
-                    <div className="mb-3 sm:mb-4">
+                  <div className="mb-3 sm:mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
+                    {packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name) ? (
                       <span className="inline-flex rounded-md border border-border bg-muted/50 px-2 py-0.5 text-xs sm:text-sm text-foreground font-medium">
                         {packageDurationLabel(pkg.duration)}
                       </span>
+                    ) : null}
+                    <div className="flex items-center gap-1.5 text-xs sm:text-sm text-muted-foreground">
+                      <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+                      <span>Suite capacity: {pkg.totalCapacity}</span>
                     </div>
-                  ) : null}
+                  </div>
                 </div>
 
                 {/* Package Description */}
@@ -310,17 +323,26 @@ function PackageRow({
                   </p>
                 </div>
 
-                {/* Package Inclusions */}
+                {/* Package inclusions + brochure */}
                 <div className="mt-auto">
-                  <h4 className="text-xs sm:text-sm font-semibold text-foreground mb-2 sm:mb-3">Package Includes</h4>
-                  <div className="space-y-1.5 sm:space-y-2">
-                    {pkg.includes.map((item) => (
-                      <div key={item} className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground">
-                        <Check className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary flex-shrink-0" />
-                        <span>{item}</span>
+                  {includeItems.length > 0 ? (
+                    <div className={pkg.brochureUrl ? "mb-4" : undefined}>
+                      <h4 className="text-xs sm:text-sm font-semibold text-foreground mb-2 sm:mb-3">
+                        Package Includes
+                      </h4>
+                      <div className="space-y-1.5 sm:space-y-2">
+                        {includeItems.map((item) => (
+                          <div
+                            key={item}
+                            className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground"
+                          >
+                            <Check className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary flex-shrink-0" />
+                            <span>{item}</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ) : null}
                   {pkg.brochureUrl ? (
                     <div className="mt-4 rounded-xl border border-border bg-muted/20 p-3 sm:p-4 space-y-2">
                       <p className="text-xs font-semibold text-foreground uppercase tracking-wide">Brochure</p>
@@ -392,12 +414,13 @@ function PackageRow({
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation()
-                                setGuestCount(Math.max(1, guestCount - 1))
+                                setGuestCount(stepAllowedGuestCount(sellable, guestCount, "down"))
                               }}
-                              disabled={guestCount <= 1}
+                              disabled={guestCount <= stepAllowedGuestCount(sellable, guestCount, "down")}
                               className={cn(
                                 "p-1.5 sm:p-2 rounded-lg border border-border hover:bg-muted transition-colors",
-                                guestCount <= 1 && "opacity-50 cursor-not-allowed"
+                                guestCount <= stepAllowedGuestCount(sellable, guestCount, "down") &&
+                                  "opacity-50 cursor-not-allowed",
                               )}
                             >
                               <Minus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
@@ -412,17 +435,23 @@ function PackageRow({
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation()
-                                setGuestCount(Math.min(maxGuests, guestCount + 1))
+                                setGuestCount(stepAllowedGuestCount(sellable, guestCount, "up"))
                               }}
-                              disabled={guestCount >= maxGuests}
+                              disabled={guestCount >= stepAllowedGuestCount(sellable, guestCount, "up")}
                               className={cn(
                                 "p-1.5 sm:p-2 rounded-lg border border-border hover:bg-muted transition-colors",
-                                guestCount >= maxGuests && "opacity-50 cursor-not-allowed"
+                                guestCount >= stepAllowedGuestCount(sellable, guestCount, "up") &&
+                                  "opacity-50 cursor-not-allowed",
                               )}
                             >
                               <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                             </button>
                           </div>
+                          {stockHint ? (
+                            <p className="text-[10px] sm:text-xs text-muted-foreground text-center leading-relaxed px-1">
+                              {stockHint}
+                            </p>
+                          ) : null}
                           <p className="text-[10px] sm:text-xs text-muted-foreground text-center">
                             {typeof pkg.availability === "number"
                               ? `${pkg.availability} available${

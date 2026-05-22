@@ -8,7 +8,7 @@ import {
   packageIsBookable,
 } from "@/lib/catalog/featured-packages"
 import { packageDurationLabel } from "@/lib/catalog/package-duration"
-import { ArrowRight, Calendar, Flame, MapPin } from "lucide-react"
+import { ArrowRight, Calendar, MapPin } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 function formatPrice(pkg: Package): string | null {
@@ -33,7 +33,7 @@ function availabilityLabel(pkg: Package): { text: string; tone: "available" | "e
   return { text: `${pkg.availability} available`, tone: "available" }
 }
 
-function FeaturedPackageCard({ pkg, rank }: { pkg: Package; rank: number }) {
+function FeaturedPackageCard({ pkg }: { pkg: Package }) {
   const bookable = packageIsBookable(pkg)
   const price = formatPrice(pkg)
   const tagline = featuredPackageTagline(pkg.id)
@@ -52,18 +52,8 @@ function FeaturedPackageCard({ pkg, rank }: { pkg: Package; rank: number }) {
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/45 to-black/20" />
 
-        <div className="absolute top-3 left-3 flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-primary-foreground shadow-lg">
-            <Flame className="h-3 w-3" />
-            Trending
-          </span>
-          <span className="rounded-full bg-black/50 px-2 py-0.5 text-[10px] font-semibold text-white/90 backdrop-blur-sm">
-            #{rank}
-          </span>
-        </div>
-
         <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">{pkg.circuit}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/90">{pkg.circuit}</p>
           <h3 className="mt-1 text-lg font-bold leading-snug text-white sm:text-xl">{pkg.name}</h3>
         </div>
       </div>
@@ -162,8 +152,8 @@ export function FeaturedPackages({ packages }: { packages: Package[] }) {
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {packages.map((pkg, index) => (
-          <FeaturedPackageCard key={pkg.id} pkg={pkg} rank={index + 1} />
+        {packages.map((pkg) => (
+          <FeaturedPackageCard key={pkg.id} pkg={pkg} />
         ))}
       </div>
     </section>

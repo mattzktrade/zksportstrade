@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { sendOrderPlacedEmail } from "@/lib/email/send-order-placed"
+import { isGuestCountAllowed, numericSellable } from "@/lib/catalog/booking-guests"
 import { mapPlaceOrderError } from "@/lib/orders/place-order-errors"
+import { getPackageById } from "@/lib/catalog/queries"
 import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
 
 export type SubmitCheckoutResult =
@@ -43,6 +45,22 @@ export async function submitCheckoutOrder(
   const guests = Math.floor(Number(input.guests))
   if (!Number.isFinite(guests) || guests < 1) {
     return { ok: false, error: "Guest count is invalid." }
+  }
+
+  const pkg = await getPackageById(input.packageId, profile.id)
+  if (!pkg || pkg.price === null) {
+    return { ok: false, error: "This package is not available to book online." }
+  }
+  const sellable = numericSellable(pkg.availability)
+  if (sellable === null || sellable < 1) {
+    return { ok: false, error: "This package is not available to book online." }
+  }
+  if (!isGuestCountAllowed(sellable, guests)) {
+    return {
+      ok: false,
+      error:
+        "This quantity would leave a single place unsold. When only a few places remain, book all remaining places together or choose a smaller group.",
+    }
   }
 
   const supabase = await createClient()

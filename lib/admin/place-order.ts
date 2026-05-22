@@ -1,3 +1,4 @@
+import { clampToAllowedGuestCount, maxBookableGuestsFromSellable, numericSellable } from "@/lib/catalog/booking-guests"
 import type { Package } from "@/lib/types/catalog"
 
 export type AdminPlaceOrderPackageOption = {
@@ -28,6 +29,17 @@ export function toAdminPlaceOrderPackageOptions(packages: Package[]): AdminPlace
 }
 
 export function maxBookableGuests(pkg: Package | null): number {
-  if (!pkg || pkg.price === null || typeof pkg.availability === "string") return 0
-  return Math.max(0, Math.min(pkg.availability, pkg.totalCapacity))
+  if (!pkg || pkg.price === null) return 0
+  const sellable = numericSellable(pkg.availability)
+  if (sellable === null) return 0
+  return maxBookableGuestsFromSellable(sellable, pkg.totalCapacity)
+}
+
+export function clampBookableGuests(pkg: Package | null, preferred: number): number {
+  if (!pkg || pkg.price === null) return 1
+  const sellable = numericSellable(pkg.availability)
+  if (sellable === null || sellable < 1) return 1
+  const cap = maxBookableGuestsFromSellable(sellable, pkg.totalCapacity)
+  if (cap < 1) return 1
+  return clampToAllowedGuestCount(Math.min(sellable, cap), preferred)
 }

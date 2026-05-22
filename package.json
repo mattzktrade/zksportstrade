@@ -7,7 +7,8 @@
     "dev": "next dev",
     "lint": "eslint .",
     "start": "next start",
-    "seed:catalog": "tsx scripts/seed-catalog.ts"
+    "seed:catalog": "tsx scripts/seed-catalog.ts",
+    "seed:catalog:2027": "tsx scripts/seed-catalog.ts --2027-only"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",

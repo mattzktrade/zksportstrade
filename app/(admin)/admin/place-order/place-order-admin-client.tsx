@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import type { AdminPlaceOrderPackageOption } from "@/lib/admin/place-order"
-import { maxBookableGuests } from "@/lib/admin/place-order"
+import { clampBookableGuests, maxBookableGuests } from "@/lib/admin/place-order"
+import { isGuestCountAllowed, lowStockGuestHint, numericSellable, stepAllowedGuestCount } from "@/lib/catalog/booking-guests"
 import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
 import type { Package } from "@/lib/types/catalog"
 import {
@@ -87,6 +88,8 @@ export function PlaceOrderAdminClient({
   }, [packageOptions, packageSearch])
 
   const maxGuests = maxBookableGuests(previewPkg)
+  const sellable = previewPkg ? (numericSellable(previewPkg.availability) ?? 0) : 0
+  const stockHint = sellable > 0 ? lowStockGuestHint(sellable) : null
   const canBook = maxGuests > 0 && previewPkg?.price != null
   const totalPrice = (previewPkg?.price ?? 0) * form.guests
 
@@ -102,8 +105,7 @@ export function PlaceOrderAdminClient({
       setPreviewPkg(pkg)
       setPreviewLoading(false)
       if (pkg) {
-        const max = maxBookableGuests(pkg)
-        setForm((f) => ({ ...f, guests: Math.min(Math.max(1, f.guests), Math.max(1, max)) }))
+        setForm((f) => ({ ...f, guests: clampBookableGuests(pkg, f.guests) }))
       }
     })
     return () => {
@@ -136,6 +138,7 @@ export function PlaceOrderAdminClient({
     form.clientPhone.trim() &&
     form.guests >= 1 &&
     form.guests <= maxGuests &&
+    isGuestCountAllowed(sellable, form.guests) &&
     addressesComplete
 
   async function handleSubmit() {
@@ -384,8 +387,10 @@ export function PlaceOrderAdminClient({
                   <div className="inline-flex items-center gap-3">
                     <button
                       type="button"
-                      disabled={form.guests <= 1}
-                      onClick={() => setForm({ ...form, guests: Math.max(1, form.guests - 1) })}
+                      disabled={form.guests <= stepAllowedGuestCount(sellable, form.guests, "down")}
+                      onClick={() =>
+                        setForm({ ...form, guests: stepAllowedGuestCount(sellable, form.guests, "down") })
+                      }
                       className="h-10 w-10 rounded-lg border border-border flex items-center justify-center disabled:opacity-40"
                     >
                       <Minus className="h-4 w-4" />
@@ -393,14 +398,19 @@ export function PlaceOrderAdminClient({
                     <span className="text-lg font-bold w-8 text-center">{form.guests}</span>
                     <button
                       type="button"
-                      disabled={form.guests >= maxGuests}
-                      onClick={() => setForm({ ...form, guests: Math.min(maxGuests, form.guests + 1) })}
+                      disabled={form.guests >= stepAllowedGuestCount(sellable, form.guests, "up")}
+                      onClick={() =>
+                        setForm({ ...form, guests: stepAllowedGuestCount(sellable, form.guests, "up") })
+                      }
                       className="h-10 w-10 rounded-lg border border-border flex items-center justify-center disabled:opacity-40"
                     >
                       <Plus className="h-4 w-4" />
                     </button>
                     <span className="text-sm text-muted-foreground">Max {maxGuests}</span>
                   </div>
+                  {stockHint ? (
+                    <p className="text-xs text-muted-foreground leading-relaxed">{stockHint}</p>
+                  ) : null}
                 </div>
 
                 <AddressFields

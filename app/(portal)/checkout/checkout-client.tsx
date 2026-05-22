@@ -3,6 +3,14 @@
 import { useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
+import {
+  clampToAllowedGuestCount,
+  isGuestCountAllowed,
+  lowStockGuestHint,
+  maxBookableGuestsFromSellable,
+  numericSellable,
+  stepAllowedGuestCount,
+} from "@/lib/catalog/booking-guests"
 import type { Package } from "@/lib/types/catalog"
 import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
 import { submitCheckoutOrder } from "./actions"
@@ -17,12 +25,6 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-function maxBookableGuests(pkg: Package): number {
-  if (pkg.price === null) return 0
-  if (typeof pkg.availability === "string") return 0
-  return Math.max(0, Math.min(pkg.availability, pkg.totalCapacity))
-}
-
 export function CheckoutClient({
   pkg,
   initialGuests,
@@ -32,8 +34,10 @@ export function CheckoutClient({
   initialGuests: number
   savedAddresses: CheckoutAddressFields
 }) {
-  const maxGuests = maxBookableGuests(pkg)
+  const sellable = numericSellable(pkg.availability) ?? 0
+  const maxGuests = maxBookableGuestsFromSellable(sellable, pkg.totalCapacity)
   const canBookOnline = maxGuests > 0 && pkg.price !== null
+  const stockHint = lowStockGuestHint(sellable)
 
   const [step, setStep] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -53,7 +57,10 @@ export function CheckoutClient({
     clientEmail: "",
     clientPhone: "",
     clientNationality: "",
-    guests: Math.min(Math.max(1, initialGuests), Math.max(1, maxGuests)),
+    guests: clampToAllowedGuestCount(
+      sellable,
+      Math.min(Math.max(1, initialGuests), Math.max(1, maxGuests)),
+    ),
     specialRequests: "",
     dietaryRequirements: "",
     poNumber: "",
@@ -121,7 +128,8 @@ export function CheckoutClient({
 
   const canProceedStep1 = formData.clientName && formData.clientEmail && formData.clientPhone
 
-  const canProceedStep2 = formData.guests > 0 && formData.guests <= maxGuests
+  const canProceedStep2 =
+    formData.guests > 0 && formData.guests <= maxGuests && isGuestCountAllowed(sellable, formData.guests)
 
   const checkoutAddressesComplete =
     formData.shippingAddressLine1.trim() &&
@@ -349,8 +357,14 @@ export function CheckoutClient({
                   <div className="flex items-center gap-3 sm:gap-4">
                     <button
                       type="button"
-                      onClick={() => setFormData({ ...formData, guests: Math.max(1, formData.guests - 1) })}
-                      className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl border border-border flex items-center justify-center hover:bg-muted transition-colors text-base sm:text-lg font-semibold"
+                      onClick={() =>
+                        setFormData({
+                          ...formData,
+                          guests: stepAllowedGuestCount(sellable, formData.guests, "down"),
+                        })
+                      }
+                      disabled={formData.guests <= stepAllowedGuestCount(sellable, formData.guests, "down")}
+                      className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl border border-border flex items-center justify-center hover:bg-muted transition-colors text-base sm:text-lg font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       -
                     </button>
@@ -359,13 +373,22 @@ export function CheckoutClient({
                     </div>
                     <button
                       type="button"
-                      onClick={() => setFormData({ ...formData, guests: Math.min(maxGuests, formData.guests + 1) })}
-                      className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl border border-border flex items-center justify-center hover:bg-muted transition-colors text-base sm:text-lg font-semibold"
+                      onClick={() =>
+                        setFormData({
+                          ...formData,
+                          guests: stepAllowedGuestCount(sellable, formData.guests, "up"),
+                        })
+                      }
+                      disabled={formData.guests >= stepAllowedGuestCount(sellable, formData.guests, "up")}
+                      className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl border border-border flex items-center justify-center hover:bg-muted transition-colors text-base sm:text-lg font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       +
                     </button>
                     <span className="text-xs sm:text-sm text-muted-foreground">Max {maxGuests} available</span>
                   </div>
+                  {stockHint ? (
+                    <p className="mt-2 text-xs text-muted-foreground leading-relaxed">{stockHint}</p>
+                  ) : null}
                 </div>
 
                 <div>

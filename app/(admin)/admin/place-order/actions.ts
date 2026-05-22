@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { requireAdminAction } from "@/app/(admin)/actions"
+import { isGuestCountAllowed, numericSellable } from "@/lib/catalog/booking-guests"
 import { getPackageById } from "@/lib/catalog/queries"
 import { sendOrderPlacedEmail } from "@/lib/email/send-order-placed"
 import { mapPlaceOrderError } from "@/lib/orders/place-order-errors"
@@ -71,6 +72,22 @@ export async function submitAdminOrderForAgent(
   if (agentErr || !agent) return { ok: false, error: "Agent account was not found." }
   if (agent.role !== "agent" || agent.approval_status !== "approved") {
     return { ok: false, error: "This agent account is not approved to place orders yet." }
+  }
+
+  const pkg = await getPackageById(input.packageId, agentId)
+  if (!pkg || pkg.price === null) {
+    return { ok: false, error: "This package is not available to book." }
+  }
+  const sellable = numericSellable(pkg.availability)
+  if (sellable === null || sellable < 1) {
+    return { ok: false, error: "This package has no bookable stock." }
+  }
+  if (!isGuestCountAllowed(sellable, guests)) {
+    return {
+      ok: false,
+      error:
+        "This quantity would leave a single place unsold. When only a few places remain, book all remaining places together or choose a smaller group.",
+    }
   }
 
   const { data, error } = await supabase.rpc("place_order", {
