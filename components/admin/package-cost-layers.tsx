@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { addCostLayer, deleteCostLayer, updateCostLayer } from "@/app/(admin)/actions"
+import { addCostLayer, deleteCostLayer, updateCostLayer, updateCostLayerQuantity } from "@/app/(admin)/actions"
 import type { CostLayerRow } from "@/lib/admin/cost-layers"
 import { formatMoney } from "@/lib/format/money"
 
@@ -47,6 +47,7 @@ export function PackageCostLayers({
   const [editCost, setEditCost] = useState("")
   const [editNote, setEditNote] = useState("")
   const [editDate, setEditDate] = useState("")
+  const [editQty, setEditQty] = useState("")
   const [editCascade, setEditCascade] = useState(true)
 
   const { totalRemaining, totalCostBasis, weightedCost } = useMemo(() => {
@@ -128,6 +129,7 @@ export function PackageCostLayers({
     setEditCost(String(layer.unit_cost))
     setEditNote(layer.note ?? "")
     setEditDate(formatDateInput(layer.received_at))
+    setEditQty(String(layer.quantity))
     setEditCascade(true)
   }
 
@@ -137,7 +139,28 @@ export function PackageCostLayers({
       toast.error("Unit cost must be a non-negative number.")
       return
     }
+    const newQty = Math.floor(Number(editQty))
+    if (!Number.isFinite(newQty) || newQty < 0) {
+      toast.error("Quantity must be a non-negative whole number.")
+      return
+    }
+    const consumed = layer.quantity - layer.quantity_remaining
+    if (newQty < consumed) {
+      toast.error(`Quantity cannot be less than ${consumed} (units already sold from this layer).`)
+      return
+    }
     start(async () => {
+      if (newQty !== layer.quantity) {
+        const qtyRes = await updateCostLayerQuantity({
+          layerId: layer.id,
+          packageId,
+          quantity: newQty,
+        })
+        if (!qtyRes.ok) {
+          toast.error(qtyRes.message)
+          return
+        }
+      }
       const res = await updateCostLayer({
         layerId: layer.id,
         packageId,
@@ -150,7 +173,16 @@ export function PackageCostLayers({
         toast.error(res.message)
         return
       }
-      toast.success(editCascade ? "Buy price updated (historical sales rewritten)." : "Buy price updated.")
+      const qtyChanged = newQty !== layer.quantity
+      toast.success(
+        qtyChanged
+          ? editCascade
+            ? "Cost layer updated; stock and historical sales adjusted."
+            : "Cost layer updated; stock adjusted."
+          : editCascade
+            ? "Buy price updated (historical sales rewritten)."
+            : "Buy price updated.",
+      )
       setEditingId(null)
       router.refresh()
     })
@@ -259,11 +291,27 @@ export function PackageCostLayers({
                       )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      <div className="font-medium text-foreground">{layer.quantity_remaining}</div>
-                      <div className="text-[10px] text-muted-foreground">
-                        of {layer.quantity}
-                        {consumed > 0 ? ` · ${consumed} sold` : ""}
-                      </div>
+                      {editing ? (
+                        <div className="flex flex-col items-end gap-1">
+                          <input
+                            inputMode="numeric"
+                            value={editQty}
+                            onChange={(e) => setEditQty(e.target.value)}
+                            className="w-[80px] px-2 py-1 rounded border border-border bg-background text-xs text-right"
+                          />
+                          <div className="text-[10px] text-muted-foreground">
+                            {consumed > 0 ? `min ${consumed} (already sold)` : "total purchased"}
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="font-medium text-foreground">{layer.quantity_remaining}</div>
+                          <div className="text-[10px] text-muted-foreground">
+                            of {layer.quantity}
+                            {consumed > 0 ? ` · ${consumed} sold` : ""}
+                          </div>
+                        </>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {editing ? (

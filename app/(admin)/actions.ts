@@ -502,6 +502,52 @@ export async function updateCostLayer(input: {
   return { ok: true }
 }
 
+export async function updateCostLayerQuantity(input: {
+  layerId: string
+  packageId?: string | null
+  quantity: number
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  if (!UUID_RE.test(input.layerId.trim())) {
+    return { ok: false, message: "Invalid cost layer id." }
+  }
+  const q = Math.floor(Number(input.quantity))
+  if (!Number.isFinite(q) || q < 0) {
+    return { ok: false, message: "Quantity must be a non-negative whole number." }
+  }
+  const { supabase } = gate
+  const { error } = await supabase.rpc("admin_update_cost_layer_quantity", {
+    p_layer_id: input.layerId.trim(),
+    p_new_quantity: q,
+  })
+  if (error) {
+    const m = error.message.toLowerCase()
+    if (m.includes("quantity_below_consumed")) {
+      return {
+        ok: false,
+        message: "Quantity cannot be less than the units already sold from this layer.",
+      }
+    }
+    if (m.includes("would_drop_below_holds")) {
+      return {
+        ok: false,
+        message: "Reducing quantity would drop available stock below active holds. Release holds first.",
+      }
+    }
+    if (m.includes("inventory_negative")) {
+      return { ok: false, message: "Reducing quantity would make available stock negative." }
+    }
+    return { ok: false, message: error.message }
+  }
+  revalidateAdminProfitPaths(input.packageId?.trim() || undefined)
+  revalidatePath("/admin/inventory")
+  revalidatePath("/admin/catalog")
+  revalidatePath("/packages")
+  revalidatePath("/")
+  return { ok: true }
+}
+
 export async function deleteCostLayer(layerId: string): Promise<ActionResult> {
   const gate = await requireAdminAction()
   if (!gate.ok) return gate

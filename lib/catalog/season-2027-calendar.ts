@@ -38,7 +38,7 @@ function portugalRaceFromSpainSlot(spain: Race): Race {
     country: "Portugal",
     countryCode: "PT",
     dateRange: DATES_TBC_LABEL,
-    image: "/images/circuits/portimao.jpg",
+    image: "/images/circuits/portugal.png",
     season: 2027,
   }
 }
@@ -54,7 +54,7 @@ function buildTurkey2027Race(): Race {
     countryCode: "TR",
     date: "2027-09-19",
     dateRange: DATES_TBC_LABEL,
-    image: "/images/circuits/istanbul.jpg",
+    image: "/images/circuits/istanbul.png",
     packagesAvailable: 4,
     lowestPrice: 4000,
     season: 2027,
