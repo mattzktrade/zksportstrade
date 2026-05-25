@@ -12,6 +12,7 @@ import {
   type CompanyType,
 } from "@/lib/types/profile"
 import { User, Mail, Building2, Phone, Edit3, Save, X, Lock } from "lucide-react"
+import { PasswordInput } from "@/components/password-input"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -488,8 +489,7 @@ export default function ProfilePage() {
           <div className="space-y-3 sm:space-y-4 max-w-md">
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">New password</label>
-              <input
-                type="password"
+              <PasswordInput
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 className="w-full px-4 py-3 bg-muted/50 border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
@@ -499,8 +499,7 @@ export default function ProfilePage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">Confirm password</label>
-              <input
-                type="password"
+              <PasswordInput
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 className="w-full px-4 py-3 bg-muted/50 border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"

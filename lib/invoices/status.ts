@@ -16,7 +16,7 @@ export function normalizeInvoiceStatus(raw: string): InvoiceWorkflowStatus {
 }
 
 export const invoiceWorkflowStatusLabels: Record<InvoiceWorkflowStatus, string> = {
-  awaiting_invoice: "Confirmed",
+  awaiting_invoice: "Awaiting invoice",
   awaiting_payment: "Awaiting payment",
   paid: "Paid",
 }

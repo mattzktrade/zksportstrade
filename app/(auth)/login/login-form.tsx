@@ -8,6 +8,7 @@ import { requestPasswordReset } from "./actions"
 import { signInWithPasswordAction } from "./sign-in-actions"
 import { Loader2 } from "lucide-react"
 import { AuthCardBrand } from "@/components/auth-card-brand"
+import { PasswordInput } from "@/components/password-input"
 import { safeRedirectPath } from "@/lib/auth/safe-redirect"
 import { normalizeSignInEmail } from "@/lib/auth/sign-in-email"
 import { useHashAuthRedirect } from "@/hooks/use-hash-auth-redirect"
@@ -196,9 +197,8 @@ export function LoginForm() {
                 Forgot password?
               </button>
             </div>
-            <input
+            <PasswordInput
               id="password"
-              type="password"
               autoComplete="current-password"
               required
               value={password}

@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { AuthCardBrand } from "@/components/auth-card-brand"
+import { PasswordInput } from "@/components/password-input"
 import { COMPANY_TYPE_OPTIONS, type CompanyType } from "@/lib/types/profile"
 import { Loader2 } from "lucide-react"
 
@@ -193,9 +194,8 @@ export default function SignupPage() {
           <label htmlFor="password" className="block text-sm font-medium text-foreground mb-1.5">
             Password
           </label>
-          <input
+          <PasswordInput
             id="password"
-            type="password"
             autoComplete="new-password"
             required
             minLength={8}

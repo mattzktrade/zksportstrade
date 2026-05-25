@@ -7,10 +7,14 @@ import { adminPackagePath } from "@/lib/admin/package-link"
 import { cn } from "@/lib/utils"
 import type { AdminOrderListRow } from "@/lib/orders/queries"
 import { AdminInvoiceStatusSelect } from "@/components/admin-invoice-status-select"
-import { normalizeInvoiceStatus, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
+import {
+  invoiceWorkflowStatusLabels,
+  normalizeInvoiceStatus,
+  type InvoiceWorkflowStatus,
+} from "@/lib/invoices/status"
 import { formatMoney } from "@/lib/format/money"
 
-type InvoiceFilter = "all" | "open" | InvoiceWorkflowStatus | "none"
+type InvoiceFilter = "all" | InvoiceWorkflowStatus
 
 type SortKey =
   | "created"
@@ -60,11 +64,8 @@ function matchesSearch(o: AdminOrderListRow, q: string): boolean {
 
 function matchesInvoiceFilter(o: AdminOrderListRow, f: InvoiceFilter): boolean {
   if (f === "all") return true
-  if (f === "none") return !o.invoice
   if (!o.invoice) return false
-  const s = normalizeInvoiceStatus(o.invoice.status)
-  if (f === "open") return s !== "paid"
-  return s === f
+  return normalizeInvoiceStatus(o.invoice.status) === f
 }
 
 function invoiceStatusRank(s: string): number {
@@ -160,11 +161,9 @@ function SortTh({
 
 const invoiceFilterTabs: { value: InvoiceFilter; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "open", label: "Not paid" },
-  { value: "awaiting_invoice", label: "Confirmed" },
-  { value: "awaiting_payment", label: "Awaiting payment" },
-  { value: "paid", label: "Paid" },
-  { value: "none", label: "No invoice" },
+  { value: "awaiting_invoice", label: invoiceWorkflowStatusLabels.awaiting_invoice },
+  { value: "awaiting_payment", label: invoiceWorkflowStatusLabels.awaiting_payment },
+  { value: "paid", label: invoiceWorkflowStatusLabels.paid },
 ]
 
 export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
@@ -272,7 +271,7 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
       <p className="text-xs text-muted-foreground">
         Showing <span className="font-medium text-foreground">{visible.length}</span> of{" "}
         <span className="font-medium text-foreground">{orders.length}</span> orders. New checkouts use invoice status{" "}
-        <span className="font-medium text-foreground">waiting to be invoiced</span> until you advance them.
+        <span className="font-medium text-foreground">{invoiceWorkflowStatusLabels.awaiting_invoice.toLowerCase()}</span> until you advance them.
       </p>
 
       {totals.buckets.length > 0 && (

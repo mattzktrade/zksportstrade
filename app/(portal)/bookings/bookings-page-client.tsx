@@ -30,9 +30,9 @@ const paymentStatusConfig: Record<
 
 const paymentFilters: { value: "all" | InvoiceWorkflowStatus; label: string }[] = [
   { value: "all", label: "All Bookings" },
-  { value: "awaiting_invoice", label: "Confirmed" },
-  { value: "awaiting_payment", label: "Awaiting payment" },
-  { value: "paid", label: "Paid" },
+  { value: "awaiting_invoice", label: invoiceWorkflowStatusLabels.awaiting_invoice },
+  { value: "awaiting_payment", label: invoiceWorkflowStatusLabels.awaiting_payment },
+  { value: "paid", label: invoiceWorkflowStatusLabels.paid },
 ]
 
 export function BookingsPageClient({ initialBookings }: { initialBookings: Booking[] }) {

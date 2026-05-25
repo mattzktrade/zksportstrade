@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { AuthCardBrand } from "@/components/auth-card-brand"
+import { PasswordInput } from "@/components/password-input"
 import { Loader2 } from "lucide-react"
 import { useHashAuthRedirect } from "@/hooks/use-hash-auth-redirect"
 
@@ -121,9 +122,8 @@ export function ResetPasswordForm() {
           <label htmlFor="password" className="block text-sm font-medium text-foreground mb-1.5">
             New password
           </label>
-          <input
+          <PasswordInput
             id="password"
-            type="password"
             autoComplete="new-password"
             required
             minLength={8}
@@ -136,9 +136,8 @@ export function ResetPasswordForm() {
           <label htmlFor="confirmPassword" className="block text-sm font-medium text-foreground mb-1.5">
             Confirm password
           </label>
-          <input
+          <PasswordInput
             id="confirmPassword"
-            type="password"
             autoComplete="new-password"
             required
             minLength={8}
