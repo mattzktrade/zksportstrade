@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client"
 import { AuthCardBrand } from "@/components/auth-card-brand"
 import { COMPANY_TYPE_OPTIONS, type CompanyType } from "@/lib/types/profile"
 import { Loader2 } from "lucide-react"
+import { sendSignupConfirmation } from "./actions"
 
 export default function SignupPage() {
   const router = useRouter()
@@ -18,14 +19,18 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [checkEmail, setCheckEmail] = useState(false)
+  const [resendLoading, setResendLoading] = useState(false)
+  const [resendSuccess, setResendSuccess] = useState<string | null>(null)
+  const [resendError, setResendError] = useState<string | null>(null)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     setMessage(null)
     const supabase = createClient()
+    const normalizedEmail = email.trim().toLowerCase()
     const { data, error } = await supabase.auth.signUp({
-      email,
+      email: normalizedEmail,
       password,
       options: {
         emailRedirectTo: typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined,
@@ -36,17 +41,40 @@ export default function SignupPage() {
         },
       },
     })
-    setLoading(false)
     if (error) {
+      setLoading(false)
       setMessage(error.message)
       return
     }
     if (data.user && !data.session) {
+      // Fire a reliable second delivery via Resend (Supabase's built-in email
+      // is heavily rate-limited and often lands in spam). Don't block the UI
+      // on the result — Supabase has already accepted the signup.
+      void sendSignupConfirmation(normalizedEmail).catch(() => {
+        /* logged server-side */
+      })
+      setLoading(false)
       setCheckEmail(true)
       return
     }
+    setLoading(false)
     router.push("/pending-approval")
     router.refresh()
+  }
+
+  async function handleResendConfirmation() {
+    const trimmed = email.trim().toLowerCase()
+    if (!trimmed) return
+    setResendLoading(true)
+    setResendSuccess(null)
+    setResendError(null)
+    const result = await sendSignupConfirmation(trimmed)
+    setResendLoading(false)
+    if (!result.ok) {
+      setResendError(result.message)
+      return
+    }
+    setResendSuccess("Sent. Check your inbox and spam folder — it can take a minute to arrive.")
   }
 
   if (checkEmail) {
@@ -57,6 +85,31 @@ export default function SignupPage() {
         <p className="text-sm text-muted-foreground">
           We sent a link to <span className="font-medium text-foreground">{email}</span>. Open it to activate your account, then sign in.
         </p>
+        <p className="text-xs text-muted-foreground">
+          Email can take a minute to arrive. If you don&apos;t see it, check your spam folder.
+        </p>
+
+        {resendSuccess && (
+          <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-left">
+            {resendSuccess}
+          </p>
+        )}
+        {resendError && (
+          <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 text-left">
+            {resendError}
+          </p>
+        )}
+
+        <button
+          type="button"
+          onClick={() => void handleResendConfirmation()}
+          disabled={resendLoading}
+          className="w-full py-2.5 rounded-xl border border-border text-sm font-medium hover:bg-muted/50 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
+        >
+          {resendLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          Resend confirmation email
+        </button>
+
         <Link href="/login" className="inline-block text-sm text-primary font-medium hover:underline">
           Back to sign in
         </Link>

@@ -303,17 +303,22 @@ function PackageRow({
                 {/* Package Info */}
                 <div>
                   <h3 className="text-lg sm:text-xl font-bold text-foreground mb-2 sm:mb-3">{pkg.name}</h3>
-                  <div className="mb-3 sm:mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
-                    {packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name) ? (
-                      <span className="inline-flex rounded-md border border-border bg-muted/50 px-2 py-0.5 text-xs sm:text-sm text-foreground font-medium">
-                        {packageDurationLabel(pkg.duration)}
-                      </span>
-                    ) : null}
-                    <div className="flex items-center gap-1.5 text-xs sm:text-sm text-muted-foreground">
-                      <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
-                      <span>Suite capacity: {pkg.totalCapacity}</span>
+                  {(packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name)) ||
+                  pkg.totalCapacity > 0 ? (
+                    <div className="mb-3 sm:mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
+                      {packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name) ? (
+                        <span className="inline-flex rounded-md border border-border bg-muted/50 px-2 py-0.5 text-xs sm:text-sm text-foreground font-medium">
+                          {packageDurationLabel(pkg.duration)}
+                        </span>
+                      ) : null}
+                      {pkg.totalCapacity > 0 ? (
+                        <div className="flex items-center gap-1.5 text-xs sm:text-sm text-muted-foreground">
+                          <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+                          <span>Suite capacity: {pkg.totalCapacity}</span>
+                        </div>
+                      ) : null}
                     </div>
-                  </div>
+                  ) : null}
                 </div>
 
                 {/* Package Description */}
