@@ -50,6 +50,15 @@ export async function updateSession(request: NextRequest) {
   const { data: profile } = await supabase.from("profiles").select("approval_status, role").eq("id", user.id).maybeSingle()
 
   if (!profile && !isUnderAuthPath) {
+    // Broken state: signed-in auth user with no profile row. Clear the
+    // session so the cookies don't keep re-triggering this branch (which
+    // would otherwise loop /login -> /login?error=no_profile forever), and
+    // skip the redirect if we're already on the login/signup page so the
+    // user has a stable landing spot to act from.
+    await supabase.auth.signOut()
+    if (isAuthRoute) {
+      return supabaseResponse
+    }
     const url = request.nextUrl.clone()
     url.pathname = "/login"
     url.searchParams.set("error", "no_profile")

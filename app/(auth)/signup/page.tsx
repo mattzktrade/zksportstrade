@@ -7,7 +7,6 @@ import { createClient } from "@/lib/supabase/client"
 import { AuthCardBrand } from "@/components/auth-card-brand"
 import { COMPANY_TYPE_OPTIONS, type CompanyType } from "@/lib/types/profile"
 import { Loader2 } from "lucide-react"
-import { sendSignupConfirmation } from "./actions"
 
 export default function SignupPage() {
   const router = useRouter()
@@ -41,23 +40,15 @@ export default function SignupPage() {
         },
       },
     })
+    setLoading(false)
     if (error) {
-      setLoading(false)
       setMessage(error.message)
       return
     }
     if (data.user && !data.session) {
-      // Fire a reliable second delivery via Resend (Supabase's built-in email
-      // is heavily rate-limited and often lands in spam). Don't block the UI
-      // on the result — Supabase has already accepted the signup.
-      void sendSignupConfirmation(normalizedEmail).catch(() => {
-        /* logged server-side */
-      })
-      setLoading(false)
       setCheckEmail(true)
       return
     }
-    setLoading(false)
     router.push("/pending-approval")
     router.refresh()
   }
@@ -68,10 +59,17 @@ export default function SignupPage() {
     setResendLoading(true)
     setResendSuccess(null)
     setResendError(null)
-    const result = await sendSignupConfirmation(trimmed)
+    const supabase = createClient()
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: trimmed,
+      options: {
+        emailRedirectTo: typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined,
+      },
+    })
     setResendLoading(false)
-    if (!result.ok) {
-      setResendError(result.message)
+    if (error) {
+      setResendError(error.message)
       return
     }
     setResendSuccess("Sent. Check your inbox and spam folder — it can take a minute to arrive.")
