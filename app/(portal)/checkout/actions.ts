@@ -146,13 +146,13 @@ export async function submitBookingApprovalRequest(
 
   revalidatePath("/bookings")
   revalidatePath("/profile")
-  revalidatePath("/packages")
-  revalidatePath("/admin/booking-requests")
 
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ?? ""
   const adminReviewUrl = siteUrl ? `${siteUrl}/admin/booking-requests` : "/admin/booking-requests"
 
-  const emailResult = await sendBookingApprovalRequestAdminEmail({
+  let emailResult: Awaited<ReturnType<typeof sendBookingApprovalRequestAdminEmail>>
+  try {
+    emailResult = await sendBookingApprovalRequestAdminEmail({
     requestReference,
     packageName: String(row.package_name ?? pkg.name),
     circuit: String(row.circuit ?? pkg.circuit),
@@ -166,7 +166,11 @@ export async function submitBookingApprovalRequest(
     clientEmail: input.clientEmail.trim(),
     clientPhone: input.clientPhone.trim(),
     adminReviewUrl,
-  })
+    })
+  } catch (e) {
+    console.error("[checkout] approval request saved but admin email threw:", e)
+    emailResult = { ok: false, error: e instanceof Error ? e.message : "email failed" }
+  }
 
   let adminNotified = emailResult.ok
   let adminNotifyNotice: string | undefined

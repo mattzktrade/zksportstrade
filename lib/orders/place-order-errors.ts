@@ -6,7 +6,10 @@ export function mapPlaceOrderError(message: string): string {
     return "This quantity would leave a single place unsold. When only a few places remain, book all remaining places together or choose a smaller group."
   }
   if (m.includes("agent_not_approved") || m.includes("not_approved")) {
-    return "This agent account is not approved to place orders yet."
+    return "The partner account on this request is not approved to place orders."
+  }
+  if (m.includes("profile_not_eligible")) {
+    return "Only approved agent or admin accounts can submit Paddock Club requests from the portal."
   }
   if (m.includes("agent_not_found")) return "Agent account was not found."
   if (m.includes("forbidden")) return "You do not have permission to place orders for another agent."

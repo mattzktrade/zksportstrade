@@ -9,6 +9,7 @@ import { isPaddockClubPackageName } from "@/lib/catalog/paddock-club"
 import { isValidPackageDuration } from "@/lib/catalog/package-duration"
 import { sendBookingApprovalRejectedEmail } from "@/lib/email/send-booking-approval-rejected"
 import { sendOrderPlacedEmail } from "@/lib/email/send-order-placed"
+import { mapPlaceOrderError } from "@/lib/orders/place-order-errors"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { isInvoiceWorkflowStatus, normalizeInvoiceStatus, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
 
@@ -701,7 +702,7 @@ export async function approveBookingRequest(
   const { data, error } = await supabase.rpc("admin_approve_booking_request", {
     p_request_id: requestId.trim(),
   })
-  if (error) return { ok: false, message: error.message }
+  if (error) return { ok: false, message: mapPlaceOrderError(error.message ?? "") }
 
   const row = data as Record<string, unknown> | null
   const orderReference = typeof row?.order_reference === "string" ? row.order_reference : undefined
