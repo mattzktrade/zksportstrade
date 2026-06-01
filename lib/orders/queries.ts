@@ -2,6 +2,7 @@ import { unstable_noStore as noStore } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import type { Booking } from "@/lib/types/catalog"
 import { normalizeInvoiceStatus } from "@/lib/invoices/status"
+import type { BookingApprovalRequestRow } from "@/lib/booking-approval/types"
 import type { OrderRow, PackageSnippet } from "@/lib/orders/types"
 import { computeOrderProfit, getConsumptionsForOrders, type OrderProfit } from "@/lib/admin/cost-layers"
 import { packageDurationLabel } from "@/lib/catalog/package-duration"
@@ -59,8 +60,64 @@ function mapOrderToBooking(row: OrderWithPackage): Booking {
   }
 }
 
+function mapApprovalRequestToBooking(
+  row: BookingApprovalRequestRow & {
+    packages?: PackageSnippet | PackageSnippet[] | null
+  },
+): Booking {
+  const pkg = one(row.packages)
+  return {
+    id: row.id,
+    orderReference: row.reference,
+    packageId: row.package_id,
+    packageName: pkg?.name ?? "Package",
+    circuit: pkg?.circuit ?? "",
+    date: pkg?.event_date ?? row.created_at,
+    guests: row.guests,
+    invoiceStatus: "awaiting_invoice",
+    totalAmount: Number(row.total_amount),
+    currency: row.currency,
+    createdAt: row.created_at,
+    clientName: row.client_name,
+    clientEmail: row.client_email,
+    packageTier: pkg?.tier,
+    packageDuration: packageDurationLabel(pkg?.duration) ?? null,
+    approvalRequestStatus: row.status,
+    approvalRequestReference: row.reference,
+  }
+}
+
 export async function getMyBookings(): Promise<Booking[]> {
   const supabase = await createClient()
+
+  const { data: requestRows } = await supabase
+    .from("booking_approval_requests")
+    .select(
+      `
+      id,
+      reference,
+      agent_profile_id,
+      package_id,
+      status,
+      guests,
+      unit_price,
+      total_amount,
+      currency,
+      client_name,
+      client_email,
+      created_at,
+      packages ( name, circuit, event_date, tier, duration, total_capacity )
+    `,
+    )
+    .neq("status", "approved")
+    .order("created_at", { ascending: false })
+
+  const approvalBookings = (
+    (requestRows ?? []) as Array<
+      BookingApprovalRequestRow & { packages?: PackageSnippet | PackageSnippet[] | null }
+    >
+  ).map(mapApprovalRequestToBooking)
+
   const { data, error } = await supabase
     .from("orders")
     .select(
@@ -92,9 +149,9 @@ export async function getMyBookings(): Promise<Booking[]> {
     )
     .order("created_at", { ascending: false })
 
-  if (error || !data) return []
+  if (error || !data) return approvalBookings
 
-  return (data as (OrderRow & {
+  const orderBookings = (data as (OrderRow & {
     packages?: PackageSnippet | PackageSnippet[] | null
     invoices?: OrderInvoiceSnippet | OrderInvoiceSnippet[] | null
   })[]).map((row) => {
@@ -105,6 +162,10 @@ export async function getMyBookings(): Promise<Booking[]> {
     }
     return mapOrderToBooking(normalized)
   })
+
+  return [...approvalBookings, ...orderBookings].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  )
 }
 
 type RawAdminOrder = OrderRow & {

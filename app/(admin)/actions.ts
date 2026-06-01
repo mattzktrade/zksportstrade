@@ -4,7 +4,11 @@ import { revalidatePath } from "next/cache"
 import { revalidateAdminProfitPaths } from "@/lib/admin/revalidate-profit"
 import { createClient } from "@/lib/supabase/server"
 import { sanitizeHttpsUrl, sanitizeHttpsUrlList } from "@/lib/auth/safe-url"
+import { deriveInventoryGroupId } from "@/lib/catalog/inventory-group"
+import { isPaddockClubPackageName } from "@/lib/catalog/paddock-club"
 import { isValidPackageDuration } from "@/lib/catalog/package-duration"
+import { sendBookingApprovalRejectedEmail } from "@/lib/email/send-booking-approval-rejected"
+import { sendOrderPlacedEmail } from "@/lib/email/send-order-placed"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { isInvoiceWorkflowStatus, normalizeInvoiceStatus, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
 
@@ -107,6 +111,7 @@ export async function updatePackageFields(input: {
   is_enquiry: boolean
   featured: boolean
   is_hidden: boolean
+  requires_booking_approval?: boolean
   sort_order: number
   brochure_url: string | null
 }): Promise<ActionResult> {
@@ -134,10 +139,15 @@ export async function updatePackageFields(input: {
   if (exErr) return { ok: false, message: exErr.message }
   if (!existing) return { ok: false, message: "Package not found." }
 
+  const raceId = input.race_id.trim()
+  const inventoryGroupId = deriveInventoryGroupId(id, duration || null, raceId)
+  const requiresBookingApproval =
+    input.requires_booking_approval ?? isPaddockClubPackageName(input.name.trim())
+
   const { error } = await supabase
     .from("packages")
     .update({
-      race_id: input.race_id.trim(),
+      race_id: raceId,
       name: input.name.trim(),
       circuit: input.circuit.trim(),
       location: input.location.trim(),
@@ -151,6 +161,8 @@ export async function updatePackageFields(input: {
       currency: (input.currency.trim() || "USD").slice(0, 8),
       total_capacity: cap,
       duration: duration || null,
+      inventory_group_id: inventoryGroupId,
+      requires_booking_approval: requiresBookingApproval,
       includes: input.includes,
       trade_price: input.trade_price,
       is_enquiry: input.is_enquiry,
@@ -218,6 +230,7 @@ export async function createPackage(input: {
   is_enquiry: boolean
   featured: boolean
   is_hidden?: boolean
+  requires_booking_approval?: boolean
   sort_order: number
   brochure_url: string | null
   initial_qty_available: number
@@ -267,9 +280,14 @@ export async function createPackage(input: {
   const gallery = sanitizeHttpsUrlList(input.gallery_images)
   const cc = input.country_code.trim().toUpperCase().slice(0, 8)
 
+  const raceId = input.race_id.trim()
+  const inventoryGroupId = deriveInventoryGroupId(id, duration || null, raceId)
+  const requiresBookingApproval =
+    input.requires_booking_approval ?? isPaddockClubPackageName(input.name.trim())
+
   const { error: insErr } = await supabase.from("packages").insert({
     id,
-    race_id: input.race_id.trim(),
+    race_id: raceId,
     name: input.name.trim(),
     circuit: input.circuit.trim(),
     location: input.location.trim(),
@@ -286,6 +304,8 @@ export async function createPackage(input: {
     is_hidden: input.is_hidden ?? false,
     tier: "paddock",
     duration: duration || null,
+    inventory_group_id: inventoryGroupId,
+    requires_booking_approval: requiresBookingApproval,
     includes: input.includes,
     featured: input.featured,
     sort_order: Math.floor(Number(input.sort_order)) || 0,
@@ -306,6 +326,42 @@ export async function createPackage(input: {
   if (invErr) {
     await supabase.from("packages").delete().eq("id", id)
     return { ok: false, message: invErr.message }
+  }
+
+  if (inventoryGroupId) {
+    const { data: siblings } = await supabase
+      .from("packages")
+      .select("id, duration")
+      .eq("inventory_group_id", inventoryGroupId)
+      .neq("id", id)
+    const siblingIds = (siblings ?? []).map((s) => s.id)
+    if (siblingIds.length > 0) {
+      const { data: invRows } = await supabase
+        .from("package_inventory")
+        .select("package_id, qty_available")
+        .in("package_id", siblingIds)
+      const invBy = new Map((invRows ?? []).map((r) => [r.package_id, r.qty_available]))
+      const sat = (siblings ?? []).find((s) => s.duration === "saturday_only")
+      const sun = (siblings ?? []).find((s) => s.duration === "sunday_only")
+      const twoDay = (siblings ?? []).find((s) => s.duration === "2_day")
+      const dur = duration || ""
+      let seedQty: number | null = null
+      if (dur === "saturday_only" || dur === "sunday_only") {
+        const peer = (siblings ?? []).find((s) => s.duration === dur)
+        if (peer) seedQty = invBy.get(peer.id) ?? null
+        else if (dur === "sunday_only" && sat) seedQty = invBy.get(sat.id) ?? null
+        else if (dur === "saturday_only" && sun) seedQty = invBy.get(sun.id) ?? null
+        else if (twoDay) seedQty = invBy.get(twoDay.id) ?? null
+      } else if (dur === "2_day") {
+        const caps = [sat, sun].map((s) => (s ? invBy.get(s.id) : null)).filter((n): n is number => n != null)
+        if (caps.length > 0) seedQty = Math.min(...caps)
+      }
+      if (seedQty != null) {
+        await supabase.from("package_inventory").update({ qty_available: seedQty }).eq("package_id", id)
+        qty = 0
+      }
+      await supabase.rpc("reconcile_linked_multi_day_inventory", { p_group_id: inventoryGroupId })
+    }
   }
 
   if (qty > 0) {
@@ -351,11 +407,21 @@ export async function updateInventoryRow(input: {
     return { ok: false, message: "Held quantity cannot exceed available capacity." }
   }
   const { supabase } = gate
+
   const { error } = await supabase
     .from("package_inventory")
     .update({ qty_available, qty_held })
     .eq("package_id", packageId)
   if (error) return { ok: false, message: error.message }
+
+  const { data: pkg } = await supabase
+    .from("packages")
+    .select("inventory_group_id")
+    .eq("id", packageId)
+    .maybeSingle()
+  if (pkg?.inventory_group_id) {
+    await supabase.rpc("reconcile_linked_multi_day_inventory", { p_group_id: pkg.inventory_group_id })
+  }
   revalidatePath("/admin/inventory")
   revalidatePath("/admin/catalog")
   revalidatePath("/packages")
@@ -600,6 +666,144 @@ export async function deletePackage(packageId: string): Promise<ActionResult> {
   revalidatePath("/packages")
   revalidatePath("/")
   revalidatePath(`/packages/race/${raceId}`)
+  return { ok: true }
+}
+
+export async function approveBookingRequest(
+  requestId: string,
+): Promise<ActionResult & { orderReference?: string }> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  if (!UUID_RE.test(requestId.trim())) {
+    return { ok: false, message: "Invalid request id." }
+  }
+
+  const { supabase } = gate
+  const { data: req, error: reqErr } = await supabase
+    .from("booking_approval_requests")
+    .select("*")
+    .eq("id", requestId.trim())
+    .maybeSingle()
+
+  if (reqErr) return { ok: false, message: reqErr.message }
+  if (!req) return { ok: false, message: "Request not found." }
+  if (req.status !== "pending") {
+    return { ok: false, message: "This request has already been reviewed." }
+  }
+
+  const { data: agent, error: agentErr } = await supabase
+    .from("profiles")
+    .select("id, email, full_name")
+    .eq("id", req.agent_profile_id)
+    .maybeSingle()
+  if (agentErr || !agent) return { ok: false, message: "Agent profile not found." }
+
+  const { data, error } = await supabase.rpc("admin_approve_booking_request", {
+    p_request_id: requestId.trim(),
+  })
+  if (error) return { ok: false, message: error.message }
+
+  const row = data as Record<string, unknown> | null
+  const orderReference = typeof row?.order_reference === "string" ? row.order_reference : undefined
+  if (!orderReference) {
+    return { ok: false, message: "Order was created but the reference was missing from the response." }
+  }
+
+  const emailResult = await sendOrderPlacedEmail({
+    agentEmail: agent.email,
+    agentName: agent.full_name || agent.email.split("@")[0] || "Partner",
+    orderReference,
+    packageName: String(row?.package_name ?? ""),
+    circuit: String(row?.circuit ?? ""),
+    guests: Number(row?.guests ?? req.guests),
+    totalAmount: Number(row?.total_amount ?? req.total_amount),
+    currency: String(row?.currency ?? req.currency),
+    clientName: req.client_name,
+    clientEmail: req.client_email,
+    clientPhone: req.client_phone,
+    clientNationality: req.client_nationality ?? "",
+    poNumber: req.po_number,
+    dietary: req.dietary_requirements,
+    specialRequests: req.special_requests,
+    shippingAddressLine1: req.shipping_address_line1,
+    shippingAddressLine2: req.shipping_address_line2,
+    shippingCity: req.shipping_city,
+    shippingPostcode: req.shipping_postcode,
+    shippingCountry: req.shipping_country,
+    billingAddressLine1: req.billing_address_line1,
+    billingAddressLine2: req.billing_address_line2,
+    billingCity: req.billing_city,
+    billingPostcode: req.billing_postcode,
+    billingCountry: req.billing_country,
+  })
+
+  if (!emailResult.ok) {
+    console.error("[approveBookingRequest] order created but email failed:", emailResult.error ?? emailResult.skipped)
+  }
+
+  revalidatePath("/admin/booking-requests")
+  revalidatePath("/admin/orders")
+  revalidatePath("/bookings")
+  revalidatePath("/admin/inventory")
+  revalidatePath("/admin/catalog")
+  revalidatePath("/packages")
+  return { ok: true, orderReference }
+}
+
+export async function rejectBookingRequest(
+  requestId: string,
+  note: string | null,
+): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  if (!UUID_RE.test(requestId.trim())) {
+    return { ok: false, message: "Invalid request id." }
+  }
+
+  const { supabase } = gate
+  const { data: req, error: reqErr } = await supabase
+    .from("booking_approval_requests")
+    .select("id, status, reference, agent_profile_id, package_id")
+    .eq("id", requestId.trim())
+    .maybeSingle()
+
+  if (reqErr) return { ok: false, message: reqErr.message }
+  if (!req) return { ok: false, message: "Request not found." }
+  if (req.status !== "pending") {
+    return { ok: false, message: "This request has already been reviewed." }
+  }
+
+  const { data: agent } = await supabase
+    .from("profiles")
+    .select("email, full_name")
+    .eq("id", req.agent_profile_id)
+    .maybeSingle()
+
+  const { data: pkg } = await supabase
+    .from("packages")
+    .select("name, circuit")
+    .eq("id", req.package_id)
+    .maybeSingle()
+
+  const { error } = await supabase.rpc("admin_reject_booking_request", {
+    p_request_id: requestId.trim(),
+    p_note: note?.trim() || null,
+  })
+  if (error) return { ok: false, message: error.message }
+
+  if (agent?.email) {
+    await sendBookingApprovalRejectedEmail({
+      agentEmail: agent.email,
+      agentName: agent.full_name || agent.email.split("@")[0] || "Partner",
+      requestReference: req.reference,
+      packageName: pkg?.name ?? "Package",
+      circuit: pkg?.circuit ?? "",
+      rejectionNote: note?.trim() || null,
+    })
+  }
+
+  revalidatePath("/admin/booking-requests")
+  revalidatePath("/bookings")
   return { ok: true }
 }
 

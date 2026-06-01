@@ -25,6 +25,8 @@ export interface Package {
   featured?: boolean
   /** When true, hidden from the agent portal until an admin shows it again. */
   isHidden?: boolean
+  /** Paddock Club etc.: checkout submits a request for admin approval instead of instant booking. */
+  requiresBookingApproval?: boolean
   /** HTTPS URL to brochure PDF or page for agents to share (from Supabase when set) */
   brochureUrl?: string | null
   /** Set when loaded from Supabase (used for navigation) */
@@ -70,6 +72,9 @@ export interface Booking {
   /** When loaded from Supabase */
   packageTier?: string
   packageDuration?: string | null
+  /** Set when this row is a pending/rejected approval request, not a confirmed order. */
+  approvalRequestStatus?: "pending" | "approved" | "rejected"
+  approvalRequestReference?: string
 }
 
 export interface Invoice {

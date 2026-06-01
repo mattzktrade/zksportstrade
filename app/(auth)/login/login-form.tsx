@@ -126,7 +126,7 @@ export function LoginForm() {
       </div>
 
       {error === "account_rejected" && (
-        <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+        <p className="text-sm text-destructive bg-destructive/5 border border-destructive/20 rounded-lg px-3 py-2">
           Your access request was not approved. If you think this is a mistake, contact ZK Sports & Entertainment.
         </p>
       )}
@@ -147,10 +147,10 @@ export function LoginForm() {
         <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">{resetSuccess}</p>
       )}
       {message && (
-        <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 space-y-2">
+        <div className="text-sm text-destructive bg-destructive/5 border border-destructive/20 rounded-lg px-3 py-2 space-y-2">
           <p>{message}</p>
           {emailNotConfirmed && (
-            <div className="pt-1 border-t border-red-100">
+            <div className="pt-1 border-t border-destructive/20">
               <button
                 type="button"
                 disabled={resendLoading}
@@ -160,7 +160,7 @@ export function LoginForm() {
                 {resendLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" aria-hidden /> : null}
                 Resend verification email
               </button>
-              <p className="text-red-600/90 text-xs mt-1.5 font-normal">
+              <p className="text-destructive/90 text-xs mt-1.5 font-normal">
                 Uses the email in the field above. If it does not match your signup email, correct it first.
               </p>
             </div>

@@ -15,14 +15,17 @@ import {
   ArrowLeft,
   ClipboardList,
   ShoppingCart,
+  ShieldCheck,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { LOGO_WHITE } from "@/lib/branding"
 
 const navigation = [
   { name: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { name: "Pending users", href: "/admin/pending-users", icon: Users },
+  { name: "Paddock requests", href: "/admin/booking-requests", icon: ShieldCheck },
   { name: "Catalog", href: "/admin/catalog", icon: Ticket },
   { name: "Holds", href: "/admin/inventory", icon: Boxes },
   { name: "Orders", href: "/admin/orders", icon: ClipboardList },
@@ -45,26 +48,27 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-muted/30">
       {sidebarOpen && (
-        <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
+        <div className="fixed inset-0 bg-zk-black/50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
       <aside
         className={cn(
-          "fixed top-0 left-0 z-50 h-full bg-slate-950 text-slate-100 border-r border-slate-800 flex flex-col transition-all duration-300 lg:translate-x-0 w-56",
+          "fixed top-0 left-0 z-50 h-full bg-zk-black text-slate-100 border-r border-white/10 flex flex-col transition-all duration-300 lg:translate-x-0 w-56",
           sidebarOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        <div className="border-b border-slate-800 p-5">
+        <div className="border-b border-white/10 p-5">
           <Link href="/admin" className="block">
             <Image
-              src="/images/ZK%20white%20logo.png"
+              src={LOGO_WHITE.src}
               alt="ZK Sports & Entertainment"
-              width={180}
-              height={48}
+              width={LOGO_WHITE.width}
+              height={LOGO_WHITE.height}
               className="h-9 w-auto"
+              sizes="180px"
               priority
             />
-            <p className="text-[9px] uppercase tracking-widest text-red-400 font-semibold mt-1.5">Admin</p>
+            <p className="text-[9px] uppercase tracking-widest text-primary font-semibold mt-1.5">Admin</p>
           </Link>
         </div>
 
@@ -85,16 +89,16 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
                 )}
               >
                 {isActive && (
-                  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-red-500 rounded-r-full" />
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-primary rounded-r-full" />
                 )}
-                <item.icon className={cn("h-[18px] w-[18px] flex-shrink-0", isActive ? "text-red-400" : "")} />
+                <item.icon className={cn("h-[18px] w-[18px] flex-shrink-0", isActive ? "text-primary" : "")} />
                 <span>{item.name}</span>
               </Link>
             )
           })}
         </nav>
 
-        <div className="p-3 border-t border-slate-800 space-y-1">
+        <div className="p-3 border-t border-white/10 space-y-1">
           <Link
             href="/"
             className="flex items-center gap-2 px-3 py-2 rounded-md text-xs text-slate-400 hover:text-white hover:bg-white/5"

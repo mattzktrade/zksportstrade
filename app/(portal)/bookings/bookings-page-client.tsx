@@ -53,7 +53,11 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
         booking.id.toLowerCase().includes(q) ||
         ref.includes(q)
 
-      const statusMatch = statusFilter === "all" || booking.invoiceStatus === statusFilter
+      const statusMatch =
+        statusFilter === "all" ||
+        (booking.approvalRequestStatus != null
+          ? false
+          : booking.invoiceStatus === statusFilter)
 
       return searchMatch && statusMatch
     })
@@ -173,7 +177,20 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
 
         <div className="divide-y divide-border">
           {filteredBookings.map((booking) => {
-            const paymentStatus = paymentStatusConfig[booking.invoiceStatus]
+            const paymentStatus =
+              booking.approvalRequestStatus === "pending"
+                ? {
+                    label: "Awaiting ZK approval",
+                    className: "text-amber-800 bg-amber-50/80 dark:text-amber-100 dark:bg-amber-950/40",
+                    dotColor: "bg-amber-500",
+                  }
+                : booking.approvalRequestStatus === "rejected"
+                  ? {
+                      label: "Request declined",
+                      className: "text-rose-800 bg-rose-50/80 dark:text-rose-100 dark:bg-rose-950/40",
+                      dotColor: "bg-rose-500",
+                    }
+                  : paymentStatusConfig[booking.invoiceStatus]
             const isExpanded = expandedBooking === booking.id
             const shortRef = (booking.orderReference ?? booking.id).replace(/^ZK-\d{4}-/i, "").slice(0, 8)
 

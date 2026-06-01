@@ -37,7 +37,7 @@ function StatCard({ title, value, change, icon: Icon, accent }: StatCardProps) {
         <div
           className={cn(
             "flex items-center gap-1 mt-2 text-xs sm:text-sm font-medium",
-            accent ? "text-white/80" : isPositive ? "text-emerald-600" : "text-red-500",
+            accent ? "text-white/80" : isPositive ? "text-emerald-600" : "text-destructive",
           )}
         >
           {isPositive ? <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4" /> : <TrendingDown className="h-3 w-3 sm:h-4 sm:w-4" />}

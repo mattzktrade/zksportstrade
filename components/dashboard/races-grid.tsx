@@ -42,7 +42,7 @@ export function RacesGrid({ catalog }: { catalog: PortalCatalog }) {
               priority
             />
           </div>
-          <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/65 to-black/75" />
+          <div className="absolute inset-0 bg-gradient-to-b from-zk-black/70 via-zk-black/65 to-zk-black/75" />
 
           <div className="relative flex flex-col min-h-[240px] sm:min-h-[280px] p-6 sm:p-8 md:p-10">
             <div className="flex-1 flex flex-col justify-center items-start max-w-2xl">

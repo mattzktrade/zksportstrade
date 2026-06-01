@@ -94,7 +94,7 @@ export default function SignupPage() {
           </p>
         )}
         {resendError && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 text-left">
+          <p className="text-sm text-destructive bg-destructive/5 border border-destructive/20 rounded-lg px-3 py-2 text-left">
             {resendError}
           </p>
         )}
@@ -126,7 +126,7 @@ export default function SignupPage() {
         </p>
       </div>
 
-      {message && <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{message}</p>}
+      {message && <p className="text-sm text-destructive bg-destructive/5 border border-destructive/20 rounded-lg px-3 py-2">{message}</p>}
 
       <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
         <div>

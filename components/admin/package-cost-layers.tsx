@@ -231,7 +231,7 @@ export function PackageCostLayers({
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Gross profit / unit</p>
           <p
             className={`text-sm font-semibold tabular-nums break-words ${
-              grossUnit == null ? "text-foreground" : grossUnit >= 0 ? "text-emerald-600" : "text-red-600"
+              grossUnit == null ? "text-foreground" : grossUnit >= 0 ? "text-emerald-600" : "text-destructive"
             }`}
           >
             {grossUnit != null ? formatMoney(packageCurrency, grossUnit) : "—"}
@@ -384,7 +384,7 @@ export function PackageCostLayers({
                               type="button"
                               disabled={pending}
                               onClick={() => confirmDelete(layer)}
-                              className="text-[11px] font-medium text-red-600 hover:underline disabled:opacity-50"
+                              className="text-[11px] font-medium text-destructive hover:underline disabled:opacity-50"
                             >
                               Delete
                             </button>

@@ -17,5 +17,24 @@ export function mapPlaceOrderError(message: string): string {
   if (m.includes("inventory_missing")) return "Inventory is not set up for this package."
   if (m.includes("invalid_guests")) return "Guest count is invalid."
   if (m.includes("event_has_ended")) return "This event has finished and is no longer available to book."
+  if (m.includes("booking_approval_required")) {
+    return "This package requires approval before booking. Please complete the Paddock Club request step at checkout."
+  }
+  if (m.includes("pending_request_exists")) {
+    return "You already have a pending approval request for this package. We will email you when it has been reviewed."
+  }
+  if (m.includes("booking_approval_not_required")) {
+    return "This package does not use the approval request flow. Please complete checkout normally."
+  }
   return "Could not complete the booking. Please try again or contact support."
+}
+
+export function mapBookingApprovalError(message: string): string {
+  const mapped = mapPlaceOrderError(message)
+  if (mapped !== "Could not complete the booking. Please try again or contact support.") return mapped
+  if (message.toLowerCase().includes("request_not_pending")) {
+    return "This request has already been reviewed."
+  }
+  if (message.toLowerCase().includes("request_not_found")) return "Booking request was not found."
+  return "Could not submit your request. Please try again or contact support."
 }

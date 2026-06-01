@@ -273,7 +273,7 @@ function PackageRow({
                           e.stopPropagation()
                           setSelectedImageIndex((prev) => (prev === 0 ? packageImages.length - 1 : prev - 1))
                         }}
-                        className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 sm:p-2 bg-black/50 hover:bg-black/70 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 sm:p-2 bg-zk-black/50 hover:bg-zk-black/70 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
                       >
                         <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
                       </button>
@@ -283,7 +283,7 @@ function PackageRow({
                           e.stopPropagation()
                           setSelectedImageIndex((prev) => (prev === packageImages.length - 1 ? 0 : prev + 1))
                         }}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 sm:p-2 bg-black/50 hover:bg-black/70 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 sm:p-2 bg-zk-black/50 hover:bg-zk-black/70 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
                       >
                         <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
                       </button>
@@ -291,7 +291,7 @@ function PackageRow({
                   )}
                   {/* Image Counter */}
                   {packageImages.length > 1 && (
-                    <div className="absolute bottom-2 right-2 px-2 py-1 bg-black/50 rounded text-[10px] sm:text-xs text-white">
+                    <div className="absolute bottom-2 right-2 px-2 py-1 bg-zk-black/50 rounded text-[10px] sm:text-xs text-white">
                       {selectedImageIndex + 1} / {packageImages.length}
                     </div>
                   )}
@@ -481,13 +481,17 @@ function PackageRow({
                           </div>
                         )}
 
-                        {/* Book Button */}
+                        {pkg.requiresBookingApproval ? (
+                          <p className="text-[10px] sm:text-xs text-amber-800 dark:text-amber-200 text-center leading-relaxed">
+                            Paddock Club — submit a request for ZK approval before booking is confirmed.
+                          </p>
+                        ) : null}
                         <Link
                           href={`/checkout?package=${pkg.id}&guests=${guestCount}`}
                           className="w-full inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 bg-primary text-white rounded-xl font-semibold hover:bg-primary/90 transition-colors text-xs sm:text-sm"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          Proceed to Checkout
+                          {pkg.requiresBookingApproval ? "Request approval" : "Proceed to Checkout"}
                           <ArrowRight className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                         </Link>
                       </>

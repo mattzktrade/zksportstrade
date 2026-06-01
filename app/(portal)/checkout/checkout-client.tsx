@@ -13,7 +13,8 @@ import {
 } from "@/lib/catalog/booking-guests"
 import type { Package } from "@/lib/types/catalog"
 import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
-import { submitCheckoutOrder } from "./actions"
+import { PADDOCK_CLUB_BOOKING_DISCLAIMER } from "@/lib/catalog/paddock-club"
+import { submitBookingApprovalRequest, submitCheckoutOrder } from "./actions"
 import {
   ArrowLeft,
   Check,
@@ -36,6 +37,8 @@ export function CheckoutClient({
 }) {
   const sellable = numericSellable(pkg.availability) ?? 0
   const maxGuests = maxBookableGuestsFromSellable(sellable, pkg.totalCapacity)
+  const requiresApproval = pkg.requiresBookingApproval === true
+  const maxStep = requiresApproval ? 4 : 3
   const canBookOnline = maxGuests > 0 && pkg.price !== null
   const stockHint = lowStockGuestHint(sellable)
 
@@ -50,6 +53,7 @@ export function CheckoutClient({
     guests: number
     confirmationEmailSent: boolean
     confirmationEmailNotice?: string
+    isApprovalRequest?: boolean
   } | null>(null)
 
   const [formData, setFormData] = useState(() => ({
@@ -65,6 +69,7 @@ export function CheckoutClient({
     dietaryRequirements: "",
     poNumber: "",
     acceptTerms: false,
+    acceptPaddockDisclaimer: false,
     ...savedAddresses,
   }))
 
@@ -89,7 +94,7 @@ export function CheckoutClient({
   const handleSubmit = async () => {
     setSubmitError(null)
     setIsSubmitting(true)
-    const result = await submitCheckoutOrder({
+    const addressPayload = {
       packageId: pkg.id,
       guests: formData.guests,
       clientName: formData.clientName.trim(),
@@ -109,20 +114,41 @@ export function CheckoutClient({
       billingCity: formData.billingCity.trim(),
       billingPostcode: formData.billingPostcode.trim(),
       billingCountry: formData.billingCountry.trim(),
-    })
+    }
+
+    const result = requiresApproval
+      ? await submitBookingApprovalRequest({
+          ...addressPayload,
+          paddockDisclaimerAccepted: formData.acceptPaddockDisclaimer,
+        })
+      : await submitCheckoutOrder(addressPayload)
+
     setIsSubmitting(false)
     if (!result.ok) {
       setSubmitError(result.error)
       return
     }
-    setCompletedSummary({
-      orderReference: result.orderReference,
-      totalAmount: result.totalAmount,
-      currency: result.currency,
-      guests: result.guests,
-      confirmationEmailSent: result.confirmationEmailSent,
-      confirmationEmailNotice: result.confirmationEmailNotice,
-    })
+
+    if (requiresApproval && "requestReference" in result) {
+      setCompletedSummary({
+        orderReference: result.requestReference,
+        totalAmount: result.totalAmount,
+        currency: result.currency,
+        guests: result.guests,
+        confirmationEmailSent: result.adminNotified,
+        confirmationEmailNotice: result.adminNotifyNotice,
+        isApprovalRequest: true,
+      })
+    } else if ("orderReference" in result) {
+      setCompletedSummary({
+        orderReference: result.orderReference,
+        totalAmount: result.totalAmount,
+        currency: result.currency,
+        guests: result.guests,
+        confirmationEmailSent: result.confirmationEmailSent,
+        confirmationEmailNotice: result.confirmationEmailNotice,
+      })
+    }
     setIsComplete(true)
   }
 
@@ -139,7 +165,22 @@ export function CheckoutClient({
     formData.billingCity.trim() &&
     formData.billingCountry.trim()
 
-  const canSubmit = formData.acceptTerms && checkoutAddressesComplete
+  const canSubmitApproval =
+    formData.acceptTerms && formData.acceptPaddockDisclaimer && checkoutAddressesComplete
+  const canSubmit = requiresApproval ? canSubmitApproval : formData.acceptTerms && checkoutAddressesComplete
+
+  const checkoutSteps = requiresApproval
+    ? [
+        { num: 1, label: "Client details" },
+        { num: 2, label: "Guests" },
+        { num: 3, label: "Checkout" },
+        { num: 4, label: "Paddock approval" },
+      ]
+    : [
+        { num: 1, label: "Client details" },
+        { num: 2, label: "Guests" },
+        { num: 3, label: "Checkout" },
+      ]
 
   if (isComplete && completedSummary) {
     const fmt = new Intl.NumberFormat("en-US", { style: "currency", currency: completedSummary.currency })
@@ -149,23 +190,34 @@ export function CheckoutClient({
           <div className="w-16 h-16 sm:w-20 sm:h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6">
             <CheckCircle2 className="h-8 w-8 sm:h-10 sm:w-10 text-emerald-600" />
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-2 sm:mb-3">Booking confirmed</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-2 sm:mb-3">
+            {completedSummary.isApprovalRequest ? "Request submitted" : "Booking confirmed"}
+          </h1>
+          {completedSummary.isApprovalRequest ? (
+            <p className="text-sm sm:text-base text-muted-foreground mb-6 sm:mb-8">
+              Your Paddock Club booking request has been sent to our team for eligibility review. We will email you once
+              it has been approved or if we need any further information. No booking is confirmed until you receive
+              approval.
+            </p>
+          ) : null}
           {completedSummary.confirmationEmailNotice ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 text-amber-950 text-left text-sm px-4 py-3 mb-6 sm:mb-8 space-y-2">
               <p className="font-medium">Booking saved — email not sent</p>
               <p className="text-amber-900/90 leading-relaxed">{completedSummary.confirmationEmailNotice}</p>
             </div>
-          ) : (
+          ) : !completedSummary.isApprovalRequest ? (
             <p className="text-sm sm:text-base text-muted-foreground mb-6 sm:mb-8">
               You should receive a booking confirmation email shortly. Payment details will follow from our team separately.
             </p>
-          )}
+          ) : null}
 
           <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 text-left mb-6 sm:mb-8">
             <h3 className="text-sm sm:text-base font-semibold text-foreground mb-3 sm:mb-4">Summary</h3>
             <dl className="space-y-2 sm:space-y-3 text-xs sm:text-sm">
               <div className="flex justify-between gap-2">
-                <dt className="text-muted-foreground shrink-0">Booking reference</dt>
+                <dt className="text-muted-foreground shrink-0">
+                  {completedSummary.isApprovalRequest ? "Request reference" : "Booking reference"}
+                </dt>
                 <dd className="font-mono font-semibold text-right">{completedSummary.orderReference}</dd>
               </div>
               <div className="flex justify-between">
@@ -221,7 +273,15 @@ export function CheckoutClient({
             <ArrowLeft className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             Back to race packages
           </Link>
-          <h1 className="text-xl sm:text-2xl font-bold text-foreground">Complete your booking</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground">
+            {requiresApproval ? "Request Paddock Club booking" : "Complete your booking"}
+          </h1>
+          {requiresApproval ? (
+            <p className="text-xs sm:text-sm text-muted-foreground mt-2 max-w-2xl leading-relaxed">
+              Paddock Club packages require ZK approval before a booking is confirmed. Complete the steps below to submit
+              your request — you will not be charged and inventory is not reserved until we approve.
+            </p>
+          ) : null}
           {pkg.agentHoldUnits != null && pkg.agentHoldUnits > 0 && pkg.agentHoldExpiresAt ? (
             <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-xs sm:text-sm text-amber-950 dark:text-amber-100 max-w-2xl">
               <p className="font-semibold">Your active hold</p>
@@ -236,11 +296,7 @@ export function CheckoutClient({
 
         <div className="px-4 sm:px-6 lg:px-8 pb-4 sm:pb-6 overflow-x-auto">
           <div className="flex items-center gap-2 sm:gap-4 min-w-max">
-            {[
-              { num: 1, label: "Client details" },
-              { num: 2, label: "Guests" },
-              { num: 3, label: "Checkout" },
-            ].map((s, i) => (
+            {checkoutSteps.map((s, i) => (
               <div key={s.num} className="flex items-center">
                 <button
                   type="button"
@@ -264,7 +320,9 @@ export function CheckoutClient({
                     {s.label}
                   </span>
                 </button>
-                {i < 2 && <div className={cn("w-6 sm:w-12 h-0.5 mx-2 sm:mx-4", step > s.num ? "bg-emerald-500" : "bg-muted")} />}
+                {i < checkoutSteps.length - 1 && (
+                  <div className={cn("w-6 sm:w-12 h-0.5 mx-2 sm:mx-4", step > s.num ? "bg-emerald-500" : "bg-muted")} />
+                )}
               </div>
             ))}
           </div>
@@ -427,7 +485,7 @@ export function CheckoutClient({
                     disabled={!canProceedStep2}
                     className="w-full sm:flex-1 py-2.5 sm:py-3 bg-primary text-white rounded-xl text-sm sm:text-base font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Continue to checkout
+                    {requiresApproval ? "Continue" : "Continue to checkout"}
                   </button>
                 </div>
               </div>
@@ -617,6 +675,119 @@ export function CheckoutClient({
                   <button type="button" onClick={() => setStep(2)} className="w-full sm:flex-1 py-2.5 sm:py-3 border border-border rounded-xl text-sm sm:text-base font-semibold hover:bg-muted transition-colors">
                     Back
                   </button>
+                  {requiresApproval ? (
+                    <button
+                      type="button"
+                      onClick={() => setStep(4)}
+                      disabled={!checkoutAddressesComplete}
+                      className="w-full sm:flex-1 py-2.5 sm:py-3 bg-primary text-white rounded-xl text-sm sm:text-base font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Continue to approval
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleSubmit()}
+                      disabled={!canSubmit || isSubmitting}
+                      className="w-full sm:flex-1 py-2.5 sm:py-3 bg-primary text-white rounded-xl text-sm sm:text-base font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {isSubmitting ? (
+                        <>
+                          <Loader2 className="h-4 w-4 sm:h-5 sm:w-5 animate-spin" />
+                          Processing…
+                        </>
+                      ) : (
+                        "Complete booking"
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {step === 4 && requiresApproval && (
+              <div className="space-y-4 sm:space-y-6">
+                <div>
+                  <h2 className="text-lg sm:text-xl font-bold text-foreground">Paddock Club eligibility</h2>
+                  <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+                    Read and confirm before submitting your request
+                  </p>
+                </div>
+
+                <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-2xl p-4 sm:p-6">
+                  <p className="text-xs sm:text-sm text-amber-950 dark:text-amber-100 whitespace-pre-line leading-relaxed">
+                    {PADDOCK_CLUB_BOOKING_DISCLAIMER}
+                  </p>
+                </div>
+
+                <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
+                  <label className="flex items-start gap-3 sm:gap-4 cursor-pointer">
+                    <div className="mt-0.5">
+                      <input
+                        type="checkbox"
+                        checked={formData.acceptPaddockDisclaimer}
+                        onChange={(e) => setFormData({ ...formData, acceptPaddockDisclaimer: e.target.checked })}
+                        className="sr-only"
+                      />
+                      <div
+                        className={cn(
+                          "w-4 h-4 sm:w-5 sm:h-5 rounded border-2 flex items-center justify-center transition-colors",
+                          formData.acceptPaddockDisclaimer ? "bg-primary border-primary" : "border-muted-foreground/30",
+                        )}
+                      >
+                        {formData.acceptPaddockDisclaimer && <Check className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-white" />}
+                      </div>
+                    </div>
+                    <p className="text-sm sm:text-base font-medium text-foreground leading-relaxed">
+                      I confirm that I have read the notice above and that my client meets Paddock Club eligibility
+                      requirements. I understand this submits a request only and is not a confirmed booking.
+                    </p>
+                  </label>
+                </div>
+
+                <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
+                  <label className="flex items-start gap-3 sm:gap-4 cursor-pointer">
+                    <div className="mt-0.5">
+                      <input
+                        type="checkbox"
+                        checked={formData.acceptTerms}
+                        onChange={(e) => setFormData({ ...formData, acceptTerms: e.target.checked })}
+                        className="sr-only"
+                      />
+                      <div
+                        className={cn(
+                          "w-4 h-4 sm:w-5 sm:h-5 rounded border-2 flex items-center justify-center transition-colors",
+                          formData.acceptTerms ? "bg-primary border-primary" : "border-muted-foreground/30",
+                        )}
+                      >
+                        {formData.acceptTerms && <Check className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-white" />}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-sm sm:text-base font-medium text-foreground">
+                        I accept the{" "}
+                        <Link href="/terms" className="text-primary underline underline-offset-2 hover:no-underline">
+                          terms and conditions
+                        </Link>
+                      </p>
+                    </div>
+                  </label>
+                </div>
+
+                {submitError && (
+                  <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                    {submitError}
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setStep(3)}
+                    className="w-full sm:flex-1 py-2.5 sm:py-3 border border-border rounded-xl text-sm sm:text-base font-semibold hover:bg-muted transition-colors"
+                  >
+                    Back
+                  </button>
                   <button
                     type="button"
                     onClick={() => void handleSubmit()}
@@ -626,10 +797,10 @@ export function CheckoutClient({
                     {isSubmitting ? (
                       <>
                         <Loader2 className="h-4 w-4 sm:h-5 sm:w-5 animate-spin" />
-                        Processing…
+                        Submitting…
                       </>
                     ) : (
-                      "Complete booking"
+                      "Submit request for approval"
                     )}
                   </button>
                 </div>

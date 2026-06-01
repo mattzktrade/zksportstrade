@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import { Inter, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import "./globals.css"
+import { LOGO_ICON } from "@/lib/branding"
 
 const inter = Inter({
   subsets: ["latin"],
@@ -20,9 +21,9 @@ export const metadata: Metadata = {
     "Exclusive F1 hospitality packages for trade partners. Book premium motorsport experiences for your clients.",
   generator: "v0.app",
   icons: {
-    icon: [{ url: "/images/zk%20small%20image.jpg", type: "image/jpeg" }],
-    apple: [{ url: "/images/zk%20small%20image.jpg", type: "image/jpeg" }],
-    shortcut: "/images/zk%20small%20image.jpg",
+    icon: [{ url: LOGO_ICON.src, type: "image/png", sizes: "32x32" }],
+    apple: [{ url: LOGO_ICON.src, type: "image/png" }],
+    shortcut: LOGO_ICON.src,
   },
 }
 

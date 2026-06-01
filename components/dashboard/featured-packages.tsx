@@ -50,7 +50,7 @@ function FeaturedPackageCard({ pkg }: { pkg: Package }) {
           className="object-cover transition-transform duration-700 group-hover:scale-105"
           sizes="(max-width: 768px) 100vw, 33vw"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/45 to-black/20" />
+        <div className="absolute inset-0 bg-gradient-to-t from-zk-black/90 via-zk-black/45 to-zk-black/20" />
 
         <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-5">
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/90">{pkg.circuit}</p>

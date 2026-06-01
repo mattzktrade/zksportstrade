@@ -29,7 +29,7 @@ function ProfitCards({ period }: { period: DashboardProfitPeriod }) {
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {period.totalsByCurrency.map((b) => {
         const complete = b.orders_missing_cost === 0
-        const profitClass = b.gross_profit >= 0 ? "text-emerald-600" : "text-red-600"
+        const profitClass = b.gross_profit >= 0 ? "text-emerald-600" : "text-destructive"
         return (
           <div key={b.currency} className="rounded-xl border border-border bg-card p-5 shadow-sm space-y-2">
             <div className="flex items-center justify-between">
@@ -119,7 +119,7 @@ function MonthlyTable({ monthly }: { monthly: DashboardProfitPeriod[] }) {
           {monthly.map((m) => {
             const b = primaryBucket(m)
             if (!b) return null
-            const profitClass = b.gross_profit >= 0 ? "text-emerald-600" : "text-red-600"
+            const profitClass = b.gross_profit >= 0 ? "text-emerald-600" : "text-destructive"
             return (
               <tr key={m.periodKey} className="hover:bg-muted/30">
                 <td className="px-4 py-3 font-medium text-foreground">{m.label}</td>

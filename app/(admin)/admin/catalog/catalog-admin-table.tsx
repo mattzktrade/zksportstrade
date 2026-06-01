@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import Image from "next/image"
+import { LOGO_ICON } from "@/lib/branding"
 import Link from "next/link"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import type { AdminPackageRow, AdminRaceOption } from "@/lib/admin/queries"
@@ -118,11 +119,12 @@ export function CatalogAdminTable({ rows, races }: { rows: AdminPackageRow[]; ra
       <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-3">
         <div className="relative">
           <Image
-            src="/images/zk%20small%20image.jpg"
+            src={LOGO_ICON.src}
             alt=""
-            width={18}
-            height={18}
-            className="absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 rounded object-cover pointer-events-none opacity-90"
+            width={LOGO_ICON.width}
+            height={LOGO_ICON.height}
+            className="absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 object-contain pointer-events-none opacity-90"
+            sizes="18px"
             aria-hidden
           />
           <input

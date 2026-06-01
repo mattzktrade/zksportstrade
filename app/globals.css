@@ -3,82 +3,85 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* ZK Sports & Entertainment branding - white/red theme */
+/* ZK Sports & Entertainment branding — #F90202 red, #010101 black */
 :root {
+  --zk-red: #f90202;
+  --zk-black: #010101;
   --background: oklch(0.985 0 0);
-  --foreground: oklch(0.145 0 0);
+  --foreground: var(--zk-black);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: var(--zk-black);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  /* ZK Sports Red - vibrant, motorsport-inspired */
-  --primary: oklch(0.5 0.2 25);
+  --popover-foreground: var(--zk-black);
+  --primary: var(--zk-red);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.965 0 0);
-  --secondary-foreground: oklch(0.145 0 0);
+  --secondary-foreground: var(--zk-black);
   --muted: oklch(0.955 0.005 250);
   --muted-foreground: oklch(0.45 0 0);
   --accent: oklch(0.955 0.005 250);
-  --accent-foreground: oklch(0.145 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  --accent-foreground: var(--zk-black);
+  --destructive: var(--zk-red);
   --destructive-foreground: oklch(1 0 0);
   --border: oklch(0.915 0.005 250);
   --input: oklch(0.915 0.005 250);
-  --ring: oklch(0.5 0.2 25);
-  --chart-1: oklch(0.5 0.2 25);
+  --ring: var(--zk-red);
+  --chart-1: var(--zk-red);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
   --radius: 0.75rem;
   --sidebar: oklch(1 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.5 0.2 25);
+  --sidebar-foreground: var(--zk-black);
+  --sidebar-primary: var(--zk-red);
   --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.965 0.01 25);
-  --sidebar-accent-foreground: oklch(0.145 0 0);
+  --sidebar-accent: color-mix(in srgb, var(--zk-red) 8%, white);
+  --sidebar-accent-foreground: var(--zk-black);
   --sidebar-border: oklch(0.915 0.005 250);
-  --sidebar-ring: oklch(0.5 0.2 25);
+  --sidebar-ring: var(--zk-red);
 }
 
 .dark {
-  --background: oklch(0.12 0.005 250);
+  --background: var(--zk-black);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.155 0.005 250);
+  --card: color-mix(in srgb, var(--zk-black) 92%, white);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.155 0.005 250);
+  --popover: color-mix(in srgb, var(--zk-black) 92%, white);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.6 0.22 25);
+  --primary: var(--zk-red);
   --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.22 0.005 250);
+  --secondary: color-mix(in srgb, var(--zk-black) 85%, white);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.22 0.005 250);
+  --muted: color-mix(in srgb, var(--zk-black) 85%, white);
   --muted-foreground: oklch(0.65 0 0);
-  --accent: oklch(0.22 0.005 250);
+  --accent: color-mix(in srgb, var(--zk-black) 85%, white);
   --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.5 0.2 25);
+  --destructive: var(--zk-red);
   --destructive-foreground: oklch(1 0 0);
-  --border: oklch(0.25 0.005 250);
-  --input: oklch(0.25 0.005 250);
-  --ring: oklch(0.6 0.22 25);
-  --chart-1: oklch(0.6 0.22 25);
+  --border: color-mix(in srgb, var(--zk-black) 75%, white);
+  --input: color-mix(in srgb, var(--zk-black) 75%, white);
+  --ring: var(--zk-red);
+  --chart-1: var(--zk-red);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.155 0.005 250);
+  --sidebar: color-mix(in srgb, var(--zk-black) 92%, white);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.6 0.22 25);
+  --sidebar-primary: var(--zk-red);
   --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.22 0.005 250);
+  --sidebar-accent: color-mix(in srgb, var(--zk-black) 85%, white);
   --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.25 0.005 250);
-  --sidebar-ring: oklch(0.6 0.22 25);
+  --sidebar-border: color-mix(in srgb, var(--zk-black) 75%, white);
+  --sidebar-ring: var(--zk-red);
 }
 
 @theme inline {
   --font-sans: "Inter", "Inter Fallback", system-ui, sans-serif;
   --font-mono: "Geist Mono", "Geist Mono Fallback", monospace;
+  --color-zk-red: var(--zk-red);
+  --color-zk-black: var(--zk-black);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

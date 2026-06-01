@@ -60,7 +60,7 @@ export function PackageOrdersTable({ orders }: { orders: AdminOrderListRow[] }) 
             <p
               className={cn(
                 "text-lg font-semibold tabular-nums",
-                totalProfit >= 0 ? "text-emerald-600" : "text-red-600",
+                totalProfit >= 0 ? "text-emerald-600" : "text-destructive",
               )}
             >
               {formatMoney(cur, totalProfit)}
@@ -121,7 +121,7 @@ export function PackageOrdersTable({ orders }: { orders: AdminOrderListRow[] }) 
                     o.profit.cost_known && o.profit.gross_profit != null
                       ? o.profit.gross_profit >= 0
                         ? "text-emerald-600"
-                        : "text-red-600"
+                        : "text-destructive"
                       : "text-muted-foreground",
                   )}
                 >

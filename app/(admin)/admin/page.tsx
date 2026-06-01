@@ -2,6 +2,7 @@ import Link from "next/link"
 import nextDynamic from "next/dynamic"
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { createClient } from "@/lib/supabase/server"
+import { countPendingBookingApprovalRequests } from "@/lib/booking-approval/queries"
 import { getDashboardProfit } from "@/lib/admin/cost-layers"
 import { PageLoadingSpinner } from "@/components/page-loading-spinner"
 import { DashboardProfitSection } from "@/components/admin/dashboard-profit-section"
@@ -12,16 +13,18 @@ export default async function AdminDashboardPage() {
   await requireAdmin()
   const supabase = await createClient()
 
-  const [{ count: pending }, { count: packages }, { count: activeHolds }, { count: orders }, profit] =
+  const [{ count: pending }, { count: packages }, { count: activeHolds }, { count: orders }, paddockRequests, profit] =
     await Promise.all([
       supabase.from("profiles").select("*", { count: "exact", head: true }).eq("approval_status", "pending"),
       supabase.from("packages").select("*", { count: "exact", head: true }),
       supabase.from("inventory_holds").select("*", { count: "exact", head: true }).is("released_at", null),
       supabase.from("orders").select("*", { count: "exact", head: true }),
+      countPendingBookingApprovalRequests(),
       getDashboardProfit(),
     ])
 
   const cards = [
+    { label: "Paddock requests", value: paddockRequests, href: "/admin/booking-requests" },
     { label: "Pending signups", value: pending ?? 0, href: "/admin/pending-users" },
     { label: "Packages in catalog", value: packages ?? 0, href: "/admin/catalog" },
     { label: "Active holds", value: activeHolds ?? 0, href: "/admin/inventory" },

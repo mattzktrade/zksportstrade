@@ -315,7 +315,7 @@ export function PlaceOrderAdminClient({
                 Checking availability…
               </p>
             ) : agentId && packageId && !canBook ? (
-              <p className="text-sm text-red-600">This package cannot be booked (sold out, enquiry-only, or no price).</p>
+              <p className="text-sm text-destructive">This package cannot be booked (sold out, enquiry-only, or no price).</p>
             ) : previewPkg && previewPkg.agentHoldUnits ? (
               <p className="text-sm text-amber-800 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
                 Agent has {previewPkg.agentHoldUnits} unit(s) on hold for this package (included in availability).

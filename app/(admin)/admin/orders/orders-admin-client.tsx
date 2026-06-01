@@ -284,7 +284,7 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
                 <p
                   className={cn(
                     "text-xl font-bold tabular-nums",
-                    b.profit >= 0 ? "text-emerald-600" : "text-red-600",
+                    b.profit >= 0 ? "text-emerald-600" : "text-destructive",
                   )}
                 >
                   {formatMoney(b.currency, b.profit)}
@@ -404,7 +404,7 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
                         o.profit.cost_known && o.profit.gross_profit != null
                           ? o.profit.gross_profit >= 0
                             ? "text-emerald-600"
-                            : "text-red-600"
+                            : "text-destructive"
                           : "text-muted-foreground",
                       )}
                       title={

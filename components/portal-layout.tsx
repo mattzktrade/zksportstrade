@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { usePortalUser } from "@/components/portal-user-provider"
+import { LOGO_MAIN } from "@/lib/branding"
 
 export function PortalLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -35,7 +36,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-muted/30">
       {sidebarOpen && (
-        <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
+        <div className="fixed inset-0 bg-zk-black/50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
       <aside
@@ -47,11 +48,12 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
         <div className="border-b border-border p-5">
           <Link href="/" className="block">
             <Image
-              src="/images/image.png"
+              src={LOGO_MAIN.src}
               alt="ZK Sports & Entertainment"
-              width={160}
-              height={40}
+              width={LOGO_MAIN.width}
+              height={LOGO_MAIN.height}
               className="h-9 w-auto"
+              sizes="160px"
               priority
             />
             <p className="text-[9px] uppercase tracking-widest text-primary font-semibold mt-1.5">Trade Portal</p>
@@ -126,11 +128,12 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
               <Menu className="h-5 w-5" />
             </button>
             <Image
-              src="/images/image.png"
+              src={LOGO_MAIN.src}
               alt="ZK Sports & Entertainment"
-              width={120}
-              height={30}
+              width={LOGO_MAIN.width}
+              height={LOGO_MAIN.height}
               className="h-6 w-auto"
+              sizes="120px"
             />
             <Link
               href="/profile"

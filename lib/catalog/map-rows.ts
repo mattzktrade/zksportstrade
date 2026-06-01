@@ -1,3 +1,4 @@
+import { packageRequiresBookingApproval } from "@/lib/catalog/paddock-club"
 import type { Package, Race } from "@/lib/types/catalog"
 
 type DbRace = {
@@ -28,9 +29,11 @@ type DbPackage = {
   total_capacity: number
   is_enquiry: boolean
   is_hidden: boolean
+  requires_booking_approval?: boolean
   image: string | null
   tier: string
   duration?: string | null
+  inventory_group_id?: string | null
   includes: unknown
   featured: boolean
   sort_order: number
@@ -64,6 +67,10 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     typeof brochureRaw === "string" && brochureRaw.trim().length > 0 ? brochureRaw.trim() : null
   const description = typeof p.description === "string" ? p.description : ""
   const galleryImages = parseGalleryImages(p.gallery_images)
+  const requiresBookingApproval = packageRequiresBookingApproval({
+    name: p.name,
+    requiresBookingApproval: p.requires_booking_approval,
+  })
 
   if (p.is_enquiry) {
   return {
@@ -88,6 +95,7 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     featured: p.featured,
     brochureUrl,
     raceId: p.race_id,
+    requiresBookingApproval,
   }
   }
 
@@ -117,6 +125,7 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     featured: p.featured,
     brochureUrl,
     raceId: p.race_id,
+    requiresBookingApproval,
   }
 }
 

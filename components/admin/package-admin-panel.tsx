@@ -76,6 +76,9 @@ export function PackageAdminPanel({
   const [includesText, setIncludesText] = useState(includesToText(initial.includes))
   const [tradePrice, setTradePrice] = useState(initial.trade_price != null ? String(initial.trade_price) : "")
   const [isEnquiry, setIsEnquiry] = useState(initial.is_enquiry)
+  const [requiresBookingApproval, setRequiresBookingApproval] = useState(
+    initial.requires_booking_approval ?? false,
+  )
   const [featured, setFeatured] = useState(initial.featured)
   const [isHidden, setIsHidden] = useState(initial.is_hidden)
   const [sortOrder, setSortOrder] = useState(String(initial.sort_order))
@@ -101,6 +104,7 @@ export function PackageAdminPanel({
     setIncludesText(includesToText(initial.includes))
     setTradePrice(initial.trade_price != null ? String(initial.trade_price) : "")
     setIsEnquiry(initial.is_enquiry)
+    setRequiresBookingApproval(initial.requires_booking_approval ?? false)
     setFeatured(initial.featured)
     setIsHidden(initial.is_hidden)
     setSortOrder(String(initial.sort_order))
@@ -153,6 +157,7 @@ export function PackageAdminPanel({
         includes: linesToList(includesText),
         trade_price: price,
         is_enquiry: isEnquiry,
+        requires_booking_approval: requiresBookingApproval,
         featured,
         is_hidden: isHidden,
         sort_order: so,
@@ -393,6 +398,14 @@ export function PackageAdminPanel({
             Enquiry package
           </label>
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={requiresBookingApproval}
+              onChange={(e) => setRequiresBookingApproval(e.target.checked)}
+            />
+            Requires booking approval (Paddock Club)
+          </label>
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
             <input type="checkbox" checked={featured} onChange={(e) => setFeatured(e.target.checked)} />
             Featured
           </label>
@@ -410,7 +423,7 @@ export function PackageAdminPanel({
             type="button"
             disabled={pending}
             onClick={() => confirmDeletePackage()}
-            className="px-4 py-2 rounded-lg border border-red-500/40 text-red-600 text-sm font-medium hover:bg-red-500/10 disabled:opacity-50"
+            className="px-4 py-2 rounded-lg border border-destructive/40 text-destructive text-sm font-medium hover:bg-destructive/10 disabled:opacity-50"
           >
             Delete package
           </button>
@@ -422,6 +435,12 @@ export function PackageAdminPanel({
       {showInventory ? (
       <div className={cn("space-y-4 min-w-0", showDetails && "border-t border-border pt-6")}>
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Inventory & cost</p>
+        {initial.inventory_group_id ? (
+          <p className="text-xs text-muted-foreground rounded-lg border border-border bg-muted/40 px-3 py-2">
+            Linked day options: Saturday and Sunday are separate pools. The 2-day option follows the lower of
+            Saturday and Sunday — selling one day only reduces that day and the 2-day count, not the other day.
+          </p>
+        ) : null}
         {!initial.inventory ? (
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground">No inventory row for this package yet.</p>
