@@ -46,6 +46,7 @@ export function AdminInvoiceStatusSelect({
   if (!invoiceId) {
     return <span className="text-muted-foreground">—</span>
   }
+  const activeInvoiceId = invoiceId
 
   function changeStatus(next: InvoiceUiStatus) {
     if (!INVOICE_UI_STATUSES.includes(next)) return
@@ -56,7 +57,7 @@ export function AdminInvoiceStatusSelect({
     const prev = localStatus
     setLocalStatus(next)
     start(async () => {
-      const res = await updateInvoiceStatus(invoiceId, next)
+      const res = await updateInvoiceStatus(activeInvoiceId, next)
       if (!res.ok) {
         setLocalStatus(prev)
         if (next === "delivered" && res.message.toLowerCase().includes("proof")) {
@@ -78,7 +79,7 @@ export function AdminInvoiceStatusSelect({
     const prev = localStatus
     start(async () => {
       const fd = new FormData()
-      fd.set("invoiceId", invoiceId)
+      fd.set("invoiceId", activeInvoiceId)
       fd.set("note", proofNote)
       if (proofFile) fd.set("file", proofFile)
       const res = await addDeliveryProofAndMarkDelivered(fd)

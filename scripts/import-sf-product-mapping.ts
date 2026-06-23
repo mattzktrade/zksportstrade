@@ -12,6 +12,8 @@ import { readFileSync } from "fs"
 import { resolve } from "path"
 import { createClient } from "@supabase/supabase-js"
 
+type SupabaseAnyClient = any
+
 config({ path: resolve(process.cwd(), ".env.local") })
 
 const DEFAULT_CSV = resolve(
@@ -292,14 +294,14 @@ function findBestMatch(csv: CsvRow, packages: PortalPkg[]): { pkg: PortalPkg; sc
   return best
 }
 
-async function ensureColumn(admin: ReturnType<typeof createClient>) {
+async function ensureColumn(admin: SupabaseAnyClient) {
   const { error } = await admin.rpc("exec_sql" as never, {} as never)
   void error
   // Column added via migration; if missing, updates will fail with a clear error.
 }
 
 async function syncInventory(
-  admin: ReturnType<typeof createClient>,
+  admin: SupabaseAnyClient,
   packageId: string,
   stock: number,
   available: number,
