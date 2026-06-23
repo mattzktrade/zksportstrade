@@ -6,8 +6,13 @@ import { getPortalProfile } from "@/lib/supabase/profile"
 import { sendOrderPlacedEmail } from "@/lib/email/send-order-placed"
 import { isGuestCountAllowed, numericSellable } from "@/lib/catalog/booking-guests"
 import { packageRequiresBookingApproval } from "@/lib/catalog/paddock-club"
+import { enqueueOrderIntegrationsServer } from "@/lib/integrations/enqueue-server"
 import { mapBookingApprovalError, mapPlaceOrderError } from "@/lib/orders/place-order-errors"
 import { getPackageById } from "@/lib/catalog/queries"
+import {
+  buildBookingApprovalAdminReviewUrl,
+  buildBookingApprovalApproveUrl,
+} from "@/lib/booking-approval/approve-links"
 import { sendBookingApprovalRequestAdminEmail } from "@/lib/email/send-booking-approval-request"
 import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
 
@@ -58,7 +63,7 @@ export async function submitBookingApprovalRequest(
     return { ok: false, error: "Your account is not approved to place orders yet." }
   }
   if (!input.paddockDisclaimerAccepted) {
-    return { ok: false, error: "Please confirm you have read and accept the Paddock Club eligibility notice." }
+    return { ok: false, error: "Please confirm you have read and accept the Paddock Club fulfilment notice." }
   }
 
   const guests = Math.floor(Number(input.guests))
@@ -147,8 +152,8 @@ export async function submitBookingApprovalRequest(
   revalidatePath("/bookings")
   revalidatePath("/profile")
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ?? ""
-  const adminReviewUrl = siteUrl ? `${siteUrl}/admin/booking-requests` : "/admin/booking-requests"
+  const adminReviewUrl = buildBookingApprovalAdminReviewUrl()
+  const approveUrl = requestId ? buildBookingApprovalApproveUrl(requestId) : adminReviewUrl
 
   let emailResult: Awaited<ReturnType<typeof sendBookingApprovalRequestAdminEmail>>
   try {
@@ -166,6 +171,7 @@ export async function submitBookingApprovalRequest(
     clientEmail: input.clientEmail.trim(),
     clientPhone: input.clientPhone.trim(),
     adminReviewUrl,
+    approveUrl,
     })
   } catch (e) {
     console.error("[checkout] approval request saved but admin email threw:", e)
@@ -274,6 +280,11 @@ export async function submitCheckoutOrder(
 
   const orderReference = row.order_reference as string
   const orderId = String(row.order_id ?? "")
+  if (orderId) {
+    const enq = await enqueueOrderIntegrationsServer(orderId, "trade_portal", { background: true })
+    if (!enq.ok) console.warn("[checkout] Integrations not queued:", enq.message)
+    else if (enq.warnings.length) console.warn("[checkout] Integration warnings:", enq.warnings.join("; "))
+  }
   const totalAmount = Number(row.total_amount ?? 0)
   const currency = String(row.currency ?? "USD")
   const guestCount = Number(row.guests ?? guests)
@@ -293,7 +304,6 @@ export async function submitCheckoutOrder(
       billing_country: input.billingCountry.trim(),
     })
     .eq("id", profile.id)
-
   if (profileErr) {
     console.error("[checkout] order saved but profile address defaults not updated:", profileErr.message)
   }
@@ -304,12 +314,9 @@ export async function submitCheckoutOrder(
   revalidatePath("/admin/inventory")
   revalidatePath("/admin/catalog")
 
-  const agentEmail = profile.email
-  const agentName = profile.full_name || profile.email.split("@")[0] || "Partner"
-
   const emailResult = await sendOrderPlacedEmail({
-    agentEmail,
-    agentName,
+    agentEmail: profile.email,
+    agentName: profile.full_name || profile.email.split("@")[0] || "Partner",
     orderReference,
     packageName: String(row.package_name ?? ""),
     circuit: String(row.circuit ?? ""),
@@ -335,18 +342,12 @@ export async function submitCheckoutOrder(
     billingCountry: input.billingCountry.trim(),
   })
 
-  if (!emailResult.ok && emailResult.error) {
-    console.error("[checkout] order saved but email failed:", emailResult.error)
-  } else if (!emailResult.ok && emailResult.skipped) {
-    console.warn("[checkout] order saved; email skipped:", emailResult.skipped)
-  }
-
   let confirmationEmailSent = emailResult.ok
   let confirmationEmailNotice: string | undefined
   if (!emailResult.ok) {
     if (emailResult.skipped) {
       confirmationEmailNotice =
-        "Your booking was saved, but confirmation email is not configured on this server. In Vercel → Project → Settings → Environment Variables, set RESEND_API_KEY and ORDER_EMAIL_FROM for Production, then redeploy."
+        "Your booking was saved, but confirmation email is not configured on this server. In Vercel -> Project -> Settings -> Environment Variables, set RESEND_API_KEY and ORDER_EMAIL_FROM for Production, then redeploy."
     } else if (emailResult.error) {
       confirmationEmailNotice = `Your booking was saved, but the confirmation email could not be sent (${emailResult.error}). Check Vercel logs, Resend domain verification, and spam.`
     }

@@ -3,8 +3,14 @@
 import { useState, useMemo } from "react"
 import Link from "next/link"
 import type { Booking } from "@/lib/types/catalog"
-import { invoiceWorkflowStatusLabels, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
+import {
+  invoiceDisplayLabel,
+  invoiceDisplayStatus,
+  paymentWorkflowStatusLabels,
+  type InvoiceWorkflowStatus,
+} from "@/lib/invoices/status"
 import { Search, Calendar, Users, Filter, ArrowUpDown, ChevronDown } from "lucide-react"
+import { InvoicePdfDownloadLink } from "@/components/invoice-pdf-download-link"
 import { cn } from "@/lib/utils"
 
 const paymentStatusConfig: Record<
@@ -12,27 +18,32 @@ const paymentStatusConfig: Record<
   { label: string; className: string; dotColor: string }
 > = {
   awaiting_invoice: {
-    label: invoiceWorkflowStatusLabels.awaiting_invoice,
-    className: "text-slate-700 bg-slate-50/50 dark:text-slate-200 dark:bg-slate-900/40",
-    dotColor: "bg-slate-500",
+    label: paymentWorkflowStatusLabels.awaiting_invoice,
+    className: "text-amber-700 bg-amber-50/50",
+    dotColor: "bg-amber-600",
   },
   awaiting_payment: {
-    label: invoiceWorkflowStatusLabels.awaiting_payment,
+    label: paymentWorkflowStatusLabels.awaiting_payment,
     className: "text-amber-700 bg-amber-50/50",
     dotColor: "bg-amber-600",
   },
   paid: {
-    label: invoiceWorkflowStatusLabels.paid,
+    label: paymentWorkflowStatusLabels.paid,
     className: "text-emerald-700 bg-emerald-50/50",
     dotColor: "bg-emerald-600",
   },
+  delivered: {
+    label: paymentWorkflowStatusLabels.delivered,
+    className: "text-sky-800 bg-sky-50/80 dark:text-sky-100 dark:bg-sky-950/40",
+    dotColor: "bg-sky-600",
+  },
 }
 
-const paymentFilters: { value: "all" | InvoiceWorkflowStatus; label: string }[] = [
+const paymentFilters: { value: "all" | "awaiting_payment" | "paid" | "delivered"; label: string }[] = [
   { value: "all", label: "All Bookings" },
-  { value: "awaiting_invoice", label: invoiceWorkflowStatusLabels.awaiting_invoice },
-  { value: "awaiting_payment", label: invoiceWorkflowStatusLabels.awaiting_payment },
-  { value: "paid", label: invoiceWorkflowStatusLabels.paid },
+  { value: "awaiting_payment", label: paymentWorkflowStatusLabels.awaiting_payment },
+  { value: "paid", label: paymentWorkflowStatusLabels.paid },
+  { value: "delivered", label: paymentWorkflowStatusLabels.delivered },
 ]
 
 export function BookingsPageClient({ initialBookings }: { initialBookings: Booking[] }) {
@@ -51,13 +62,13 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
         booking.packageName.toLowerCase().includes(q) ||
         booking.clientName.toLowerCase().includes(q) ||
         booking.id.toLowerCase().includes(q) ||
-        ref.includes(q)
+        ref.includes(q) ||
+        (booking.xeroInvoiceNumber ?? "").toLowerCase().includes(q)
 
+      const displayStatus = invoiceDisplayStatus(booking.invoiceStatus)
       const statusMatch =
         statusFilter === "all" ||
-        (booking.approvalRequestStatus != null
-          ? false
-          : booking.invoiceStatus === statusFilter)
+        (booking.approvalRequestStatus != null ? false : displayStatus === statusFilter)
 
       return searchMatch && statusMatch
     })
@@ -78,10 +89,13 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
   }, [initialBookings, search, statusFilter, sortBy, sortOrder])
 
   const stats = useMemo(() => {
-    const awaitingPayment = initialBookings.filter((b) => b.invoiceStatus === "awaiting_payment").length
-    const paid = initialBookings.filter((b) => b.invoiceStatus === "paid").length
+    const awaitingPayment = initialBookings.filter(
+      (b) => invoiceDisplayStatus(b.invoiceStatus) === "awaiting_payment",
+    ).length
+    const paid = initialBookings.filter((b) => invoiceDisplayStatus(b.invoiceStatus) === "paid").length
+    const delivered = initialBookings.filter((b) => invoiceDisplayStatus(b.invoiceStatus) === "delivered").length
     const totalValue = initialBookings.reduce((sum, b) => sum + b.totalAmount, 0)
-    return { awaitingPayment, paid, totalValue }
+    return { awaitingPayment, paid, delivered, totalValue }
   }, [initialBookings])
 
   const tableGrid =
@@ -103,6 +117,10 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
           <div className="px-3 sm:px-4 lg:px-5 py-2 sm:py-3 bg-card border border-border rounded-lg min-w-[90px] sm:min-w-[120px]">
             <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-0.5 sm:mb-1">Paid</p>
             <p className="text-xl sm:text-2xl font-bold text-foreground">{stats.paid}</p>
+          </div>
+          <div className="px-3 sm:px-4 lg:px-5 py-2 sm:py-3 bg-card border border-border rounded-lg min-w-[90px] sm:min-w-[120px]">
+            <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-0.5 sm:mb-1">Delivered</p>
+            <p className="text-xl sm:text-2xl font-bold text-foreground">{stats.delivered}</p>
           </div>
           <div className="px-3 sm:px-4 lg:px-5 py-2 sm:py-3 bg-card border border-border rounded-lg min-w-[110px] sm:min-w-[160px]">
             <p className="text-[10px] sm:text-xs text-muted-foreground font-medium mb-0.5 sm:mb-1">Total Value</p>
@@ -190,7 +208,7 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
                       className: "text-rose-800 bg-rose-50/80 dark:text-rose-100 dark:bg-rose-950/40",
                       dotColor: "bg-rose-500",
                     }
-                  : paymentStatusConfig[booking.invoiceStatus]
+                  : paymentStatusConfig[invoiceDisplayStatus(booking.invoiceStatus)]
             const isExpanded = expandedBooking === booking.id
             const shortRef = (booking.orderReference ?? booking.id).replace(/^ZK-\d{4}-/i, "").slice(0, 8)
 
@@ -208,6 +226,11 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
                     <span className="text-xs font-mono text-muted-foreground" title={booking.orderReference ?? booking.id}>
                       {shortRef.toUpperCase()}
                     </span>
+                    {booking.xeroInvoiceNumber ? (
+                      <p className="text-[10px] font-mono text-muted-foreground mt-0.5" title="Xero invoice">
+                        {booking.xeroInvoiceNumber}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="min-w-0">
                     <p className="font-semibold text-foreground truncate">{booking.packageName}</p>
@@ -267,6 +290,9 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
                     <div className="flex-1 min-w-0 pr-2">
                       <p className="text-sm sm:text-base font-semibold text-foreground truncate mb-0.5 sm:mb-1">{booking.packageName}</p>
                       <p className="text-xs sm:text-sm text-muted-foreground truncate">{booking.circuit}</p>
+                      {booking.xeroInvoiceNumber ? (
+                        <p className="text-[10px] font-mono text-muted-foreground mt-0.5">{booking.xeroInvoiceNumber}</p>
+                      ) : null}
                     </div>
                     <div className="flex flex-col items-end gap-1.5 sm:gap-2 flex-shrink-0">
                       <span
@@ -354,6 +380,12 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
                         <div>
                           <h4 className="text-sm font-semibold text-foreground mb-3">Payment Summary</h4>
                           <dl className="space-y-2 text-sm">
+                            {booking.xeroInvoiceNumber ? (
+                              <div className="flex justify-between gap-2">
+                                <dt className="text-muted-foreground shrink-0">Invoice no.</dt>
+                                <dd className="font-mono font-medium text-right">{booking.xeroInvoiceNumber}</dd>
+                              </div>
+                            ) : null}
                             <div className="flex justify-between gap-2">
                               <dt className="text-muted-foreground shrink-0">Status</dt>
                               <dd>
@@ -380,6 +412,11 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
                               <dt className="font-semibold text-foreground">Total</dt>
                               <dd className="font-bold text-primary">${booking.totalAmount.toLocaleString()}</dd>
                             </div>
+                            {booking.xeroInvoiceNumber ? (
+                              <div className="pt-3">
+                                <InvoicePdfDownloadLink orderId={booking.id} variant="button" />
+                              </div>
+                            ) : null}
                           </dl>
                         </div>
                       </div>

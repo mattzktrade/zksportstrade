@@ -1,8 +1,7 @@
-import Image from "next/image"
+import { CatalogImage } from "@/components/catalog-image"
 import Link from "next/link"
 import type { Package } from "@/lib/types/catalog"
 import {
-  featuredPackageTagline,
   packageCheckoutHref,
   packageDetailsHref,
   packageIsBookable,
@@ -36,16 +35,16 @@ function availabilityLabel(pkg: Package): { text: string; tone: "available" | "e
 function FeaturedPackageCard({ pkg }: { pkg: Package }) {
   const bookable = packageIsBookable(pkg)
   const price = formatPrice(pkg)
-  const tagline = featuredPackageTagline(pkg.id)
   const duration = packageDurationLabel(pkg.duration)
   const stock = availabilityLabel(pkg)
 
   return (
     <article className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all duration-300 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5">
       <div className="relative aspect-[16/10] overflow-hidden">
-        <Image
-          src={pkg.image || "/placeholder.svg"}
+        <CatalogImage
+          src={pkg.image}
           alt={pkg.name}
+          variant="card"
           fill
           className="object-cover transition-transform duration-700 group-hover:scale-105"
           sizes="(max-width: 768px) 100vw, 33vw"
@@ -59,8 +58,6 @@ function FeaturedPackageCard({ pkg }: { pkg: Package }) {
       </div>
 
       <div className="flex flex-1 flex-col gap-4 p-4 sm:p-5">
-        {tagline ? <p className="text-sm leading-relaxed text-muted-foreground">{tagline}</p> : null}
-
         <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <MapPin className="h-3.5 w-3.5 shrink-0 text-primary/80" />

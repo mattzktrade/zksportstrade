@@ -1,20 +1,29 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { addCostLayer, deleteCostLayer, updateCostLayer, updateCostLayerQuantity } from "@/app/(admin)/actions"
 import type { CostLayerRow } from "@/lib/admin/cost-layers"
+import type { LinkedInventoryPackage } from "@/lib/admin/linked-inventory"
+import { linkedPackageSellable } from "@/lib/admin/linked-inventory"
+import type { PackageSalesBreakdown } from "@/lib/admin/package-sales-breakdown"
+import { packageDurationLabel } from "@/lib/catalog/package-duration"
 import { formatMoney } from "@/lib/format/money"
 
 type Props = {
   packageId: string
   packageCurrency: string
+  packageName: string
+  packageDuration?: string | null
   /** Optional sale price for the package, used to preview margin against weighted cost. */
   salePrice: number | null
   layers: CostLayerRow[]
-  /** Current qty_available on package_inventory. Used to flag desync. */
-  qtyAvailable: number
+  salesBreakdown: PackageSalesBreakdown
+  linkedPackages?: LinkedInventoryPackage[]
+  /** Sellable for this package when not in a linked group. */
+  sellable?: number
 }
 
 function formatPct(value: number): string {
@@ -29,12 +38,26 @@ function formatDateInput(iso: string): string {
   return local.toISOString().slice(0, 10)
 }
 
+function formatDisplayDate(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ""
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()}`
+}
+
+function soldCount(n: number): string {
+  return String(Math.max(0, Math.floor(n)))
+}
+
 export function PackageCostLayers({
   packageId,
   packageCurrency,
+  packageName,
+  packageDuration = null,
   salePrice,
   layers,
-  qtyAvailable,
+  salesBreakdown,
+  linkedPackages = [],
+  sellable = 0,
 }: Props) {
   const router = useRouter()
   const [pending, start] = useTransition()
@@ -42,10 +65,12 @@ export function PackageCostLayers({
   const [addQty, setAddQty] = useState("")
   const [addCost, setAddCost] = useState("")
   const [addNote, setAddNote] = useState("")
+  const [addSource, setAddSource] = useState("")
   const [addDate, setAddDate] = useState("")
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editCost, setEditCost] = useState("")
   const [editNote, setEditNote] = useState("")
+  const [editSource, setEditSource] = useState("")
   const [editDate, setEditDate] = useState("")
   const [editQty, setEditQty] = useState("")
   const [editCascade, setEditCascade] = useState(true)
@@ -76,7 +101,30 @@ export function PackageCostLayers({
     return grossUnit / salePrice
   }, [grossUnit, salePrice])
 
-  const desync = qtyAvailable - totalRemaining
+  const isLinkedGroup = linkedPackages.length > 1
+
+  const packageSalesRows = useMemo(() => {
+    if (isLinkedGroup) {
+      return linkedPackages.map((p) => ({
+        id: p.id,
+        name: p.name,
+        duration: p.duration,
+        salesBreakdown: p.sales_breakdown,
+        sellable: linkedPackageSellable(p),
+        isCurrent: p.id === packageId,
+      }))
+    }
+    return [
+      {
+        id: packageId,
+        name: packageName,
+        duration: packageDuration,
+        salesBreakdown,
+        sellable,
+        isCurrent: true,
+      },
+    ]
+  }, [isLinkedGroup, linkedPackages, packageId, packageName, packageDuration, salesBreakdown, sellable])
   const sortedLayers = useMemo(
     () => [...layers].sort((a, b) => {
       const da = new Date(a.received_at).getTime()
@@ -91,6 +139,7 @@ export function PackageCostLayers({
     setAddQty("")
     setAddCost("")
     setAddNote("")
+    setAddSource("")
     setAddDate("")
   }
 
@@ -111,6 +160,7 @@ export function PackageCostLayers({
         quantity: q,
         unitCost: c,
         note: addNote.trim() || null,
+        source: addSource.trim() || null,
         receivedAt: addDate || null,
       })
       if (!res.ok) {
@@ -128,6 +178,7 @@ export function PackageCostLayers({
     setEditingId(layer.id)
     setEditCost(String(layer.unit_cost))
     setEditNote(layer.note ?? "")
+    setEditSource(layer.source ?? "")
     setEditDate(formatDateInput(layer.received_at))
     setEditQty(String(layer.quantity))
     setEditCascade(true)
@@ -166,6 +217,7 @@ export function PackageCostLayers({
         packageId,
         unitCost: c,
         note: editNote,
+        source: editSource,
         receivedAt: editDate || null,
         cascadeToConsumptions: editCascade,
       })
@@ -243,24 +295,84 @@ export function PackageCostLayers({
         </div>
       </div>
 
-      {desync !== 0 && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
-          Cost layers cover{" "}
-          <span className="font-semibold tabular-nums">{totalRemaining}</span> units but inventory shows{" "}
-          <span className="font-semibold tabular-nums">{qtyAvailable}</span>.
-          {desync > 0
-            ? " Add a cost layer for the missing units so sales record an accurate buy price."
-            : " A direct stock edit shrank inventory below the layer total — adjust a layer's quantity to reconcile."}
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Places sold</p>
+          {isLinkedGroup ? (
+            <span className="text-[10px] font-medium uppercase tracking-wide text-primary/80">Linked inventory</span>
+          ) : null}
         </div>
-      )}
+        <div className="rounded-lg border border-border overflow-x-auto">
+        <table className="w-full text-xs min-w-[520px]">
+          <thead>
+            <tr className="bg-muted/40 text-left text-[10px] uppercase tracking-wide text-muted-foreground">
+              <th className="px-3 py-2 font-medium">Package</th>
+              <th className="px-3 py-2 font-medium text-right">Portal</th>
+              <th className="px-3 py-2 font-medium text-right">Wix</th>
+              <th className="px-3 py-2 font-medium text-right">Salesforce</th>
+              <th className="px-3 py-2 font-medium text-right">Total</th>
+              <th className="px-3 py-2 font-medium text-right">Sellable</th>
+            </tr>
+          </thead>
+          <tbody>
+            {packageSalesRows.map((row) => {
+              const duration = packageDurationLabel(row.duration)
+              const label = duration ? `${row.name} · ${duration}` : row.name
+              return (
+                <tr
+                  key={row.id}
+                  className={
+                    row.isCurrent
+                      ? "border-t border-border bg-muted/15 font-medium text-foreground"
+                      : "border-t border-border text-muted-foreground"
+                  }
+                >
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      {row.isCurrent ? (
+                        <span>{label}</span>
+                      ) : (
+                        <Link
+                          href={`/admin/catalog/${encodeURIComponent(row.id)}`}
+                          className="hover:text-foreground hover:underline"
+                        >
+                          {label}
+                        </Link>
+                      )}
+                      {isLinkedGroup ? (
+                        <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/80 border border-border rounded px-1 py-px">
+                          Linked
+                        </span>
+                      ) : null}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {soldCount(row.salesBreakdown.tradePortal)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">{soldCount(row.salesBreakdown.wix)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {soldCount(row.salesBreakdown.salesforceOffline)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">{soldCount(row.salesBreakdown.total)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{soldCount(row.sellable)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        </div>
+      </div>
 
-      <div className="rounded-lg border border-border overflow-x-auto">
+      <div className="space-y-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Stock purchased</p>
+        <div className="rounded-lg border border-border overflow-x-auto">
         <table className="w-full text-xs min-w-[640px]">
           <thead>
             <tr className="bg-muted/40 text-left text-[10px] uppercase tracking-wide text-muted-foreground">
               <th className="px-3 py-2 font-medium">Received</th>
-              <th className="px-3 py-2 font-medium text-right">Qty (rem / total)</th>
+              <th className="px-3 py-2 font-medium text-right">Qty bought</th>
               <th className="px-3 py-2 font-medium text-right">Buy price</th>
+              <th className="px-3 py-2 font-medium">Source</th>
               <th className="px-3 py-2 font-medium">Note</th>
               <th className="px-3 py-2 font-medium min-w-[11rem]" />
             </tr>
@@ -268,7 +380,7 @@ export function PackageCostLayers({
           <tbody>
             {sortedLayers.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-3 py-4 text-center text-muted-foreground">
+                <td colSpan={6} className="px-3 py-4 text-center text-muted-foreground">
                   No cost layers yet. Use “Add stock + buy price” below.
                 </td>
               </tr>
@@ -287,7 +399,7 @@ export function PackageCostLayers({
                           className="px-2 py-1 rounded border border-border bg-background text-xs"
                         />
                       ) : (
-                        new Date(layer.received_at).toLocaleDateString()
+                        formatDisplayDate(layer.received_at)
                       )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
@@ -300,17 +412,11 @@ export function PackageCostLayers({
                             className="w-[80px] px-2 py-1 rounded border border-border bg-background text-xs text-right"
                           />
                           <div className="text-[10px] text-muted-foreground">
-                            {consumed > 0 ? `min ${consumed} (already sold)` : "total purchased"}
+                            {consumed > 0 ? `min ${consumed} (allocated to orders)` : "units purchased"}
                           </div>
                         </div>
                       ) : (
-                        <>
-                          <div className="font-medium text-foreground">{layer.quantity_remaining}</div>
-                          <div className="text-[10px] text-muted-foreground">
-                            of {layer.quantity}
-                            {consumed > 0 ? ` · ${consumed} sold` : ""}
-                          </div>
-                        </>
+                        <div className="font-medium text-foreground">{layer.quantity}</div>
                       )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
@@ -325,6 +431,18 @@ export function PackageCostLayers({
                         <span className={layer.unit_cost === 0 ? "text-amber-700 dark:text-amber-300" : "text-foreground"}>
                           {formatMoney(layer.currency, layer.unit_cost)}
                         </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {editing ? (
+                        <input
+                          value={editSource}
+                          onChange={(e) => setEditSource(e.target.value)}
+                          placeholder="e.g. F1 Direct"
+                          className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
+                        />
+                      ) : (
+                        <span className={layer.source ? "" : "text-muted-foreground/60"}>{layer.source || "—"}</span>
                       )}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">
@@ -348,7 +466,7 @@ export function PackageCostLayers({
                               checked={editCascade}
                               onChange={(e) => setEditCascade(e.target.checked)}
                             />
-                            Rewrite past sales
+                            Update past order costs
                           </label>
                           <div className="flex gap-2">
                             <button
@@ -398,6 +516,7 @@ export function PackageCostLayers({
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       <div className="rounded-lg border border-border p-3 space-y-3">
@@ -440,6 +559,15 @@ export function PackageCostLayers({
               />
             </label>
             <label className="block text-xs text-muted-foreground">
+              Source (who we bought from)
+              <input
+                value={addSource}
+                onChange={(e) => setAddSource(e.target.value)}
+                placeholder="e.g. F1 Direct"
+                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              />
+            </label>
+            <label className="block text-xs text-muted-foreground">
               Note (optional)
               <input
                 value={addNote}
@@ -458,7 +586,7 @@ export function PackageCostLayers({
                 Add stock
               </button>
               <p className="text-[11px] text-muted-foreground mt-2">
-                Increases capacity by the quantity above and links the new units to this buy price. Future sales consume layers in receive-date order (FIFO).
+                Increases capacity by the quantity above and links the new units to this buy price. Future sales consume layers in receive-date order (FIFO). The Source is pushed to the Salesforce product so you can see who the stock was bought from.
               </p>
             </div>
           </div>

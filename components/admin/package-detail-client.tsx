@@ -3,9 +3,11 @@
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
+import type { LinkedInventoryPackage } from "@/lib/admin/linked-inventory"
 import type { AdminPackageRow, AdminRaceOption } from "@/lib/admin/queries"
 import { adminCatalogProductTitleFromPackage } from "@/lib/admin/catalog-product-title"
 import type { AdminOrderListRow } from "@/lib/orders/queries"
+import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
 import { adminPackagePath, parseAdminPackageTab, type AdminPackageTab } from "@/lib/admin/package-link"
 import { PackageAdminPanel } from "@/components/admin/package-admin-panel"
 import { PackageOrdersTable } from "@/components/admin/package-orders-table"
@@ -13,6 +15,7 @@ import { PackageOrdersTable } from "@/components/admin/package-orders-table"
 const TABS: { id: AdminPackageTab; label: string }[] = [
   { id: "details", label: "Details" },
   { id: "inventory", label: "Inventory & cost" },
+  { id: "integrations", label: "Integrations" },
   { id: "orders", label: "Orders" },
 ]
 
@@ -25,10 +28,14 @@ export function PackageDetailClient({
   pkg,
   races,
   orders,
+  wixListings = [],
+  linkedPackages = [],
 }: {
   pkg: AdminPackageRow
   races: AdminRaceOption[]
   orders: AdminOrderListRow[]
+  wixListings?: WixChannelListingRow[]
+  linkedPackages?: LinkedInventoryPackage[]
 }) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -47,7 +54,7 @@ export function PackageDetailClient({
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div className="min-w-0 space-y-1">
           <Link href="/admin/catalog" className="text-sm text-primary hover:underline">
-            ← Catalog
+            ← Inventory
           </Link>
           <h1 className="text-2xl font-bold text-foreground leading-snug">{displayTitle}</h1>
           {pkg.is_hidden ? (
@@ -90,18 +97,39 @@ export function PackageDetailClient({
         ))}
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-4 sm:p-6 min-w-0 overflow-hidden">
+      <div
+        className={cn(
+          "rounded-xl border border-border bg-card min-w-0 overflow-hidden",
+          activeTab === "orders" ? "p-3 sm:p-4" : "p-4 sm:p-6",
+        )}
+      >
         {activeTab === "details" ? (
           <PackageAdminPanel
             initial={pkg}
             races={races}
+            wixListings={wixListings}
+            linkedPackages={linkedPackages}
             section="details"
             onDeleted={() => router.push("/admin/catalog")}
           />
         ) : activeTab === "inventory" ? (
-          <PackageAdminPanel initial={pkg} races={races} section="inventory" />
+          <PackageAdminPanel
+            initial={pkg}
+            races={races}
+            wixListings={wixListings}
+            linkedPackages={linkedPackages}
+            section="inventory"
+          />
+        ) : activeTab === "integrations" ? (
+          <PackageAdminPanel
+            initial={pkg}
+            races={races}
+            wixListings={wixListings}
+            linkedPackages={linkedPackages}
+            section="integrations"
+          />
         ) : (
-          <PackageOrdersTable orders={orders} />
+          <PackageOrdersTable orders={orders} costLayers={pkg.cost_layers} />
         )}
       </div>
     </div>

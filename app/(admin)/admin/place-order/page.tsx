@@ -45,10 +45,6 @@ export default async function AdminPlaceOrderPage() {
     <div className="p-6 lg:p-8 max-w-5xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Place order for agent</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Create a portal booking on behalf of an approved trade partner — for example when they confirmed by email.
-          Stock is decremented and the agent receives the usual confirmation email.
-        </p>
       </div>
 
       {agents.length === 0 ? (

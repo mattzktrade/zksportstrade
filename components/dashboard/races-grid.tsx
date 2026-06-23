@@ -2,6 +2,7 @@
 
 import Image from "next/image"
 import Link from "next/link"
+import { CatalogImage } from "@/components/catalog-image"
 import { ArrowRight } from "lucide-react"
 import type { PortalCatalog } from "@/lib/catalog/portal-catalog"
 import { getSeasonSlice, type PortalCatalogSeasonYear } from "@/lib/catalog/portal-catalog"
@@ -52,7 +53,7 @@ export function RacesGrid({ catalog }: { catalog: PortalCatalog }) {
                   <span className="text-primary text-[9px] sm:text-[10px] font-semibold uppercase tracking-[0.25em]">Trade Portal</span>
                 </div>
                 <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-2 tracking-tight">
-                  Welcome to <span className="text-primary">ZK</span> Sports & Entertainment
+                  Welcome to ZK Sports & Entertainment
                 </h1>
                 <p className="text-white/70 text-xs sm:text-sm md:text-base">
                   Access exclusive F1 hospitality packages and manage your bookings
@@ -80,9 +81,7 @@ export function RacesGrid({ catalog }: { catalog: PortalCatalog }) {
         </div>
       </div>
 
-      {seasonYear === 2026 && featuredPackages.length > 0 ? (
-        <FeaturedPackages packages={featuredPackages} />
-      ) : null}
+      {featuredPackages.length > 0 ? <FeaturedPackages packages={featuredPackages} /> : null}
 
       <div className="flex flex-col gap-4 mb-5 sm:mb-6">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -139,10 +138,12 @@ export function RacesGrid({ catalog }: { catalog: PortalCatalog }) {
             className="group relative rounded-xl overflow-hidden hover:shadow-xl hover:shadow-primary/10 transition-all duration-300"
           >
             <div className="relative aspect-[4/3] overflow-hidden">
-              <Image
-                src={race.image || "/placeholder.svg"}
+              <CatalogImage
+                src={race.image}
                 alt={race.name}
+                variant="card"
                 fill
+                sizes="(max-width: 640px) 50vw, 25vw"
                 className="object-cover group-hover:scale-110 transition-transform duration-500"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/10" />

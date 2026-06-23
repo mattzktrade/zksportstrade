@@ -30,10 +30,6 @@ export default async function AdminAgentsPage({
     <div className="p-6 lg:p-8 max-w-6xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Agents</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Approved trade partners with live order counts, open payment counts, and net sales from Supabase. Expand a row
-          to set each booking payment status (agents see the same values on My Bookings).
-        </p>
       </div>
 
       <form method="get" className="flex flex-wrap gap-2 items-center">

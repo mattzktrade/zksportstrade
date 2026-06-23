@@ -43,6 +43,7 @@ export type BookingApprovalRequestEmailPayload = {
   clientEmail: string
   clientPhone: string
   adminReviewUrl: string
+  approveUrl: string
 }
 
 export async function sendBookingApprovalRequestAdminEmail(
@@ -63,6 +64,8 @@ export async function sendBookingApprovalRequestAdminEmail(
 
   const resend = new Resend(apiKey)
   const subject = `Paddock Club approval needed — ${p.requestReference}`
+  const safeApproveUrl = escapeHtml(p.approveUrl)
+  const safeReviewUrl = escapeHtml(p.adminReviewUrl)
 
   const html = [
     `<p>A partner has submitted a <strong>Paddock Club booking request</strong> that needs your approval before it is confirmed.</p>`,
@@ -77,15 +80,31 @@ export async function sendBookingApprovalRequestAdminEmail(
     `${escapeHtml(p.clientName)}<br/>`,
     `${escapeHtml(p.clientEmail)}<br/>`,
     `${escapeHtml(p.clientPhone)}</p>`,
-    `<p><a href="${escapeHtml(p.adminReviewUrl)}">Review and approve in admin</a></p>`,
-    `<p>ZK Sports &amp; Entertainment portal</p>`,
+  ].join("")
+
+  const actionHtml = [
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:24px 0 16px;">`,
+    `<tr><td align="center">`,
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0">`,
+    `<tr><td align="center" bgcolor="#b91c1c" style="border-radius:10px;">`,
+    `<a href="${safeApproveUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:15px 36px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;">Approve booking</a>`,
+    `</td></tr></table>`,
+    `</td></tr></table>`,
+    `<p style="margin:0 0 8px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.6;color:#52525b;text-align:center;">`,
+    `<a href="${safeReviewUrl}" target="_blank" rel="noopener noreferrer" style="color:#b91c1c;font-weight:600;">Review in admin portal</a>`,
+    `</p>`,
+    `<p style="margin:0 0 24px;padding:14px 16px;background-color:#fafafa;border:1px solid #e4e4e7;border-radius:10px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.55;color:#52525b;">`,
+    `<strong style="color:#18181b;">Button not working?</strong><br/>`,
+    `<a href="${safeApproveUrl}" target="_blank" rel="noopener noreferrer" style="color:#b91c1c;font-weight:600;word-break:break-all;">${safeApproveUrl}</a>`,
+    `</p>`,
+    `<p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#a1a1aa;">ZK Sports &amp; Entertainment portal</p>`,
   ].join("")
 
   const { error } = await resend.emails.send({
     from,
     to,
     subject,
-    html,
+    html: html + actionHtml,
   })
 
   if (error) return { ok: false, error: error.message }

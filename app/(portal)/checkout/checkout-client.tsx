@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import Image from "next/image"
+import { useLayoutEffect, useState } from "react"
+import { CatalogImage } from "@/components/catalog-image"
 import Link from "next/link"
 import {
   clampToAllowedGuestCount,
@@ -13,7 +13,7 @@ import {
 } from "@/lib/catalog/booking-guests"
 import type { Package } from "@/lib/types/catalog"
 import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
-import { PADDOCK_CLUB_BOOKING_DISCLAIMER } from "@/lib/catalog/paddock-club"
+import { buildPaddockClubBookingDisclaimer } from "@/lib/catalog/paddock-club"
 import { submitBookingApprovalRequest, submitCheckoutOrder } from "./actions"
 import {
   ArrowLeft,
@@ -30,11 +30,14 @@ export function CheckoutClient({
   pkg,
   initialGuests,
   savedAddresses,
+  agentAgencyLabel = null,
 }: {
   pkg: Package
   initialGuests: number
   savedAddresses: CheckoutAddressFields
+  agentAgencyLabel?: string | null
 }) {
+  const paddockDisclaimer = buildPaddockClubBookingDisclaimer(agentAgencyLabel)
   const sellable = numericSellable(pkg.availability) ?? 0
   const maxGuests = maxBookableGuestsFromSellable(sellable, pkg.totalCapacity)
   const requiresApproval = pkg.requiresBookingApproval === true
@@ -74,6 +77,10 @@ export function CheckoutClient({
   }))
 
   const backToRaceHref = pkg.raceId ? `/packages/race/${pkg.raceId}` : "/packages"
+
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0)
+  }, [pkg.id])
 
   if (!canBookOnline) {
     return (
@@ -195,9 +202,9 @@ export function CheckoutClient({
           </h1>
           {completedSummary.isApprovalRequest ? (
             <p className="text-sm sm:text-base text-muted-foreground mb-6 sm:mb-8">
-              Your Paddock Club booking request has been sent to our team for eligibility review. We will email you once
-              it has been approved or if we need any further information. No booking is confirmed until you receive
-              approval.
+              Your Paddock Club booking request has been sent for review. Requests are typically approved within an hour;
+              a booking confirmation email is sent as soon as it is approved. No booking is confirmed until you receive
+              that approval.
             </p>
           ) : null}
           {completedSummary.confirmationEmailNotice ? (
@@ -207,7 +214,7 @@ export function CheckoutClient({
             </div>
           ) : !completedSummary.isApprovalRequest ? (
             <p className="text-sm sm:text-base text-muted-foreground mb-6 sm:mb-8">
-              You should receive a booking confirmation email shortly. Payment details will follow from our team separately.
+              You should receive your booking confirmation and invoice shortly.
             </p>
           ) : null}
 
@@ -501,8 +508,9 @@ export function CheckoutClient({
                 <div className="bg-card rounded-2xl border border-border p-4 sm:p-6 space-y-3">
                   <h3 className="text-sm font-semibold text-foreground">Payment</h3>
                   <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
-                    Payment is arranged offline after confirmation. Our team will contact you with terms; unless otherwise agreed, payment is typically due within{" "}
-                    <span className="font-medium text-foreground">7 days</span>. Failure to pay on time may result in your booking being cancelled.
+                    Payment is arranged offline after confirmation. Unless otherwise agreed, payment is due within{" "}
+                    <span className="font-medium text-foreground">ten (10) business days</span>. Failure to pay on time
+                    may result in your booking being cancelled.
                   </p>
                   <div>
                     <label className="block text-xs sm:text-sm font-medium text-foreground mb-2">PO number (optional)</label>
@@ -708,7 +716,7 @@ export function CheckoutClient({
             {step === 4 && requiresApproval && (
               <div className="space-y-4 sm:space-y-6">
                 <div>
-                  <h2 className="text-lg sm:text-xl font-bold text-foreground">Paddock Club eligibility</h2>
+                  <h2 className="text-lg sm:text-xl font-bold text-foreground">Paddock Club fulfilment &amp; eligibility</h2>
                   <p className="text-xs sm:text-sm text-muted-foreground mt-1">
                     Read and confirm before submitting your request
                   </p>
@@ -716,7 +724,7 @@ export function CheckoutClient({
 
                 <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-2xl p-4 sm:p-6">
                   <p className="text-xs sm:text-sm text-amber-950 dark:text-amber-100 whitespace-pre-line leading-relaxed">
-                    {PADDOCK_CLUB_BOOKING_DISCLAIMER}
+                    {paddockDisclaimer}
                   </p>
                 </div>
 
@@ -739,8 +747,8 @@ export function CheckoutClient({
                       </div>
                     </div>
                     <p className="text-sm sm:text-base font-medium text-foreground leading-relaxed">
-                      I confirm that I have read the notice above and that my client meets Paddock Club eligibility
-                      requirements. I understand this submits a request only and is not a confirmed booking.
+                      I confirm I have read the notice above and understand this is a request only, not a confirmed
+                      booking.
                     </p>
                   </label>
                 </div>
@@ -811,7 +819,14 @@ export function CheckoutClient({
           <div className="lg:col-span-1">
             <div className="lg:sticky lg:top-24 bg-card rounded-2xl border border-border overflow-hidden">
               <div className="relative aspect-video">
-                <Image src={pkg.image || "/placeholder.svg"} alt={pkg.circuit} fill className="object-cover" />
+                <CatalogImage
+                  src={pkg.image}
+                  alt={pkg.circuit}
+                  variant="card"
+                  fill
+                  sizes="(max-width: 1024px) 100vw, 40vw"
+                  className="object-cover"
+                />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
                 <div className="absolute bottom-3 sm:bottom-4 left-3 sm:left-4 right-3 sm:right-4">
                   <p className="text-white text-sm sm:text-base font-bold">{pkg.circuit}</p>

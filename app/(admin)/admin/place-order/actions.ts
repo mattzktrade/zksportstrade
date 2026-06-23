@@ -5,6 +5,7 @@ import { requireAdminAction } from "@/app/(admin)/actions"
 import { isGuestCountAllowed, numericSellable } from "@/lib/catalog/booking-guests"
 import { getPackageById } from "@/lib/catalog/queries"
 import { sendOrderPlacedEmail } from "@/lib/email/send-order-placed"
+import { enqueueOrderIntegrationsServer } from "@/lib/integrations/enqueue-server"
 import { mapPlaceOrderError } from "@/lib/orders/place-order-errors"
 import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
 import type { Package } from "@/lib/types/catalog"
@@ -144,6 +145,16 @@ export async function submitAdminOrderForAgent(
     }
   }
 
+  const agentEmail = agent.email
+  const agentName = agent.full_name || agent.email.split("@")[0] || "Partner"
+  const orderReference = row.order_reference as string
+  const orderId = String(row.order_id ?? "")
+  if (orderId) {
+    const enq = await enqueueOrderIntegrationsServer(orderId, "admin", { background: true })
+    if (!enq.ok) console.warn("[admin place-order] Integrations not queued:", enq.message)
+    else if (enq.warnings.length) console.warn("[admin place-order] Integration warnings:", enq.warnings.join("; "))
+  }
+
   revalidatePath("/bookings")
   revalidatePath("/packages")
   revalidatePath("/admin/orders")
@@ -151,9 +162,6 @@ export async function submitAdminOrderForAgent(
   revalidatePath("/admin/catalog")
   revalidatePath("/admin/agents")
 
-  const agentEmail = agent.email
-  const agentName = agent.full_name || agent.email.split("@")[0] || "Partner"
-  const orderReference = row.order_reference as string
   const totalAmount = Number(row.total_amount ?? 0)
   const currency = String(row.currency ?? "USD")
   const guestCount = Number(row.guests ?? guests)

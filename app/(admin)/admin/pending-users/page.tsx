@@ -10,9 +10,6 @@ export default async function AdminPendingUsersPage() {
     <div className="p-6 lg:p-8 max-w-6xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Pending users</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Approve trade partners to grant catalog access, or reject with an internal note.
-        </p>
       </div>
       <PendingUsersTable profiles={profiles} />
     </div>

@@ -2,8 +2,14 @@
 
 import { useState, useMemo } from "react"
 import type { Invoice } from "@/lib/types/catalog"
-import { invoiceWorkflowStatusLabels, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
-import { Search, Filter, CheckCircle2, Clock, FileText, Send } from "lucide-react"
+import {
+  invoiceDisplayStatus,
+  invoiceWorkflowStatusLabels,
+  paymentWorkflowStatusLabels,
+  type InvoiceWorkflowStatus,
+} from "@/lib/invoices/status"
+import { Search, Filter, CheckCircle2, Clock, FileText } from "lucide-react"
+import { InvoicePdfDownloadLink } from "@/components/invoice-pdf-download-link"
 import { cn, formatMoney } from "@/lib/utils"
 
 const statusConfig: Record<
@@ -11,13 +17,13 @@ const statusConfig: Record<
   { label: string; icon: typeof CheckCircle2; className: string; dotColor: string }
 > = {
   awaiting_invoice: {
-    label: invoiceWorkflowStatusLabels.awaiting_invoice,
-    icon: Send,
-    className: "text-slate-700 bg-slate-50/50 dark:text-slate-200 dark:bg-slate-900/40",
-    dotColor: "bg-slate-500",
+    label: paymentWorkflowStatusLabels.awaiting_invoice,
+    icon: Clock,
+    className: "text-amber-700 bg-amber-50/50",
+    dotColor: "bg-amber-600",
   },
   awaiting_payment: {
-    label: invoiceWorkflowStatusLabels.awaiting_payment,
+    label: paymentWorkflowStatusLabels.awaiting_payment,
     icon: Clock,
     className: "text-amber-700 bg-amber-50/50",
     dotColor: "bg-amber-600",
@@ -28,13 +34,18 @@ const statusConfig: Record<
     className: "text-emerald-700 bg-emerald-50/50",
     dotColor: "bg-emerald-600",
   },
+  delivered: {
+    label: invoiceWorkflowStatusLabels.delivered,
+    icon: CheckCircle2,
+    className: "text-emerald-700 bg-emerald-50/50",
+    dotColor: "bg-emerald-600",
+  },
 }
 
-const filterTabs: { value: "all" | InvoiceWorkflowStatus; label: string }[] = [
+const filterTabs: { value: "all" | "awaiting_payment" | "paid"; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "awaiting_invoice", label: "To invoice" },
-  { value: "awaiting_payment", label: "Awaiting payment" },
-  { value: "paid", label: "Paid" },
+  { value: "awaiting_payment", label: paymentWorkflowStatusLabels.awaiting_payment },
+  { value: "paid", label: paymentWorkflowStatusLabels.paid },
 ]
 
 function formatIssueDate(issuedAt: string | null) {
@@ -66,7 +77,8 @@ export function InvoicesPageClient({
         invoice.packageName.toLowerCase().includes(q) ||
         invoice.bookingId.toLowerCase().includes(q)
 
-      const statusMatch = statusFilter === "all" || invoice.status === statusFilter
+      const statusMatch =
+        statusFilter === "all" || invoiceDisplayStatus(invoice.status) === statusFilter
 
       return searchMatch && statusMatch && orderMatch
     })
@@ -74,13 +86,10 @@ export function InvoicesPageClient({
 
   const stats = useMemo(() => {
     const paid = initialInvoices.filter((i) => i.status === "paid").reduce((sum, i) => sum + i.amount, 0)
-    const awaitingInvoice = initialInvoices
-      .filter((i) => i.status === "awaiting_invoice")
-      .reduce((sum, i) => sum + i.amount, 0)
     const awaitingPayment = initialInvoices
-      .filter((i) => i.status === "awaiting_payment")
+      .filter((i) => invoiceDisplayStatus(i.status) === "awaiting_payment")
       .reduce((sum, i) => sum + i.amount, 0)
-    return { paid, awaitingInvoice, awaitingPayment }
+    return { paid, awaitingPayment }
   }, [initialInvoices])
 
   return (
@@ -89,26 +98,17 @@ export function InvoicesPageClient({
         <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Invoices</h1>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-        <div className="bg-card border border-border rounded-xl p-4 sm:p-6">
-          <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1 sm:mb-2">
-            {invoiceWorkflowStatusLabels.awaiting_invoice}
-          </p>
-          <p className="text-2xl sm:text-3xl font-bold text-foreground mb-1">{formatMoney(stats.awaitingInvoice)}</p>
-          <p className="text-xs sm:text-sm text-muted-foreground">
-            {initialInvoices.filter((i) => i.status === "awaiting_invoice").length} invoice
-            {initialInvoices.filter((i) => i.status === "awaiting_invoice").length !== 1 ? "s" : ""}
-          </p>
-        </div>
-
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
         <div className="bg-card border border-border rounded-xl p-4 sm:p-6">
           <p className="text-xs sm:text-sm font-medium text-muted-foreground mb-1 sm:mb-2">
             {invoiceWorkflowStatusLabels.awaiting_payment}
           </p>
           <p className="text-2xl sm:text-3xl font-bold text-foreground mb-1">{formatMoney(stats.awaitingPayment)}</p>
           <p className="text-xs sm:text-sm text-muted-foreground">
-            {initialInvoices.filter((i) => i.status === "awaiting_payment").length} invoice
-            {initialInvoices.filter((i) => i.status === "awaiting_payment").length !== 1 ? "s" : ""}
+            {initialInvoices.filter((i) => invoiceDisplayStatus(i.status) === "awaiting_payment").length} invoice
+            {initialInvoices.filter((i) => invoiceDisplayStatus(i.status) === "awaiting_payment").length !== 1
+              ? "s"
+              : ""}
           </p>
         </div>
 
@@ -166,11 +166,14 @@ export function InvoicesPageClient({
                 <th className="text-left px-3 sm:px-4 lg:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-muted-foreground hidden md:table-cell">
                   Issue Date
                 </th>
+                <th className="text-left px-3 sm:px-4 lg:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-muted-foreground">
+                  PDF
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {filteredInvoices.map((invoice) => {
-                const status = statusConfig[invoice.status]
+                const status = statusConfig[invoiceDisplayStatus(invoice.status)]
                 const highlighted = highlightOrderId && invoice.orderId === highlightOrderId
 
                 return (
@@ -208,6 +211,13 @@ export function InvoicesPageClient({
                     </td>
                     <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4 text-xs sm:text-sm text-muted-foreground hidden md:table-cell">
                       {formatIssueDate(invoice.issuedAt)}
+                    </td>
+                    <td className="px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
+                      {invoice.orderId && invoice.xeroInvoiceNumber ? (
+                        <InvoicePdfDownloadLink orderId={invoice.orderId} label="Download" />
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
                     </td>
                   </tr>
                 )

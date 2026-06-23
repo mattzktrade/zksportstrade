@@ -35,9 +35,18 @@ export async function updateSession(request: NextRequest) {
   const isUnderAuthPath = path.startsWith("/auth/")
   const isPendingPage = path === "/pending-approval"
 
+  const isPublicApi =
+    path.startsWith("/api/webhooks/") ||
+    path.startsWith("/api/cron/") ||
+    path.startsWith("/api/integrations/")
+
   if (!user) {
     const isPublic =
-      path === "/login" || path === "/signup" || path.startsWith("/auth/") || isResetPasswordPage
+      path === "/login" ||
+      path === "/signup" ||
+      path.startsWith("/auth/") ||
+      isResetPasswordPage ||
+      isPublicApi
     if (isPublic) {
       return supabaseResponse
     }

@@ -4,6 +4,13 @@ import type { PortalProfile } from "@/lib/types/profile"
 import { INVENTORY_COLUMNS, PACKAGE_COLUMNS } from "@/lib/catalog/columns"
 import type { DbInventory, DbPackage } from "@/lib/catalog/map-rows"
 import { getCostLayersByPackage, summarizePackageCost, type CostLayerRow, type PackageCostSummary } from "@/lib/admin/cost-layers"
+import {
+  getPackageSalesBreakdownByPackage,
+} from "@/lib/admin/package-sales-breakdown-queries"
+import {
+  emptyPackageSalesBreakdown,
+  type PackageSalesBreakdown,
+} from "@/lib/admin/package-sales-breakdown"
 
 const AGENT_PROFILE_COLUMNS =
   "id, email, full_name, company_name, company_type, mobile, role, approval_status, created_at" as const
@@ -15,6 +22,62 @@ export type AdminPackageRow = DbPackage & {
   race_name: string
   cost_layers: CostLayerRow[]
   cost_summary: PackageCostSummary | null
+  sales_breakdown: PackageSalesBreakdown
+}
+
+import type { LinkedInventoryPackage } from "@/lib/admin/linked-inventory"
+
+export type LinkedInventorySibling = LinkedInventoryPackage
+
+export async function getLinkedInventoryPackages(
+  inventoryGroupId: string,
+): Promise<LinkedInventorySibling[]> {
+  const supabase = await createClient()
+  const groupId = inventoryGroupId.trim()
+  if (!groupId) return []
+
+  const { data: packages } = await supabase
+    .from("packages")
+    .select("id, name, duration")
+    .eq("inventory_group_id", groupId)
+    .order("name")
+
+  const rows = packages ?? []
+  if (rows.length === 0) return []
+
+  const ids = rows.map((p) => p.id)
+  const [invBy, salesByPkg] = await Promise.all([
+    (async () => {
+      const { data: inv } = await supabase
+        .from("package_inventory")
+        .select("package_id, qty_available, qty_held")
+        .in("package_id", ids)
+      return new Map((inv ?? []).map((i) => [i.package_id, i]))
+    })(),
+    getPackageSalesBreakdownByPackage(ids),
+  ])
+
+  return rows.map((p) => {
+    const row = invBy.get(p.id)
+    return {
+      id: p.id,
+      name: p.name,
+      duration: p.duration,
+      qty_available: row?.qty_available ?? null,
+      qty_held: row?.qty_held ?? null,
+      sales_breakdown: salesByPkg.get(p.id) ?? emptyPackageSalesBreakdown(p.id),
+    }
+  })
+}
+
+/** @deprecated Use getLinkedInventoryPackages — kept for callers that exclude self. */
+export async function getLinkedInventorySiblings(
+  inventoryGroupId: string,
+  excludePackageId?: string,
+): Promise<LinkedInventorySibling[]> {
+  const all = await getLinkedInventoryPackages(inventoryGroupId)
+  if (!excludePackageId) return all
+  return all.filter((p) => p.id !== excludePackageId)
 }
 
 export type AdminRaceOption = {
@@ -247,7 +310,10 @@ export async function getAdminPackageRows(): Promise<AdminPackageRow[]> {
   const raceName = new Map((races ?? []).map((r: { id: string; name: string }) => [r.id, r.name]))
   const invBy = new Map((inv ?? []).map((i: DbInventory) => [i.package_id, i]))
   const packageIds = (packages as DbPackage[]).map((p) => p.id)
-  const layersByPkg = await getCostLayersByPackage(packageIds)
+  const [layersByPkg, salesByPkg] = await Promise.all([
+    getCostLayersByPackage(packageIds),
+    getPackageSalesBreakdownByPackage(packageIds),
+  ])
   return (packages as DbPackage[]).map((p) => {
     const layers = layersByPkg.get(p.id) ?? []
     const summary = summarizePackageCost(p.currency || "USD", layers)
@@ -258,6 +324,7 @@ export async function getAdminPackageRows(): Promise<AdminPackageRow[]> {
       race_name: raceName.get(p.race_id) ?? p.race_id,
       cost_layers: layers,
       cost_summary: summary,
+      sales_breakdown: salesByPkg.get(p.id) ?? emptyPackageSalesBreakdown(p.id),
     }
   })
 }

@@ -1,8 +1,8 @@
 "use client"
 
 import { useState, useMemo } from "react"
-import Image from "next/image"
 import Link from "next/link"
+import { CatalogImage } from "@/components/catalog-image"
 import type { Race } from "@/lib/types/catalog"
 import type { PortalCatalog, PortalCatalogSeasonYear } from "@/lib/catalog/portal-catalog"
 import { getSeasonSlice } from "@/lib/catalog/portal-catalog"
@@ -17,7 +17,7 @@ function RaceTableRow({ race }: { race: RaceRow }) {
       <td className="px-4 sm:px-6 py-3 sm:py-4">
         <div className="flex items-center gap-2 sm:gap-3">
           <div className="relative w-10 h-10 sm:w-12 sm:h-12 rounded-lg overflow-hidden flex-shrink-0">
-            <Image src={race.image || "/placeholder.svg"} alt={race.name} fill className="object-cover" />
+            <CatalogImage src={race.image} alt={race.name} variant="thumb" fill className="object-cover" />
           </div>
           <div>
             <p className="text-sm sm:text-base font-semibold text-foreground">{race.shortName}</p>
@@ -64,7 +64,7 @@ function RaceMobileCard({ race }: { race: RaceRow }) {
       <div className="p-3 sm:p-4 space-y-2 sm:space-y-3">
         <div className="flex items-center gap-2 sm:gap-3">
           <div className="relative w-12 h-12 sm:w-16 sm:h-16 rounded-lg overflow-hidden flex-shrink-0">
-            <Image src={race.image || "/placeholder.svg"} alt={race.name} fill className="object-cover" />
+            <CatalogImage src={race.image} alt={race.name} variant="thumb" fill className="object-cover" />
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm sm:text-base font-semibold text-foreground truncate">{race.shortName}</p>

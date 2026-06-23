@@ -45,5 +45,15 @@ export default async function CheckoutPage({
   const initialGuests = Number.isFinite(rawGuests) && rawGuests > 0 ? rawGuests : 2
   const savedAddresses = profile ? checkoutDefaultsFromProfile(profile) : emptyCheckoutAddressFields()
 
-  return <CheckoutClient pkg={pkg} initialGuests={initialGuests} savedAddresses={savedAddresses} />
+  const agentAgencyLabel =
+    profile?.company_name?.trim() || profile?.full_name?.trim() || profile?.email?.split("@")[0] || null
+
+  return (
+    <CheckoutClient
+      pkg={pkg}
+      initialGuests={initialGuests}
+      savedAddresses={savedAddresses}
+      agentAgencyLabel={agentAgencyLabel}
+    />
+  )
 }

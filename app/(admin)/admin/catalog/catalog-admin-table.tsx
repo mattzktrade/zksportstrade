@@ -1,20 +1,22 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Image from "next/image"
 import { LOGO_ICON } from "@/lib/branding"
 import Link from "next/link"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import type { AdminPackageRow, AdminRaceOption } from "@/lib/admin/queries"
+import { linkedPackagesFromAdminRows, type LinkedInventoryPackage } from "@/lib/admin/linked-inventory"
 import { adminCatalogProductTitleFromPackage } from "@/lib/admin/catalog-product-title"
 import { adminRaceLabel } from "@/lib/admin/race-label"
 import { adminPackagePath } from "@/lib/admin/package-link"
 import { isBookableEventDate } from "@/lib/catalog/bookable-events"
-import { PACKAGE_DURATION_OPTIONS, packageDurationLabel } from "@/lib/catalog/package-duration"
 import { PackageAdminPanel } from "@/components/admin/package-admin-panel"
-import { PackagePortalVisibilityCheckbox } from "@/components/admin/package-portal-visibility"
 import { formatMoneyCompact } from "@/lib/format/money"
 import { cn } from "@/lib/utils"
+import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
+
+const CATALOG_FILTER_STORAGE_KEY = "zk-admin-catalog-filters-v1"
 
 function sellableFromInventory(inv: { qty_available: number; qty_held: number } | null): number | null {
   if (!inv) return null
@@ -23,25 +25,23 @@ function sellableFromInventory(inv: { qty_available: number; qty_held: number } 
 
 function rowMatchesSearch(row: AdminPackageRow, q: string): boolean {
   if (!q) return true
-  const hay = [
-    row.id,
-    row.name,
-    row.circuit,
-    row.location,
-    row.country,
-    row.race_name,
-    row.date_range,
-    row.duration ?? "",
-    packageDurationLabel(row.duration) ?? "",
-  ]
+  const hay = [row.id, row.name, row.circuit, row.location, row.country, row.race_name, row.date_range]
     .join(" ")
     .toLowerCase()
   return hay.includes(q)
 }
 
-type StockFilter = "all" | "in_stock" | "out" | "no_inventory"
+type StockFilter = "all" | "in_stock" | "out_of_stock"
 type ScheduleFilter = "upcoming" | "all"
 type VisibilityFilter = "all" | "visible" | "hidden"
+
+type SavedCatalogFilters = {
+  search?: string
+  raceFilter?: string
+  scheduleFilter?: ScheduleFilter
+  visibilityFilter?: VisibilityFilter
+  stockFilter?: StockFilter
+}
 
 function rowMatchesVisibility(row: AdminPackageRow, f: VisibilityFilter): boolean {
   if (f === "all") return true
@@ -57,10 +57,8 @@ function rowMatchesScheduleFilter(row: AdminPackageRow, f: ScheduleFilter): bool
 function rowMatchesStockFilter(row: AdminPackageRow, f: StockFilter): boolean {
   if (f === "all") return true
   const sellable = sellableFromInventory(row.inventory)
-  if (f === "no_inventory") return row.inventory == null
-  if (row.inventory == null) return false
   if (f === "in_stock") return (sellable ?? 0) > 0
-  return (sellable ?? 0) === 0
+  return row.inventory == null || (sellable ?? 0) === 0
 }
 
 function formatTradeSummary(currency: string, tradePrice: number | null, isEnquiry: boolean): string {
@@ -69,9 +67,26 @@ function formatTradeSummary(currency: string, tradePrice: number | null, isEnqui
   return formatMoneyCompact(currency, tradePrice, 0)
 }
 
-export function CatalogAdminTable({ rows, races }: { rows: AdminPackageRow[]; races: AdminRaceOption[] }) {
+export function CatalogAdminTable({
+  rows,
+  races,
+  wixListingsByPackage = {},
+}: {
+  rows: AdminPackageRow[]
+  races: AdminRaceOption[]
+  wixListingsByPackage?: Record<string, WixChannelListingRow[]>
+}) {
   const sorted = useMemo(
-    () => [...rows].sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)),
+    () =>
+      [...rows].sort((a, b) => {
+        const dateA = (a.event_date ?? "").slice(0, 10)
+        const dateB = (b.event_date ?? "").slice(0, 10)
+        if (dateA !== dateB) return dateA.localeCompare(dateB)
+        const raceA = a.race_name ?? a.race_id ?? ""
+        const raceB = b.race_name ?? b.race_id ?? ""
+        if (raceA !== raceB) return raceA.localeCompare(raceB)
+        return a.sort_order - b.sort_order || a.name.localeCompare(b.name)
+      }),
     [rows],
   )
 
@@ -80,7 +95,42 @@ export function CatalogAdminTable({ rows, races }: { rows: AdminPackageRow[]; ra
   const [scheduleFilter, setScheduleFilter] = useState<ScheduleFilter>("upcoming")
   const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>("all")
   const [stockFilter, setStockFilter] = useState<StockFilter>("all")
-  const [durationFilter, setDurationFilter] = useState<string>("")
+  const [filtersReady, setFiltersReady] = useState(false)
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CATALOG_FILTER_STORAGE_KEY)
+      if (!raw) return
+      const saved = JSON.parse(raw) as SavedCatalogFilters
+      if (typeof saved.search === "string") setSearch(saved.search)
+      if (typeof saved.raceFilter === "string") setRaceFilter(saved.raceFilter)
+      if (saved.scheduleFilter === "upcoming" || saved.scheduleFilter === "all") {
+        setScheduleFilter(saved.scheduleFilter)
+      }
+      if (saved.visibilityFilter === "all" || saved.visibilityFilter === "visible" || saved.visibilityFilter === "hidden") {
+        setVisibilityFilter(saved.visibilityFilter)
+      }
+      if (saved.stockFilter === "all" || saved.stockFilter === "in_stock" || saved.stockFilter === "out_of_stock") {
+        setStockFilter(saved.stockFilter)
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setFiltersReady(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!filtersReady) return
+    const payload: SavedCatalogFilters = {
+      search,
+      raceFilter,
+      scheduleFilter,
+      visibilityFilter,
+      stockFilter,
+    }
+    localStorage.setItem(CATALOG_FILTER_STORAGE_KEY, JSON.stringify(payload))
+  }, [search, raceFilter, scheduleFilter, visibilityFilter, stockFilter, filtersReady])
 
   const searchNorm = search.trim().toLowerCase()
 
@@ -96,15 +146,42 @@ export function CatalogAdminTable({ rows, races }: { rows: AdminPackageRow[]; ra
       if (searchNorm && !rowMatchesSearch(row, searchNorm)) return false
       if (raceFilter && row.race_id !== raceFilter) return false
       if (!rowMatchesStockFilter(row, stockFilter)) return false
-      if (durationFilter && (row.duration ?? "") !== durationFilter) return false
       return true
     })
-  }, [sorted, searchNorm, raceFilter, scheduleFilter, visibilityFilter, stockFilter, durationFilter])
+  }, [sorted, searchNorm, raceFilter, scheduleFilter, visibilityFilter, stockFilter])
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, { label: string; rows: AdminPackageRow[] }>()
+    for (const row of filtered) {
+      const key = row.race_id || row.race_name || "other"
+      if (!map.has(key)) {
+        const race = races.find((r) => r.id === row.race_id)
+        map.set(key, { label: race ? adminRaceLabel(race) : row.race_name || "Other", rows: [] })
+      }
+      map.get(key)!.rows.push(row)
+    }
+    return [...map.values()]
+  }, [filtered, races])
 
   const upcomingCount = useMemo(
     () => sorted.filter((row) => rowMatchesScheduleFilter(row, "upcoming")).length,
     [sorted],
   )
+
+  function resetFilters() {
+    setSearch("")
+    setRaceFilter("")
+    setScheduleFilter("upcoming")
+    setVisibilityFilter("all")
+    setStockFilter("all")
+  }
+
+  const hasActiveFilters =
+    search.trim() !== "" ||
+    raceFilter !== "" ||
+    scheduleFilter !== "upcoming" ||
+    visibilityFilter !== "all" ||
+    stockFilter !== "all"
 
   if (sorted.length === 0) {
     return (
@@ -190,34 +267,29 @@ export function CatalogAdminTable({ rows, races }: { rows: AdminPackageRow[]; ra
               className="px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground"
             >
               <option value="all">All</option>
-              <option value="in_stock">In stock (sellable &gt; 0)</option>
-              <option value="out">Out of stock</option>
-              <option value="no_inventory">No inventory row</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground sm:min-w-[180px] flex-1">
-            Duration
-            <select
-              value={durationFilter}
-              onChange={(e) => setDurationFilter(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground"
-            >
-              <option value="">All durations</option>
-              {PACKAGE_DURATION_OPTIONS.filter((o) => o.value).map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
+              <option value="in_stock">In stock</option>
+              <option value="out_of_stock">Out of stock / no inventory</option>
             </select>
           </label>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Showing {filtered.length} of {scheduleFilter === "upcoming" ? upcomingCount : sorted.length} packages
-          {scheduleFilter === "upcoming" && upcomingCount < sorted.length
-            ? ` (${sorted.length - upcomingCount} past hidden — switch schedule to view)`
-            : ""}
-          {filtered.length === 0 ? " — try clearing search or filters." : ""}
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground">
+            Showing {filtered.length} of {scheduleFilter === "upcoming" ? upcomingCount : sorted.length} packages
+            {scheduleFilter === "upcoming" && upcomingCount < sorted.length
+              ? ` (${sorted.length - upcomingCount} past hidden — switch schedule to view)`
+              : ""}
+            {filtered.length === 0 ? " — try clearing search or filters." : ""}
+          </p>
+          {hasActiveFilters ? (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="text-xs font-medium text-primary hover:underline"
+            >
+              Reset filters
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -225,9 +297,28 @@ export function CatalogAdminTable({ rows, races }: { rows: AdminPackageRow[]; ra
           No packages match your filters.
         </p>
       ) : (
-        <div className="space-y-2">
-          {filtered.map((row) => (
-            <CatalogRow key={row.id} initial={row} races={races} />
+        <div className="space-y-6">
+          {grouped.map((group) => (
+            <section key={group.label} className="space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground px-1">
+                {group.label}
+                <span className="font-normal normal-case tracking-normal text-muted-foreground/80">
+                  {" "}
+                  · {group.rows.length} package{group.rows.length === 1 ? "" : "s"}
+                </span>
+              </h3>
+              <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
+                {group.rows.map((row) => (
+                  <CatalogRow
+                    key={row.id}
+                    initial={row}
+                    races={races}
+                    wixListings={wixListingsByPackage[row.id] ?? []}
+                    linkedPackages={linkedPackagesFromAdminRows(row, sorted)}
+                  />
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       )}
@@ -235,7 +326,17 @@ export function CatalogAdminTable({ rows, races }: { rows: AdminPackageRow[]; ra
   )
 }
 
-function CatalogRow({ initial, races }: { initial: AdminPackageRow; races: AdminRaceOption[] }) {
+function CatalogRow({
+  initial,
+  races,
+  wixListings = [],
+  linkedPackages = [],
+}: {
+  initial: AdminPackageRow
+  races: AdminRaceOption[]
+  wixListings?: WixChannelListingRow[]
+  linkedPackages?: LinkedInventoryPackage[]
+}) {
   const [expanded, setExpanded] = useState(false)
 
   const currency = initial.currency
@@ -253,70 +354,76 @@ function CatalogRow({ initial, races }: { initial: AdminPackageRow; races: Admin
   let stockLabel: string
   let stockClass: string
   if (!hasInventoryRow) {
-    stockLabel = "No inventory"
-    stockClass = "bg-amber-500/15 text-amber-800 dark:text-amber-200 border-amber-500/30"
+    stockLabel = "No stock"
+    stockClass = "text-amber-800 dark:text-amber-200"
   } else if ((sellableLive ?? 0) > 0) {
-    stockLabel = `${sellableLive} sellable`
-    stockClass = "bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 border-emerald-500/30"
+    stockLabel = `${sellableLive} avail.`
+    stockClass = "text-emerald-700 dark:text-emerald-300"
   } else {
     stockLabel = "Out of stock"
-    stockClass = "bg-muted text-muted-foreground border-border"
+    stockClass = "text-muted-foreground"
   }
 
   const isHidden = initial.is_hidden
 
   return (
-    <div
-      className={cn(
-        "rounded-xl border border-border bg-card shadow-sm overflow-hidden min-w-0",
-        isHidden && "opacity-75 border-dashed",
-      )}
-    >
-      <button
-        type="button"
-        onClick={() => setExpanded((e) => !e)}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors"
-        aria-expanded={expanded}
-      >
-        <span className="shrink-0 text-muted-foreground">
+    <div className={cn("min-w-0", isHidden && "opacity-80")}>
+      <div className="flex items-stretch gap-0">
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          className="shrink-0 px-3 py-3.5 text-muted-foreground hover:bg-muted/40 transition-colors"
+          aria-expanded={expanded}
+          aria-label={expanded ? "Collapse" : "Expand"}
+        >
           {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        </span>
-        <div className="min-w-0 flex-1">
-          <Link
-            href={adminPackagePath(initial.id)}
-            onClick={(e) => e.stopPropagation()}
-            className="block font-medium text-foreground truncate hover:text-primary hover:underline"
-          >
-            {displayTitle || initial.name || "Untitled"}
-          </Link>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
-          {isHidden ? (
-            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground px-2 py-0.5 rounded border border-dashed border-border">
-              Hidden
+        </button>
+
+        <div className="flex flex-1 min-w-0 items-center gap-4 py-3 pr-4">
+          <div className="min-w-0 flex-1">
+            <Link
+              href={adminPackagePath(initial.id)}
+              className="font-medium text-foreground hover:text-primary hover:underline truncate block"
+            >
+              {initial.name || displayTitle || "Untitled"}
+            </Link>
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">
+              {[initial.date_range, initial.circuit || initial.location].filter(Boolean).join(" · ")}
+            </p>
+          </div>
+
+          <div className="hidden sm:flex shrink-0 items-center gap-3 text-sm">
+            {isHidden ? (
+              <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Hidden</span>
+            ) : null}
+            <span className={cn("text-xs font-medium tabular-nums", stockClass)} title={hasInventoryRow ? `Available ${qa}, held ${qh}` : undefined}>
+              {stockLabel}
             </span>
-          ) : null}
-          <PackagePortalVisibilityCheckbox packageId={initial.id} isHidden={isHidden} />
-          <span
-            className={`text-xs font-medium px-2 py-1 rounded-md border ${stockClass}`}
-            title={hasInventoryRow ? `Available ${qa}, held ${qh}` : undefined}
-          >
-            {stockLabel}
-          </span>
+            <span className="font-semibold tabular-nums text-foreground min-w-[4.5rem] text-right">
+              {priceSummary}
+            </span>
+          </div>
         </div>
-        <span className="shrink-0 text-sm font-semibold tabular-nums text-foreground min-w-[5.5rem] text-right">
-          {priceSummary}
-        </span>
-      </button>
+      </div>
+
+      <div className="sm:hidden flex items-center justify-between gap-3 px-4 pb-3 -mt-1 text-sm">
+        <span className={cn("text-xs font-medium tabular-nums", stockClass)}>{stockLabel}</span>
+        <span className="font-semibold tabular-nums">{priceSummary}</span>
+      </div>
 
       {expanded && (
-        <div className="border-t border-border p-4 bg-card min-w-0 overflow-hidden">
+        <div className="border-t border-border bg-muted/20 px-4 py-4 min-w-0 overflow-hidden">
           <div className="flex justify-end mb-3">
             <Link href={adminPackagePath(initial.id)} className="text-sm text-primary font-medium hover:underline">
               Open full product page →
             </Link>
           </div>
-          <PackageAdminPanel initial={initial} races={races} />
+          <PackageAdminPanel
+            initial={initial}
+            races={races}
+            wixListings={wixListings}
+            linkedPackages={linkedPackages}
+          />
         </div>
       )}
     </div>

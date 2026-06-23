@@ -5,6 +5,8 @@
   "scripts": {
     "build": "next build",
     "dev": "next dev",
+    "dev:local": "tsx scripts/dev-with-cron.ts",
+    "dev:cron": "tsx scripts/local-integration-cron.ts",
     "lint": "eslint .",
     "start": "next start",
     "seed:catalog": "tsx scripts/seed-catalog.ts",

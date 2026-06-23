@@ -64,6 +64,8 @@ export interface Booking {
   guests: number
   /** Invoice workflow status (admin-controlled); mirrors Invoices page */
   invoiceStatus: InvoiceWorkflowStatus
+  /** Xero invoice number once synced (e.g. INV-0001) */
+  xeroInvoiceNumber?: string | null
   totalAmount: number
   currency: string
   createdAt: string
@@ -82,6 +84,8 @@ export interface Invoice {
   bookingId: string
   /** Internal order id for deep links from bookings */
   orderId?: string
+  /** Xero invoice number once synced */
+  xeroInvoiceNumber?: string | null
   amount: number
   currency: string
   status: InvoiceWorkflowStatus

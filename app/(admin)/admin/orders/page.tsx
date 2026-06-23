@@ -11,29 +11,27 @@ const OrdersAdminClient = nextDynamic(
   { loading: () => <PageLoadingSpinner /> },
 )
 
-export default async function AdminOrdersPage() {
+type Props = { searchParams: Promise<{ payment?: string }> }
+
+export default async function AdminOrdersPage({ searchParams }: Props) {
   await requireAdmin()
+  const { payment } = await searchParams
   const orders = await getAllOrdersForAdmin()
 
+  const initialPaymentFilter =
+    payment === "awaiting_payment" || payment === "paid" || payment === "delivered" ? payment : undefined
+
   return (
-    <div className="p-6 lg:p-8 max-w-[1400px] space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Orders</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Live portal bookings from Supabase. Search and sort the table, filter by payment status, and update workflow
-            (defaults to confirmed). Stock is decremented when a booking is placed.
-          </p>
-        </div>
-        <Link
-          href="/admin/place-order"
-          className="inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90"
-        >
-          Place order for agent
-        </Link>
+    <div className="p-6 lg:p-8 max-w-[1600px] space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Orders</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Live bookings from trade agents on the portal. Filter by payment and delivery status, update invoices, and
+          download PDFs.
+        </p>
       </div>
 
-      <OrdersAdminClient orders={orders} />
+      <OrdersAdminClient orders={orders} initialPaymentFilter={initialPaymentFilter} />
 
       <Link href="/admin" className="text-sm text-primary hover:underline">
         ← Back to dashboard

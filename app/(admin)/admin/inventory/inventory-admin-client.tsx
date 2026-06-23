@@ -1,40 +1,15 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react"
+import { useEffect, useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
+import { Search } from "lucide-react"
 import { toast } from "sonner"
 import { createInventoryHold, releaseInventoryHold } from "@/app/(admin)/actions"
 import type { InventoryHoldWithDetails, InventoryPackageOption } from "@/lib/admin/queries"
 import type { PortalProfile } from "@/lib/types/profile"
 
-function optionMatchesSearch(p: InventoryPackageOption, q: string): boolean {
-  if (!q.trim()) return true
-  const s = q.trim().toLowerCase()
-  const hay = [p.id, p.name, p.race_name, p.circuit, p.date_range, p.location].join(" ").toLowerCase()
-  return hay.includes(s)
-}
-
-function optionPrimaryLabel(p: InventoryPackageOption): string {
-  return `${p.race_name} — ${p.name}`
-}
-
-function optionSecondaryLabel(p: InventoryPackageOption): string {
-  const bits: string[] = []
-  if (p.date_range?.trim()) bits.push(p.date_range.trim())
-  if (p.circuit?.trim()) bits.push(p.circuit.trim())
-  else if (p.location?.trim()) bits.push(p.location.trim())
-  return bits.join(" · ")
-}
-
 function agentPrimaryLabel(a: PortalProfile): string {
   return (a.company_name?.trim() || a.full_name?.trim() || a.email || "Agent").trim()
-}
-
-function agentMatchesSearch(a: PortalProfile, q: string): boolean {
-  if (!q.trim()) return true
-  const s = q.trim().toLowerCase()
-  const hay = [a.id, a.email, a.full_name, a.company_name].join(" ").toLowerCase()
-  return hay.includes(s)
 }
 
 export function InventoryAdminClient({
@@ -48,16 +23,13 @@ export function InventoryAdminClient({
 }) {
   const router = useRouter()
   const [pending, start] = useTransition()
-  const [packageId, setPackageId] = useState(packages[0]?.id ?? "")
+
   const [packageSearch, setPackageSearch] = useState("")
-  const [packageListOpen, setPackageListOpen] = useState(false)
-  const packagePickerRef = useRef<HTMLDivElement>(null)
+  const [packageId, setPackageId] = useState(packages[0]?.id ?? "")
 
   const [agentSearch, setAgentSearch] = useState("")
-  const [agentListOpen, setAgentListOpen] = useState(false)
-  const agentPickerRef = useRef<HTMLDivElement>(null)
-
   const [agentId, setAgentId] = useState(agents[0]?.id ?? "")
+
   const [qty, setQty] = useState("1")
   const [holdHours, setHoldHours] = useState("24")
   const [note, setNote] = useState("")
@@ -65,23 +37,41 @@ export function InventoryAdminClient({
   const activeHolds = useMemo(() => holds.filter((h) => !h.released_at), [holds])
   const releasedHolds = useMemo(() => holds.filter((h) => h.released_at), [holds])
 
-  const filteredPackages = useMemo(
-    () => packages.filter((p) => optionMatchesSearch(p, packageSearch)),
-    [packages, packageSearch],
+  const sortedPackages = useMemo(
+    () =>
+      [...packages].sort(
+        (a, b) => a.race_name.localeCompare(b.race_name) || a.name.localeCompare(b.name),
+      ),
+    [packages],
   )
 
-  const selectedPackage = useMemo(() => packages.find((p) => p.id === packageId), [packages, packageId])
+  const filteredPackages = useMemo(() => {
+    const q = packageSearch.trim().toLowerCase()
+    if (!q) return sortedPackages
+    return sortedPackages.filter((p) => {
+      const hay = [p.id, p.name, p.race_name, p.circuit, p.date_range, p.location].join(" ").toLowerCase()
+      return hay.includes(q)
+    })
+  }, [sortedPackages, packageSearch])
 
   const sortedAgents = useMemo(
-    () => [...agents].sort((a, b) => agentPrimaryLabel(a).localeCompare(agentPrimaryLabel(b)) || a.email.localeCompare(b.email)),
+    () =>
+      [...agents].sort(
+        (a, b) => agentPrimaryLabel(a).localeCompare(agentPrimaryLabel(b)) || a.email.localeCompare(b.email),
+      ),
     [agents],
   )
 
-  const filteredAgents = useMemo(
-    () => sortedAgents.filter((a) => agentMatchesSearch(a, agentSearch)),
-    [sortedAgents, agentSearch],
-  )
+  const filteredAgents = useMemo(() => {
+    const q = agentSearch.trim().toLowerCase()
+    if (!q) return sortedAgents
+    return sortedAgents.filter((a) => {
+      const hay = [a.id, a.email, a.full_name, a.company_name].join(" ").toLowerCase()
+      return hay.includes(q)
+    })
+  }, [sortedAgents, agentSearch])
 
+  const selectedPackage = useMemo(() => packages.find((p) => p.id === packageId), [packages, packageId])
   const selectedAgent = useMemo(() => agents.find((a) => a.id === agentId), [agents, agentId])
 
   useEffect(() => {
@@ -97,20 +87,6 @@ export function InventoryAdminClient({
       setAgentId(agents[0].id)
     }
   }, [agents, agentId])
-
-  useEffect(() => {
-    function onDocMouseDown(e: MouseEvent) {
-      const t = e.target as Node
-      if (packagePickerRef.current && !packagePickerRef.current.contains(t)) {
-        setPackageListOpen(false)
-      }
-      if (agentPickerRef.current && !agentPickerRef.current.contains(t)) {
-        setAgentListOpen(false)
-      }
-    }
-    document.addEventListener("mousedown", onDocMouseDown)
-    return () => document.removeEventListener("mousedown", onDocMouseDown)
-  }, [])
 
   function submitHold(e: React.FormEvent) {
     e.preventDefault()
@@ -160,159 +136,84 @@ export function InventoryAdminClient({
     <div className="space-y-10">
       <section className="rounded-xl border border-border bg-card p-5 shadow-sm space-y-4 max-w-xl">
         <h2 className="text-base font-semibold text-foreground">Create hold</h2>
-        <p className="text-sm text-muted-foreground">
-          Reserves units against an agent for a specific catalog package (inventory row required). Stock checks run in
-          the database; held counts must stay within capacity. Holds auto-release after the duration you set if the
-          agent does not check out (expired rows are also cleared when stock is read or at checkout).
-        </p>
-        <form onSubmit={(e) => void submitHold(e)} className="space-y-3">
-          <div ref={packagePickerRef} className="block text-xs text-muted-foreground">
-            <span className="block">Package</span>
+
+        <form onSubmit={(e) => void submitHold(e)} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-2">Package</label>
             {packages.length === 0 ? (
-              <p className="mt-1 text-sm text-amber-700 dark:text-amber-300 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
-                No packages with an inventory row. Add inventory from the catalog page first.
+              <p className="text-sm text-amber-700 dark:text-amber-300 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+                No packages with inventory. Add stock from the inventory page first.
               </p>
             ) : (
               <>
-                <input
-                  type="search"
-                  value={packageSearch}
-                  onChange={(e) => {
-                    setPackageSearch(e.target.value)
-                    setPackageListOpen(true)
-                  }}
-                  onFocus={() => setPackageListOpen(true)}
-                  placeholder="Search event, hospitality name, circuit, id…"
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-                  aria-label="Search packages for hold"
-                  aria-controls="inventory-package-list"
-                  aria-expanded={packageListOpen}
-                />
-                {packageListOpen && (
-                  <ul
-                    id="inventory-package-list"
-                    role="listbox"
-                    className="mt-1 max-h-56 overflow-auto rounded-lg border border-border bg-card shadow-md z-20"
-                  >
-                    {filteredPackages.length === 0 ? (
-                      <li className="px-3 py-2 text-sm text-muted-foreground">No packages match this search.</li>
-                    ) : (
-                      filteredPackages.map((p) => {
-                        const active = p.id === packageId
-                        const s = Math.max(0, p.qty_available - p.qty_held)
-                        return (
-                          <li key={p.id} role="option" aria-selected={active}>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPackageId(p.id)
-                                setPackageSearch("")
-                                setPackageListOpen(false)
-                              }}
-                              className={`w-full text-left px-3 py-2.5 text-sm border-b border-border last:border-0 transition-colors ${
-                                active ? "bg-primary/10" : "hover:bg-muted/80"
-                              }`}
-                            >
-                              <div className="font-medium text-foreground leading-snug">{optionPrimaryLabel(p)}</div>
-                              <div className="text-xs text-muted-foreground mt-0.5">{optionSecondaryLabel(p)}</div>
-                              <div className="text-[11px] font-mono text-muted-foreground mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
-                                <span>{p.id}</span>
-                                <span className="text-foreground/80">
-                                  Sellable {s} / cap {p.qty_available} (held {p.qty_held})
-                                </span>
-                              </div>
-                            </button>
-                          </li>
-                        )
-                      })
-                    )}
-                  </ul>
-                )}
-                {selectedPackage && (
-                  <div className="mt-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm space-y-0.5">
-                    <div className="font-medium text-foreground">{optionPrimaryLabel(selectedPackage)}</div>
-                    <div className="text-xs text-muted-foreground">{optionSecondaryLabel(selectedPackage)}</div>
-                    <div className="text-[11px] font-mono text-muted-foreground pt-0.5">{selectedPackage.id}</div>
-                    <div className="text-xs text-foreground pt-1">
-                      Sellable now: <span className="font-semibold tabular-nums">{sellable}</span> (capacity{" "}
-                      {selectedPackage.qty_available}, held {selectedPackage.qty_held})
-                    </div>
-                  </div>
-                )}
+                <div className="relative mb-2">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={packageSearch}
+                    onChange={(e) => setPackageSearch(e.target.value)}
+                    placeholder="Search package or race…"
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-border bg-background text-sm"
+                  />
+                </div>
+                <select
+                  value={packageId}
+                  onChange={(e) => setPackageId(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-sm"
+                >
+                  <option value="">Select package…</option>
+                  {filteredPackages.map((p) => {
+                    const s = Math.max(0, p.qty_available - p.qty_held)
+                    return (
+                      <option key={p.id} value={p.id}>
+                        {p.race_name} — {p.name} ({s} avail.)
+                      </option>
+                    )
+                  })}
+                </select>
+                {selectedPackage ? (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Sellable now: <span className="font-semibold text-foreground tabular-nums">{sellable}</span>
+                  </p>
+                ) : null}
               </>
             )}
           </div>
-          <div ref={agentPickerRef} className="block text-xs text-muted-foreground">
-            <span className="block">Agent</span>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-2">Trade partner</label>
             {agents.length === 0 ? (
-              <p className="mt-1 text-sm text-amber-700 dark:text-amber-300 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
-                No approved agents yet. Approve agent accounts first.
+              <p className="text-sm text-amber-700 dark:text-amber-300 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+                No approved agents yet.
               </p>
             ) : (
               <>
-                <input
-                  type="search"
-                  value={agentSearch}
-                  onChange={(e) => {
-                    setAgentSearch(e.target.value)
-                    setAgentListOpen(true)
-                  }}
-                  onFocus={() => setAgentListOpen(true)}
-                  placeholder="Search company, name, email, id…"
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-                  aria-label="Search agents for hold"
-                  aria-controls="inventory-agent-list"
-                  aria-expanded={agentListOpen}
-                />
-                {agentListOpen && (
-                  <ul
-                    id="inventory-agent-list"
-                    role="listbox"
-                    className="mt-1 max-h-56 overflow-auto rounded-lg border border-border bg-card shadow-md z-20"
-                  >
-                    {filteredAgents.length === 0 ? (
-                      <li className="px-3 py-2 text-sm text-muted-foreground">No agents match this search.</li>
-                    ) : (
-                      filteredAgents.map((a) => {
-                        const active = a.id === agentId
-                        return (
-                          <li key={a.id} role="option" aria-selected={active}>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setAgentId(a.id)
-                                setAgentSearch("")
-                                setAgentListOpen(false)
-                              }}
-                              className={`w-full text-left px-3 py-2.5 text-sm border-b border-border last:border-0 transition-colors ${
-                                active ? "bg-primary/10" : "hover:bg-muted/80"
-                              }`}
-                            >
-                              <div className="font-medium text-foreground leading-snug">{agentPrimaryLabel(a)}</div>
-                              <div className="text-xs text-muted-foreground mt-0.5">{a.email}</div>
-                              {a.company_name?.trim() &&
-                              a.full_name?.trim() &&
-                              a.full_name.trim().toLowerCase() !== a.company_name.trim().toLowerCase() ? (
-                                <div className="text-[11px] text-muted-foreground mt-0.5">{a.full_name}</div>
-                              ) : null}
-                              <div className="text-[11px] font-mono text-muted-foreground mt-1">{a.id}</div>
-                            </button>
-                          </li>
-                        )
-                      })
-                    )}
-                  </ul>
-                )}
-                {selectedAgent && (
-                  <div className="mt-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm space-y-0.5">
-                    <div className="font-medium text-foreground">{agentPrimaryLabel(selectedAgent)}</div>
-                    <div className="text-xs text-muted-foreground">{selectedAgent.email}</div>
-                    <div className="text-[11px] font-mono text-muted-foreground pt-0.5">{selectedAgent.id}</div>
-                  </div>
-                )}
+                <div className="relative mb-2">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={agentSearch}
+                    onChange={(e) => setAgentSearch(e.target.value)}
+                    placeholder="Search company or email…"
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-border bg-background text-sm"
+                  />
+                </div>
+                <select
+                  value={agentId}
+                  onChange={(e) => setAgentId(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-sm"
+                >
+                  <option value="">Select agent…</option>
+                  {filteredAgents.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {agentPrimaryLabel(a)} ({a.email})
+                    </option>
+                  ))}
+                </select>
               </>
             )}
           </div>
+
           <label className="block text-xs text-muted-foreground">
             Quantity
             <input
@@ -320,32 +221,35 @@ export function InventoryAdminClient({
               min={1}
               value={qty}
               onChange={(e) => setQty(e.target.value)}
-              className="mt-1 w-full max-w-[160px] px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              className="mt-1.5 w-full max-w-[160px] px-3 py-2 rounded-lg border border-border bg-background text-sm"
             />
           </label>
+
           <label className="block text-xs text-muted-foreground">
-            Hold duration (hours until auto-release)
+            Hold duration
             <select
               value={holdHours}
               onChange={(e) => setHoldHours(e.target.value)}
-              className="mt-1 w-full max-w-[220px] px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              className="mt-1.5 w-full max-w-[220px] px-3 py-2 rounded-lg border border-border bg-background text-sm"
             >
               <option value="6">6 hours</option>
               <option value="12">12 hours</option>
               <option value="24">24 hours</option>
               <option value="48">48 hours</option>
               <option value="72">72 hours</option>
-              <option value="168">7 days (168 hours)</option>
+              <option value="168">7 days</option>
             </select>
           </label>
+
           <label className="block text-xs text-muted-foreground">
             Note (optional)
             <input
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
             />
           </label>
+
           <button
             type="submit"
             disabled={pending || packages.length === 0 || agents.length === 0}
@@ -356,104 +260,51 @@ export function InventoryAdminClient({
         </form>
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-base font-semibold text-foreground">Active holds</h2>
+      <section className="space-y-4">
+        <h2 className="text-base font-semibold text-foreground">Active holds ({activeHolds.length})</h2>
         {activeHolds.length === 0 ? (
           <p className="text-sm text-muted-foreground">No active holds.</p>
         ) : (
-          <HoldTable holds={activeHolds} onRelease={release} pending={pending} released={false} />
-        )}
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-base font-semibold text-foreground">Released holds</h2>
-        {releasedHolds.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No history yet.</p>
-        ) : (
-          <HoldTable holds={releasedHolds} onRelease={() => {}} pending={pending} released />
-        )}
-      </section>
-    </div>
-  )
-}
-
-function HoldTable({
-  holds,
-  onRelease,
-  pending,
-  released,
-}: {
-  holds: InventoryHoldWithDetails[]
-  onRelease: (id: string) => void
-  pending: boolean
-  released: boolean
-}) {
-  return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-            <th className="p-3 font-medium">Package</th>
-            <th className="p-3 font-medium">Agent</th>
-            <th className="p-3 font-medium">Qty</th>
-            <th className="p-3 font-medium">Note</th>
-            <th className="p-3 font-medium whitespace-nowrap">Expires</th>
-            <th className="p-3 font-medium">Created</th>
-            {!released && <th className="p-3 font-medium w-[120px]" />}
-            {released && <th className="p-3 font-medium">Released</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {holds.map((h) => (
-            <tr key={h.id} className="border-b border-border last:border-0">
-              <td className="p-3 min-w-[220px]">
-                {h.package_event_summary ? (
-                  <div className="text-sm font-medium text-foreground leading-snug">{h.package_event_summary}</div>
-                ) : null}
-                <div
-                  className={
-                    h.package_event_summary
-                      ? "text-xs text-muted-foreground mt-1 leading-snug"
-                      : "font-medium text-foreground leading-snug"
-                  }
-                >
-                  {h.package_name}
+          <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
+            {activeHolds.map((h) => (
+              <div key={h.id} className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-medium text-foreground truncate">{h.package_name}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {h.package_event_summary}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {h.agent_company || h.agent_email} · {h.quantity} unit{h.quantity === 1 ? "" : "s"}
+                    {h.expires_at ? ` · expires ${new Date(h.expires_at).toLocaleString()}` : ""}
+                  </p>
+                  {h.note ? <p className="text-xs text-muted-foreground mt-1">{h.note}</p> : null}
                 </div>
-                <div className="text-[11px] font-mono text-muted-foreground mt-1">{h.package_id}</div>
-              </td>
-              <td className="p-3 text-muted-foreground">
-                <div>{h.agent_company || h.agent_email}</div>
-                <div className="text-xs">{h.agent_email}</div>
-              </td>
-              <td className="p-3 tabular-nums">{h.quantity}</td>
-              <td className="p-3 text-muted-foreground max-w-[200px]">{h.note ?? "—"}</td>
-              <td className="p-3 text-muted-foreground whitespace-nowrap text-xs">
-                {h.expires_at ? new Date(h.expires_at).toLocaleString() : "—"}
-              </td>
-              <td className="p-3 text-muted-foreground whitespace-nowrap">
-                {new Date(h.created_at).toLocaleString()}
-              </td>
-              {!released && (
-                <td className="p-3">
-                  <button
-                    type="button"
-                    disabled={pending}
-                    onClick={() => onRelease(h.id)}
-                    className="text-xs font-medium text-primary hover:underline disabled:opacity-50"
-                  >
-                    Release
-                  </button>
-                </td>
-              )}
-              {released && (
-                <td className="p-3 text-muted-foreground whitespace-nowrap">
-                  {h.released_at ? new Date(h.released_at).toLocaleString() : "—"}
-                </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => release(h.id)}
+                  className="shrink-0 text-sm font-medium text-destructive hover:underline disabled:opacity-50"
+                >
+                  Release
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {releasedHolds.length > 0 ? (
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Recently released ({releasedHolds.length})</h2>
+          <div className="rounded-xl border border-dashed border-border divide-y divide-border overflow-hidden">
+            {releasedHolds.slice(0, 10).map((h) => (
+              <div key={h.id} className="px-4 py-2.5 text-sm text-muted-foreground">
+                {h.package_name} — {h.agent_company || h.agent_email} ({h.quantity})
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   )
 }

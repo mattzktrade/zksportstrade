@@ -1,8 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import Image from "next/image"
 import Link from "next/link"
+import { CatalogImage } from "@/components/catalog-image"
 import type { AdminPlaceOrderPackageOption } from "@/lib/admin/place-order"
 import { clampBookableGuests, maxBookableGuests } from "@/lib/admin/place-order"
 import { isGuestCountAllowed, lowStockGuestHint, numericSellable, stepAllowedGuestCount } from "@/lib/catalog/booking-guests"
@@ -243,14 +243,6 @@ export function PlaceOrderAdminClient({
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-foreground">
-        <p className="font-medium">Admin booking</p>
-        <p className="text-muted-foreground mt-1 leading-relaxed">
-          This creates a real portal booking under the selected agent. Inventory and cost layers are updated
-          the same way as a self-serve checkout.
-        </p>
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           {/* Agent & package */}
@@ -458,7 +450,14 @@ export function PlaceOrderAdminClient({
           <div className="sticky top-6 rounded-2xl border border-border bg-card overflow-hidden">
             {previewPkg?.image ? (
               <div className="relative aspect-[16/10]">
-                <Image src={previewPkg.image} alt={previewPkg.name} fill className="object-cover" />
+                <CatalogImage
+                  src={previewPkg.image}
+                  alt={previewPkg.name}
+                  variant="card"
+                  fill
+                  sizes="(max-width: 1024px) 100vw, 50vw"
+                  className="object-cover"
+                />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
                 <div className="absolute bottom-0 p-4">
                   <p className="text-[10px] uppercase tracking-wider text-primary font-semibold">{previewPkg.circuit}</p>

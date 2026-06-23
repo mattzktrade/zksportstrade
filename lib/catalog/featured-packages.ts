@@ -1,5 +1,5 @@
 import type { Package } from "@/lib/types/catalog"
-import { featuredTaglineForPackage, pickFeaturedPackagesByStem } from "@/lib/catalog/season-rollover"
+import { pickFeaturedPackagesByStem } from "@/lib/catalog/season-rollover"
 
 /** Curated dashboard highlights — ids must exist in the catalog. */
 export const FEATURED_PACKAGE_IDS = [
@@ -10,18 +10,10 @@ export const FEATURED_PACKAGE_IDS = [
 
 export type FeaturedPackageId = (typeof FEATURED_PACKAGE_IDS)[number]
 
-const FEATURED_TAGLINES: Record<FeaturedPackageId, string> = {
-  "monaco-velocity-terrace-sun-sat-2026": "Saturday & Sunday terrace hospitality on the harbour",
-  "singapore-national-gallery-vip-3days-2026": "Three-day VIP at the National Gallery",
-  "abudhabi-marsa-box-3days-2026": "Exclusive ZK Marsa Box across the full race weekend",
-}
-
-export function featuredPackageTagline(packageId: string): string | null {
-  return featuredTaglineForPackage(packageId, FEATURED_TAGLINES)
-}
-
-/** Resolves featured templates to the active season’s package ids (e.g. 2027 after 2026 ends). */
+/** Packages marked featured in admin (primary). Falls back to legacy curated ids when none flagged. */
 export function pickFeaturedPackages(packages: Package[]): Package[] {
+  const flagged = packages.filter((p) => p.featured === true)
+  if (flagged.length > 0) return flagged
   return pickFeaturedPackagesByStem(FEATURED_PACKAGE_IDS, packages)
 }
 

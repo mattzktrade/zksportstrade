@@ -1,20 +1,22 @@
 "use client"
 
 import Link from "next/link"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useTransition } from "react"
+import { useRouter } from "next/navigation"
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react"
+import { toast } from "sonner"
+import { cancelAdminOrder } from "@/app/(admin)/actions"
 import { adminPackagePath } from "@/lib/admin/package-link"
 import { cn } from "@/lib/utils"
 import type { AdminOrderListRow } from "@/lib/orders/queries"
 import { AdminInvoiceStatusSelect } from "@/components/admin-invoice-status-select"
-import {
-  invoiceWorkflowStatusLabels,
-  normalizeInvoiceStatus,
-  type InvoiceWorkflowStatus,
-} from "@/lib/invoices/status"
+import { InvoicePdfDownloadLink } from "@/components/invoice-pdf-download-link"
+import { invoiceDisplayStatus, invoiceWorkflowStatusLabels } from "@/lib/invoices/status"
 import { formatMoney } from "@/lib/format/money"
 
-type InvoiceFilter = "all" | InvoiceWorkflowStatus
+type InvoiceFilter = "all" | "awaiting_payment" | "paid" | "delivered"
+
+const ORDERS_FILTER_STORAGE_KEY = "zk-admin-orders-filters-v1"
 
 type SortKey =
   | "created"
@@ -45,6 +47,21 @@ function agentSecondary(agent: AdminOrderListRow["agent"]): string {
   return parts.join(" · ")
 }
 
+function SupplierAllocations({ order }: { order: AdminOrderListRow }) {
+  if (order.supplierAllocations.length === 0) {
+    return <span className="text-xs text-muted-foreground">No supplier assigned</span>
+  }
+  return (
+    <div className="space-y-0.5">
+      {order.supplierAllocations.map((a) => (
+        <p key={a.supplier} className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">{a.quantity}x</span> {a.supplier}
+        </p>
+      ))}
+    </div>
+  )
+}
+
 function matchesSearch(o: AdminOrderListRow, q: string): boolean {
   if (!q) return true
   const n = q.toLowerCase().trim()
@@ -65,13 +82,13 @@ function matchesSearch(o: AdminOrderListRow, q: string): boolean {
 function matchesInvoiceFilter(o: AdminOrderListRow, f: InvoiceFilter): boolean {
   if (f === "all") return true
   if (!o.invoice) return false
-  return normalizeInvoiceStatus(o.invoice.status) === f
+  return invoiceDisplayStatus(o.invoice.status) === f
 }
 
 function invoiceStatusRank(s: string): number {
-  const n = normalizeInvoiceStatus(s)
-  if (n === "awaiting_invoice") return 0
-  if (n === "awaiting_payment") return 1
+  const n = invoiceDisplayStatus(s)
+  if (n === "awaiting_payment") return 0
+  if (n === "paid") return 1
   return 2
 }
 
@@ -159,18 +176,238 @@ function SortTh({
   )
 }
 
+function AdminOrderMobileCard({
+  order: o,
+  pending,
+  onCancel,
+}: {
+  order: AdminOrderListRow
+  pending: boolean
+  onCancel: (o: AdminOrderListRow) => void
+}) {
+  const pkg = o.packages
+  const profitTitle =
+    !o.profit.cost_known
+      ? "Cost basis missing for one or more units on this order. Add a buy price on the package cost layers."
+      : !o.profit.currency_consistent
+        ? "Some cost layers are in a different currency than the order; figures may be off."
+        : undefined
+
+  return (
+    <article
+      className={cn(
+        "rounded-xl border border-border bg-card p-4 shadow-sm space-y-3",
+        o.status === "cancelled" && "opacity-60",
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-mono text-xs text-foreground break-all">{o.reference}</p>
+          {o.status === "cancelled" ? (
+            <span className="mt-1 inline-flex rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Cancelled
+            </span>
+          ) : null}
+        </div>
+        <p className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+          {new Date(o.created_at).toLocaleString("en-GB", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </p>
+      </div>
+
+      <div>
+        <Link
+          href={adminPackagePath(o.package_id, "orders")}
+          className="font-medium text-foreground hover:text-primary hover:underline break-words"
+        >
+          {pkg?.name ?? o.package_id}
+        </Link>
+        {pkg?.circuit ? <p className="text-xs text-muted-foreground break-words">{pkg.circuit}</p> : null}
+      </div>
+
+      <div>
+        <p className="font-medium text-foreground">{agentPrimary(o.agent)}</p>
+        {agentSecondary(o.agent) ? (
+          <p className="text-xs text-muted-foreground break-words">{agentSecondary(o.agent)}</p>
+        ) : null}
+      </div>
+
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+        <div>
+          <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Guests</dt>
+          <dd className="mt-0.5 tabular-nums font-medium">{o.guests}</dd>
+        </div>
+        <div>
+          <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Total</dt>
+          <dd className="mt-0.5 tabular-nums font-medium">{formatMoney(o.currency, Number(o.total_amount))}</dd>
+        </div>
+        <div>
+          <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">COGS</dt>
+          <dd className="mt-0.5 tabular-nums text-muted-foreground">
+            {o.profit.cost_known && o.profit.cogs != null
+              ? formatMoney(o.profit.currency, o.profit.cogs)
+              : "—"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Gross profit</dt>
+          <dd
+            className={cn(
+              "mt-0.5 tabular-nums font-medium",
+              o.profit.cost_known && o.profit.gross_profit != null
+                ? o.profit.gross_profit >= 0
+                  ? "text-emerald-600"
+                  : "text-destructive"
+                : "text-muted-foreground",
+            )}
+            title={profitTitle}
+          >
+            {o.profit.cost_known && o.profit.gross_profit != null
+              ? formatMoney(o.profit.currency, o.profit.gross_profit)
+              : "—"}
+          </dd>
+        </div>
+        <div className="col-span-2">
+          <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Margin</dt>
+          <dd className="mt-0.5 tabular-nums text-muted-foreground">
+            {o.profit.margin != null ? formatPct(o.profit.margin) : "—"}
+          </dd>
+        </div>
+        <div className="col-span-2">
+          <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Supplier allocation</dt>
+          <dd className="mt-0.5">
+            <SupplierAllocations order={o} />
+          </dd>
+        </div>
+      </dl>
+
+      <div className="space-y-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Payment</p>
+        <AdminInvoiceStatusSelect
+          key={`mobile-${o.invoice?.id ?? ""}-${o.invoice?.status ?? ""}`}
+          invoiceId={o.invoice?.id ?? null}
+          initialStatus={o.invoice?.status ?? null}
+          deliveryProofs={o.deliveryProofs}
+          className="w-full max-w-none"
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
+        {o.invoice?.xero_invoice_number ? (
+          <InvoicePdfDownloadLink orderId={o.id} label="PDF" />
+        ) : (
+          <span className="text-xs text-muted-foreground">No PDF</span>
+        )}
+        {o.status !== "cancelled" ? (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => onCancel(o)}
+            className="text-xs font-medium text-destructive hover:underline disabled:opacity-50"
+          >
+            Cancel order
+          </button>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        )}
+      </div>
+    </article>
+  )
+}
+
 const invoiceFilterTabs: { value: InvoiceFilter; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "awaiting_invoice", label: invoiceWorkflowStatusLabels.awaiting_invoice },
   { value: "awaiting_payment", label: invoiceWorkflowStatusLabels.awaiting_payment },
   { value: "paid", label: invoiceWorkflowStatusLabels.paid },
+  { value: "delivered", label: invoiceWorkflowStatusLabels.delivered },
 ]
 
-export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
+export function OrdersAdminClient({
+  orders,
+  initialPaymentFilter,
+}: {
+  orders: AdminOrderListRow[]
+  initialPaymentFilter?: InvoiceFilter
+}) {
+  const router = useRouter()
+  const [pending, start] = useTransition()
   const [search, setSearch] = useState("")
-  const [invoiceFilter, setInvoiceFilter] = useState<InvoiceFilter>("all")
+  const [invoiceFilter, setInvoiceFilter] = useState<InvoiceFilter>(initialPaymentFilter ?? "all")
   const [sortKey, setSortKey] = useState<SortKey>("created")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
+  const [filtersReady, setFiltersReady] = useState(false)
+
+  useEffect(() => {
+    if (initialPaymentFilter) {
+      setInvoiceFilter(initialPaymentFilter)
+      setFiltersReady(true)
+      return
+    }
+    try {
+      const raw = localStorage.getItem(ORDERS_FILTER_STORAGE_KEY)
+      if (!raw) return
+      const saved = JSON.parse(raw) as {
+        search?: string
+        invoiceFilter?: InvoiceFilter
+        sortKey?: SortKey
+        sortDir?: "asc" | "desc"
+      }
+      if (typeof saved.search === "string") setSearch(saved.search)
+      if (
+        saved.invoiceFilter === "all" ||
+        saved.invoiceFilter === "awaiting_payment" ||
+        saved.invoiceFilter === "paid" ||
+        saved.invoiceFilter === "delivered"
+      ) {
+        setInvoiceFilter(saved.invoiceFilter)
+      }
+      if (saved.sortKey) setSortKey(saved.sortKey)
+      if (saved.sortDir === "asc" || saved.sortDir === "desc") setSortDir(saved.sortDir)
+    } catch {
+      /* ignore */
+    } finally {
+      setFiltersReady(true)
+    }
+  }, [initialPaymentFilter])
+
+  useEffect(() => {
+    if (!filtersReady) return
+    localStorage.setItem(
+      ORDERS_FILTER_STORAGE_KEY,
+      JSON.stringify({ search, invoiceFilter, sortKey, sortDir }),
+    )
+  }, [search, invoiceFilter, sortKey, sortDir, filtersReady])
+
+  function resetFilters() {
+    setSearch("")
+    setInvoiceFilter("all")
+    setSortKey("created")
+    setSortDir("desc")
+  }
+
+  function cancelOrder(o: AdminOrderListRow) {
+    if (
+      !window.confirm(
+        `Cancel order ${o.reference}? This restores portal stock and keeps the row for records. You must close the Salesforce Opportunity separately if one was created.`,
+      )
+    ) {
+      return
+    }
+    start(async () => {
+      const res = await cancelAdminOrder(o.id)
+      if (!res.ok) {
+        toast.error(res.message)
+        return
+      }
+      toast.success(res.message ?? "Order cancelled.", { duration: 10000 })
+      router.refresh()
+    })
+  }
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"))
@@ -247,7 +484,7 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
           />
         </div>
         <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:flex-wrap">
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide shrink-0">Invoice</span>
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide shrink-0">Payment</span>
           <div className="flex flex-wrap gap-1.5">
             {invoiceFilterTabs.map((tab) => (
               <button
@@ -265,13 +502,22 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
               </button>
             ))}
           </div>
+          {(search || invoiceFilter !== "all" || sortKey !== "created" || sortDir !== "desc") && (
+            <button
+              type="button"
+              onClick={() => resetFilters()}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground border border-border"
+            >
+              Reset filters
+            </button>
+          )}
         </div>
       </div>
 
       <p className="text-xs text-muted-foreground">
         Showing <span className="font-medium text-foreground">{visible.length}</span> of{" "}
-        <span className="font-medium text-foreground">{orders.length}</span> orders. New checkouts use invoice status{" "}
-        <span className="font-medium text-foreground">{invoiceWorkflowStatusLabels.awaiting_invoice.toLowerCase()}</span> until you advance them.
+        <span className="font-medium text-foreground">{orders.length}</span> orders. Trade-portal invoices are created
+        automatically in Xero when an order is placed.
       </p>
 
       {totals.buckets.length > 0 && (
@@ -306,14 +552,22 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
         </div>
       )}
 
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1280px]">
+      <div className="rounded-xl border border-border bg-card overflow-hidden w-full">
+        <div className="lg:hidden divide-y divide-border">
+          {visible.map((o) => (
+            <div key={o.id} className="p-3 sm:p-4">
+              <AdminOrderMobileCard order={o} pending={pending} onCancel={cancelOrder} />
+            </div>
+          ))}
+        </div>
+
+        <div className="hidden lg:block overflow-x-auto w-full">
+          <table className="w-full text-sm min-w-[1100px] table-fixed">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-left">
-                <SortTh label="Reference" activeKey={sortKey} sortKey="reference" sortDir={sortDir} onSort={toggleSort} />
-                <SortTh label="Package" activeKey={sortKey} sortKey="package" sortDir={sortDir} onSort={toggleSort} />
-                <SortTh label="Agent" activeKey={sortKey} sortKey="agent" sortDir={sortDir} onSort={toggleSort} />
+                <SortTh label="Reference" activeKey={sortKey} sortKey="reference" sortDir={sortDir} onSort={toggleSort} className="w-[148px]" />
+                <SortTh label="Package" activeKey={sortKey} sortKey="package" sortDir={sortDir} onSort={toggleSort} className="w-[180px]" />
+                <SortTh label="Agent" activeKey={sortKey} sortKey="agent" sortDir={sortDir} onSort={toggleSort} className="w-[140px]" />
                 <SortTh
                   label="Guests"
                   activeKey={sortKey}
@@ -365,25 +619,47 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
                   sortKey="payment_status"
                   sortDir={sortDir}
                   onSort={toggleSort}
+                  className="w-[150px]"
                 />
-                <SortTh label="Created" activeKey={sortKey} sortKey="created" sortDir={sortDir} onSort={toggleSort} />
+                <SortTh label="Created" activeKey={sortKey} sortKey="created" sortDir={sortDir} onSort={toggleSort} className="w-[130px]" />
+                <th className="px-3 py-3 text-left font-medium text-muted-foreground w-[72px]">PDF</th>
+                <th className="px-3 py-3 text-left font-medium text-muted-foreground w-[72px]">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {visible.map((o) => {
                 const pkg = o.packages
                 return (
-                  <tr key={o.id} className="hover:bg-muted/30">
-                    <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">{o.reference}</td>
-                    <td className="px-4 py-3">
+                  <tr
+                    key={o.id}
+                    className={cn("hover:bg-muted/30", o.status === "cancelled" && "opacity-60")}
+                  >
+                    <td className="px-4 py-3 align-top overflow-hidden">
+                      <div className="flex min-w-0 flex-col gap-1">
+                        <span className="font-mono text-xs leading-snug break-all">{o.reference}</span>
+                        {o.status === "cancelled" ? (
+                          <span className="inline-flex w-fit shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Cancelled
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 align-top overflow-hidden">
                       <Link
                         href={adminPackagePath(o.package_id, "orders")}
-                        className="font-medium text-foreground hover:text-primary hover:underline"
+                        className="font-medium text-foreground hover:text-primary hover:underline break-words"
                       >
                         {pkg?.name ?? o.package_id}
                       </Link>
-                      <p className="text-xs text-muted-foreground">{pkg?.circuit}</p>
-                      <p className="text-[11px] text-primary mt-0.5">View product →</p>
+                      {pkg?.circuit ? (
+                        <p className="text-xs text-muted-foreground break-words">{pkg.circuit}</p>
+                      ) : null}
+                      <div className="mt-2 border-t border-border/60 pt-2">
+                        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Suppliers
+                        </p>
+                        <SupplierAllocations order={o} />
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-medium text-foreground">{agentPrimary(o.agent)}</p>
@@ -422,12 +698,12 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
                     <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
                       {o.profit.margin != null ? formatPct(o.profit.margin) : "—"}
                     </td>
-                    <td className="px-4 py-3 min-w-[200px]">
+                    <td className="px-3 py-3">
                       <AdminInvoiceStatusSelect
                         key={`${o.invoice?.id ?? ""}-${o.invoice?.status ?? ""}`}
                         invoiceId={o.invoice?.id ?? null}
                         initialStatus={o.invoice?.status ?? null}
-                        className="max-w-[200px]"
+                        deliveryProofs={o.deliveryProofs}
                       />
                     </td>
                     <td className="px-4 py-3 text-muted-foreground whitespace-nowrap text-xs">
@@ -438,6 +714,27 @@ export function OrdersAdminClient({ orders }: { orders: AdminOrderListRow[] }) {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
+                    </td>
+                    <td className="px-4 py-3">
+                      {o.invoice?.xero_invoice_number ? (
+                        <InvoicePdfDownloadLink orderId={o.id} label="PDF" />
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {o.status !== "cancelled" ? (
+                        <button
+                          type="button"
+                          disabled={pending}
+                          onClick={() => cancelOrder(o)}
+                          className="text-xs font-medium text-destructive hover:underline disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
                     </td>
                   </tr>
                 )

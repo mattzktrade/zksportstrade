@@ -1,4 +1,5 @@
 import { packageRequiresBookingApproval } from "@/lib/catalog/paddock-club"
+import { toDisplayImageUrl } from "@/lib/images/display-image-url"
 import type { Package, Race } from "@/lib/types/catalog"
 
 type DbRace = {
@@ -40,15 +41,28 @@ type DbPackage = {
   brochure_url?: string | null
   description?: string | null
   gallery_images?: unknown
+  product_code?: string | null
+  salesforce_product_id?: string | null
+  retail_price_multiplier?: number | null
+  sell_on_trade_portal?: boolean
+  sell_on_wix?: boolean
+  sell_on_partners?: boolean
+  integration_sync_status?: string
+  integration_synced_at?: string | null
+  integration_sync_error?: string | null
 }
 
 function parseGalleryImages(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
   const out: string[] = []
   for (const x of raw) {
-    if (typeof x === "string" && x.trim().length > 0) out.push(x.trim())
+    if (typeof x === "string" && x.trim().length > 0) out.push(toDisplayImageUrl(x.trim()))
   }
   return out
+}
+
+function mapPackageImage(image: string | null): string {
+  return image?.trim() ? toDisplayImageUrl(image.trim()) : "/placeholder.svg"
 }
 
 type DbInventory = {
@@ -86,7 +100,7 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     currency: p.currency,
     availability: "Enquire",
     totalCapacity: p.total_capacity,
-    image: p.image ?? "/placeholder.svg",
+    image: mapPackageImage(p.image),
     tier,
     duration: durationRaw,
     includes,
@@ -116,7 +130,7 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     currency: p.currency,
     availability: sellable,
     totalCapacity: p.total_capacity,
-    image: p.image ?? "/placeholder.svg",
+    image: mapPackageImage(p.image),
     tier,
     duration: durationRaw,
     includes,
@@ -145,7 +159,7 @@ export function mapRaceRow(r: DbRace, packages: Package[]): Race {
     countryCode: r.country_code,
     date: r.event_date,
     dateRange: r.date_range,
-    image: r.image,
+    image: toDisplayImageUrl(r.image),
     packagesAvailable: racePackages.length,
     lowestPrice,
     season: r.season,

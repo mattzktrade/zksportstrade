@@ -1,8 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import Image from "next/image"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import { CatalogImage } from "@/components/catalog-image"
+import { PackageGallery } from "@/components/package-gallery"
+import { prefetchCatalogImages } from "@/lib/images/prefetch-catalog-image"
 import type { Package, Race } from "@/lib/types/catalog"
 import {
   clampToAllowedGuestCount,
@@ -10,9 +12,8 @@ import {
   stepAllowedGuestCount,
 } from "@/lib/catalog/booking-guests"
 import { nameIncludesDurationLabel, packageDurationLabel } from "@/lib/catalog/package-duration"
-import { ArrowLeft, MapPin, Calendar, Users, Check, ArrowRight, ChevronDown, Minus, Plus, ChevronLeft, ChevronRight, FileDown, Link2 } from "lucide-react"
+import { ArrowLeft, MapPin, Calendar, Users, Check, ArrowRight, ChevronDown, Minus, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { toast } from "sonner"
 
 const DEFAULT_PACKAGE_DESCRIPTION =
   "Experience the ultimate Formula 1 hospitality with this premium package. Enjoy exclusive access to the paddock area, world-class dining, and unforgettable moments with the sport's elite. This package includes all race weekend sessions - Friday practice, Saturday qualifying, and Sunday's main event."
@@ -67,10 +68,12 @@ export function RacePackagesClient({
         {/* Race Header */}
         <div className="relative rounded-2xl overflow-hidden bg-foreground min-h-[200px] sm:min-h-[240px] md:min-h-[280px] lg:min-h-[320px] group">
           <div className="absolute inset-0">
-            <Image
-              src={race.image || "/placeholder.svg"}
+            <CatalogImage
+              src={race.image}
               alt={race.name}
+              variant="hero"
               fill
+              priority
               className="object-cover group-hover:scale-105 transition-transform duration-700"
             />
           </div>
@@ -164,6 +167,7 @@ function PackageRow({
   onToggle: () => void
 }) {
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
+  const [showFullDetails, setShowFullDetails] = useState(false)
   const isAvailabilityString = typeof pkg.availability === "string"
   const sellable = typeof pkg.availability === "number" ? pkg.availability : 0
   const maxGuests = isAvailabilityString ? 1 : Math.min(sellable, pkg.totalCapacity)
@@ -174,10 +178,27 @@ function PackageRow({
   const canBook = !isAvailabilityString && pkg.price !== null && sellable > 0
   const stockHint = !isAvailabilityString ? lowStockGuestHint(sellable) : null
   const includeItems = pkg.includes.map((item) => item.trim()).filter(Boolean)
+  const description = pkg.description?.trim() ? pkg.description.trim() : DEFAULT_PACKAGE_DESCRIPTION
+  const shouldCollapseDetails = description.length > 180 || includeItems.length > 4
 
-  const primaryImage = pkg.image?.trim() || "/placeholder.svg"
-  const extras = (pkg.galleryImages ?? []).filter((u) => typeof u === "string" && u.trim().length > 0 && u.trim() !== primaryImage)
-  const packageImages = [primaryImage, ...extras.map((u) => u.trim())]
+  const packageImages = useMemo(() => {
+    const primaryImage = pkg.image?.trim() || "/placeholder.svg"
+    const extras = (pkg.galleryImages ?? []).filter(
+      (u) => typeof u === "string" && u.trim().length > 0 && u.trim() !== primaryImage,
+    )
+    return [primaryImage, ...extras.map((u) => u.trim())]
+  }, [pkg.image, pkg.galleryImages])
+
+  const preloadGallery = useCallback(() => {
+    prefetchCatalogImages(packageImages, "card")
+  }, [packageImages])
+
+  useEffect(() => {
+    if (!isExpanded) {
+      setSelectedImageIndex(0)
+      setShowFullDetails(false)
+    }
+  }, [isExpanded])
 
   return (
     <div id={rowId} className="scroll-mt-24">
@@ -188,6 +209,8 @@ function PackageRow({
           isExpanded && "bg-muted/30",
         )}
         onClick={onToggle}
+        onMouseEnter={preloadGallery}
+        onFocus={preloadGallery}
       >
         <div>
           <p className="font-semibold text-foreground">{pkg.name}</p>
@@ -221,6 +244,7 @@ function PackageRow({
           isExpanded && "bg-muted/30",
         )}
         onClick={onToggle}
+        onTouchStart={preloadGallery}
       >
         <div className="flex items-center justify-between mb-2">
           <div className="flex-1 min-w-0 pr-2">
@@ -254,146 +278,134 @@ function PackageRow({
       {isExpanded && (
         <div className="px-3 sm:px-4 pb-3 sm:pb-4 lg:px-6 lg:pb-6">
           <div className="pt-3 sm:pt-4 border-t border-border">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+            <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-2 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.35fr)_minmax(280px,0.8fr)] xl:items-start">
               {/* Left Column - Image Gallery */}
-              <div className="lg:col-span-1">
-                <div className="relative aspect-[16/10] rounded-xl overflow-hidden group">
-                  <Image
-                    src={packageImages[selectedImageIndex]}
-                    alt={pkg.name}
-                    fill
-                    className="object-cover"
-                  />
-                  {/* Navigation Arrows */}
-                  {packageImages.length > 1 && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setSelectedImageIndex((prev) => (prev === 0 ? packageImages.length - 1 : prev - 1))
-                        }}
-                        className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 sm:p-2 bg-zk-black/50 hover:bg-zk-black/70 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setSelectedImageIndex((prev) => (prev === packageImages.length - 1 ? 0 : prev + 1))
-                        }}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 sm:p-2 bg-zk-black/50 hover:bg-zk-black/70 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
-                      </button>
-                    </>
-                  )}
-                  {/* Image Counter */}
-                  {packageImages.length > 1 && (
-                    <div className="absolute bottom-2 right-2 px-2 py-1 bg-zk-black/50 rounded text-[10px] sm:text-xs text-white">
-                      {selectedImageIndex + 1} / {packageImages.length}
-                    </div>
-                  )}
-                </div>
+              <div className="min-w-0 lg:col-span-1">
+                <PackageGallery
+                  images={packageImages}
+                  alt={pkg.name}
+                  selectedIndex={selectedImageIndex}
+                  onSelectIndex={setSelectedImageIndex}
+                  warmCache
+                  className="w-full aspect-[16/10] xl:aspect-auto xl:h-[380px]"
+                />
               </div>
 
               {/* Middle Column - Package Details */}
-              <div className="lg:col-span-1 flex flex-col lg:aspect-[16/10]">
-                {/* Package Info */}
-                <div>
-                  <h3 className="text-lg sm:text-xl font-bold text-foreground mb-2 sm:mb-3">{pkg.name}</h3>
-                  {(packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name)) ||
-                  pkg.totalCapacity > 0 ? (
-                    <div className="mb-3 sm:mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
-                      {packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name) ? (
-                        <span className="inline-flex rounded-md border border-border bg-muted/50 px-2 py-0.5 text-xs sm:text-sm text-foreground font-medium">
-                          {packageDurationLabel(pkg.duration)}
-                        </span>
-                      ) : null}
-                      {pkg.totalCapacity > 0 ? (
-                        <div className="flex items-center gap-1.5 text-xs sm:text-sm text-muted-foreground">
-                          <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
-                          <span>Suite capacity: {pkg.totalCapacity}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
+              <div className="min-w-0 lg:col-span-1">
+                <div
+                  className={cn(
+                    "relative w-full rounded-2xl border border-border bg-card p-4 sm:p-5 lg:p-6",
+                    !showFullDetails && "xl:h-[380px]",
+                    !showFullDetails && shouldCollapseDetails && "xl:overflow-hidden",
+                  )}
+                >
+                  {/* Package Info */}
+                  <div className="border-b border-border pb-4 sm:pb-5">
+                    <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+                      Package details
+                    </p>
+                    <h3 className="mt-2 text-xl sm:text-2xl font-bold leading-tight text-foreground">{pkg.name}</h3>
+                    {(packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name)) ||
+                    pkg.totalCapacity > 0 ||
+                    pkg.brochureUrl ? (
+                      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs sm:text-sm text-muted-foreground">
+                        {packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name) ? (
+                          <span>{packageDurationLabel(pkg.duration)}</span>
+                        ) : null}
+                        {pkg.totalCapacity > 0 ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <Users className="h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden />
+                            <span>Suite capacity {pkg.totalCapacity}</span>
+                          </span>
+                        ) : null}
+                        {pkg.brochureUrl ? (
+                          <a
+                            href={pkg.brochureUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-muted-foreground underline-offset-4 hover:underline"
+                          >
+                            View brochure
+                          </a>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
 
-                {/* Package Description */}
-                <div className="mb-3 sm:mb-4">
-                  <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                    {pkg.description?.trim() ? pkg.description.trim() : DEFAULT_PACKAGE_DESCRIPTION}
-                  </p>
-                </div>
+                  {/* Package Description */}
+                  <div className="py-4 sm:py-5">
+                    <h4 className="text-sm sm:text-base font-semibold text-foreground mb-2">About this package</h4>
+                    <p
+                      className={cn(
+                        "max-w-prose text-sm sm:text-[15px] text-muted-foreground leading-7 whitespace-pre-wrap",
+                        !showFullDetails && shouldCollapseDetails && "xl:max-h-24 xl:overflow-hidden",
+                      )}
+                    >
+                      {description}
+                    </p>
+                  </div>
 
-                {/* Package inclusions + brochure */}
-                <div className="mt-auto">
+                  {/* Package inclusions */}
                   {includeItems.length > 0 ? (
-                    <div className={pkg.brochureUrl ? "mb-4" : undefined}>
-                      <h4 className="text-xs sm:text-sm font-semibold text-foreground mb-2 sm:mb-3">
+                    <div className="border-t border-border pt-4 sm:pt-5">
+                      <h4 className="text-sm sm:text-base font-semibold text-foreground mb-3">
                         Package Includes
                       </h4>
-                      <div className="space-y-1.5 sm:space-y-2">
-                        {includeItems.map((item) => (
+                      <div className="grid gap-x-5 gap-y-2 sm:grid-cols-2">
+                        {includeItems.map((item, index) => (
                           <div
                             key={item}
-                            className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground"
+                            className={cn(
+                              "flex items-start gap-2 text-xs sm:text-sm text-muted-foreground",
+                              !showFullDetails && shouldCollapseDetails && index >= 4 && "xl:hidden",
+                            )}
                           >
-                            <Check className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary flex-shrink-0" />
-                            <span>{item}</span>
+                            <Check className="mt-0.5 h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary flex-shrink-0" />
+                            <span className="leading-relaxed">{item}</span>
                           </div>
                         ))}
                       </div>
+                      {!showFullDetails && includeItems.length > 4 ? (
+                        <p className="mt-2 hidden text-xs text-muted-foreground xl:block">
+                          + {includeItems.length - 4} more included
+                        </p>
+                      ) : null}
                     </div>
                   ) : null}
-                  {pkg.brochureUrl ? (
-                    <div className="mt-4 rounded-xl border border-border bg-muted/20 p-3 sm:p-4 space-y-2">
-                      <p className="text-xs font-semibold text-foreground uppercase tracking-wide">Brochure</p>
-                      <p className="text-[11px] sm:text-xs text-muted-foreground leading-relaxed">
-                        Share this PDF or page with your client. Opens in a new tab — use your browser to download or share.
-                      </p>
-                      <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                        <a
-                          href={pkg.brochureUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="inline-flex items-center justify-center gap-2 px-3 sm:px-4 py-2 rounded-xl bg-primary text-primary-foreground text-xs sm:text-sm font-semibold hover:bg-primary/90 transition-colors"
-                        >
-                          <FileDown className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
-                          View brochure
-                        </a>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            void navigator.clipboard.writeText(pkg.brochureUrl!).then(
-                              () => toast.success("Link copied"),
-                              () => toast.error("Could not copy — open the brochure and copy from the address bar"),
-                            )
-                          }}
-                          className="inline-flex items-center justify-center gap-2 px-3 sm:px-4 py-2 rounded-xl border border-border bg-background text-xs sm:text-sm font-semibold text-foreground hover:bg-muted transition-colors"
-                        >
-                          <Link2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
-                          Copy link
-                        </button>
-                      </div>
+                  {shouldCollapseDetails ? (
+                    <div
+                      className={cn(
+                        "mt-4 hidden xl:block",
+                        !showFullDetails &&
+                          "xl:absolute xl:inset-x-0 xl:bottom-0 xl:rounded-b-2xl xl:bg-gradient-to-t xl:from-card xl:via-card xl:to-card/80 xl:px-6 xl:pb-5 xl:pt-12",
+                      )}
+                    >
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setShowFullDetails((v) => !v)
+                        }}
+                        className="inline-flex w-full items-center justify-center rounded-xl border border-border bg-background px-3 py-2 text-xs sm:text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+                      >
+                        {showFullDetails ? "Show less" : "Show full details"}
+                      </button>
                     </div>
                   ) : null}
                 </div>
               </div>
 
               {/* Right Column - Booking Section */}
-              <div className="lg:col-span-1">
+              <div className="min-w-0 lg:col-span-2 xl:col-span-1">
                 <div className="lg:sticky lg:top-6">
-                  <div className="bg-card border border-border rounded-xl p-3 sm:p-4 space-y-3 sm:space-y-4">
+                  <div className="flex w-full flex-col bg-card border border-border rounded-xl p-3 sm:p-4 xl:p-3.5 space-y-2.5 xl:h-[380px] xl:overflow-hidden">
                     {/* Price */}
                     <div>
                       <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Price per person</p>
                       {pkg.price !== null ? (
-                        <p className="text-xl sm:text-2xl font-bold text-foreground">${pkg.price.toLocaleString()}</p>
+                        <p className="text-xl font-bold text-foreground">${pkg.price.toLocaleString()}</p>
                       ) : (
                         <p className="text-xl sm:text-2xl font-bold text-muted-foreground">-</p>
                       )}
@@ -403,18 +415,25 @@ function PackageRow({
                     {canBook && (
                       <>
                         {pkg.agentHoldUnits != null && pkg.agentHoldUnits > 0 && pkg.agentHoldExpiresAt ? (
-                          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100 mb-3">
-                            <p className="font-semibold">Your active hold</p>
-                            <p className="mt-0.5 leading-relaxed">
-                              {pkg.agentHoldUnits} seat{pkg.agentHoldUnits !== 1 ? "s" : ""} reserved until{" "}
-                              {new Date(pkg.agentHoldExpiresAt).toLocaleString()}. Stock shown includes your hold so you
-                              can proceed to checkout.
+                          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-950 dark:text-amber-100">
+                            <p className="font-semibold">
+                              {pkg.agentHoldUnits} held until{" "}
+                              <span className="font-medium">{new Date(pkg.agentHoldExpiresAt).toLocaleTimeString()}</span>
                             </p>
                           </div>
                         ) : null}
                         <div>
-                          <label className="block text-xs sm:text-sm font-medium text-foreground mb-2">Number of Guests</label>
-                          <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                          <div className="mb-2 flex items-center justify-between gap-3">
+                            <label className="block text-xs sm:text-sm font-medium text-foreground">Number of Guests</label>
+                            <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-[10px] sm:text-xs font-semibold text-emerald-700">
+                              {typeof pkg.availability === "number"
+                                ? `${pkg.availability} available${
+                                    pkg.agentHoldUnits != null && pkg.agentHoldUnits > 0 ? " incl. hold" : ""
+                                  }`
+                                : String(pkg.availability)}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 sm:gap-3 mb-1.5">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -423,7 +442,7 @@ function PackageRow({
                               }}
                               disabled={guestCount <= stepAllowedGuestCount(sellable, guestCount, "down")}
                               className={cn(
-                                "p-1.5 sm:p-2 rounded-lg border border-border hover:bg-muted transition-colors",
+                                "p-1.5 rounded-lg border border-border hover:bg-muted transition-colors",
                                 guestCount <= stepAllowedGuestCount(sellable, guestCount, "down") &&
                                   "opacity-50 cursor-not-allowed",
                               )}
@@ -431,7 +450,7 @@ function PackageRow({
                               <Minus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                             </button>
                             <div className="flex-1 text-center">
-                              <span className="text-base sm:text-lg font-semibold text-foreground">{guestCount}</span>
+                              <span className="text-base font-semibold text-foreground">{guestCount}</span>
                               <span className="text-xs sm:text-sm text-muted-foreground ml-1.5">
                                 {guestCount === 1 ? "guest" : "guests"}
                               </span>
@@ -444,7 +463,7 @@ function PackageRow({
                               }}
                               disabled={guestCount >= stepAllowedGuestCount(sellable, guestCount, "up")}
                               className={cn(
-                                "p-1.5 sm:p-2 rounded-lg border border-border hover:bg-muted transition-colors",
+                                "p-1.5 rounded-lg border border-border hover:bg-muted transition-colors",
                                 guestCount >= stepAllowedGuestCount(sellable, guestCount, "up") &&
                                   "opacity-50 cursor-not-allowed",
                               )}
@@ -453,42 +472,35 @@ function PackageRow({
                             </button>
                           </div>
                           {stockHint ? (
-                            <p className="text-[10px] sm:text-xs text-muted-foreground text-center leading-relaxed px-1">
-                              {stockHint}
+                            <p className="text-[10px] sm:text-xs text-muted-foreground text-center leading-snug px-1">
+                              Limited stock: only allowed quantities can be selected.
                             </p>
                           ) : null}
-                          <p className="text-[10px] sm:text-xs text-muted-foreground text-center">
-                            {typeof pkg.availability === "number"
-                              ? `${pkg.availability} available${
-                                  pkg.agentHoldUnits != null && pkg.agentHoldUnits > 0 ? " (includes your hold)" : ""
-                                }`
-                              : String(pkg.availability)}
-                          </p>
                         </div>
 
                         {/* Total Price */}
                         {pkg.price !== null && (
-                          <div className="pt-2 sm:pt-3 border-t border-border">
-                            <div className="flex items-center justify-between text-xs sm:text-sm mb-2">
+                          <div className="pt-2 border-t border-border">
+                            <div className="flex items-center justify-between text-xs mb-1.5">
                               <span className="text-muted-foreground">
                                 ${pkg.price.toLocaleString()} × {guestCount} {guestCount === 1 ? "guest" : "guests"}
                               </span>
                             </div>
                             <div className="flex items-center justify-between pt-2 border-t border-border">
                               <span className="text-xs sm:text-sm font-semibold text-foreground">Total</span>
-                              <span className="text-lg sm:text-xl font-bold text-primary">${totalPrice.toLocaleString()}</span>
+                              <span className="text-lg font-bold text-primary">${totalPrice.toLocaleString()}</span>
                             </div>
                           </div>
                         )}
 
                         {pkg.requiresBookingApproval ? (
-                          <p className="text-[10px] sm:text-xs text-amber-800 dark:text-amber-200 text-center leading-relaxed">
-                            Paddock Club — submit a request for ZK approval before booking is confirmed.
+                          <p className="rounded-lg bg-amber-500/10 px-3 py-1.5 text-center text-[10px] font-medium text-amber-800 dark:text-amber-200">
+                            Approval required before confirmation.
                           </p>
                         ) : null}
                         <Link
                           href={`/checkout?package=${pkg.id}&guests=${guestCount}`}
-                          className="w-full inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 bg-primary text-white rounded-xl font-semibold hover:bg-primary/90 transition-colors text-xs sm:text-sm"
+                          className="mt-auto w-full inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 bg-primary text-white rounded-xl font-semibold hover:bg-primary/90 transition-colors text-xs sm:text-sm xl:mb-1.5"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {pkg.requiresBookingApproval ? "Request approval" : "Proceed to Checkout"}

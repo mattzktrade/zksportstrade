@@ -16,6 +16,7 @@ type RawInvoiceRow = {
   currency: string
   status: string
   issued_at: string | null
+  xero_invoice_number: string | null
   orders?: OrderJoin | OrderJoin[] | null
 }
 
@@ -36,6 +37,7 @@ export async function getMyInvoices(): Promise<Invoice[]> {
       currency,
       status,
       issued_at,
+      xero_invoice_number,
       orders (
         id,
         reference,
@@ -56,6 +58,7 @@ export async function getMyInvoices(): Promise<Invoice[]> {
       id: row.reference,
       bookingId: order?.reference ?? "",
       orderId: order?.id,
+      xeroInvoiceNumber: row.xero_invoice_number ?? null,
       amount: Number(row.amount),
       currency: row.currency,
       status: normalizeInvoiceStatus(row.status),

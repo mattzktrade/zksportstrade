@@ -44,20 +44,32 @@ function formatMoney(amount: number, currency: string): string {
   }
 }
 
+function labeledField(label: string, value: string): string {
+  const v = value.trim()
+  if (!v) return ""
+  return `<strong>${escapeHtml(label)}:</strong> ${escapeHtml(v)}`
+}
+
 function buildHtml(p: OrderEmailPayload): string {
+  const clientLines = [
+    labeledField("Full name", p.clientName),
+    labeledField("Email", p.clientEmail),
+    labeledField("Phone", p.clientPhone),
+    p.clientNationality.trim() ? labeledField("Nationality", p.clientNationality) : "",
+  ].filter(Boolean)
+
   const lines = [
     `<p>Hi ${escapeHtml(p.agentName)},</p>`,
     `<p>Please see below confirmation of your booking. Our finance team will be in touch regarding payment separately.</p>`,
     `<p><strong>Booking reference:</strong> ${escapeHtml(p.orderReference)}</p>`,
-    `<p><strong>Experience</strong><br/>${escapeHtml(p.packageName)} — ${escapeHtml(p.circuit)}<br/>`,
-    `Guests: ${p.guests}<br/>`,
-    `Total: ${escapeHtml(formatMoney(p.totalAmount, p.currency))}</p>`,
+    `<p><strong>Experience</strong><br/>`,
+    `${labeledField("Package", `${p.packageName} — ${p.circuit}`)}<br/>`,
+    `${labeledField("Guests", String(p.guests))}<br/>`,
+    `${labeledField("Total", formatMoney(p.totalAmount, p.currency))}`,
+    `</p>`,
     `<p><strong>Client / lead guest</strong><br/>`,
-    `${escapeHtml(p.clientName)}<br/>`,
-    `${escapeHtml(p.clientEmail)}<br/>`,
-    `${escapeHtml(p.clientPhone)}`,
-    p.clientNationality ? `<br/>Nationality: ${escapeHtml(p.clientNationality)}` : "",
-    "</p>",
+    clientLines.join("<br/>"),
+    `</p>`,
   ]
 
   const shipLines = [
@@ -95,12 +107,27 @@ function buildHtml(p: OrderEmailPayload): string {
 
 import { stripSurroundingQuotes } from "@/lib/email/config"
 
-function parseFinanceCc(): string[] {
-  const raw = process.env.FINANCE_NOTIFICATION_EMAILS ?? process.env.FINANCE_TEAM_EMAIL ?? ""
-  return raw
-    .split(/[,;]/g)
-    .map((s) => stripSurroundingQuotes(s.trim()))
-    .filter((s) => s.length > 0)
+/** Legacy inbox — no longer CC'd on confirmations (use ORDER_CONFIRMATION_CC / FINANCE_NOTIFICATION_EMAILS). */
+const BLOCKED_CONFIRMATION_CC = new Set(["bookings@zk-sports.com"])
+
+function parseConfirmationCc(): string[] {
+  const raw = [
+    process.env.FINANCE_NOTIFICATION_EMAILS ?? "",
+    process.env.FINANCE_TEAM_EMAIL ?? "",
+    process.env.ORDER_CONFIRMATION_CC ?? "",
+  ].join(",")
+
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const part of raw.split(/[,;]/g)) {
+    const email = stripSurroundingQuotes(part.trim())
+    if (!email) continue
+    const key = email.toLowerCase()
+    if (BLOCKED_CONFIRMATION_CC.has(key) || seen.has(key)) continue
+    seen.add(key)
+    out.push(email)
+  }
+  return out
 }
 
 export async function sendOrderPlacedEmail(p: OrderEmailPayload): Promise<{ ok: boolean; skipped?: string; error?: string }> {
@@ -111,7 +138,7 @@ export async function sendOrderPlacedEmail(p: OrderEmailPayload): Promise<{ ok: 
     return { ok: false, skipped: "RESEND_API_KEY or ORDER_EMAIL_FROM not configured" }
   }
 
-  const cc = parseFinanceCc()
+  const cc = parseConfirmationCc()
   const resend = new Resend(apiKey)
   const subject = `Booking Confirmation ${p.orderReference} — ${p.circuit}`
 

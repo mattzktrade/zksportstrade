@@ -56,7 +56,7 @@ const faqs = [
       },
       {
         q: "What does the payment status on a booking mean?",
-        a: "Each booking shows a payment status: Awaiting invoice (booking received, invoice not yet issued), Awaiting payment (invoice sent, payment outstanding), or Paid. Use the payment filter on My Bookings. Status is updated by our team as your invoice progresses in Xero.",
+        a: "Each booking shows a payment status: Awaiting payment (invoice sent, payment outstanding) or Paid. Wix website orders are paid at checkout. Use the payment filter on My Bookings.",
       },
     ],
   },
@@ -69,7 +69,7 @@ const faqs = [
       },
       {
         q: "Where can I see payment status?",
-        a: "Open My Bookings and use the payment status filter. Each row shows Awaiting invoice, Awaiting payment, or Paid for that booking reference.",
+        a: "Open My Bookings and use the payment status filter. Each row shows Awaiting payment or Paid for that booking reference.",
       },
       {
         q: "How do I know when payment has been received?",

@@ -53,3 +53,18 @@ export function packageDurationTitlePrefix(value: string | null | undefined): st
 export function isValidPackageDuration(value: string): boolean {
   return value in LABEL_BY_VALUE
 }
+
+/** Infer stored duration from display name when admin leaves duration blank on create. */
+export function inferPackageDurationFromName(name: string): PackageDurationValue | "" {
+  const n = name.trim()
+  if (!n) return ""
+
+  if (/\b3\s*days?\b/i.test(n)) return "3_day"
+  if (/\b2\s*days?\b/i.test(n) || /\bsaturday\s*(?:&|and)\s*sunday\b/i.test(n)) return "2_day"
+  if (/\bsaturday\s+only\b/i.test(n) || /^saturday\b/i.test(n)) return "saturday_only"
+  if (/\bsunday\s+only\b/i.test(n) || /^sunday\b/i.test(n)) return "sunday_only"
+  if (/\bfriday\s+only\b/i.test(n) || /^friday\b/i.test(n)) return "friday_only"
+  if (/\bthursday\s+only\b/i.test(n) || /^thursday\b/i.test(n)) return "thursday_only"
+
+  return ""
+}

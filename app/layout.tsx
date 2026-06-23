@@ -34,6 +34,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <link rel="preconnect" href="https://static.wixstatic.com" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://assets.quintevents.com" crossOrigin="anonymous" />
+      </head>
       <body className={`${inter.variable} ${geistMono.variable} font-sans antialiased`}>
         {children}
         <Analytics />

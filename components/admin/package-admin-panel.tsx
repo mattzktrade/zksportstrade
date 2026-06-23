@@ -9,12 +9,14 @@ import {
   updateInventoryRow,
   updatePackageFields,
 } from "@/app/(admin)/actions"
+import type { LinkedInventoryPackage } from "@/lib/admin/linked-inventory"
 import type { AdminPackageRow, AdminRaceOption } from "@/lib/admin/queries"
 import { adminRaceLabel } from "@/lib/admin/race-label"
-import { PACKAGE_DURATION_OPTIONS } from "@/lib/catalog/package-duration"
 import { cn } from "@/lib/utils"
 import { PackageCostLayers } from "@/components/admin/package-cost-layers"
 import { PackagePortalVisibilityCheckbox } from "@/components/admin/package-portal-visibility"
+import { PackageIntegrationPanel } from "@/components/admin/package-integration-panel"
+import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
 
 function linesToList(s: string): string[] {
   return s
@@ -41,16 +43,20 @@ function currencyHint(currency: string): string {
   return `Amounts in ${c}`
 }
 
-export type PackageAdminPanelSection = "all" | "details" | "inventory"
+export type PackageAdminPanelSection = "all" | "details" | "inventory" | "integrations"
 
 export function PackageAdminPanel({
   initial,
   races,
+  wixListings = [],
+  linkedPackages = [],
   onDeleted,
   section = "all",
 }: {
   initial: AdminPackageRow
   races: AdminRaceOption[]
+  wixListings?: WixChannelListingRow[]
+  linkedPackages?: LinkedInventoryPackage[]
   /** Called after successful delete (e.g. redirect from detail page). */
   onDeleted?: () => void
   /** Which block to show. Catalog expand uses `all`; product page uses separate tabs. */
@@ -70,9 +76,7 @@ export function PackageAdminPanel({
   const [description, setDescription] = useState(typeof initial.description === "string" ? initial.description : "")
   const [image, setImage] = useState(initial.image ?? "")
   const [galleryText, setGalleryText] = useState(galleryToText(initial.gallery_images))
-  const [currency, setCurrency] = useState(initial.currency)
   const [totalCapacity, setTotalCapacity] = useState(String(initial.total_capacity))
-  const [duration, setDuration] = useState(initial.duration ?? "")
   const [includesText, setIncludesText] = useState(includesToText(initial.includes))
   const [tradePrice, setTradePrice] = useState(initial.trade_price != null ? String(initial.trade_price) : "")
   const [isEnquiry, setIsEnquiry] = useState(initial.is_enquiry)
@@ -81,9 +85,7 @@ export function PackageAdminPanel({
   )
   const [featured, setFeatured] = useState(initial.featured)
   const [isHidden, setIsHidden] = useState(initial.is_hidden)
-  const [sortOrder, setSortOrder] = useState(String(initial.sort_order))
   const [brochureUrl, setBrochureUrl] = useState(typeof initial.brochure_url === "string" ? initial.brochure_url : "")
-  const [qtyAvailable, setQtyAvailable] = useState(String(initial.inventory?.qty_available ?? 0))
   const [qtyHeld, setQtyHeld] = useState(String(initial.inventory?.qty_held ?? 0))
 
   useEffect(() => {
@@ -98,18 +100,14 @@ export function PackageAdminPanel({
     setDescription(typeof initial.description === "string" ? initial.description : "")
     setImage(initial.image ?? "")
     setGalleryText(galleryToText(initial.gallery_images))
-    setCurrency(initial.currency)
     setTotalCapacity(String(initial.total_capacity))
-    setDuration(initial.duration ?? "")
     setIncludesText(includesToText(initial.includes))
     setTradePrice(initial.trade_price != null ? String(initial.trade_price) : "")
     setIsEnquiry(initial.is_enquiry)
     setRequiresBookingApproval(initial.requires_booking_approval ?? false)
     setFeatured(initial.featured)
     setIsHidden(initial.is_hidden)
-    setSortOrder(String(initial.sort_order))
     setBrochureUrl(typeof initial.brochure_url === "string" ? initial.brochure_url : "")
-    setQtyAvailable(String(initial.inventory?.qty_available ?? 0))
     setQtyHeld(String(initial.inventory?.qty_held ?? 0))
   }, [initial])
 
@@ -125,11 +123,6 @@ export function PackageAdminPanel({
       const price = parsePrice()
       if (tradePrice.trim() !== "" && price === null) {
         toast.error("Trade price must be a number or empty for enquiry-style pricing.")
-        return
-      }
-      const so = Math.floor(Number(sortOrder))
-      if (!Number.isFinite(so)) {
-        toast.error("Sort order must be a number.")
         return
       }
       const cap = Math.floor(Number(totalCapacity))
@@ -151,16 +144,16 @@ export function PackageAdminPanel({
         description: description.trim(),
         image: image.trim() || null,
         gallery_images: linesToList(galleryText),
-        currency: currency.trim() || "USD",
+        currency: (initial.currency || "USD").trim() || "USD",
         total_capacity: cap,
-        duration,
+        duration: initial.duration ?? "",
         includes: linesToList(includesText),
         trade_price: price,
         is_enquiry: isEnquiry,
         requires_booking_approval: requiresBookingApproval,
         featured,
         is_hidden: isHidden,
-        sort_order: so,
+        sort_order: initial.sort_order,
         brochure_url: brochureUrl.trim() || null,
       })
       if (!res.ok) {
@@ -172,10 +165,14 @@ export function PackageAdminPanel({
     })
   }
 
-  function saveInventory() {
+  function saveHeld() {
     start(async () => {
-      const qa = Math.floor(Number(qtyAvailable))
+      const qa = initial.inventory?.qty_available ?? 0
       const qh = Math.floor(Number(qtyHeld))
+      if (!Number.isFinite(qh) || qh < 0) {
+        toast.error("Held quantity must be a non-negative whole number.")
+        return
+      }
       const res = await updateInventoryRow({
         packageId: initial.id,
         qty_available: qa,
@@ -185,7 +182,9 @@ export function PackageAdminPanel({
         toast.error(res.message)
         return
       }
-      toast.success("Inventory updated.")
+      toast.success(
+        linkedPackages.length > 1 ? "Hold updated across linked packages." : "Held quantity updated.",
+      )
       router.refresh()
     })
   }
@@ -205,7 +204,7 @@ export function PackageAdminPanel({
   function confirmDeletePackage() {
     if (
       !window.confirm(
-        `Delete package “${name || initial.id}”? This cannot be undone. Packages with existing orders cannot be deleted.`,
+        `Delete package “${name || initial.id}”? This removes the portal listing and deletes the linked Wix and Salesforce products. Packages with existing orders cannot be deleted.`,
       )
     ) {
       return
@@ -216,7 +215,7 @@ export function PackageAdminPanel({
         toast.error(res.message)
         return
       }
-      toast.success("Package deleted.")
+      toast.success(res.message ?? "Package deleted.", { duration: res.message ? 10000 : 4000 })
       if (onDeleted) onDeleted()
       else router.push("/admin/catalog")
       router.refresh()
@@ -225,7 +224,12 @@ export function PackageAdminPanel({
 
   const showDetails = section === "all" || section === "details"
   const showInventory = section === "all" || section === "inventory"
-  const salePrice = section === "inventory" ? initial.trade_price : parsePrice()
+  const showIntegrations = section === "all" || section === "integrations"
+  const salePrice = section === "inventory" || section === "all" ? initial.trade_price : parsePrice()
+  const qtyAvailable = initial.inventory?.qty_available ?? 0
+  const qtyHeldNum = initial.inventory?.qty_held ?? 0
+  const sellable = Math.max(0, qtyAvailable - qtyHeldNum)
+  const soldTotal = initial.sales_breakdown?.total ?? 0
 
   return (
     <div className="space-y-6 min-w-0 w-full">
@@ -233,7 +237,7 @@ export function PackageAdminPanel({
       <div className="space-y-3 min-w-0">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Package details</p>
         <PackagePortalVisibilityCheckbox packageId={initial.id} isHidden={initial.is_hidden} className="mb-1" />
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           <label className="block text-xs text-muted-foreground sm:col-span-2">
             Race
             <select
@@ -280,12 +284,12 @@ export function PackageAdminPanel({
               className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
             />
           </label>
-          <label className="block text-xs text-muted-foreground">
+          <label className="block text-xs text-muted-foreground sm:col-span-2 sm:max-w-xs">
             Country code
             <input
               value={countryCode}
               onChange={(e) => setCountryCode(e.target.value)}
-              className="mt-1 w-full max-w-[100px] px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
             />
           </label>
           <label className="block text-xs text-muted-foreground">
@@ -294,7 +298,7 @@ export function PackageAdminPanel({
               type="date"
               value={eventDate}
               onChange={(e) => setEventDate(e.target.value)}
-              className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
             />
           </label>
           <label className="block text-xs text-muted-foreground sm:col-span-2">
@@ -302,38 +306,16 @@ export function PackageAdminPanel({
             <input
               value={dateRange}
               onChange={(e) => setDateRange(e.target.value)}
-              className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
             />
           </label>
-          <label className="block text-xs text-muted-foreground">
-            Currency
-            <input
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
-              className="mt-1 w-full max-w-[100px] px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            />
-          </label>
-          <label className="block text-xs text-muted-foreground">
+          <label className="block text-xs text-muted-foreground sm:col-span-2 sm:max-w-xs">
             Total capacity
             <input
               value={totalCapacity}
               onChange={(e) => setTotalCapacity(e.target.value)}
-              className="mt-1 w-full max-w-[120px] px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
             />
-          </label>
-          <label className="block text-xs text-muted-foreground sm:col-span-2">
-            Package duration
-            <select
-              value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              className="mt-1 w-full max-w-md px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            >
-              {PACKAGE_DURATION_OPTIONS.map((o) => (
-                <option key={o.value || "none"} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
           </label>
           <label className="block text-xs text-muted-foreground sm:col-span-2">
             Primary image URL
@@ -343,6 +325,9 @@ export function PackageAdminPanel({
               className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
               placeholder="https://… or /images/…"
             />
+            <span className="block text-[11px] text-muted-foreground/80 mt-1 leading-relaxed">
+              Wix and other CDN thumbnail links are upgraded to full size on save and in the portal.
+            </span>
           </label>
           <label className="block text-xs text-muted-foreground sm:col-span-2">
             Extra gallery image URLs (one per line)
@@ -375,15 +360,9 @@ export function PackageAdminPanel({
               onChange={(e) => setTradePrice(e.target.value)}
               className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
             />
-            <span className="block text-[11px] text-muted-foreground/80 mt-1">{currencyHint(currency)}</span>
-          </label>
-          <label className="block text-xs text-muted-foreground">
-            Sort order
-            <input
-              value={sortOrder}
-              onChange={(e) => setSortOrder(e.target.value)}
-              className="mt-1 w-full max-w-[120px] px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            />
+            <span className="block text-[11px] text-muted-foreground/80 mt-1">
+              {currencyHint((initial.currency || "USD").trim() || "USD")}
+            </span>
           </label>
           <label className="block text-xs text-muted-foreground sm:col-span-2">
             Brochure URL (optional)
@@ -428,19 +407,18 @@ export function PackageAdminPanel({
             Delete package
           </button>
         </div>
-        <p className="text-[11px] font-mono text-muted-foreground">ID: {initial.id}</p>
       </div>
+      ) : null}
+
+      {showIntegrations ? (
+        <div className={cn(showDetails && section === "all" && "border-t border-border pt-6")}>
+          <PackageIntegrationPanel initial={initial} wixListings={wixListings} compact={section === "all"} />
+        </div>
       ) : null}
 
       {showInventory ? (
       <div className={cn("space-y-4 min-w-0", showDetails && "border-t border-border pt-6")}>
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Inventory & cost</p>
-        {initial.inventory_group_id ? (
-          <p className="text-xs text-muted-foreground rounded-lg border border-border bg-muted/40 px-3 py-2">
-            Linked day options: Saturday and Sunday are separate pools. The 2-day option follows the lower of
-            Saturday and Sunday — selling one day only reduces that day and the 2-day count, not the other day.
-          </p>
-        ) : null}
         {!initial.inventory ? (
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground">No inventory row for this package yet.</p>
@@ -455,42 +433,57 @@ export function PackageAdminPanel({
           </div>
         ) : (
           <>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-2xl">
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Sellable</p>
+                <p className="text-lg font-semibold tabular-nums">{sellable}</p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">On hold</p>
+                <p className="text-lg font-semibold tabular-nums">{qtyHeldNum}</p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Stock</p>
+                <p className="text-lg font-semibold tabular-nums">{qtyAvailable}</p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Sold</p>
+                <p className="text-lg font-semibold tabular-nums">{soldTotal}</p>
+              </div>
+            </div>
             <PackageCostLayers
               packageId={initial.id}
+              packageName={initial.name}
+              packageDuration={initial.duration}
               packageCurrency={(initial.currency || "USD").trim() || "USD"}
               salePrice={salePrice}
               layers={initial.cost_layers}
-              qtyAvailable={initial.inventory.qty_available}
+              salesBreakdown={initial.sales_breakdown}
+              linkedPackages={linkedPackages}
+              sellable={sellable}
             />
-            <div className="rounded-lg border border-dashed border-border p-3 space-y-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Manual capacity override
-              </p>
-              <div className="grid grid-cols-2 gap-3 max-w-md">
-                <label className="block text-xs text-muted-foreground">
-                  Qty capacity
-                  <input
-                    value={qtyAvailable}
-                    onChange={(e) => setQtyAvailable(e.target.value)}
-                    className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-                  />
-                </label>
-                <label className="block text-xs text-muted-foreground">
-                  Qty held
-                  <input
-                    value={qtyHeld}
-                    onChange={(e) => setQtyHeld(e.target.value)}
-                    className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-                  />
-                </label>
-              </div>
+            <div className="rounded-lg border border-dashed border-border p-3 space-y-3 max-w-xs">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Manual hold</p>
+              {linkedPackages.length > 1 ? (
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Applies to all linked packages in this group (Saturday, Sunday, multi-day).
+                </p>
+              ) : null}
+              <label className="block text-xs text-muted-foreground">
+                Qty on hold
+                <input
+                  value={qtyHeld}
+                  onChange={(e) => setQtyHeld(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                />
+              </label>
               <button
                 type="button"
                 disabled={pending}
-                onClick={() => saveInventory()}
+                onClick={() => saveHeld()}
                 className="px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted disabled:opacity-50"
               >
-                Save manual edit
+                Save hold
               </button>
             </div>
           </>

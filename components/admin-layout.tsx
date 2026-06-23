@@ -16,6 +16,7 @@ import {
   ClipboardList,
   ShoppingCart,
   ShieldCheck,
+  Plug,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
@@ -26,11 +27,12 @@ const navigation = [
   { name: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { name: "Pending users", href: "/admin/pending-users", icon: Users },
   { name: "Paddock requests", href: "/admin/booking-requests", icon: ShieldCheck },
-  { name: "Catalog", href: "/admin/catalog", icon: Ticket },
+  { name: "Inventory", href: "/admin/catalog", icon: Ticket },
   { name: "Holds", href: "/admin/inventory", icon: Boxes },
   { name: "Orders", href: "/admin/orders", icon: ClipboardList },
   { name: "Place order", href: "/admin/place-order", icon: ShoppingCart },
   { name: "Agents", href: "/admin/agents", icon: UserCircle },
+  { name: "Integrations", href: "/admin/integrations", icon: Plug },
 ]
 
 export function AdminLayout({ children }: { children: React.ReactNode }) {

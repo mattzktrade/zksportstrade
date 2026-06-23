@@ -9,6 +9,7 @@ export type CostLayerRow = {
   unit_cost: number
   currency: string
   note: string | null
+  source: string | null
   received_at: string
   created_at: string
   updated_at: string
@@ -22,6 +23,7 @@ export type CostConsumptionRow = {
   quantity: number
   unit_cost: number | null
   currency: string
+  supplier_source_snapshot: string | null
   created_at: string
 }
 
@@ -54,10 +56,10 @@ export type OrderCostSummary = {
 }
 
 const COST_LAYER_COLUMNS =
-  "id, package_id, quantity, quantity_remaining, unit_cost, currency, note, received_at, created_at, updated_at" as const
+  "id, package_id, quantity, quantity_remaining, unit_cost, currency, note, source, received_at, created_at, updated_at" as const
 
 const CONSUMPTION_COLUMNS =
-  "id, order_id, cost_layer_id, package_id, quantity, unit_cost, currency, created_at" as const
+  "id, order_id, cost_layer_id, package_id, quantity, unit_cost, currency, supplier_source_snapshot, created_at" as const
 
 function n(value: number | string | null | undefined): number {
   if (value == null) return 0
@@ -381,6 +383,7 @@ export async function getDashboardProfit(): Promise<DashboardProfit> {
   const { data: orders, error: oe } = await supabase
     .from("orders")
     .select("id, status, total_amount, currency, guests, created_at")
+    .neq("channel", "wix")
     .neq("status", "cancelled")
     .order("created_at", { ascending: false })
     .limit(20000)

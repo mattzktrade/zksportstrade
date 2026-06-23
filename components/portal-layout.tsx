@@ -10,6 +10,7 @@ import { useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { usePortalUser } from "@/components/portal-user-provider"
 import { LOGO_MAIN } from "@/lib/branding"
+import { ContactWidget } from "@/components/contact-widget"
 
 export function PortalLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -151,6 +152,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
 
         <main className="min-h-[calc(100vh-56px)] lg:min-h-screen">{children}</main>
       </div>
+      <ContactWidget />
     </div>
   )
 }

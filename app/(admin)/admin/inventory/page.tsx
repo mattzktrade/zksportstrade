@@ -1,5 +1,6 @@
 import dynamic from "next/dynamic"
 import { requireAdmin } from "@/lib/admin/require-admin"
+import { releaseExpiredInventoryHoldsAndSync } from "@/lib/integrations/release-expired-holds"
 import {
   getAdminPackageRows,
   getApprovedAgents,
@@ -31,6 +32,11 @@ function toInventoryOptions(pkgRows: Awaited<ReturnType<typeof getAdminPackageRo
 
 export default async function AdminInventoryPage() {
   await requireAdmin()
+  try {
+    await releaseExpiredInventoryHoldsAndSync()
+  } catch (e) {
+    console.error("[admin/inventory] expired hold release failed:", e)
+  }
   const [holds, agents, pkgRows] = await Promise.all([
     getInventoryHoldsWithDetails(),
     getApprovedAgents(),
@@ -43,9 +49,7 @@ export default async function AdminInventoryPage() {
       <div>
         <h1 className="text-2xl font-bold text-foreground">Holds</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Create client holds tied to agents (with an auto-release timer), or release them manually. Expired holds return
-          stock when agents browse packages or complete checkout (the database clears past-due holds then). Capacity
-          edits live on the catalog page.
+          Reserve stock for a trade partner. Holds auto-release after the duration you set.
         </p>
       </div>
       <InventoryAdminClient holds={holds} agents={agents} packages={packages} />
