@@ -14,6 +14,16 @@ type XeroInvoice = {
   InvoiceNumber?: string
   Status?: string
 }
+type XeroItem = { Code?: string; Name?: string; IsSold?: boolean }
+type XeroBillingAddress = {
+  line1?: string | null
+  line2?: string | null
+  city?: string | null
+  postcode?: string | null
+  country?: string | null
+}
+
+let cachedInvoiceItemCode: string | null | undefined
 
 /** Default on; set env to `false` to create DRAFT invoices or skip email. */
 function xeroInvoiceAutoAuthorise(): boolean {
@@ -30,18 +40,55 @@ function addDays(isoDate: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+function buildXeroAddresses(address?: XeroBillingAddress): Array<Record<string, string>> | undefined {
+  const line1 = address?.line1?.trim()
+  const line2 = address?.line2?.trim()
+  const city = address?.city?.trim()
+  const postcode = address?.postcode?.trim()
+  const country = address?.country?.trim()
+  if (!line1 && !line2 && !city && !postcode && !country) return undefined
+
+  return [
+    {
+      AddressType: "POBOX",
+      ...(line1 ? { AddressLine1: line1 } : {}),
+      ...(line2 ? { AddressLine2: line2 } : {}),
+      ...(city ? { City: city } : {}),
+      ...(postcode ? { PostalCode: postcode } : {}),
+      ...(country ? { Country: country } : {}),
+    },
+  ]
+}
+
 async function findOrCreateXeroContact(input: {
   name: string
   email: string
   phone?: string
+  billingAddress?: XeroBillingAddress
 }): Promise<string> {
   const email = input.email.trim().toLowerCase()
+  const addresses = buildXeroAddresses(input.billingAddress)
   const where = encodeURIComponent(`EmailAddress=="${email}"`)
   const found = await xeroRequest<{ Contacts?: XeroContact[] }>(
     "GET",
     `/api.xro/2.0/Contacts?where=${where}`,
   )
-  if (found.Contacts?.[0]?.ContactID) return found.Contacts[0].ContactID
+  const existingId = found.Contacts?.[0]?.ContactID
+  if (existingId) {
+    if (addresses) {
+      await xeroRequest("POST", "/api.xro/2.0/Contacts", {
+        body: {
+          Contacts: [
+            {
+              ContactID: existingId,
+              Addresses: addresses,
+            },
+          ],
+        },
+      })
+    }
+    return existingId
+  }
 
   const created = await xeroRequest<{ Contacts?: XeroContact[] }>("POST", "/api.xro/2.0/Contacts", {
     body: {
@@ -52,6 +99,7 @@ async function findOrCreateXeroContact(input: {
           Phones: input.phone?.trim()
             ? [{ PhoneType: "DEFAULT", PhoneNumber: input.phone.trim() }]
             : undefined,
+          Addresses: addresses,
         },
       ],
     },
@@ -59,6 +107,25 @@ async function findOrCreateXeroContact(input: {
   const id = created.Contacts?.[0]?.ContactID
   if (!id) throw new Error("Xero did not return a ContactID.")
   return id
+}
+
+async function resolveXeroInvoiceItemCode(): Promise<string | undefined> {
+  if (cachedInvoiceItemCode !== undefined) return cachedInvoiceItemCode ?? undefined
+
+  const preferred = process.env.XERO_INVOICE_ITEM_CODE?.trim() || "1001"
+  try {
+    const res = await xeroRequest<{ Items?: XeroItem[] }>("GET", "/api.xro/2.0/Items")
+    const items = res.Items ?? []
+    const match =
+      items.find((item) => item.Code?.trim().toLowerCase() === preferred.toLowerCase() && item.IsSold !== false) ??
+      items.find((item) => item.Name?.trim().toLowerCase() === "tickets" && item.IsSold !== false)
+    cachedInvoiceItemCode = match?.Code?.trim() || null
+  } catch (e) {
+    cachedInvoiceItemCode = null
+    console.warn("[xero] Invoice item lookup skipped:", e instanceof Error ? e.message : e)
+  }
+
+  return cachedInvoiceItemCode ?? undefined
 }
 
 /** Best-effort: attach Xero invoice PDF to the linked Salesforce Opportunity. */
@@ -134,22 +201,33 @@ export async function createXeroInvoiceForOrder(orderId: string): Promise<{
     .eq("id", order.agent_profile_id)
     .maybeSingle()
 
-  const { data: pkg } = await admin.from("packages").select("name").eq("id", order.package_id).maybeSingle()
+  const { data: pkg } = await admin.from("packages").select("name, circuit").eq("id", order.package_id).maybeSingle()
 
   const billToName = (agent?.company_name || agent?.full_name || agent?.email || "Trade partner").trim()
   const contactId = await findOrCreateXeroContact({
     name: billToName,
     email: agent?.email ?? order.client_email,
     phone: order.client_phone,
+    billingAddress: {
+      line1: order.billing_address_line1,
+      line2: order.billing_address_line2,
+      city: order.billing_city,
+      postcode: order.billing_postcode,
+      country: order.billing_country,
+    },
   })
 
   const today = new Date().toISOString().slice(0, 10)
   const dueDays = Number(process.env.XERO_INVOICE_DUE_DAYS ?? "7")
   const dueDate = addDays(today, Number.isFinite(dueDays) ? dueDays : 7)
 
-  const description = `${pkg?.name ?? "Package"} — ${order.client_name} (${order.guests} guest${order.guests === 1 ? "" : "s"})`
+  const packageName = pkg?.name ?? "Package"
+  const eventName = pkg?.circuit?.trim()
+  const description = `${packageName}${eventName ? ` (${eventName})` : ""} — ${order.client_name} (${order.guests} guest${order.guests === 1 ? "" : "s"})`
   const { accountCode, taxType } = await getXeroInvoiceLineDefaults()
   const currencyCode = await resolveXeroInvoiceCurrency(String(order.currency ?? "USD"))
+  const itemCode = await resolveXeroInvoiceItemCode()
+  const autoAuthorise = xeroInvoiceAutoAuthorise()
 
   const result = await xeroRequest<{ Invoices?: XeroInvoice[] }>("POST", "/api.xro/2.0/Invoices", {
     body: {
@@ -162,9 +240,11 @@ export async function createXeroInvoiceForOrder(orderId: string): Promise<{
           Reference: order.reference,
           ...(currencyCode ? { CurrencyCode: currencyCode } : {}),
           LineAmountTypes: "Exclusive",
-          Status: xeroInvoiceAutoAuthorise() ? "AUTHORISED" : "DRAFT",
+          Status: autoAuthorise ? "AUTHORISED" : "DRAFT",
+          ...(autoAuthorise ? { SentToContact: true } : {}),
           LineItems: [
             {
+              ...(itemCode ? { ItemCode: itemCode } : {}),
               Description: description,
               Quantity: Number(order.guests),
               UnitAmount: Number(order.unit_price),
@@ -187,7 +267,7 @@ export async function createXeroInvoiceForOrder(orderId: string): Promise<{
       orderReference: order.reference,
       xeroInvoiceId: xeroInv.InvoiceID,
       xeroInvoiceNumber: xeroInv.InvoiceNumber ?? null,
-      packageName: pkg?.name ?? "Package",
+      packageName,
       clientName: order.client_name,
       guests: Number(order.guests),
       totalAmount: Number(order.total_amount),
