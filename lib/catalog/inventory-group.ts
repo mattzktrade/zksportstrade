@@ -34,6 +34,28 @@ const PACKAGE_ID_DURATION_SUFFIXES = [
   "-thursday",
 ] as const
 
+/** Prefixes stripped from generated ids when the day label appears before the product name. */
+const PACKAGE_ID_DURATION_PREFIXES = [
+  "saturday-sunday-",
+  "sunday-saturday-",
+  "sat-sun-",
+  "sun-sat-",
+  "saturday-only-",
+  "sunday-only-",
+  "friday-only-",
+  "thursday-only-",
+  "saturday-",
+  "sunday-",
+  "friday-",
+  "thursday-",
+  "3-days-",
+  "3-day-",
+  "3days-",
+  "2-days-",
+  "2-day-",
+  "2day-",
+] as const
+
 /** Remove trailing season year, e.g. `-2026`. */
 export function packageIdWithoutSeasonYear(packageId: string): string {
   return packageId.replace(/-\d{4}$/, "")
@@ -61,6 +83,17 @@ export function packageInventoryStem(packageId: string): string {
     .replace(/-3days$/g, "")
     .replace(/-2-days?-/g, "-")
     .replace(/-2-days?$/g, "")
+
+  const racePrefixMatch = stem.match(/^(.+-\d{4}-)(.+)$/)
+  const prefixBase = racePrefixMatch?.[1] ?? ""
+  let namePart = racePrefixMatch?.[2] ?? stem
+  for (const prefix of PACKAGE_ID_DURATION_PREFIXES) {
+    if (namePart.startsWith(prefix)) {
+      namePart = namePart.slice(prefix.length)
+      break
+    }
+  }
+  stem = `${prefixBase}${namePart}`
 
   return collapseSlugHyphens(stem)
 }

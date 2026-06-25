@@ -52,6 +52,7 @@ export function CatalogNewPackage({
   const [initialUnitCost, setInitialUnitCost] = useState("")
   const [initialSource, setInitialSource] = useState("")
   const [duration, setDuration] = useState("")
+  const [inventoryGroupId, setInventoryGroupId] = useState("")
 
   const selectedRace = races.find((r) => r.id === raceId)
 
@@ -84,6 +85,7 @@ export function CatalogNewPackage({
     setInitialUnitCost("")
     setInitialSource("")
     setDuration("")
+    setInventoryGroupId("")
     if (firstRace) applyRaceDefaults(firstRace)
     else {
       setCircuit("")
@@ -180,6 +182,7 @@ export function CatalogNewPackage({
         currency: "USD",
         total_capacity: cap,
         duration,
+        inventory_group_id: inventoryGroupId.trim() || null,
         includes: linesToList(includesText),
         trade_price: price,
         is_enquiry: isEnquiry,
@@ -288,6 +291,19 @@ export function CatalogNewPackage({
           <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground/90">
             Saturday only, Sunday only, and 3-day options with the same product stem share inventory (e.g. Velocity
             Terrace splits).
+          </span>
+        </label>
+
+        <label className="block text-xs text-muted-foreground sm:col-span-2 sm:max-w-md">
+          Linked inventory key
+          <input
+            value={inventoryGroupId}
+            onChange={(e) => setInventoryGroupId(e.target.value)}
+            className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
+            placeholder="Leave blank to auto-link, e.g. abudhabi-2026/velocity-terrace"
+          />
+          <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground/90">
+            Use the same key for the 3 day, 2 day, Saturday, Sunday, and Friday versions when they share one stock pool.
           </span>
         </label>
 

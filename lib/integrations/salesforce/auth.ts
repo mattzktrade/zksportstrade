@@ -39,6 +39,11 @@ export async function getSalesforceAccessToken(): Promise<{ accessToken: string;
   const json = (await res.json()) as Record<string, unknown>
   if (!res.ok) {
     const msg = typeof json.error_description === "string" ? json.error_description : JSON.stringify(json)
+    if (/client identifier invalid/i.test(msg)) {
+      throw new Error(
+        "Salesforce token refresh failed: client identifier invalid. Reconnect Salesforce from Admin -> Integrations -> Salesforce because the saved refresh token does not match the current Salesforce Client ID/Secret.",
+      )
+    }
     throw new Error(`Salesforce token refresh failed: ${msg}`)
   }
 

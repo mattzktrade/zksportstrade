@@ -1,4 +1,4 @@
-/** Auto-generated from scripts/generate-live-inventory.mjs — live stock sheet 2026-05-20 */
+/** Auto-generated from scripts/generate-live-inventory.mjs — live stock sheet 2026-06-24 */
 import type { Package } from "../types/catalog"
 
 export const livePackages2026: Package[] = [
@@ -500,7 +500,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "barcelona-f1-experiences-house-44-2026",
     "name": "3 Day F1 Experiences House 44",
-    "circuit": "Spanish Grand Prix",
+    "circuit": "Barcelona Grand Prix",
     "location": "Barcelona",
     "country": "Spain",
     "countryCode": "ES",
@@ -525,7 +525,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "barcelona-legend-paddock-club-2026",
     "name": "3 Day Legend Paddock Club",
-    "circuit": "Spanish Grand Prix",
+    "circuit": "Barcelona Grand Prix",
     "location": "Barcelona",
     "country": "Spain",
     "countryCode": "ES",
@@ -551,7 +551,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "barcelona-paddock-club-audi-2026",
     "name": "3 Day Paddock Club - Audi",
-    "circuit": "Spanish Grand Prix",
+    "circuit": "Barcelona Grand Prix",
     "location": "Barcelona",
     "country": "Spain",
     "countryCode": "ES",
@@ -576,7 +576,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "barcelona-paddock-club-team-haas-2026",
     "name": "3 Day Paddock Club - Team Haas",
-    "circuit": "Spanish Grand Prix",
+    "circuit": "Barcelona Grand Prix",
     "location": "Barcelona",
     "country": "Spain",
     "countryCode": "ES",
@@ -601,7 +601,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "barcelona-f1-experiences-paddock-club-2026",
     "name": "3 Day F1 Experiences Paddock Club",
-    "circuit": "Spanish Grand Prix",
+    "circuit": "Barcelona Grand Prix",
     "location": "Barcelona",
     "country": "Spain",
     "countryCode": "ES",
@@ -626,7 +626,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "barcelona-paddock-club-club-suite-f1-2026",
     "name": "3 Day Paddock Club - Club Suite (F1)",
-    "circuit": "Spanish Grand Prix",
+    "circuit": "Barcelona Grand Prix",
     "location": "Barcelona",
     "country": "Spain",
     "countryCode": "ES",
@@ -651,7 +651,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "barcelona-champions-club-2026",
     "name": "3 Day Champions Club",
-    "circuit": "Spanish Grand Prix",
+    "circuit": "Barcelona Grand Prix",
     "location": "Barcelona",
     "country": "Spain",
     "countryCode": "ES",
@@ -1479,7 +1479,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "madrid-gordon-ramsey-f1-garage-2026",
     "name": "3 Day Gordon Ramsey at F1 Garage",
-    "circuit": "Madrid Grand Prix",
+    "circuit": "Spanish Grand Prix",
     "location": "Madrid",
     "country": "Spain",
     "countryCode": "ES",
@@ -1503,7 +1503,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "madrid-paddock-club-house-44-2026",
     "name": "3 Day Paddock Club - House 44",
-    "circuit": "Madrid Grand Prix",
+    "circuit": "Spanish Grand Prix",
     "location": "Madrid",
     "country": "Spain",
     "countryCode": "ES",
@@ -1528,7 +1528,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "madrid-paddock-club-team-haas-2026",
     "name": "3 Day Paddock Club - Team Haas",
-    "circuit": "Madrid Grand Prix",
+    "circuit": "Spanish Grand Prix",
     "location": "Madrid",
     "country": "Spain",
     "countryCode": "ES",
@@ -1553,7 +1553,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "madrid-paddock-club-club-suite-f1-2026",
     "name": "3 Day Paddock Club - Club Suite (F1)",
-    "circuit": "Madrid Grand Prix",
+    "circuit": "Spanish Grand Prix",
     "location": "Madrid",
     "country": "Spain",
     "countryCode": "ES",
@@ -1578,7 +1578,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "madrid-champions-club-2026",
     "name": "3 Day Champions Club",
-    "circuit": "Madrid Grand Prix",
+    "circuit": "Spanish Grand Prix",
     "location": "Madrid",
     "country": "Spain",
     "countryCode": "ES",

@@ -3,13 +3,26 @@
 import { useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { retryPackageIntegrationSync, updatePackageIntegration } from "@/app/(admin)/actions"
+import { clearPackageSalesforceLink, retryPackageIntegrationSync, updatePackageIntegration } from "@/app/(admin)/actions"
 import type { AdminPackageRow } from "@/lib/admin/queries"
 import { retailPriceFromTrade } from "@/lib/integrations/retail-price"
 import { packageSyncStatusClass, packageSyncStatusLabel } from "@/lib/integrations/sync-status"
 import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
 import { PackageWixListingPanel } from "@/components/admin/package-wix-listing-panel"
 import { cn } from "@/lib/utils"
+
+function formatSyncDate(value: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(new Date(value))
+}
 
 export function PackageIntegrationPanel({
   initial,
@@ -29,20 +42,25 @@ export function PackageIntegrationPanel({
   const [retailMultiplier, setRetailMultiplier] = useState(
     initial.retail_price_multiplier != null ? String(initial.retail_price_multiplier) : "",
   )
+  const [wixRetailPrice, setWixRetailPrice] = useState(
+    initial.wix_retail_price != null ? String(initial.wix_retail_price) : "",
+  )
   const [sellTrade, setSellTrade] = useState(initial.sell_on_trade_portal !== false)
   const [sellWix, setSellWix] = useState(initial.sell_on_wix === true)
 
   useEffect(() => {
     setSalesforceProductId(initial.salesforce_product_id ?? "")
     setRetailMultiplier(initial.retail_price_multiplier != null ? String(initial.retail_price_multiplier) : "")
+    setWixRetailPrice(initial.wix_retail_price != null ? String(initial.wix_retail_price) : "")
     setSellTrade(initial.sell_on_trade_portal !== false)
     setSellWix(initial.sell_on_wix === true)
   }, [initial])
 
   const tradePrice = initial.trade_price != null ? Number(initial.trade_price) : null
   const overrideMult = retailMultiplier.trim() === "" ? null : Number(retailMultiplier)
+  const manualWixPrice = wixRetailPrice.trim() === "" ? null : Number(wixRetailPrice)
   const websitePrice =
-    tradePrice != null ? retailPriceFromTrade(tradePrice, overrideMult ?? undefined) : null
+    tradePrice != null ? retailPriceFromTrade(tradePrice, overrideMult ?? undefined, manualWixPrice) : manualWixPrice
 
   function save() {
     start(async () => {
@@ -55,12 +73,22 @@ export function PackageIntegrationPanel({
         }
         mult = n
       }
+      let manualPrice: number | null = null
+      if (wixRetailPrice.trim() !== "") {
+        const n = Number(wixRetailPrice)
+        if (!Number.isFinite(n) || n < 0) {
+          toast.error("Manual Wix price must be zero or a positive number.")
+          return
+        }
+        manualPrice = n
+      }
 
       const res = await updatePackageIntegration({
         packageId: initial.id,
         product_code: initial.product_code?.trim() || null,
         salesforce_product_id: salesforceProductId.trim() || null,
         retail_price_multiplier: mult,
+        wix_retail_price: manualPrice,
         sell_on_trade_portal: sellTrade,
         sell_on_wix: sellWix,
         sell_on_partners: false,
@@ -83,6 +111,25 @@ export function PackageIntegrationPanel({
         return
       }
       toast.success(res.message ?? "Sync queued.", { duration: 8000 })
+      router.refresh()
+    })
+  }
+
+  function clearSalesforceLink() {
+    if (
+      !window.confirm(
+        "Clear the saved Salesforce Product Id and Product Code for this package? Use this when the current values came from sandbox or the wrong org.",
+      )
+    ) {
+      return
+    }
+    start(async () => {
+      const res = await clearPackageSalesforceLink(initial.id)
+      if (!res.ok) {
+        toast.error(res.message)
+        return
+      }
+      toast.success("Salesforce link cleared. Queue Salesforce sync to create/link the live product.")
       router.refresh()
     })
   }
@@ -126,6 +173,16 @@ export function PackageIntegrationPanel({
             placeholder="01t… — optional; leave blank for auto-create"
             className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
           />
+          {initial.salesforce_product_id || initial.product_code ? (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => clearSalesforceLink()}
+              className="mt-1 text-[11px] font-medium text-destructive hover:underline disabled:opacity-50"
+            >
+              Clear Salesforce link/code
+            </button>
+          ) : null}
         </label>
         <label className="block text-xs text-muted-foreground">
           Wix price multiplier
@@ -137,9 +194,22 @@ export function PackageIntegrationPanel({
           />
           {tradePrice != null && websitePrice != null ? (
             <span className="mt-1 block text-[11px] text-muted-foreground">
-              Trade {tradePrice.toLocaleString()} → Wix ≈ {websitePrice.toLocaleString()} {initial.currency}
+              Trade {tradePrice.toLocaleString()} → Wix {manualWixPrice != null ? "=" : "≈"}{" "}
+              {websitePrice.toLocaleString()} {initial.currency}
             </span>
           ) : null}
+        </label>
+        <label className="block text-xs text-muted-foreground">
+          Manual Wix price
+          <input
+            value={wixRetailPrice}
+            onChange={(e) => setWixRetailPrice(e.target.value)}
+            placeholder="Leave blank to use multiplier"
+            className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+          />
+          <span className="mt-1 block text-[11px] text-muted-foreground">
+            Overrides the multiplier when set. Use this for hand-picked Wix prices.
+          </span>
         </label>
       </div>
 
@@ -162,7 +232,7 @@ export function PackageIntegrationPanel({
 
       {initial.integration_synced_at ? (
         <p className="text-[11px] text-muted-foreground">
-          Last Salesforce sync: {new Date(initial.integration_synced_at).toLocaleString()}
+          Last Salesforce sync: {formatSyncDate(initial.integration_synced_at)}
         </p>
       ) : null}
 
@@ -191,7 +261,7 @@ export function PackageIntegrationPanel({
           onClick={() => retrySync()}
           className="px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted disabled:opacity-50"
         >
-          Queue sync
+          Queue Salesforce sync
         </button>
       </div>
     </div>

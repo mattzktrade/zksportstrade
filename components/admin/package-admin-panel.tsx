@@ -17,6 +17,7 @@ import { PackageCostLayers } from "@/components/admin/package-cost-layers"
 import { PackagePortalVisibilityCheckbox } from "@/components/admin/package-portal-visibility"
 import { PackageIntegrationPanel } from "@/components/admin/package-integration-panel"
 import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
+import { PACKAGE_DURATION_OPTIONS, packageDurationLabel } from "@/lib/catalog/package-duration"
 
 function linesToList(s: string): string[] {
   return s
@@ -79,6 +80,8 @@ export function PackageAdminPanel({
   const [totalCapacity, setTotalCapacity] = useState(String(initial.total_capacity))
   const [includesText, setIncludesText] = useState(includesToText(initial.includes))
   const [tradePrice, setTradePrice] = useState(initial.trade_price != null ? String(initial.trade_price) : "")
+  const [duration, setDuration] = useState(initial.duration ?? "")
+  const [inventoryGroupId, setInventoryGroupId] = useState(initial.inventory_group_id ?? "")
   const [isEnquiry, setIsEnquiry] = useState(initial.is_enquiry)
   const [requiresBookingApproval, setRequiresBookingApproval] = useState(
     initial.requires_booking_approval ?? false,
@@ -103,6 +106,8 @@ export function PackageAdminPanel({
     setTotalCapacity(String(initial.total_capacity))
     setIncludesText(includesToText(initial.includes))
     setTradePrice(initial.trade_price != null ? String(initial.trade_price) : "")
+    setDuration(initial.duration ?? "")
+    setInventoryGroupId(initial.inventory_group_id ?? "")
     setIsEnquiry(initial.is_enquiry)
     setRequiresBookingApproval(initial.requires_booking_approval ?? false)
     setFeatured(initial.featured)
@@ -146,7 +151,8 @@ export function PackageAdminPanel({
         gallery_images: linesToList(galleryText),
         currency: (initial.currency || "USD").trim() || "USD",
         total_capacity: cap,
-        duration: initial.duration ?? "",
+        duration,
+        inventory_group_id: inventoryGroupId.trim() || null,
         includes: linesToList(includesText),
         trade_price: price,
         is_enquiry: isEnquiry,
@@ -316,6 +322,35 @@ export function PackageAdminPanel({
               onChange={(e) => setTotalCapacity(e.target.value)}
               className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
             />
+          </label>
+          <label className="block text-xs text-muted-foreground">
+            Package type / duration
+            <select
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+            >
+              {PACKAGE_DURATION_OPTIONS.map((option) => (
+                <option key={option.value || "none"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <span className="block text-[11px] text-muted-foreground/80 mt-1">
+              Current: {packageDurationLabel(initial.duration) ?? "Not specified"}
+            </span>
+          </label>
+          <label className="block text-xs text-muted-foreground">
+            Linked inventory key
+            <input
+              value={inventoryGroupId}
+              onChange={(e) => setInventoryGroupId(e.target.value)}
+              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
+              placeholder="Leave blank to auto-link by race and package slug"
+            />
+            <span className="block text-[11px] text-muted-foreground/80 mt-1 leading-relaxed">
+              Packages with the same key share inventory. Use this to link 3 day, 2 day, Saturday, and Sunday versions.
+            </span>
           </label>
           <label className="block text-xs text-muted-foreground sm:col-span-2">
             Primary image URL

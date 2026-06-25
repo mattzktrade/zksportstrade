@@ -97,13 +97,11 @@ export async function syncWixProductContent(
   productId: string,
   payload: CatalogListingPayload,
 ): Promise<void> {
-  const name = buildWixProductTitle(payload)
   const description = buildWixProductDescription(payload)
 
   await wixRequest("PATCH", `/stores/v1/products/${encodeURIComponent(productId)}`, {
     body: {
       product: {
-        name,
         description,
         sku: "",
         additionalInfoSections: [],

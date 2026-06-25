@@ -25,7 +25,7 @@ function sellableFromInventory(inv: { qty_available: number; qty_held: number } 
 
 function rowMatchesSearch(row: AdminPackageRow, q: string): boolean {
   if (!q) return true
-  const hay = [row.id, row.name, row.circuit, row.location, row.country, row.race_name, row.date_range]
+  const hay = [row.id, row.name, row.circuit, row.location, row.country, row.race_name, row.date_range, row.product_code]
     .join(" ")
     .toLowerCase()
   return hay.includes(q)
@@ -350,6 +350,7 @@ function CatalogRow({
   const hasInventoryRow = initial.inventory != null
   const sellableLive = hasInventoryRow ? Math.max(0, qa - qh) : null
   const priceSummary = formatTradeSummary(currency, tradePrice, isEnquiry)
+  const sfCode = initial.product_code?.trim()
 
   let stockLabel: string
   let stockClass: string
@@ -389,6 +390,12 @@ function CatalogRow({
             </Link>
             <p className="text-xs text-muted-foreground mt-0.5 truncate">
               {[initial.date_range, initial.circuit || initial.location].filter(Boolean).join(" · ")}
+              {sfCode ? (
+                <>
+                  {" "}
+                  · <span className="font-mono text-foreground/80">SF {sfCode}</span>
+                </>
+              ) : null}
             </p>
           </div>
 

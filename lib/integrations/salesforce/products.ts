@@ -11,7 +11,7 @@ import { getStoredInstanceUrl } from "@/lib/integrations/salesforce/settings-sto
 import { productCodeLookupVariants } from "@/lib/integrations/salesforce/product-code"
 import { linkProductToEvent } from "@/lib/integrations/salesforce/events"
 import { syncProductValueSold } from "@/lib/integrations/salesforce/sold-metrics"
-import { syncSalesforcePackageItems } from "@/lib/integrations/salesforce/package-items"
+import { syncSalesforcePackageItemsForLinkedGroup } from "@/lib/integrations/salesforce/package-items"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { PACKAGE_COLUMNS, INVENTORY_COLUMNS } from "@/lib/catalog/columns"
 
@@ -135,7 +135,9 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
     raceSeason = typeof seasonVal === "number" ? seasonVal : null
   }
 
-  const byCodeId = productCode ? await resolveProduct2IdByCode(productCode) : null
+  // If an explicit Product Id is present, trust that over Product Code. Sandbox Product Codes can
+  // collide with unrelated live products, so only use code lookup when no Product Id is saved.
+  const byCodeId = !preferredId && productCode ? await resolveProduct2IdByCode(productCode) : null
 
   if (!preferredId && productCode && !byCodeId) {
     throw new Error(
@@ -156,6 +158,17 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
     stockTotal,
     sellable,
   })
+
+  if (product2Id !== preferredId) {
+    await admin
+      .from("packages")
+      .update({
+        salesforce_product_id: product2Id,
+        integration_sync_status: "pending",
+        integration_sync_error: null,
+      })
+      .eq("id", packageId)
+  }
 
   const productFamily = inferSalesforceProductFamily(row, config.productFamily)
 
@@ -239,9 +252,9 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
   // Keep Value Sold in step with Quantity Sold for portal bookings (DLRS often updates qty only).
   await syncProductValueSold({ product2Id, config, fieldsUpdated, fieldsSkipped })
 
-  await syncSalesforcePackageItems({
-    parentPackageId: packageId,
-    parentProduct2Id: product2Id,
+  await syncSalesforcePackageItemsForLinkedGroup({
+    packageId,
+    product2Id,
     config,
     fieldsUpdated,
     fieldsSkipped,
@@ -288,11 +301,35 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
     )
   }
 
+  let packageProductCode: string | null = canonicalCode
+  if (canonicalCode) {
+    const { data: duplicateCode } = await admin
+      .from("packages")
+      .select("id, salesforce_product_id")
+      .eq("product_code", canonicalCode)
+      .neq("id", packageId)
+      .maybeSingle()
+
+    if (duplicateCode?.id) {
+      const { error: clearErr } = await admin
+        .from("packages")
+        .update({ product_code: null })
+        .eq("id", String(duplicateCode.id))
+
+      if (clearErr) throw new Error(clearErr.message)
+
+      packageProductCode = canonicalCode
+      fieldsSkipped.push(
+        `Product Code "${canonicalCode}" was moved from package "${duplicateCode.id}" to this linked Salesforce product.`,
+      )
+    }
+  }
+
   const { error: upErr } = await admin
     .from("packages")
     .update({
       salesforce_product_id: product2Id,
-      ...(canonicalCode ? { product_code: canonicalCode } : {}),
+      ...(canonicalCode ? { product_code: packageProductCode } : {}),
       integration_sync_status: "synced",
       integration_synced_at: new Date().toISOString(),
       integration_sync_error: null,
@@ -450,7 +487,8 @@ async function resolveProduct2IdForSync(ctx: {
     )
     const hit = rows[0]
     if (!hit?.Id) {
-      throw new Error(`Salesforce Product Id "${ctx.preferredId}" was not found.`)
+      const existing = await findExistingProduct2ForCreate(ctx)
+      return existing ?? createProduct2({ ...ctx, productCode: null })
     }
     return hit.Id
   }
@@ -458,7 +496,32 @@ async function resolveProduct2IdForSync(ctx: {
   if (ctx.byCodeId) return ctx.byCodeId
 
   // Auto-create the Product2 so a new portal package appears in Salesforce without manual setup.
-  return createProduct2(ctx)
+  const existing = await findExistingProduct2ForCreate(ctx)
+  return existing ?? createProduct2(ctx)
+}
+
+async function findExistingProduct2ForCreate(ctx: {
+  productName: string
+  config: NonNullable<ReturnType<typeof getSalesforceConfig>>
+  tradePrice: number | null
+}): Promise<string | null> {
+  const name = ctx.productName.trim()
+  if (!name) return null
+
+  const select = ["Id", "Name", "CreatedDate"]
+  if (ctx.config.fieldUnitPrice) select.push(ctx.config.fieldUnitPrice)
+
+  const rows = await salesforceQuery<Record<string, unknown>>(
+    `SELECT ${select.join(", ")} FROM Product2 WHERE Name = '${escapeSoqlString(name)}' ORDER BY CreatedDate DESC LIMIT 10`,
+  )
+  if (rows.length === 0) return null
+
+  if (ctx.config.fieldUnitPrice && ctx.tradePrice != null) {
+    const priceMatch = rows.find((row) => numClose(Number(row[ctx.config.fieldUnitPrice!]), ctx.tradePrice))
+    if (priceMatch?.Id) return String(priceMatch.Id)
+  }
+
+  return typeof rows[0]?.Id === "string" ? rows[0].Id : null
 }
 
 /**

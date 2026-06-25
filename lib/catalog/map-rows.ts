@@ -44,6 +44,7 @@ type DbPackage = {
   product_code?: string | null
   salesforce_product_id?: string | null
   retail_price_multiplier?: number | null
+  wix_retail_price?: number | null
   sell_on_trade_portal?: boolean
   sell_on_wix?: boolean
   sell_on_partners?: boolean

@@ -6,6 +6,24 @@ function escapeSoqlString(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
 }
 
+const EVENT_NAME_BASE_ALIASES: Record<string, string[]> = {
+  "Australian Grand Prix": ["Australia Grand Prix"],
+  "Austrian Grand Prix": ["Austria Grand Prix"],
+  "Belgian Grand Prix": ["Belgium Grand Prix"],
+  "British Grand Prix": ["British Grand Prix", "Great Britain Grand Prix", "UK Grand Prix"],
+  "Canadian Grand Prix": ["Canada Grand Prix"],
+  "Chinese Grand Prix": ["China Grand Prix"],
+  "Dutch Grand Prix": ["Netherlands Grand Prix", "Dutch Grand Prix"],
+  "Hungarian Grand Prix": ["Hungary Grand Prix"],
+  "Italian Grand Prix": ["Italy Grand Prix"],
+  "Japanese Grand Prix": ["Japan Grand Prix"],
+  "Saudi Arabian Grand Prix": ["Saudi Arabia Grand Prix"],
+  "Spanish Grand Prix": ["Spain Grand Prix", "Madrid Grand Prix"],
+  "Turkish Grand Prix": ["Turkey Grand Prix", "Türkiye Grand Prix"],
+  "United States Grand Prix": ["United States Grand Prix", "US Grand Prix", "USA Grand Prix", "Austin Grand Prix"],
+  "São Paulo Grand Prix": ["Sao Paulo Grand Prix", "Brazil Grand Prix", "Brazilian Grand Prix"],
+}
+
 export type EventLookup = {
   /** API name of the lookup field on Product2 (e.g. Event_Name__c). */
   field: string
@@ -41,16 +59,35 @@ export async function resolveEventLookup(config: SalesforceConfig): Promise<Even
   return { field: candidate.name, object: candidate.referenceTo![0] }
 }
 
+function eventNameAliases(raceName: string): string[] {
+  const name = raceName.trim()
+  if (!name) return []
+  const baseAliases = [name, ...(EVENT_NAME_BASE_ALIASES[name] ?? [])]
+  const aliases = new Set<string>()
+
+  for (const alias of baseAliases) {
+    aliases.add(alias)
+    if (/\bGrand Prix\b/i.test(alias)) {
+      aliases.add(alias.replace(/\bGrand Prix\b/i, "F1 GP").trim())
+      aliases.add(alias.replace(/\bGrand Prix\b/i, "GP").trim())
+    }
+  }
+
+  return [...aliases].filter(Boolean)
+}
+
 /** Returns the Event record Id whose Name matches the race (season + name), or null. */
 async function findEventId(object: string, season: number | null, raceName: string): Promise<string | null> {
   const name = raceName.trim()
   if (!name) return null
 
-  const candidates = [
-    season != null ? `${season} ${name}` : null,
-    season != null ? `${name} ${season}` : null,
-    name,
-  ].filter((v): v is string => Boolean(v))
+  const candidates = eventNameAliases(name).flatMap((alias) =>
+    [
+      season != null ? `${season} ${alias}` : null,
+      season != null ? `${alias} ${season}` : null,
+      alias,
+    ].filter((v): v is string => Boolean(v)),
+  )
 
   // Exact match first (most reliable), then a contains match on the race name.
   for (const candidate of candidates) {
@@ -60,17 +97,21 @@ async function findEventId(object: string, season: number | null, raceName: stri
     if (rows[0]?.Id) return rows[0].Id
   }
 
-  const like = season != null ? `%${name}%${season}%` : `%${name}%`
-  const fuzzy = await salesforceQuery<{ Id: string }>(
-    `SELECT Id FROM ${object} WHERE Name LIKE '${escapeSoqlString(like)}' ORDER BY CreatedDate DESC LIMIT 1`,
-  )
-  if (fuzzy[0]?.Id) return fuzzy[0].Id
+  for (const alias of eventNameAliases(name)) {
+    const like = season != null ? `%${alias}%${season}%` : `%${alias}%`
+    const fuzzy = await salesforceQuery<{ Id: string }>(
+      `SELECT Id FROM ${object} WHERE Name LIKE '${escapeSoqlString(like)}' ORDER BY CreatedDate DESC LIMIT 1`,
+    )
+    if (fuzzy[0]?.Id) return fuzzy[0].Id
+  }
 
   if (season != null) {
-    const byNameOnly = await salesforceQuery<{ Id: string }>(
-      `SELECT Id FROM ${object} WHERE Name LIKE '%${escapeSoqlString(name)}%' ORDER BY CreatedDate DESC LIMIT 1`,
-    )
-    if (byNameOnly[0]?.Id) return byNameOnly[0].Id
+    for (const alias of eventNameAliases(name)) {
+      const byNameOnly = await salesforceQuery<{ Id: string }>(
+        `SELECT Id FROM ${object} WHERE Name LIKE '%${escapeSoqlString(alias)}%' ORDER BY CreatedDate DESC LIMIT 1`,
+      )
+      if (byNameOnly[0]?.Id) return byNameOnly[0].Id
+    }
   }
 
   return null

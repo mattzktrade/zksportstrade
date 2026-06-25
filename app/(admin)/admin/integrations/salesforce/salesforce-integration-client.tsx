@@ -3,7 +3,7 @@
 import { useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { runIntegrationOutboxNow, pullSalesforceInventoryNow } from "@/app/(admin)/actions"
+import { clearSalesforceSyncFailures, runIntegrationOutboxNow, pullSalesforceInventoryNow } from "@/app/(admin)/actions"
 import type { RecentSyncFailure } from "@/lib/admin/integration-failures"
 
 export function SalesforceIntegrationClient({
@@ -24,6 +24,7 @@ export function SalesforceIntegrationClient({
   const router = useRouter()
   const [pending, start] = useTransition()
   const [pullPending, startPull] = useTransition()
+  const [clearPending, startClear] = useTransition()
 
   function processQueue() {
     start(async () => {
@@ -66,11 +67,11 @@ export function SalesforceIntegrationClient({
         toast.error(`Pull had errors: ${pull.errors[0]}`, { duration: 12000 })
       } else if (pull.closedWon?.lineItemsApplied) {
         toast.success(
-          `Applied ${pull.closedWon.lineItemsApplied} offline sale(s) from Closed Won opportunities. Queued channel sync.`,
+          `Applied ${pull.closedWon.lineItemsApplied} offline sale(s) from Closed Won opportunities. Channel sync will run automatically.`,
         )
       } else if (pull.adjusted > 0) {
         toast.success(
-          `Updated ${pull.adjusted} package(s) from Salesforce inventory. Queued ${pull.channelSyncQueued} channel sync(s).`,
+          `Updated ${pull.adjusted} package(s) from Salesforce inventory. Channel sync will run automatically.`,
         )
       } else {
         const scanned = pull.closedWon?.opportunitiesScanned ?? 0
@@ -80,9 +81,21 @@ export function SalesforceIntegrationClient({
             : `Checked ${pull.checked} packages — portal already matches Salesforce.`,
         )
       }
-      if (outbox.failed > 0 && outbox.failures?.[0]?.error) {
+      if (outbox?.failed && outbox.failures?.[0]?.error) {
         toast.error(`Sync queue: ${outbox.failures[0].error}`, { duration: 12000 })
       }
+      router.refresh()
+    })
+  }
+
+  function clearFailures() {
+    startClear(async () => {
+      const res = await clearSalesforceSyncFailures()
+      if (!res.ok) {
+        toast.error(res.message)
+        return
+      }
+      toast.success("Old Salesforce sync errors cleared.")
       router.refresh()
     })
   }
@@ -144,7 +157,17 @@ export function SalesforceIntegrationClient({
 
       {recentFailures.length > 0 ? (
         <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 space-y-2">
-          <p className="text-sm font-semibold text-destructive">Latest sync error</p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-destructive">Latest sync error</p>
+            <button
+              type="button"
+              disabled={clearPending}
+              onClick={() => clearFailures()}
+              className="text-xs font-medium text-destructive hover:underline disabled:opacity-50"
+            >
+              {clearPending ? "Clearing..." : "Clear old errors"}
+            </button>
+          </div>
           {recentFailures.map((f, i) => (
             <div key={i} className="text-xs text-destructive/90 space-y-1">
               {f.package_id ? (

@@ -21,7 +21,11 @@ export function resolveRetailPriceMultiplier(packageOverride: number | null | un
 export function retailPriceFromTrade(
   tradePrice: number | null | undefined,
   packageOverride?: number | null,
+  manualRetailPrice?: number | null,
 ): number | null {
+  if (manualRetailPrice != null && Number.isFinite(manualRetailPrice) && manualRetailPrice >= 0) {
+    return Math.round(manualRetailPrice * 100) / 100
+  }
   if (tradePrice == null || !Number.isFinite(tradePrice)) return null
   const mult = resolveRetailPriceMultiplier(packageOverride)
   const rounded = Math.round(tradePrice * mult * 100) / 100

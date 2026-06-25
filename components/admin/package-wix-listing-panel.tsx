@@ -11,6 +11,19 @@ import {
 } from "@/app/(admin)/actions"
 import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
 
+function formatSyncDate(value: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(new Date(value))
+}
+
 export function PackageWixListingPanel({
   packageId,
   initialListings,
@@ -119,7 +132,7 @@ export function PackageWixListingPanel({
         <div className="text-xs space-y-1">
           <p className="font-mono break-all text-[11px]">{listing.external_id}</p>
           {listing.last_synced_at ? (
-            <p className="text-muted-foreground">Synced {new Date(listing.last_synced_at).toLocaleString()}</p>
+            <p className="text-muted-foreground">Synced {formatSyncDate(listing.last_synced_at)}</p>
           ) : null}
           {listing.last_sync_error ? (
             <p className="text-destructive whitespace-pre-wrap">{listing.last_sync_error}</p>

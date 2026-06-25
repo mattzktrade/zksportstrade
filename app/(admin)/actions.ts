@@ -377,6 +377,7 @@ export async function updatePackageFields(input: {
   currency: string
   total_capacity: number
   duration: string
+  inventory_group_id?: string | null
   includes: string[]
   trade_price: number | null
   is_enquiry: boolean
@@ -406,12 +407,19 @@ export async function updatePackageFields(input: {
   const desc = input.description.trim()
   const cc = input.country_code.trim().toUpperCase().slice(0, 8)
 
-  const { data: existing, error: exErr } = await supabase.from("packages").select("race_id").eq("id", id).maybeSingle()
+  const { data: existing, error: exErr } = await supabase
+    .from("packages")
+    .select("race_id, inventory_group_id")
+    .eq("id", id)
+    .maybeSingle()
   if (exErr) return { ok: false, message: exErr.message }
   if (!existing) return { ok: false, message: "Package not found." }
 
   const raceId = input.race_id.trim()
-  const inventoryGroupId = deriveInventoryGroupId(id, duration || null, raceId)
+  const manualInventoryGroupId = input.inventory_group_id?.trim() || null
+  const inventoryGroupId = duration
+    ? manualInventoryGroupId ?? deriveInventoryGroupId(id, duration, raceId)
+    : null
   const requiresBookingApproval =
     input.requires_booking_approval ?? isPaddockClubPackageName(input.name.trim())
 
@@ -446,6 +454,21 @@ export async function updatePackageFields(input: {
 
   if (error) return { ok: false, message: error.message }
 
+  const previousInventoryGroupId =
+    typeof existing.inventory_group_id === "string" ? existing.inventory_group_id.trim() || null : null
+
+  if (previousInventoryGroupId && previousInventoryGroupId !== inventoryGroupId) {
+    await supabase.rpc("reconcile_linked_multi_day_inventory", { p_group_id: previousInventoryGroupId })
+    const { data: previousLinked } = await supabase
+      .from("packages")
+      .select("id")
+      .eq("inventory_group_id", previousInventoryGroupId)
+    for (const pkg of previousLinked ?? []) {
+      const enq = await enqueueProductUpsert(supabase, String(pkg.id))
+      if (!enq.ok) return { ok: false, message: enq.message }
+    }
+  }
+
   if (inventoryGroupId) {
     await supabase.rpc("reconcile_linked_multi_day_inventory", { p_group_id: inventoryGroupId })
     await enqueuePackageInventoryChannelSync(supabase, id)
@@ -463,6 +486,7 @@ export async function updatePackageIntegration(input: {
   product_code: string | null
   salesforce_product_id: string | null
   retail_price_multiplier: number | null
+  wix_retail_price?: number | null
   sell_on_trade_portal: boolean
   sell_on_wix: boolean
   sell_on_partners: boolean
@@ -483,10 +507,25 @@ export async function updatePackageIntegration(input: {
   if (mult != null && (!Number.isFinite(mult) || mult <= 0)) {
     return { ok: false, message: "Retail price multiplier must be a positive number." }
   }
+  const wixRetailPrice = input.wix_retail_price ?? null
+  if (wixRetailPrice != null && (!Number.isFinite(wixRetailPrice) || wixRetailPrice < 0)) {
+    return { ok: false, message: "Manual Wix price must be zero or a positive number." }
+  }
 
-  const { data: existing, error: exErr } = await supabase.from("packages").select("race_id").eq("id", id).maybeSingle()
+  const { data: existing, error: exErr } = await supabase
+    .from("packages")
+    .select("race_id, product_code, salesforce_product_id")
+    .eq("id", id)
+    .maybeSingle()
   if (exErr) return { ok: false, message: exErr.message }
   if (!existing) return { ok: false, message: "Package not found." }
+
+  const existingProductCode =
+    typeof existing.product_code === "string" ? existing.product_code.trim() || null : null
+  const existingProductId =
+    typeof existing.salesforce_product_id === "string" ? existing.salesforce_product_id.trim() || null : null
+  const nextProductId = input.salesforce_product_id?.trim() || null
+  const identityChanged = existingProductCode !== productCode || existingProductId !== nextProductId
 
   const { error } = await supabase
     .from("packages")
@@ -494,9 +533,16 @@ export async function updatePackageIntegration(input: {
       product_code: productCode,
       salesforce_product_id: input.salesforce_product_id?.trim() || null,
       retail_price_multiplier: mult,
+      wix_retail_price: wixRetailPrice,
       sell_on_trade_portal: input.sell_on_trade_portal,
       sell_on_wix: input.sell_on_wix,
       sell_on_partners: input.sell_on_partners,
+      ...(identityChanged
+        ? {
+            integration_sync_status: input.enqueue_sync === false ? "idle" : "pending",
+            integration_sync_error: null,
+          }
+        : {}),
     })
     .eq("id", id)
 
@@ -506,6 +552,38 @@ export async function updatePackageIntegration(input: {
     const enq = await enqueueProductUpsert(supabase, id)
     if (!enq.ok) return { ok: false, message: enq.message }
   }
+
+  revalidatePackagePaths((existing as { race_id: string }).race_id)
+  return { ok: true }
+}
+
+export async function clearPackageSalesforceLink(packageId: string): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  const { supabase } = gate
+
+  const id = packageId.trim()
+  if (!id) return { ok: false, message: "Package id is missing." }
+
+  const { data: existing, error: exErr } = await supabase
+    .from("packages")
+    .select("race_id")
+    .eq("id", id)
+    .maybeSingle()
+  if (exErr) return { ok: false, message: exErr.message }
+  if (!existing) return { ok: false, message: "Package not found." }
+
+  const { error } = await supabase
+    .from("packages")
+    .update({
+      product_code: null,
+      salesforce_product_id: null,
+      integration_sync_status: "idle",
+      integration_synced_at: null,
+      integration_sync_error: null,
+    })
+    .eq("id", id)
+  if (error) return { ok: false, message: error.message }
 
   revalidatePackagePaths((existing as { race_id: string }).race_id)
   return { ok: true }
@@ -670,15 +748,21 @@ export async function saveWixChannelListing(input: {
     savedListing = data
   }
 
-  const enq = await enqueueProductUpsert(supabase, packageId)
-  if (!enq.ok) return { ok: false, message: enq.message }
+  const wixSync = await syncPackageCatalogToWix(packageId)
 
   revalidatePath("/admin/catalog")
   revalidatePath(`/admin/catalog/${encodeURIComponent(packageId)}`)
   revalidatePath("/admin/integrations/wix")
+  const syncMessage =
+    wixSync.errors.length > 0
+      ? `Wix mapping saved, but Wix sync failed: ${wixSync.errors.join(" · ")}`
+      : wixSync.updated > 0
+        ? `Wix mapping saved. Wix updated (${wixSync.updated} listing${wixSync.updated === 1 ? "" : "s"}).`
+        : `Wix mapping saved. ${wixSync.skipped.join(" ")}`
+
   return {
-    ok: true,
-    message: "Wix mapping saved. Sync queued.",
+    ok: wixSync.errors.length === 0,
+    message: syncMessage,
     listing: (savedListing as WixChannelListingRow | null) ?? undefined,
   }
 }
@@ -774,6 +858,7 @@ export async function createPackage(input: {
   currency: string
   total_capacity: number
   duration: string
+  inventory_group_id?: string | null
   includes: string[]
   trade_price: number | null
   is_enquiry: boolean
@@ -841,7 +926,10 @@ export async function createPackage(input: {
   const gallery = normalizeCatalogImageUrlList(sanitizeHttpsUrlList(input.gallery_images))
   const cc = input.country_code.trim().toUpperCase().slice(0, 8)
 
-  const inventoryGroupId = deriveInventoryGroupId(id, duration || null, raceId)
+  const manualInventoryGroupId = input.inventory_group_id?.trim() || null
+  const inventoryGroupId = duration
+    ? manualInventoryGroupId ?? deriveInventoryGroupId(id, duration || null, raceId)
+    : null
   const requiresBookingApproval =
     input.requires_booking_approval ?? isPaddockClubPackageName(input.name.trim())
 
@@ -1191,12 +1279,48 @@ export async function runIntegrationOutboxNow(): Promise<
   }
 }
 
+export async function clearSalesforceSyncFailures(): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  const { supabase } = gate
+
+  const { error: outboxErr } = await supabase
+    .from("integration_outbox")
+    .delete()
+    .eq("status", "failed")
+  if (outboxErr) return { ok: false, message: outboxErr.message }
+
+  const { error: packageErr } = await supabase
+    .from("packages")
+    .update({
+      integration_sync_status: "idle",
+      integration_sync_error: null,
+    })
+    .eq("integration_sync_status", "failed")
+  if (packageErr) return { ok: false, message: packageErr.message }
+
+  const { error: orderErr } = await supabase
+    .from("orders")
+    .update({
+      salesforce_sync_status: "pending",
+      salesforce_line_item_status: null,
+      salesforce_sync_error: null,
+    })
+    .or("salesforce_sync_status.eq.failed,salesforce_line_item_status.eq.failed")
+  if (orderErr) return { ok: false, message: orderErr.message }
+
+  revalidatePath("/admin/integrations/salesforce")
+  revalidatePath("/admin/catalog")
+  revalidatePath("/admin/orders")
+  return { ok: true }
+}
+
 /** Pull offline Salesforce sales into portal inventory, then push siblings to SF + Wix. */
 export async function pullSalesforceInventoryNow(): Promise<
   | {
       ok: true
       pull: Awaited<ReturnType<typeof pullInventoryFromSalesforce>>
-      outbox: Awaited<ReturnType<typeof drainOutboxNow>>
+      outbox: Awaited<ReturnType<typeof drainOutboxNow>> | null
     }
   | { ok: false; message: string }
 > {
@@ -1207,11 +1331,10 @@ export async function pullSalesforceInventoryNow(): Promise<
     if (pull.skipped) {
       return { ok: false, message: pull.message ?? "Salesforce inventory pull was skipped." }
     }
-    const outbox = await drainOutboxNow({ maxRounds: 15 })
     revalidatePath("/admin/integrations/salesforce")
     revalidatePath("/admin/catalog")
     revalidatePath("/admin/inventory")
-    return { ok: true, pull, outbox }
+    return { ok: true, pull, outbox: null }
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Salesforce inventory pull failed." }
   }

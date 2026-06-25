@@ -65,6 +65,7 @@ type PackageListingRow = {
   tier: string | null
   duration: string | null
   retail_price_multiplier: number | null
+  wix_retail_price: number | null
   sell_on_trade_portal: boolean
   sell_on_wix: boolean
   sell_on_partners: boolean
@@ -175,7 +176,7 @@ export async function buildCatalogListingPayload(
     pricing: {
       tradePrice,
       currency: (row.currency ?? "USD").trim() || "USD",
-      retailPrice: retailPriceFromTrade(tradePrice, row.retail_price_multiplier),
+      retailPrice: retailPriceFromTrade(tradePrice, row.retail_price_multiplier, row.wix_retail_price),
       isEnquiry: Boolean(row.is_enquiry),
     },
     channels: {

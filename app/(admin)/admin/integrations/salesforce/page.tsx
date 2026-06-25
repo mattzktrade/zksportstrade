@@ -22,7 +22,7 @@ export default async function SalesforceIntegrationPage({
         </Link>
         <h1 className="text-2xl font-semibold text-foreground mt-2">Salesforce integration</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Connect your sandbox, then process the sync queue. Products need a Product Code; orders create Opportunities.
+          Connect Salesforce, then process the sync queue. Products need a Product Code; orders create Opportunities.
         </p>
       </div>
 

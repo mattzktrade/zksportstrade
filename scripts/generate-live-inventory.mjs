@@ -29,7 +29,7 @@ const RACES = {
   },
   spain: {
     raceId: "spain-2026",
-    circuit: "Spanish Grand Prix",
+    circuit: "Barcelona Grand Prix",
     location: "Barcelona",
     country: "Spain",
     countryCode: "ES",
@@ -89,7 +89,7 @@ const RACES = {
   },
   madrid: {
     raceId: "madrid-2026",
-    circuit: "Madrid Grand Prix",
+    circuit: "Spanish Grand Prix",
     location: "Madrid",
     country: "Spain",
     countryCode: "ES",

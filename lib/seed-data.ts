@@ -110,8 +110,8 @@ export const races2026: Race[] = [
   },
   {
     id: "spain-2026",
-    name: "Spanish Grand Prix",
-    shortName: "Spain",
+    name: "Barcelona Grand Prix",
+    shortName: "Barcelona",
     location: "Barcelona",
     country: "Spain",
     countryCode: "ES",
@@ -201,8 +201,8 @@ export const races2026: Race[] = [
   },
   {
     id: "madrid-2026",
-    name: "Madrid Grand Prix",
-    shortName: "Madrid",
+    name: "Spanish Grand Prix",
+    shortName: "Spain",
     location: "Madrid",
     country: "Spain",
     countryCode: "ES",

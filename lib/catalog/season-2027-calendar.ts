@@ -4,10 +4,10 @@ import { circuitKeyFromRaceId, DATES_TBC_LABEL } from "@/lib/catalog/season-roll
 /**
  * 2027 F1 calendar adjustments (confirmed 2025–2026):
  * - Portuguese GP at Portimão replaces the Dutch GP (Zandvoort ends after 2026).
- * - The early-June European slot held by Barcelona/Catalunya in 2026 becomes Portugal in 2027 (not Spanish GP at Barcelona).
+ * - The early-June European slot held by Barcelona/Catalunya in 2026 becomes Portugal in 2027.
  * - Turkish GP returns at Istanbul Park; Barcelona-Catalunya and Dutch GP are off the 2027 calendar.
  *
- * Madrid Grand Prix remains a separate 2027 round (Spain, later in the season).
+ * Spanish Grand Prix remains at Madrid as a separate 2027 round later in the season.
  */
 export function apply2027CalendarAdjustments(races2027: Race[]): Race[] {
   let races = races2027.filter((r) => circuitKeyFromRaceId(r.id) !== "netherlands")

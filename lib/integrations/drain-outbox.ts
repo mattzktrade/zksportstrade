@@ -8,6 +8,8 @@ let drainMutex: Promise<void> = Promise.resolve()
 export type DrainOutboxOptions = {
   /** Max processing rounds (each round handles up to 20 jobs). Default 12. */
   maxRounds?: number
+  /** Skip the pre-drain Salesforce inventory pull when caller already did it. */
+  skipInventoryPull?: boolean
   /** Stop early once this order has no pending outbox jobs. */
   orderId?: string
   /** Stop early once this package has no pending outbox jobs. */
@@ -53,13 +55,15 @@ async function hasPendingOutboxForPackage(packageId: string): Promise<boolean> {
 async function drainIntegrationOutboxInner(
   options: DrainOutboxOptions = {},
 ): Promise<ProcessOutboxResult> {
-  try {
-    await pullInventoryFromSalesforce()
-  } catch (e) {
-    console.warn(
-      "[integrations] Salesforce inventory pull before outbox drain failed:",
-      e instanceof Error ? e.message : e,
-    )
+  if (!options.skipInventoryPull) {
+    try {
+      await pullInventoryFromSalesforce()
+    } catch (e) {
+      console.warn(
+        "[integrations] Salesforce inventory pull before outbox drain failed:",
+        e instanceof Error ? e.message : e,
+      )
+    }
   }
 
   const maxRounds = options.maxRounds ?? 12

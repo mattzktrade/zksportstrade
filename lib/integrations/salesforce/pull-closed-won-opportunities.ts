@@ -1,11 +1,15 @@
 import { enqueuePackageInventoryChannelSyncServer } from "@/lib/integrations/enqueue-server"
 import { salesforceQuery } from "@/lib/integrations/salesforce/client"
 import type { SalesforceConfig } from "@/lib/integrations/salesforce/config"
+import {
+  readSfInventorySnapshotsBulk,
+  salesforceTargetSellable,
+} from "@/lib/integrations/salesforce/inventory-snapshot"
 import { getIntegrationSetting, setIntegrationSetting } from "@/lib/integrations/salesforce/settings-store"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 const CURSOR_KEY = "salesforce_closed_won_inventory_cursor"
-const FORCE_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000
+const FORCE_LOOKBACK_MS = 730 * 24 * 60 * 60 * 1000
 const FIRST_RUN_OVERLAP_MS = 5 * 60 * 1000
 
 export type ClosedWonOpportunityAdjustment = {
@@ -38,6 +42,15 @@ type OpportunityRow = {
       Quantity: number | string | null
     }>
   } | null
+}
+
+type PackageMappingRow = {
+  id: string
+  salesforce_product_id: string | null
+  package_inventory?: { qty_available: number | null; qty_held: number | null } | Array<{
+    qty_available: number | null
+    qty_held: number | null
+  }> | null
 }
 
 function escapeSoqlString(s: string): string {
@@ -149,7 +162,7 @@ export async function pullClosedWonOpportunitySales(
 
   const { data: packageRows, error: pkgErr } = await admin
     .from("packages")
-    .select("id, salesforce_product_id")
+    .select("id, salesforce_product_id, package_inventory ( qty_available, qty_held )")
     .not("salesforce_product_id", "is", null)
 
   if (pkgErr) {
@@ -158,12 +171,23 @@ export async function pullClosedWonOpportunitySales(
   }
 
   const packageByProduct2 = new Map<string, string>()
-  for (const row of packageRows ?? []) {
+  const currentSellableByPackage = new Map<string, number>()
+  const product2Ids: string[] = []
+  for (const row of (packageRows ?? []) as PackageMappingRow[]) {
     const product2Id =
       typeof row.salesforce_product_id === "string" ? row.salesforce_product_id.trim() : ""
     const packageId = typeof row.id === "string" ? row.id.trim() : ""
-    if (product2Id && packageId) packageByProduct2.set(product2Id, packageId)
+    if (product2Id && packageId) {
+      packageByProduct2.set(product2Id, packageId)
+      product2Ids.push(product2Id)
+      const inv = Array.isArray(row.package_inventory) ? row.package_inventory[0] : row.package_inventory
+      const available = Number(inv?.qty_available) || 0
+      const held = Number(inv?.qty_held) || 0
+      currentSellableByPackage.set(packageId, Math.max(0, Math.floor(available) - Math.floor(held)))
+    }
   }
+
+  const sfSnapshots = await readSfInventorySnapshotsBulk(product2Ids, config)
 
   const packagesToSync = new Set<string>()
 
@@ -202,13 +226,31 @@ export async function pullClosedWonOpportunitySales(
         continue
       }
 
-      const { error: rpcErr } = await admin.rpc("adjust_linked_inventory_available", {
-        p_package_id: packageId,
-        p_delta: -quantity,
+      const currentSellable = currentSellableByPackage.get(packageId)
+      const sfTargetSellable = salesforceTargetSellable(sfSnapshots.get(product2Id) ?? {
+        quantitySold: 0,
+        stock: null,
+        available: null,
+        quantitySoldEstimated: false,
       })
-      if (rpcErr) {
-        result.errors.push(`${oppId} line ${lineItemId}: ${rpcErr.message}`)
-        continue
+      const reflectedInPortal =
+        currentSellable != null && sfTargetSellable != null
+          ? Math.max(0, currentSellable - sfTargetSellable)
+          : quantity
+      const decrement = Math.min(quantity, reflectedInPortal)
+
+      if (decrement > 0) {
+        const { error: rpcErr } = await admin.rpc("adjust_linked_inventory_available", {
+          p_package_id: packageId,
+          p_delta: -decrement,
+        })
+        if (rpcErr) {
+          result.errors.push(`${oppId} line ${lineItemId}: ${rpcErr.message}`)
+          continue
+        }
+        if (currentSellable != null) {
+          currentSellableByPackage.set(packageId, Math.max(0, currentSellable - decrement))
+        }
       }
 
       const { error: insertErr } = await admin.from("salesforce_offline_sale_applications").insert({

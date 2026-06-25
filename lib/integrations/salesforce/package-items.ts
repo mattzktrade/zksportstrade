@@ -10,14 +10,39 @@ type SyncPackageItemsArgs = {
   fieldsSkipped: string[]
 }
 
+type SyncLinkedGroupArgs = {
+  packageId: string
+  product2Id: string
+  config: SalesforceConfig
+  fieldsUpdated: string[]
+  fieldsSkipped: string[]
+}
+
 const CHILD_SORT: Record<string, number> = {
   friday_only: 10,
-  saturday_only: 20,
-  sunday_only: 30,
+  "2_day": 20,
+  saturday_only: 30,
+  sunday_only: 40,
 }
 
 function escapeSoqlString(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+}
+
+async function existingProduct2Ids(productIds: string[]): Promise<Set<string>> {
+  const unique = [...new Set(productIds.map((id) => id.trim()).filter(Boolean))]
+  const out = new Set<string>()
+  if (unique.length === 0) return out
+
+  for (let i = 0; i < unique.length; i += 100) {
+    const batch = unique.slice(i, i + 100)
+    const inList = batch.map((id) => `'${escapeSoqlString(id)}'`).join(", ")
+    const rows = await salesforceQuery<{ Id: string }>(`SELECT Id FROM Product2 WHERE Id IN (${inList})`)
+    for (const row of rows) {
+      if (row.Id) out.add(row.Id)
+    }
+  }
+  return out
 }
 
 function packageItemConfig(config: SalesforceConfig) {
@@ -41,24 +66,29 @@ async function ensurePortalPackageItemsForParent(parentPackageId: string): Promi
   if (parentErr) throw new Error(parentErr.message)
   if (!parent?.inventory_group_id) return
 
-  const duration = String(parent.duration ?? "")
-  const requiredDurations =
-    duration === "3_day"
-      ? ["friday_only", "saturday_only", "sunday_only"]
-      : duration === "2_day"
-        ? ["saturday_only", "sunday_only"]
-        : []
-  if (requiredDurations.length === 0) return
-
-  const { data: children, error: childErr } = await admin
+  const { data: siblings, error: childErr } = await admin
     .from("packages")
     .select("id, duration")
     .eq("inventory_group_id", parent.inventory_group_id)
-    .in("duration", requiredDurations)
   if (childErr) throw new Error(childErr.message)
 
-  const rows = (children ?? [])
+  const duration = String(parent.duration ?? "")
+  const siblingDurations = new Set((siblings ?? []).map((child) => String(child.duration ?? "")))
+  const requiredDurations =
+    duration === "3_day"
+      ? siblingDurations.has("2_day")
+        ? ["friday_only", "saturday_only", "sunday_only", "2_day"]
+        : ["friday_only", "saturday_only", "sunday_only"]
+      : duration === "2_day"
+        ? ["saturday_only", "sunday_only"]
+        : []
+
+  await admin.from("package_items").delete().eq("parent_package_id", parentPackageId)
+  if (requiredDurations.length === 0) return
+
+  const rows = (siblings ?? [])
     .filter((child) => child.id !== parentPackageId)
+    .filter((child) => requiredDurations.includes(String(child.duration ?? "")))
     .map((child) => ({
       parent_package_id: parentPackageId,
       child_package_id: String(child.id),
@@ -119,7 +149,7 @@ export async function syncSalesforcePackageItems({
     ]),
   )
 
-  const desired = rows
+  const desiredBeforeValidation = rows
     .map((row) => {
       return {
         childPackageId: row.child_package_id,
@@ -133,6 +163,15 @@ export async function syncSalesforcePackageItems({
       fieldsSkipped.push(`Package Items: child ${row.childPackageId} has no Salesforce Product Id yet.`)
       return false
     })
+
+  const existingChildren = await existingProduct2Ids(desiredBeforeValidation.map((row) => row.childProduct2Id))
+  const desired = desiredBeforeValidation.filter((row) => {
+    if (existingChildren.has(row.childProduct2Id)) return true
+    fieldsSkipped.push(
+      `Package Items: child ${row.childPackageId} has stale/missing Salesforce Product Id ${row.childProduct2Id}. Clear and sync that child product first.`,
+    )
+    return false
+  })
 
   if (desired.length === 0) return
 
@@ -154,10 +193,16 @@ export async function syncSalesforcePackageItems({
       ...(itemConfig.sort ? { [itemConfig.sort]: item.sortOrder } : {}),
     }
     const existingId = existingByChild.get(item.childProduct2Id)
-    if (existingId) {
-      await salesforceRequest("PATCH", `/sobjects/${itemConfig.object}/${existingId}`, { body })
-    } else {
-      await salesforceRequest("POST", `/sobjects/${itemConfig.object}`, { body })
+    try {
+      if (existingId) {
+        await salesforceRequest("PATCH", `/sobjects/${itemConfig.object}/${existingId}`, { body })
+      } else {
+        await salesforceRequest("POST", `/sobjects/${itemConfig.object}`, { body })
+      }
+    } catch (e) {
+      fieldsSkipped.push(
+        `Package Items: ${item.childPackageId}: ${e instanceof Error ? e.message : String(e)}`,
+      )
     }
   }
 
@@ -168,4 +213,60 @@ export async function syncSalesforcePackageItems({
     }
   }
   fieldsUpdated.push(`Package Items (${desired.length})`)
+}
+
+export async function syncSalesforcePackageItemsForLinkedGroup({
+  packageId,
+  product2Id,
+  config,
+  fieldsUpdated,
+  fieldsSkipped,
+}: SyncLinkedGroupArgs): Promise<void> {
+  const admin = createAdminClient()
+  if (!admin) throw new Error("Supabase service role is not configured.")
+
+  const { data: current, error: currentErr } = await admin
+    .from("packages")
+    .select("id, duration, inventory_group_id, salesforce_product_id")
+    .eq("id", packageId)
+    .maybeSingle()
+  if (currentErr) throw new Error(currentErr.message)
+  if (!current?.inventory_group_id) {
+    await syncSalesforcePackageItems({
+      parentPackageId: packageId,
+      parentProduct2Id: product2Id,
+      config,
+      fieldsUpdated,
+      fieldsSkipped,
+    })
+    return
+  }
+
+  const { data: parents, error: parentsErr } = await admin
+    .from("packages")
+    .select("id, duration, salesforce_product_id")
+    .eq("inventory_group_id", current.inventory_group_id)
+    .in("duration", ["3_day", "2_day"])
+  if (parentsErr) throw new Error(parentsErr.message)
+
+  for (const parent of parents ?? []) {
+    const parentPackageId = String(parent.id)
+    const parentProduct2Id =
+      parentPackageId === packageId
+        ? product2Id
+        : String((parent as { salesforce_product_id?: string | null }).salesforce_product_id ?? "").trim()
+
+    if (!parentProduct2Id) {
+      fieldsSkipped.push(`Package Items: parent ${parentPackageId} has no Salesforce Product Id yet.`)
+      continue
+    }
+
+    await syncSalesforcePackageItems({
+      parentPackageId,
+      parentProduct2Id,
+      config,
+      fieldsUpdated,
+      fieldsSkipped,
+    })
+  }
 }
