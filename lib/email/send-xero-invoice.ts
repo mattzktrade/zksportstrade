@@ -2,7 +2,7 @@ import { Resend } from "resend"
 import { getResendApiKey, getResendFromAddress, stripSurroundingQuotes } from "@/lib/email/config"
 import { xeroFetchInvoicePdf } from "@/lib/integrations/xero/client"
 
-const DEFAULT_INVOICE_CC = "matt@zk-sports.com"
+const DEFAULT_INVOICE_CC = "finance@zk-sports.com"
 
 export type XeroInvoiceEmailPayload = {
   agentEmail: string

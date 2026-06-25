@@ -49,10 +49,10 @@ Set in `.env.local` / Vercel (comma-separated):
 
 ```bash
 FINANCE_NOTIFICATION_EMAILS=matt@zk-sports.com
-ORDER_CONFIRMATION_CC=matt@zk-sports.com
+ORDER_CONFIRMATION_CC=bookings@zk-sports.com
 ```
 
-`bookings@zk-sports.com` is **never** CC’d (legacy). Restart dev server after changing env.
+Restart dev server after changing env locally; redeploy after changing env in Vercel.
 
 ## 6. Test an order
 

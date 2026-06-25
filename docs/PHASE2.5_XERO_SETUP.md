@@ -22,7 +22,7 @@ XERO_INVOICE_TAX_TYPE=OUTPUT2        # UK 20% VAT on income; auto-detected if om
 XERO_INVOICE_DUE_DAYS=7
 XERO_INVOICE_AUTO_AUTHORISE=true     # AUTHORISED vs DRAFT
 XERO_INVOICE_EMAIL_ON_CREATE=true    # email invoice PDF when authorised
-XERO_INVOICE_CC=matt@zk-sports.com   # CC on invoice emails (Xero API has no CC; portal sends via Resend)
+XERO_INVOICE_CC=finance@zk-sports.com # CC on invoice emails (Xero API has no CC; portal sends via Resend)
 XERO_WEBHOOK_KEY=                    # for /api/webhooks/xero signature
 ```
 
@@ -43,7 +43,7 @@ When Xero marks an invoice paid, portal invoice status becomes **paid** (basic U
 
 1. Agent places order → Supabase order + invoice (`awaiting_invoice`).
 2. Outbox: `order.placed` (Salesforce) + `invoice.create` (Xero) — processed automatically before checkout finishes.
-3. Xero invoice is **authorised and emailed** to the agent with **CC to `XERO_INVOICE_CC`** (default `matt@zk-sports.com`) via Resend + PDF attachment.
+3. Xero invoice is **authorised and emailed** to the agent with **CC to `XERO_INVOICE_CC`** (default `finance@zk-sports.com`) via Resend + PDF attachment.
 4. Portal invoice → **awaiting_payment** with Xero invoice number on **My Bookings**.
 
 ## 7. Troubleshooting Connect (`invalid_scope`)

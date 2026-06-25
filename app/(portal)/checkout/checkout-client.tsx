@@ -509,7 +509,7 @@ export function CheckoutClient({
                   <h3 className="text-sm font-semibold text-foreground">Payment</h3>
                   <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
                     Payment is arranged offline after confirmation. Unless otherwise agreed, payment is due within{" "}
-                    <span className="font-medium text-foreground">ten (10) business days</span>. Failure to pay on time
+                    <span className="font-medium text-foreground">7 days</span>. Failure to pay on time
                     may result in your booking being cancelled.
                   </p>
                   <div>

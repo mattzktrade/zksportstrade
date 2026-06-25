@@ -73,7 +73,7 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
   const { data: rows, error } = await admin
     .from("integration_outbox")
     .select("id, event_type, payload, attempts")
-    .in("status", ["pending", "failed"])
+    .eq("status", "pending")
     .order("created_at", { ascending: true })
     .limit(BATCH_SIZE)
 
@@ -96,7 +96,7 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
       .from("integration_outbox")
       .update({ status: "processing", attempts: row.attempts + 1 })
       .eq("id", row.id)
-      .in("status", ["pending", "failed"])
+      .eq("status", "pending")
       .select("id")
       .maybeSingle()
 

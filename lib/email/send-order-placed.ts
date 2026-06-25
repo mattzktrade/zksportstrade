@@ -107,9 +107,6 @@ function buildHtml(p: OrderEmailPayload): string {
 
 import { stripSurroundingQuotes } from "@/lib/email/config"
 
-/** Legacy inbox — no longer CC'd on confirmations (use ORDER_CONFIRMATION_CC / FINANCE_NOTIFICATION_EMAILS). */
-const BLOCKED_CONFIRMATION_CC = new Set(["bookings@zk-sports.com"])
-
 function parseConfirmationCc(): string[] {
   const raw = [
     process.env.FINANCE_NOTIFICATION_EMAILS ?? "",
@@ -123,7 +120,7 @@ function parseConfirmationCc(): string[] {
     const email = stripSurroundingQuotes(part.trim())
     if (!email) continue
     const key = email.toLowerCase()
-    if (BLOCKED_CONFIRMATION_CC.has(key) || seen.has(key)) continue
+    if (seen.has(key)) continue
     seen.add(key)
     out.push(email)
   }

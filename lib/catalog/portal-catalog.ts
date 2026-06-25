@@ -55,7 +55,10 @@ export function buildPortalSeasonSlices(
       label: `${year} Season`,
       races: seasonRaces,
       packages: seasonPackages,
-      datesNote: year === 2027 ? "Race weekend dates for 2027 are to be confirmed. Packages and trade rates are available to browse and enquire." : undefined,
+      datesNote:
+        year === 2027
+          ? "Race weekend dates for 2027 are to be confirmed. Please enquire about any package for next years races and we will be able to help."
+          : undefined,
     })
   }
 

@@ -1,7 +1,6 @@
 import { createHmac, timingSafeEqual } from "crypto"
-import { NextResponse } from "next/server"
+import { after, NextResponse } from "next/server"
 import { getXeroCredentials } from "@/lib/integrations/xero/config"
-import { drainOutboxNow } from "@/lib/integrations/schedule-drain"
 import { markPortalInvoicePaidFromXero } from "@/lib/integrations/xero/invoices"
 
 type XeroWebhookEvent = {
@@ -16,6 +15,20 @@ function safeEqualStrings(a: string, b: string): boolean {
   const bb = Buffer.from(b)
   if (ba.length !== bb.length) return false
   return timingSafeEqual(ba, bb)
+}
+
+async function processXeroEvents(events: XeroWebhookEvent[]): Promise<void> {
+  for (const ev of events) {
+    if (ev.eventCategory !== "INVOICE") continue
+    const type = (ev.eventType ?? "").toUpperCase()
+    if (type === "UPDATE" && ev.resourceId) {
+      try {
+        await markPortalInvoicePaidFromXero(ev.resourceId)
+      } catch (e) {
+        console.error("[xero webhook] invoice update:", e instanceof Error ? e.message : e)
+      }
+    }
+  }
 }
 
 export async function POST(request: Request) {
@@ -39,18 +52,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
   }
 
-  for (const ev of payload.events ?? []) {
-    if (ev.eventCategory !== "INVOICE") continue
-    const type = (ev.eventType ?? "").toUpperCase()
-    if (type === "UPDATE" && ev.resourceId) {
-      try {
-        await markPortalInvoicePaidFromXero(ev.resourceId)
-        await drainOutboxNow({ maxRounds: 5 })
-      } catch (e) {
-        console.error("[xero webhook] invoice update:", e instanceof Error ? e.message : e)
-      }
-    }
-  }
+  const events = payload.events ?? []
+  after(() => processXeroEvents(events))
 
   return NextResponse.json({ ok: true })
 }

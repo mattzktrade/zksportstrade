@@ -28,7 +28,7 @@ const termsSections = [
     title: "3. Orders, Pricing, and Payment",
     paragraphs: [
       "No booking is confirmed until ZK issues written confirmation and receives payment in cleared funds, unless ZK expressly confirms otherwise in writing.",
-      "All amounts must be paid by the due date on the invoice. Time is of the essence. Contracts for which payments are not received within ten (10) business days of contract execution are subject to cancellation. If payment is late, ZK may, at its discretion, cancel the booking, reallocate inventory, or resell tickets or hospitality without liability.",
+      "All amounts must be paid by the due date on the invoice. Unless otherwise agreed in writing, payment is due within seven (7) days. Time is of the essence. If payment is late, ZK may, at its discretion, cancel the booking, reallocate inventory, or resell tickets or hospitality without liability.",
       "By submitting a booking, signing an order form, accepting a portal confirmation, or paying an invoice, the Client acknowledges that it has agreed to the payment and terms represented and will make payment accordingly. The Client and each person accepting these Terms represents and warrants that they have authority to enter into this agreement on behalf of the relevant party.",
       "Payments must be made in the exact currency and to the bank account details specified on ZK's invoice or Order Form. The Client is responsible for all bank charges, intermediary bank fees, and currency conversion costs. Overdue balances may accrue interest at 1.5% per month, or the maximum allowed by applicable law if lower, from the due date until paid.",
     ],

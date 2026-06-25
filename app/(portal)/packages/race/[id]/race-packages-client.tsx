@@ -179,7 +179,8 @@ function PackageRow({
   const stockHint = !isAvailabilityString ? lowStockGuestHint(sellable) : null
   const includeItems = pkg.includes.map((item) => item.trim()).filter(Boolean)
   const description = pkg.description?.trim() ? pkg.description.trim() : DEFAULT_PACKAGE_DESCRIPTION
-  const shouldCollapseDetails = description.length > 180 || includeItems.length > 4
+  const shouldCollapseDetails =
+    description.length > 180 || includeItems.length > 4 || includeItems.some((item) => item.length > 72)
 
   const packageImages = useMemo(() => {
     const primaryImage = pkg.image?.trim() || "/placeholder.svg"
@@ -296,7 +297,7 @@ function PackageRow({
                 <div
                   className={cn(
                     "relative w-full rounded-2xl border border-border bg-card p-4 sm:p-5 lg:p-6",
-                    !showFullDetails && "xl:h-[380px]",
+                    !showFullDetails && shouldCollapseDetails ? "xl:h-[380px]" : "xl:min-h-[380px]",
                     !showFullDetails && shouldCollapseDetails && "xl:overflow-hidden",
                   )}
                 >
