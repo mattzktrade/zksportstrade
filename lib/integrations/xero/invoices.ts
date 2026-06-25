@@ -40,6 +40,22 @@ function addDays(isoDate: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+function formatXeroRaceLabel(input: {
+  raceName?: string | null
+  circuit?: string | null
+  eventDate?: string | null
+}): string | null {
+  const rawName = input.raceName?.trim() || input.circuit?.trim()
+  if (!rawName) return null
+
+  const eventName = rawName.replace(/\s+Grand Prix$/i, " F1 GP")
+  const year = input.eventDate?.trim().slice(0, 4)
+  if (year && /^\d{4}$/.test(year) && !eventName.includes(year)) {
+    return `${year} ${eventName}`
+  }
+  return eventName
+}
+
 function buildXeroAddresses(address?: XeroBillingAddress): Array<Record<string, string>> | undefined {
   const line1 = address?.line1?.trim()
   const line2 = address?.line2?.trim()
@@ -201,7 +217,15 @@ export async function createXeroInvoiceForOrder(orderId: string): Promise<{
     .eq("id", order.agent_profile_id)
     .maybeSingle()
 
-  const { data: pkg } = await admin.from("packages").select("name, circuit").eq("id", order.package_id).maybeSingle()
+  const { data: pkg } = await admin
+    .from("packages")
+    .select("name, circuit, race_id, event_date")
+    .eq("id", order.package_id)
+    .maybeSingle()
+
+  const { data: race } = pkg?.race_id
+    ? await admin.from("races").select("name, event_date").eq("id", pkg.race_id).maybeSingle()
+    : { data: null }
 
   const billToName = (agent?.company_name || agent?.full_name || agent?.email || "Trade partner").trim()
   const contactId = await findOrCreateXeroContact({
@@ -222,8 +246,12 @@ export async function createXeroInvoiceForOrder(orderId: string): Promise<{
   const dueDate = addDays(today, Number.isFinite(dueDays) ? dueDays : 7)
 
   const packageName = pkg?.name ?? "Package"
-  const eventName = pkg?.circuit?.trim()
-  const description = `${packageName}${eventName ? ` (${eventName})` : ""} — ${order.client_name} (${order.guests} guest${order.guests === 1 ? "" : "s"})`
+  const raceLabel = formatXeroRaceLabel({
+    raceName: race?.name,
+    circuit: pkg?.circuit,
+    eventDate: race?.event_date ?? pkg?.event_date,
+  })
+  const description = `${packageName}${raceLabel ? ` (${raceLabel})` : ""}`
   const { accountCode, taxType } = await getXeroInvoiceLineDefaults()
   const currencyCode = await resolveXeroInvoiceCurrency(String(order.currency ?? "USD"))
   const itemCode = await resolveXeroInvoiceItemCode()
