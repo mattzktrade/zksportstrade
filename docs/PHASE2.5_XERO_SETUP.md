@@ -17,7 +17,7 @@ XERO_CLIENT_ID=
 XERO_CLIENT_SECRET=
 # Optional:
 XERO_SALES_ACCOUNT_CODE=200          # revenue account (defaults to 200 if omitted)
-XERO_INVOICE_TAX_TYPE=OUTPUT2        # UK 20% VAT on income; auto-detected if omitted
+XERO_INVOICE_TAX_TYPE=OUTPUT         # 0% sales tax in the live ZK Xero org; auto-detected if omitted
 # XERO_INVOICE_CURRENCY=GBP          # force invoice currency if org lacks USD (enable USD in Xero for production)
 XERO_INVOICE_DUE_DAYS=7
 XERO_INVOICE_AUTO_AUTHORISE=true     # AUTHORISED vs DRAFT
