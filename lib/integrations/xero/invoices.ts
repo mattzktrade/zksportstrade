@@ -56,6 +56,20 @@ function formatXeroRaceLabel(input: {
   return eventName
 }
 
+function isAbuDhabiEvent(input: {
+  raceId?: string | null
+  raceName?: string | null
+  circuit?: string | null
+  country?: string | null
+  countryCode?: string | null
+}): boolean {
+  return [input.raceId, input.raceName, input.circuit, input.country, input.countryCode]
+    .some((value) => {
+      const normalized = value?.trim().toLowerCase()
+      return normalized === "uae" || normalized?.includes("abu dhabi") || normalized?.includes("abudhabi")
+    })
+}
+
 function buildXeroAddresses(address?: XeroBillingAddress): Array<Record<string, string>> | undefined {
   const line1 = address?.line1?.trim()
   const line2 = address?.line2?.trim()
@@ -219,12 +233,12 @@ export async function createXeroInvoiceForOrder(orderId: string): Promise<{
 
   const { data: pkg } = await admin
     .from("packages")
-    .select("name, circuit, race_id, event_date")
+    .select("name, circuit, race_id, event_date, country, country_code")
     .eq("id", order.package_id)
     .maybeSingle()
 
   const { data: race } = pkg?.race_id
-    ? await admin.from("races").select("name, event_date").eq("id", pkg.race_id).maybeSingle()
+    ? await admin.from("races").select("name, event_date, country, country_code").eq("id", pkg.race_id).maybeSingle()
     : { data: null }
 
   const billToName = (agent?.company_name || agent?.full_name || agent?.email || "Trade partner").trim()
@@ -256,6 +270,17 @@ export async function createXeroInvoiceForOrder(orderId: string): Promise<{
   const currencyCode = await resolveXeroInvoiceCurrency(String(order.currency ?? "USD"))
   const itemCode = await resolveXeroInvoiceItemCode()
   const autoAuthorise = xeroInvoiceAutoAuthorise()
+  const includesAbuDhabiTax = isAbuDhabiEvent({
+    raceId: pkg?.race_id,
+    raceName: race?.name,
+    circuit: pkg?.circuit,
+    country: race?.country ?? pkg?.country,
+    countryCode: race?.country_code ?? pkg?.country_code,
+  })
+  const lineAmountTypes = includesAbuDhabiTax ? "Inclusive" : "Exclusive"
+  const lineTaxType = includesAbuDhabiTax
+    ? process.env.XERO_ABU_DHABI_TAX_TYPE?.trim() || "TAX001"
+    : taxType
 
   const result = await xeroRequest<{ Invoices?: XeroInvoice[] }>("POST", "/api.xro/2.0/Invoices", {
     body: {
@@ -267,7 +292,7 @@ export async function createXeroInvoiceForOrder(orderId: string): Promise<{
           DueDate: dueDate,
           Reference: order.reference,
           ...(currencyCode ? { CurrencyCode: currencyCode } : {}),
-          LineAmountTypes: "Exclusive",
+          LineAmountTypes: lineAmountTypes,
           Status: autoAuthorise ? "AUTHORISED" : "DRAFT",
           ...(autoAuthorise ? { SentToContact: true } : {}),
           LineItems: [
@@ -277,7 +302,7 @@ export async function createXeroInvoiceForOrder(orderId: string): Promise<{
               Quantity: Number(order.guests),
               UnitAmount: Number(order.unit_price),
               AccountCode: accountCode,
-              TaxType: taxType,
+              TaxType: lineTaxType,
             },
           ],
         },

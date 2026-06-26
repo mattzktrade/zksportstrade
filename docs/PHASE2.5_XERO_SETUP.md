@@ -18,6 +18,7 @@ XERO_CLIENT_SECRET=
 # Optional:
 XERO_SALES_ACCOUNT_CODE=200          # revenue account (defaults to 200 if omitted)
 XERO_INVOICE_TAX_TYPE=OUTPUT         # 0% sales tax in the live ZK Xero org; auto-detected if omitted
+XERO_ABU_DHABI_TAX_TYPE=TAX001       # 5% DXB sales tax for Abu Dhabi invoices; amounts remain tax-inclusive
 XERO_INVOICE_ITEM_CODE=1001          # optional Xero item code for Tickets; skipped if the item is not found
 # XERO_INVOICE_CURRENCY=GBP          # force invoice currency if org lacks USD (enable USD in Xero for production)
 XERO_INVOICE_DUE_DAYS=7
