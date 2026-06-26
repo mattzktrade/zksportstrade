@@ -49,10 +49,23 @@ type PackageMappingRow = {
   id: string
   salesforce_product_id: string | null
   product_code?: string | null
+  inventory_group_id?: string | null
+  duration?: string | null
   package_inventory?: { qty_available: number | null; qty_held: number | null } | Array<{
     qty_available: number | null
     qty_held: number | null
   }> | null
+}
+
+type LinkedGroupPackageRow = {
+  id: string
+  duration: string | null
+  inventory_group_id: string | null
+  package_inventory?: { qty_available: number | null; qty_held: number | null } | Array<{
+    qty_available: number | null
+    qty_held: number | null
+  }> | null
+  package_cost_layers?: Array<{ quantity: number | null }> | null
 }
 
 function escapeSoqlString(s: string): string {
@@ -106,6 +119,139 @@ async function loadAppliedLineItemKeys(admin: SupabaseClient): Promise<Set<strin
     if (oppId && lineId) keys.add(`${oppId}:${lineId}`)
   }
   return keys
+}
+
+function consumesDay(duration: string | null | undefined, day: "friday_only" | "saturday_only" | "sunday_only"): boolean {
+  if (duration === "3_day") return true
+  if (duration === "2_day") return day === "saturday_only" || day === "sunday_only"
+  return duration === day
+}
+
+function inventoryRow(raw: LinkedGroupPackageRow["package_inventory"]) {
+  return Array.isArray(raw) ? raw[0] : raw
+}
+
+async function reconcileLinkedInventoryFromRecordedSales(
+  admin: SupabaseClient,
+  seedPackageIds: Iterable<string>,
+): Promise<{ reconciledPackages: string[]; errors: string[] }> {
+  const seedIds = [...new Set([...seedPackageIds].map((id) => id.trim()).filter(Boolean))]
+  if (seedIds.length === 0) return { reconciledPackages: [], errors: [] }
+
+  const { data: seedRows, error: seedErr } = await admin
+    .from("packages")
+    .select("id, inventory_group_id")
+    .in("id", seedIds)
+  if (seedErr) return { reconciledPackages: [], errors: [seedErr.message] }
+
+  const groupIds = [
+    ...new Set(
+      (seedRows ?? [])
+        .map((row) => (typeof row.inventory_group_id === "string" ? row.inventory_group_id.trim() : ""))
+        .filter(Boolean),
+    ),
+  ]
+  const packageIds = new Set(seedIds)
+
+  let groupRows: LinkedGroupPackageRow[] = []
+  if (groupIds.length > 0) {
+    const { data, error } = await admin
+      .from("packages")
+      .select("id, duration, inventory_group_id, package_inventory ( qty_available, qty_held ), package_cost_layers ( quantity )")
+      .in("inventory_group_id", groupIds)
+    if (error) return { reconciledPackages: [], errors: [error.message] }
+    groupRows = (data ?? []) as LinkedGroupPackageRow[]
+    for (const row of groupRows) packageIds.add(row.id)
+  }
+
+  const allIds = [...packageIds]
+  const [ordersRes, sfRes] = await Promise.all([
+    admin
+      .from("orders")
+      .select("package_id, guests, status")
+      .in("package_id", allIds),
+    admin
+      .from("salesforce_offline_sale_applications")
+      .select("package_id, quantity")
+      .in("package_id", allIds),
+  ])
+
+  const errors: string[] = []
+  if (ordersRes.error) errors.push(ordersRes.error.message)
+  if (sfRes.error) errors.push(sfRes.error.message)
+  if (errors.length > 0) return { reconciledPackages: [], errors }
+
+  const soldByPackage = new Map<string, number>()
+  for (const row of ordersRes.data ?? []) {
+    if (row.status === "cancelled") continue
+    const packageId = typeof row.package_id === "string" ? row.package_id.trim() : ""
+    if (!packageId) continue
+    const qty = Math.max(0, Math.floor(Number(row.guests) || 0))
+    soldByPackage.set(packageId, (soldByPackage.get(packageId) ?? 0) + qty)
+  }
+  for (const row of sfRes.data ?? []) {
+    const packageId = typeof row.package_id === "string" ? row.package_id.trim() : ""
+    if (!packageId) continue
+    const qty = Math.max(0, Math.floor(Number(row.quantity) || 0))
+    soldByPackage.set(packageId, (soldByPackage.get(packageId) ?? 0) + qty)
+  }
+
+  const reconciledPackages: string[] = []
+  const rowsByGroup = new Map<string, LinkedGroupPackageRow[]>()
+  for (const row of groupRows) {
+    const groupId = row.inventory_group_id?.trim()
+    if (!groupId) continue
+    const list = rowsByGroup.get(groupId) ?? []
+    list.push(row)
+    rowsByGroup.set(groupId, list)
+  }
+
+  for (const rows of rowsByGroup.values()) {
+    const byDuration = new Map(rows.map((row) => [row.duration, row]))
+    const dayAvailable = new Map<"friday_only" | "saturday_only" | "sunday_only", number>()
+
+    for (const day of ["friday_only", "saturday_only", "sunday_only"] as const) {
+      const row = byDuration.get(day)
+      if (!row) continue
+      const layerTotal = (row.package_cost_layers ?? []).reduce((sum, layer) => sum + (Number(layer.quantity) || 0), 0)
+      const inv = inventoryRow(row.package_inventory)
+      const fallbackBase = (Number(inv?.qty_available) || 0) + (soldByPackage.get(row.id) ?? 0)
+      const base = Math.max(layerTotal, fallbackBase)
+      const consumed = rows.reduce(
+        (sum, candidate) => sum + (consumesDay(candidate.duration, day) ? (soldByPackage.get(candidate.id) ?? 0) : 0),
+        0,
+      )
+      dayAvailable.set(day, Math.max(0, Math.floor(base - consumed)))
+    }
+
+    for (const row of rows) {
+      let nextAvailable: number | null = null
+      if (row.duration === "friday_only" || row.duration === "saturday_only" || row.duration === "sunday_only") {
+        nextAvailable = dayAvailable.get(row.duration) ?? null
+      } else if (row.duration === "2_day") {
+        const sat = dayAvailable.get("saturday_only")
+        const sun = dayAvailable.get("sunday_only")
+        nextAvailable = sat != null && sun != null ? Math.min(sat, sun) : null
+      } else if (row.duration === "3_day") {
+        const values = [
+          dayAvailable.get("friday_only"),
+          dayAvailable.get("saturday_only"),
+          dayAvailable.get("sunday_only"),
+        ].filter((n): n is number => n != null)
+        nextAvailable = values.length > 0 ? Math.min(...values) : null
+      }
+
+      if (nextAvailable == null) continue
+      const { error } = await admin
+        .from("package_inventory")
+        .update({ qty_available: nextAvailable })
+        .eq("package_id", row.id)
+      if (error) errors.push(`${row.id}: ${error.message}`)
+      else reconciledPackages.push(row.id)
+    }
+  }
+
+  return { reconciledPackages, errors }
 }
 
 /**
@@ -164,7 +310,7 @@ export async function pullClosedWonOpportunitySales(
 
   const { data: packageRows, error: pkgErr } = await admin
     .from("packages")
-    .select("id, salesforce_product_id, product_code, package_inventory ( qty_available, qty_held )")
+    .select("id, salesforce_product_id, product_code, inventory_group_id, duration, package_inventory ( qty_available, qty_held )")
     .or("salesforce_product_id.not.is.null,product_code.not.is.null")
 
   if (pkgErr) {
@@ -295,6 +441,26 @@ export async function pullClosedWonOpportunitySales(
       })
     }
   }
+
+  const { data: recordedSfPackages, error: recordedSfErr } = await admin
+    .from("salesforce_offline_sale_applications")
+    .select("package_id")
+  if (recordedSfErr) {
+    result.errors.push(`recorded Salesforce sales: ${recordedSfErr.message}`)
+  }
+  const recordedSfPackageIds = (recordedSfPackages ?? [])
+    .map((row) => (typeof row.package_id === "string" ? row.package_id.trim() : ""))
+    .filter(Boolean)
+
+  const reconcile = await reconcileLinkedInventoryFromRecordedSales(admin, [
+    ...packagesToSync,
+    ...result.adjustments.map((adj) => adj.packageId),
+    ...recordedSfPackageIds,
+  ])
+  for (const packageId of reconcile.reconciledPackages) {
+    packagesToSync.add(packageId)
+  }
+  result.errors.push(...reconcile.errors)
 
   for (const packageId of packagesToSync) {
     const enq = await enqueuePackageInventoryChannelSyncServer(packageId, {
