@@ -25,6 +25,20 @@ export async function computeProductValueSoldFromLines(
   return Math.max(0, Number(v))
 }
 
+export async function computeProductQuantitySoldFromWonLines(
+  product2Id: string,
+  wonStageName: string,
+): Promise<number> {
+  const won = escapeSoqlString(wonStageName.trim())
+  const pid = escapeSoqlString(product2Id)
+  const rows = await salesforceQuery<{ totalQty: number | null }>(
+    `SELECT SUM(Quantity) totalQty FROM OpportunityLineItem WHERE Product2Id = '${pid}' AND (Opportunity.IsWon = true OR Opportunity.StageName = '${won}')`,
+  )
+  const v = rows[0]?.totalQty
+  if (v == null || !Number.isFinite(Number(v))) return 0
+  return Math.max(0, Math.floor(Number(v)))
+}
+
 /**
  * Push Value Sold on Product2 so it tracks Quantity Sold for portal bookings.
  * Uses opportunity line totals; falls back to Quantity Sold × Unit Price when the

@@ -6,11 +6,17 @@ import { SalesforceApiError } from "@/lib/integrations/salesforce/client"
 import { salesforceQuery, salesforceRequest } from "@/lib/integrations/salesforce/client"
 import { isSalesforceDuplicateError } from "@/lib/integrations/salesforce/duplicate"
 import { getProduct2UpdateableFields, getProduct2Fields } from "@/lib/integrations/salesforce/describe"
-import { PROTECTED_SALESFORCE_PRODUCT_FIELDS } from "@/lib/integrations/salesforce/inventory-snapshot"
+import {
+  PROTECTED_SALESFORCE_PRODUCT_FIELDS,
+  readSfInventorySnapshot,
+} from "@/lib/integrations/salesforce/inventory-snapshot"
 import { getStoredInstanceUrl } from "@/lib/integrations/salesforce/settings-store"
 import { productCodeLookupVariants } from "@/lib/integrations/salesforce/product-code"
 import { linkProductToEvent } from "@/lib/integrations/salesforce/events"
-import { syncProductValueSold } from "@/lib/integrations/salesforce/sold-metrics"
+import {
+  computeProductQuantitySoldFromWonLines,
+  syncProductValueSold,
+} from "@/lib/integrations/salesforce/sold-metrics"
 import { syncSalesforcePackageItemsForLinkedGroup } from "@/lib/integrations/salesforce/package-items"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { PACKAGE_COLUMNS, INVENTORY_COLUMNS } from "@/lib/catalog/columns"
@@ -23,6 +29,7 @@ type PackageRow = {
   salesforce_product_id: string | null
   salesforce_product_family: string | null
   duration: string | null
+  inventory_group_id: string | null
   trade_price: number | null
   currency: string
   is_enquiry: boolean
@@ -51,6 +58,12 @@ function inferSalesforceProductFamily(row: PackageRow, fallback: string): string
   const explicit = row.salesforce_product_family?.trim()
   if (explicit) return explicit
   const duration = row.duration?.trim()
+  if (
+    row.inventory_group_id?.trim() &&
+    (duration === "friday_only" || duration === "saturday_only" || duration === "sunday_only")
+  ) {
+    return "Package"
+  }
   if (duration === "friday_only" || duration === "saturday_only" || duration === "sunday_only") {
     return "Single Ticket"
   }
@@ -171,9 +184,25 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
   }
 
   const productFamily = inferSalesforceProductFamily(row, config.productFamily)
-
   const fieldsUpdated: string[] = []
   const fieldsSkipped: string[] = []
+  const sfSnapshot = await readSfInventorySnapshot(product2Id, config).catch((e) => {
+    fieldsSkipped.push(`Salesforce inventory snapshot: ${e instanceof Error ? e.message : String(e)}`)
+    return null
+  })
+  const wonLineQty = await computeProductQuantitySoldFromWonLines(product2Id, config.opportunityStageWon).catch((e) => {
+    fieldsSkipped.push(`Closed Won line quantity: ${e instanceof Error ? e.message : String(e)}`)
+    return 0
+  })
+  const existingSfSold = Math.max(0, Math.floor(sfSnapshot?.quantitySold ?? 0), wonLineQty)
+  const availableForSalesforce =
+    existingSfSold > 0 ? Math.min(sellable, Math.max(0, stockTotal - existingSfSold)) : sellable
+  if (existingSfSold > 0 && availableForSalesforce !== sellable) {
+    fieldsSkipped.push(
+      `Available Quantity capped at ${availableForSalesforce} to preserve ${existingSfSold} Salesforce sold unit(s).`,
+    )
+  }
+
   if (preferredId && byCodeId && preferredId !== byCodeId) {
     fieldsSkipped.push(
       `Product Code "${productCode}" is on a different Salesforce product (${byCodeId}). Syncing your chosen Id ${preferredId}.`,
@@ -200,7 +229,7 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
     fieldPatches.push({ api: config.fieldStockQty, value: stockTotal, label: "Stock Quantity" })
   }
   if (config.fieldAvailableQty) {
-    fieldPatches.push({ api: config.fieldAvailableQty, value: sellable, label: "Available Quantity" })
+    fieldPatches.push({ api: config.fieldAvailableQty, value: availableForSalesforce, label: "Available Quantity" })
   }
   // Source (who we bought from). Only push when we actually have one so we never blank an
   // existing Salesforce value for products with no source recorded in the portal yet.
@@ -281,7 +310,7 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
     expected: {
       name: row.name.trim(),
       tradePrice,
-      sellable,
+      sellable: availableForSalesforce,
       stockTotal,
     },
     fieldsUpdated,

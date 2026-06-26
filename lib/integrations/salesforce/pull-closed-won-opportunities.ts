@@ -6,6 +6,7 @@ import {
   salesforceTargetSellable,
 } from "@/lib/integrations/salesforce/inventory-snapshot"
 import { getIntegrationSetting, setIntegrationSetting } from "@/lib/integrations/salesforce/settings-store"
+import { findProduct2IdByCode } from "@/lib/integrations/salesforce/products"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 const CURSOR_KEY = "salesforce_closed_won_inventory_cursor"
@@ -47,6 +48,7 @@ type OpportunityRow = {
 type PackageMappingRow = {
   id: string
   salesforce_product_id: string | null
+  product_code?: string | null
   package_inventory?: { qty_available: number | null; qty_held: number | null } | Array<{
     qty_available: number | null
     qty_held: number | null
@@ -162,8 +164,8 @@ export async function pullClosedWonOpportunitySales(
 
   const { data: packageRows, error: pkgErr } = await admin
     .from("packages")
-    .select("id, salesforce_product_id, package_inventory ( qty_available, qty_held )")
-    .not("salesforce_product_id", "is", null)
+    .select("id, salesforce_product_id, product_code, package_inventory ( qty_available, qty_held )")
+    .or("salesforce_product_id.not.is.null,product_code.not.is.null")
 
   if (pkgErr) {
     result.errors.push(pkgErr.message)
@@ -174,9 +176,23 @@ export async function pullClosedWonOpportunitySales(
   const currentSellableByPackage = new Map<string, number>()
   const product2Ids: string[] = []
   for (const row of (packageRows ?? []) as PackageMappingRow[]) {
-    const product2Id =
+    let product2Id =
       typeof row.salesforce_product_id === "string" ? row.salesforce_product_id.trim() : ""
     const packageId = typeof row.id === "string" ? row.id.trim() : ""
+    const productCode = typeof row.product_code === "string" ? row.product_code.trim() : ""
+    if (!product2Id && productCode && packageId) {
+      try {
+        product2Id = (await findProduct2IdByCode(productCode)) ?? ""
+        if (product2Id) {
+          await admin
+            .from("packages")
+            .update({ salesforce_product_id: product2Id, integration_sync_error: null })
+            .eq("id", packageId)
+        }
+      } catch (e) {
+        result.errors.push(`${packageId}: Product Code "${productCode}" lookup failed: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
     if (product2Id && packageId) {
       packageByProduct2.set(product2Id, packageId)
       product2Ids.push(product2Id)
