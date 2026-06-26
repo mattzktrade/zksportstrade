@@ -1,4 +1,3 @@
-import { enqueuePackageInventoryChannelSyncServer } from "@/lib/integrations/enqueue-server"
 import { salesforceQuery } from "@/lib/integrations/salesforce/client"
 import type { SalesforceConfig } from "@/lib/integrations/salesforce/config"
 import {
@@ -251,6 +250,15 @@ async function reconcileLinkedInventoryFromRecordedSales(
     }
   }
 
+  if (reconciledPackages.length > 0) {
+    const { error } = await admin
+      .from("packages")
+      .update({ integration_sync_status: "synced", integration_sync_error: null })
+      .in("id", reconciledPackages)
+      .eq("integration_sync_status", "pending")
+    if (error) errors.push(`package sync status: ${error.message}`)
+  }
+
   return { reconciledPackages, errors }
 }
 
@@ -457,20 +465,7 @@ export async function pullClosedWonOpportunitySales(
     ...result.adjustments.map((adj) => adj.packageId),
     ...recordedSfPackageIds,
   ])
-  for (const packageId of reconcile.reconciledPackages) {
-    packagesToSync.add(packageId)
-  }
   result.errors.push(...reconcile.errors)
-
-  for (const packageId of packagesToSync) {
-    const enq = await enqueuePackageInventoryChannelSyncServer(packageId, {
-      trigger: "salesforce.closed_won",
-      scheduleDrain: false,
-    })
-    if (!enq.ok) {
-      result.errors.push(`channel sync ${packageId}: ${enq.message}`)
-    }
-  }
 
   if (rows.length > 0) {
     await setIntegrationSetting(CURSOR_KEY, maxModified.toISOString())

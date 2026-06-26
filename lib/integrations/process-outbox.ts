@@ -10,6 +10,7 @@ import { getXeroConnectionStatus } from "@/lib/integrations/xero/settings-store"
 
 const MAX_ATTEMPTS = 8
 const BATCH_SIZE = 20
+const STALE_PROCESSING_MS = 10 * 60 * 1000
 
 type OutboxRow = {
   id: string
@@ -44,6 +45,49 @@ export class OutboxOrphanedError extends Error {
   }
 }
 
+async function recoverStaleProcessingJobs(
+  admin: NonNullable<ReturnType<typeof createAdminClient>>,
+): Promise<void> {
+  const cutoff = new Date(Date.now() - STALE_PROCESSING_MS).toISOString()
+  const { data } = await admin
+    .from("integration_outbox")
+    .select("id, event_type, payload, attempts, last_error, processed_at")
+    .eq("status", "processing")
+    .or(`processed_at.is.null,processed_at.lt.${cutoff}`)
+    .limit(BATCH_SIZE)
+
+  for (const row of data ?? []) {
+    const attempts = Number(row.attempts ?? 0)
+    const terminal = attempts >= MAX_ATTEMPTS
+    const message =
+      typeof row.last_error === "string" && row.last_error.trim()
+        ? row.last_error.slice(0, 2000)
+        : "Sync job timed out while processing."
+
+    await admin
+      .from("integration_outbox")
+      .update({
+        status: terminal ? "failed" : "pending",
+        last_error: message,
+        processed_at: terminal ? new Date().toISOString() : null,
+      })
+      .eq("id", row.id)
+      .eq("status", "processing")
+
+    const payload = row.payload as Record<string, unknown> | null
+    const packageId = typeof payload?.package_id === "string" ? payload.package_id : null
+    if (terminal && packageId && row.event_type === "product.upsert") {
+      await admin
+        .from("packages")
+        .update({
+          integration_sync_status: "failed",
+          integration_sync_error: message.slice(0, 500),
+        })
+        .eq("id", packageId)
+    }
+  }
+}
+
 async function assertOrderExistsForOutbox(orderId: string): Promise<void> {
   const admin = createAdminClient()
   if (!admin) throw new Error("Service role not configured.")
@@ -70,6 +114,8 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
     return { processed: 0, completed: 0, failed: 0, orphaned: 0, skipped: true, message: "Service role not configured." }
   }
 
+  await recoverStaleProcessingJobs(admin)
+
   const { data: rows, error } = await admin
     .from("integration_outbox")
     .select("id, event_type, payload, attempts")
@@ -94,7 +140,7 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
   for (const row of pending) {
     const { data: claimed } = await admin
       .from("integration_outbox")
-      .update({ status: "processing", attempts: row.attempts + 1 })
+      .update({ status: "processing", attempts: row.attempts + 1, processed_at: new Date().toISOString() })
       .eq("id", row.id)
       .eq("status", "pending")
       .select("id")
@@ -190,6 +236,18 @@ async function handleOutboxEvent(row: OutboxRow): Promise<void> {
   switch (row.event_type) {
     case "product.upsert":
     case "inventory.snapshot": {
+      if (row.event_type === "product.upsert" && row.payload.trigger === "salesforce.closed_won") {
+        const packageId = String(row.payload.package_id ?? "")
+        if (packageId) {
+          const admin = createAdminClient()
+          await admin
+            ?.from("packages")
+            .update({ integration_sync_status: "synced", integration_sync_error: null })
+            .eq("id", packageId)
+            .eq("integration_sync_status", "pending")
+        }
+        return
+      }
       if (!isSalesforceConfigured()) throw new Error("Salesforce env vars not set.")
       const sf = await getSalesforceConnectionStatus()
       if (!sf.connected) throw new Error("Salesforce not connected.")
