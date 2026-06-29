@@ -60,6 +60,7 @@ type LinkedGroupPackageRow = {
   id: string
   duration: string | null
   inventory_group_id: string | null
+  total_capacity?: number | null
   package_inventory?: { qty_available: number | null; qty_held: number | null } | Array<{
     qty_available: number | null
     qty_held: number | null
@@ -156,7 +157,7 @@ async function reconcileLinkedInventoryFromRecordedSales(
   if (groupIds.length > 0) {
     const { data, error } = await admin
       .from("packages")
-      .select("id, duration, inventory_group_id, package_inventory ( qty_available, qty_held ), package_cost_layers ( quantity )")
+      .select("id, duration, inventory_group_id, total_capacity, package_inventory ( qty_available, qty_held ), package_cost_layers ( quantity )")
       .in("inventory_group_id", groupIds)
     if (error) return { reconciledPackages: [], errors: [error.message] }
     groupRows = (data ?? []) as LinkedGroupPackageRow[]
@@ -213,9 +214,10 @@ async function reconcileLinkedInventoryFromRecordedSales(
       const row = byDuration.get(day)
       if (!row) continue
       const layerTotal = (row.package_cost_layers ?? []).reduce((sum, layer) => sum + (Number(layer.quantity) || 0), 0)
+      const totalCapacity = Math.max(0, Math.floor(Number(row.total_capacity) || 0))
       const inv = inventoryRow(row.package_inventory)
       const fallbackBase = (Number(inv?.qty_available) || 0) + (soldByPackage.get(row.id) ?? 0)
-      const base = Math.max(layerTotal, fallbackBase)
+      const base = totalCapacity > 0 ? totalCapacity : Math.max(layerTotal, fallbackBase)
       const consumed = rows.reduce(
         (sum, candidate) => sum + (consumesDay(candidate.duration, day) ? (soldByPackage.get(candidate.id) ?? 0) : 0),
         0,

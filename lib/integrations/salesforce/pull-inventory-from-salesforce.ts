@@ -1,4 +1,3 @@
-import { enqueuePackageInventoryChannelSyncServer } from "@/lib/integrations/enqueue-server"
 import { getSalesforceConfig, isSalesforceConfigured } from "@/lib/integrations/salesforce/config"
 import {
   readSfInventorySnapshotsBulk,
@@ -15,6 +14,7 @@ import {
   getStoredInstanceUrl,
   setIntegrationSetting,
 } from "@/lib/integrations/salesforce/settings-store"
+import { syncPackageCatalogToWix } from "@/lib/integrations/wix/catalog-sync"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 const LAST_PULL_KEY = "salesforce_inventory_pull_last_run"
@@ -47,6 +47,7 @@ type PackagePullRow = {
   integration_sync_status: string | null
   duration: string | null
   inventory_group_id: string | null
+  total_capacity: number
   qty_available: number
   qty_held: number
 }
@@ -79,6 +80,7 @@ async function pullAvailableQuantityFromSalesforce(
       integration_sync_status,
       duration,
       inventory_group_id,
+      total_capacity,
       package_inventory ( qty_available, qty_held )
     `,
     )
@@ -113,6 +115,7 @@ async function pullAvailableQuantityFromSalesforce(
       duration: typeof raw.duration === "string" ? raw.duration : null,
       inventory_group_id:
         typeof raw.inventory_group_id === "string" ? raw.inventory_group_id : null,
+      total_capacity: Math.max(0, Math.floor(Number(raw.total_capacity) || 0)),
       qty_available: Number(inv?.qty_available) || 0,
       qty_held: Number(inv?.qty_held) || 0,
     })
@@ -170,19 +173,45 @@ async function pullAvailableQuantityFromSalesforce(
     }
 
     const currentSellable = portalSellable(pkg.qty_available, pkg.qty_held)
-    if (sfSellable >= currentSellable) {
+    const sfStockTotal = snapshot.stock == null ? null : Math.max(0, Math.floor(snapshot.stock))
+    const totalChanged = sfStockTotal != null && sfStockTotal !== pkg.total_capacity
+    const sellableChanged = sfSellable !== currentSellable
+    const delta = sfSellable - currentSellable
+
+    if (!totalChanged && !sellableChanged) {
       skippedPackages++
       continue
     }
 
-    const delta = sfSellable - currentSellable
-    const { error: rpcErr } = await admin.rpc("adjust_linked_inventory_available", {
-      p_package_id: pkg.id,
-      p_delta: delta,
-    })
-    if (rpcErr) {
-      errors.push(`${pkg.id}: ${rpcErr.message}`)
-      continue
+    if (sellableChanged) {
+      const { error: invErr } = await admin
+        .from("package_inventory")
+        .update({ qty_available: sfSellable + Math.max(0, Math.floor(pkg.qty_held)) })
+        .eq("package_id", pkg.id)
+      if (invErr) {
+        errors.push(`${pkg.id}: ${invErr.message}`)
+        continue
+      }
+    }
+
+    if (totalChanged) {
+      const { error: pkgErr } = await admin
+        .from("packages")
+        .update({
+          total_capacity: sfStockTotal,
+          integration_sync_status: "synced",
+          integration_sync_error: null,
+        })
+        .eq("id", pkg.id)
+      if (pkgErr) {
+        errors.push(`${pkg.id}: ${pkgErr.message}`)
+        continue
+      }
+    } else if (sellableChanged) {
+      await admin
+        .from("packages")
+        .update({ integration_sync_status: "synced", integration_sync_error: null })
+        .eq("id", pkg.id)
     }
 
     adjustments.push({
@@ -196,14 +225,11 @@ async function pullAvailableQuantityFromSalesforce(
 
   let channelSyncQueued = 0
   for (const adj of adjustments) {
-    const enq = await enqueuePackageInventoryChannelSyncServer(adj.packageId, {
-      trigger: "salesforce.inventory_pull",
-      scheduleDrain: false,
-    })
-    if (enq.ok) {
+    const wix = await syncPackageCatalogToWix(adj.packageId)
+    if (wix.ok) {
       channelSyncQueued++
     } else {
-      errors.push(`channel sync ${adj.packageId}: ${enq.message}`)
+      errors.push(`Wix sync ${adj.packageId}: ${[...wix.errors, ...wix.skipped].join("; ")}`)
     }
   }
 

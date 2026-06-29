@@ -67,11 +67,11 @@ export function SalesforceIntegrationClient({
         toast.error(`Pull had errors: ${pull.errors[0]}`, { duration: 12000 })
       } else if (pull.closedWon?.lineItemsApplied) {
         toast.success(
-          `Applied ${pull.closedWon.lineItemsApplied} offline sale(s) from Closed Won opportunities. Channel sync will run automatically.`,
+          `Applied ${pull.closedWon.lineItemsApplied} offline sale(s) from Closed Won opportunities and refreshed portal/Wix inventory.`,
         )
       } else if (pull.adjusted > 0) {
         toast.success(
-          `Updated ${pull.adjusted} package(s) from Salesforce inventory. Channel sync will run automatically.`,
+          `Updated ${pull.adjusted} package(s) from Salesforce inventory and refreshed Wix where mapped.`,
         )
       } else {
         const scanned = pull.closedWon?.opportunitiesScanned ?? 0

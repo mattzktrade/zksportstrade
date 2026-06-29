@@ -39,11 +39,7 @@ export async function computeProductQuantitySoldFromWonLines(
   return Math.max(0, Math.floor(Number(v)))
 }
 
-/**
- * Push Value Sold on Product2 so it tracks Quantity Sold for portal bookings.
- * Uses opportunity line totals; falls back to Quantity Sold × Unit Price when the
- * line sum is zero but DLRS has already incremented quantity.
- */
+/** Push Value Sold on Product2 from actual non-lost OpportunityLineItem totals only. */
 export async function syncProductValueSold(args: {
   product2Id: string
   config: SalesforceConfig
@@ -65,17 +61,10 @@ export async function syncProductValueSold(args: {
     return
   }
 
-  let valueSold = await computeProductValueSoldFromLines(product2Id, config.opportunityStageLost)
-
-  if (valueSold === 0 && config.fieldQuantitySold && config.fieldUnitPrice) {
-    const rows = await salesforceQuery<Record<string, unknown>>(
-      `SELECT ${config.fieldQuantitySold}, ${config.fieldUnitPrice} FROM Product2 WHERE Id = '${escapeSoqlString(product2Id)}' LIMIT 1`,
-    )
-    const qty = Number(rows[0]?.[config.fieldQuantitySold])
-    const price = Number(rows[0]?.[config.fieldUnitPrice])
-    if (Number.isFinite(qty) && qty > 0 && Number.isFinite(price) && price > 0) {
-      valueSold = qty * price
-    }
+  const valueSold = await computeProductValueSoldFromLines(product2Id, config.opportunityStageLost)
+  if (valueSold <= 0) {
+    fieldsSkipped.push("Value Sold: no non-lost Salesforce opportunity line totals found.")
+    return
   }
 
   try {

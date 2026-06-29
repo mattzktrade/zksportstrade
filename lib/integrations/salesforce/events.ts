@@ -77,7 +77,7 @@ function eventNameAliases(raceName: string): string[] {
 }
 
 /** Returns the Event record Id whose Name matches the race (season + name), or null. */
-async function findEventId(object: string, season: number | null, raceName: string): Promise<string | null> {
+export async function findEventId(object: string, season: number | null, raceName: string): Promise<string | null> {
   const name = raceName.trim()
   if (!name) return null
 

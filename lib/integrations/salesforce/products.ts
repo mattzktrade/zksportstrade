@@ -12,7 +12,7 @@ import {
 } from "@/lib/integrations/salesforce/inventory-snapshot"
 import { getStoredInstanceUrl } from "@/lib/integrations/salesforce/settings-store"
 import { productCodeLookupVariants } from "@/lib/integrations/salesforce/product-code"
-import { linkProductToEvent } from "@/lib/integrations/salesforce/events"
+import { findEventId, linkProductToEvent, resolveEventLookup } from "@/lib/integrations/salesforce/events"
 import {
   computeProductQuantitySoldFromWonLines,
   syncProductValueSold,
@@ -30,6 +30,7 @@ type PackageRow = {
   salesforce_product_family: string | null
   duration: string | null
   inventory_group_id: string | null
+  total_capacity: number | null
   trade_price: number | null
   currency: string
   is_enquiry: boolean
@@ -128,8 +129,10 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
     (sum, l) => sum + (Number((l as { quantity: number | null }).quantity) || 0),
     0,
   )
-  // Fallback for packages with no cost layers yet: at least the units currently available.
-  const stockTotal = Math.max(totalReceived, sellable)
+  const totalCapacity = Math.max(0, Math.floor(Number(row.total_capacity) || 0))
+  // total_capacity is the commercial stock bought for the package. Cost layers are supplier/cost
+  // detail and can be partial or duplicated across linked packages, so only use them as a fallback.
+  const stockTotal = totalCapacity > 0 ? totalCapacity : Math.max(totalReceived, sellable)
 
   const stockSource = buildStockSourceSummary(layers ?? [])
   const tradePrice = row.trade_price != null && !row.is_enquiry ? Number(row.trade_price) : null
@@ -148,16 +151,31 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
     raceSeason = typeof seasonVal === "number" ? seasonVal : null
   }
 
+  const preSyncNotes: string[] = []
+  let byCodeId: string | null = null
   // If an explicit Product Id is present, trust that over Product Code. Sandbox Product Codes can
-  // collide with unrelated live products, so only use code lookup when no Product Id is saved.
-  const byCodeId = !preferredId && productCode ? await resolveProduct2IdByCode(productCode) : null
-
-  if (!preferredId && productCode && !byCodeId) {
-    throw new Error(
-      `No Salesforce product found with Product Code "${productCode}". ` +
-        `Leave Product Code blank to create a new product in Salesforce (it will assign the next code automatically), ` +
-        `or paste the 18-character Product Id from the Salesforce product URL.`,
-    )
+  // collide with unrelated live products, so code lookup is event-checked before it is accepted.
+  if (!preferredId && productCode) {
+    const candidateByCode = await resolveProduct2IdByCode(productCode)
+    if (candidateByCode) {
+      const eventCheck = await productMatchesRaceEvent({
+        product2Id: candidateByCode,
+        config,
+        season: raceSeason,
+        raceName,
+      })
+      if (eventCheck?.matches === false) {
+        preSyncNotes.push(
+          `Product Code "${productCode}" belongs to another Salesforce event (${eventCheck.message}); creating/linking the correct event product instead.`,
+        )
+      } else {
+        byCodeId = candidateByCode
+      }
+    } else {
+      preSyncNotes.push(
+        `Product Code "${productCode}" was not found in this Salesforce org; creating/linking a new live product instead.`,
+      )
+    }
   }
 
   const product2Id = await resolveProduct2IdForSync({
@@ -167,6 +185,8 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
     productName: row.name.trim(),
     productFamily: inferSalesforceProductFamily(row, config.productFamily),
     config,
+    raceSeason,
+    raceName,
     tradePrice,
     stockTotal,
     sellable,
@@ -185,7 +205,7 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
 
   const productFamily = inferSalesforceProductFamily(row, config.productFamily)
   const fieldsUpdated: string[] = []
-  const fieldsSkipped: string[] = []
+  const fieldsSkipped: string[] = [...preSyncNotes]
   const sfSnapshot = await readSfInventorySnapshot(product2Id, config).catch((e) => {
     fieldsSkipped.push(`Salesforce inventory snapshot: ${e instanceof Error ? e.message : String(e)}`)
     return null
@@ -195,8 +215,14 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
     return 0
   })
   const existingSfSold = Math.max(0, Math.floor(sfSnapshot?.quantitySold ?? 0), wonLineQty)
-  const availableForSalesforce =
-    existingSfSold > 0 ? Math.min(sellable, Math.max(0, stockTotal - existingSfSold)) : sellable
+  let availableForSalesforce = sellable
+  if (existingSfSold > 0) {
+    const availableBySold = Math.max(0, stockTotal - existingSfSold)
+    const sfAvailable = sfSnapshot?.available == null ? null : Math.max(0, Math.floor(sfSnapshot.available))
+    if (availableBySold < sellable && sfAvailable !== sellable) {
+      availableForSalesforce = availableBySold
+    }
+  }
   if (existingSfSold > 0 && availableForSalesforce !== sellable) {
     fieldsSkipped.push(
       `Available Quantity capped at ${availableForSalesforce} to preserve ${existingSfSold} Salesforce sold unit(s).`,
@@ -499,6 +525,42 @@ async function readSalesforceProductCodeWithRetry(
   return null
 }
 
+async function productMatchesRaceEvent(args: {
+  product2Id: string
+  config: NonNullable<ReturnType<typeof getSalesforceConfig>>
+  season: number | null
+  raceName: string
+}): Promise<{ matches: boolean; message: string } | null> {
+  const raceName = args.raceName.trim()
+  if (!raceName) return null
+
+  const lookup = await resolveEventLookup(args.config).catch(() => null)
+  if (!lookup) return null
+
+  const expectedEventId = await findEventId(lookup.object, args.season, raceName).catch(() => null)
+  if (!expectedEventId) return null
+
+  const rows = await salesforceQuery<Record<string, unknown>>(
+    `SELECT Id, Name, ${lookup.field} FROM Product2 WHERE Id = '${escapeSoqlString(args.product2Id)}' LIMIT 1`,
+  )
+  const row = rows[0]
+  const actualEventId = row?.[lookup.field] == null ? "" : String(row[lookup.field]).trim()
+  if (!actualEventId) {
+    return {
+      matches: false,
+      message: `expected ${expectedEventId}, candidate product has no Salesforce event set`,
+    }
+  }
+
+  return {
+    matches: actualEventId === expectedEventId,
+    message:
+      actualEventId === expectedEventId
+        ? `${args.season ?? ""} ${raceName}`.trim()
+        : `expected ${expectedEventId}, found ${actualEventId}`,
+  }
+}
+
 async function resolveProduct2IdForSync(ctx: {
   productCode: string | null
   preferredId: string | null
@@ -506,6 +568,8 @@ async function resolveProduct2IdForSync(ctx: {
   productName: string
   productFamily: string
   config: NonNullable<ReturnType<typeof getSalesforceConfig>>
+  raceSeason: number | null
+  raceName: string
   tradePrice: number | null
   stockTotal: number
   sellable: number
@@ -532,6 +596,8 @@ async function resolveProduct2IdForSync(ctx: {
 async function findExistingProduct2ForCreate(ctx: {
   productName: string
   config: NonNullable<ReturnType<typeof getSalesforceConfig>>
+  raceSeason: number | null
+  raceName: string
   tradePrice: number | null
 }): Promise<string | null> {
   const name = ctx.productName.trim()
@@ -545,12 +611,27 @@ async function findExistingProduct2ForCreate(ctx: {
   )
   if (rows.length === 0) return null
 
+  const eventSafeRows: Record<string, unknown>[] = []
+  for (const row of rows) {
+    const id = typeof row.Id === "string" ? row.Id : ""
+    if (!id) continue
+    const eventCheck = await productMatchesRaceEvent({
+      product2Id: id,
+      config: ctx.config,
+      season: ctx.raceSeason,
+      raceName: ctx.raceName,
+    })
+    if (eventCheck?.matches === false) continue
+    eventSafeRows.push(row)
+  }
+  if (eventSafeRows.length === 0) return null
+
   if (ctx.config.fieldUnitPrice && ctx.tradePrice != null) {
-    const priceMatch = rows.find((row) => numClose(Number(row[ctx.config.fieldUnitPrice!]), ctx.tradePrice))
+    const priceMatch = eventSafeRows.find((row) => numClose(Number(row[ctx.config.fieldUnitPrice!]), ctx.tradePrice))
     if (priceMatch?.Id) return String(priceMatch.Id)
   }
 
-  return typeof rows[0]?.Id === "string" ? rows[0].Id : null
+  return typeof eventSafeRows[0]?.Id === "string" ? eventSafeRows[0].Id : null
 }
 
 /**
@@ -563,6 +644,8 @@ async function createProduct2(ctx: {
   productName: string
   productFamily: string
   config: NonNullable<ReturnType<typeof getSalesforceConfig>>
+  raceSeason: number | null
+  raceName: string
   tradePrice: number | null
   stockTotal: number
   sellable: number
