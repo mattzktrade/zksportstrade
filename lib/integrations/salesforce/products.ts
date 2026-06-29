@@ -30,7 +30,6 @@ type PackageRow = {
   salesforce_product_family: string | null
   duration: string | null
   inventory_group_id: string | null
-  total_capacity: number | null
   trade_price: number | null
   currency: string
   is_enquiry: boolean
@@ -115,6 +114,14 @@ async function readLocalSoldForPackage(
   return Math.max(0, portalSold + offlineSold)
 }
 
+function resolveSalesforceStockTotal(input: {
+  totalReceived: number
+  sellable: number
+  sold: number
+}): number {
+  return Math.max(0, Math.floor(input.totalReceived), Math.floor(input.sellable + input.sold))
+}
+
 export async function syncPackageToSalesforce(packageId: string): Promise<ProductSyncResult> {
   const syncStarted = Date.now()
   const admin = createAdminClient()
@@ -152,10 +159,12 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
     (sum, l) => sum + (Number((l as { quantity: number | null }).quantity) || 0),
     0,
   )
-  const totalCapacity = Math.max(0, Math.floor(Number(row.total_capacity) || 0))
-  // total_capacity is the commercial stock bought for the package. Cost layers are supplier/cost
-  // detail and can be partial or duplicated across linked packages, so only use them as a fallback.
-  const stockTotal = totalCapacity > 0 ? totalCapacity : Math.max(totalReceived, sellable)
+  const localRecordedSold = await readLocalSoldForPackage(admin, packageId).catch(() => 0)
+  let stockTotal = resolveSalesforceStockTotal({
+    totalReceived,
+    sellable,
+    sold: localRecordedSold,
+  })
 
   const stockSource = buildStockSourceSummary(layers ?? [])
   const tradePrice = row.trade_price != null && !row.is_enquiry ? Number(row.trade_price) : null
@@ -237,8 +246,12 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
     fieldsSkipped.push(`Closed Won line quantity: ${e instanceof Error ? e.message : String(e)}`)
     return 0
   })
+  stockTotal = resolveSalesforceStockTotal({
+    totalReceived,
+    sellable,
+    sold: Math.max(localRecordedSold, wonLineQty),
+  })
   const existingSfSold = Math.max(0, Math.floor(sfSnapshot?.quantitySold ?? 0), wonLineQty)
-  const localRecordedSold = await readLocalSoldForPackage(admin, packageId).catch(() => 0)
   let availableForSalesforce = sellable
   if (wonLineQty > localRecordedSold && stockTotal > wonLineQty) {
     availableForSalesforce = Math.max(sellable, stockTotal - wonLineQty)

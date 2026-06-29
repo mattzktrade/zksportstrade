@@ -50,12 +50,11 @@ export function parseSfInventorySnapshotFromRow(
   let quantitySold = 0
   let quantitySoldEstimated = false
 
-  // Value Sold is the source of truth for historical sales (website, offline, portal).
-  if (valueSold != null && valueSold > 0 && unitPrice != null && unitPrice > 0) {
+  if (explicitSold != null && explicitSold > 0) {
+    quantitySold = explicitSold
+  } else if (valueSold != null && valueSold > 0 && unitPrice != null && unitPrice > 0) {
     quantitySold = Math.max(0, Math.floor(valueSold / unitPrice))
     quantitySoldEstimated = true
-  } else if (explicitSold != null && explicitSold > 0) {
-    quantitySold = explicitSold
   } else if (stock != null && available != null && stock > available) {
     quantitySold = stock - available
   }

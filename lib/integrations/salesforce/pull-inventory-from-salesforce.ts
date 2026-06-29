@@ -49,7 +49,6 @@ type PackagePullRow = {
   integration_sync_status: string | null
   duration: string | null
   inventory_group_id: string | null
-  total_capacity: number
   qty_available: number
   qty_held: number
 }
@@ -107,7 +106,6 @@ async function pullAvailableQuantityFromSalesforce(
       integration_sync_status,
       duration,
       inventory_group_id,
-      total_capacity,
       package_inventory ( qty_available, qty_held )
     `,
     )
@@ -143,7 +141,6 @@ async function pullAvailableQuantityFromSalesforce(
       duration: typeof raw.duration === "string" ? raw.duration : null,
       inventory_group_id:
         typeof raw.inventory_group_id === "string" ? raw.inventory_group_id : null,
-      total_capacity: Math.max(0, Math.floor(Number(raw.total_capacity) || 0)),
       qty_available: Number(inv?.qty_available) || 0,
       qty_held: Number(inv?.qty_held) || 0,
     })
@@ -225,12 +222,10 @@ async function pullAvailableQuantityFromSalesforce(
       skippedPackages++
       continue
     }
-    const sfStockTotal = snapshot.stock == null ? null : Math.max(0, Math.floor(snapshot.stock))
-    const totalChanged = sfStockTotal != null && sfStockTotal !== pkg.total_capacity
     const sellableChanged = targetSellable !== currentSellable
     const delta = targetSellable - currentSellable
 
-    if (!totalChanged && !sellableChanged) {
+    if (!sellableChanged) {
       skippedPackages++
       continue
     }
@@ -246,25 +241,10 @@ async function pullAvailableQuantityFromSalesforce(
       }
     }
 
-    if (totalChanged) {
-      const { error: pkgErr } = await admin
-        .from("packages")
-        .update({
-          total_capacity: sfStockTotal,
-          integration_sync_status: "synced",
-          integration_sync_error: null,
-        })
-        .eq("id", pkg.id)
-      if (pkgErr) {
-        errors.push(`${pkg.id}: ${pkgErr.message}`)
-        continue
-      }
-    } else if (sellableChanged) {
-      await admin
-        .from("packages")
-        .update({ integration_sync_status: "synced", integration_sync_error: null })
-        .eq("id", pkg.id)
-    }
+    await admin
+      .from("packages")
+      .update({ integration_sync_status: "synced", integration_sync_error: null })
+      .eq("id", pkg.id)
 
     adjustments.push({
       packageId: pkg.id,

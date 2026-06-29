@@ -20,14 +20,20 @@ function downloadInventoryCsv(rows: AdminPackageRow[]): void {
     "Location",
     "Price",
     "Currency",
-    "Stock",
+    "Total stock started",
+    "Salesforce sold",
+    "Portal available",
     "On hold",
-    "Sellable",
+    "Available left",
     "Package ID",
   ]
   const body = rows.map((p) => {
-    const stock = Number(p.inventory?.qty_available ?? 0)
+    const portalAvailable = Number(p.inventory?.qty_available ?? 0)
     const held = Number(p.inventory?.qty_held ?? 0)
+    const portalStockPurchased = p.cost_layers.reduce((sum, layer) => sum + Number(layer.quantity ?? 0), 0)
+    const salesforceStock = p.salesforce_inventory?.stock
+    const totalStockStarted = salesforceStock ?? Math.max(portalStockPurchased, portalAvailable)
+    const salesforceSold = p.salesforce_inventory?.quantitySold ?? p.sales_breakdown.salesforceOffline
     return [
       p.race_name,
       p.name,
@@ -36,9 +42,11 @@ function downloadInventoryCsv(rows: AdminPackageRow[]): void {
       p.location,
       p.trade_price ?? "",
       p.currency,
-      stock,
+      totalStockStarted,
+      salesforceSold,
+      portalAvailable,
       held,
-      Math.max(0, stock - held),
+      Math.max(0, portalAvailable - held),
       p.id,
     ]
   })

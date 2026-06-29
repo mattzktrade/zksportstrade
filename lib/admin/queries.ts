@@ -11,6 +11,12 @@ import {
   emptyPackageSalesBreakdown,
   type PackageSalesBreakdown,
 } from "@/lib/admin/package-sales-breakdown"
+import { getSalesforceConfig, isSalesforceConfigured } from "@/lib/integrations/salesforce/config"
+import {
+  readSfInventorySnapshotsBulk,
+  type SfInventorySnapshot,
+} from "@/lib/integrations/salesforce/inventory-snapshot"
+import { getSalesforceConnectionStatus, getStoredInstanceUrl } from "@/lib/integrations/salesforce/settings-store"
 
 const AGENT_PROFILE_COLUMNS =
   "id, email, full_name, company_name, company_type, mobile, role, approval_status, created_at" as const
@@ -23,6 +29,7 @@ export type AdminPackageRow = DbPackage & {
   cost_layers: CostLayerRow[]
   cost_summary: PackageCostSummary | null
   sales_breakdown: PackageSalesBreakdown
+  salesforce_inventory: SfInventorySnapshot | null
 }
 
 import type { LinkedInventoryPackage } from "@/lib/admin/linked-inventory"
@@ -310,9 +317,10 @@ export async function getAdminPackageRows(): Promise<AdminPackageRow[]> {
   const raceName = new Map((races ?? []).map((r: { id: string; name: string }) => [r.id, r.name]))
   const invBy = new Map((inv ?? []).map((i: DbInventory) => [i.package_id, i]))
   const packageIds = (packages as DbPackage[]).map((p) => p.id)
-  const [layersByPkg, salesByPkg] = await Promise.all([
+  const [layersByPkg, salesByPkg, sfInventoryByProduct] = await Promise.all([
     getCostLayersByPackage(packageIds),
     getPackageSalesBreakdownByPackage(packageIds),
+    getSalesforceInventorySnapshotsForPackages(packages as DbPackage[]),
   ])
   return (packages as DbPackage[]).map((p) => {
     const layers = layersByPkg.get(p.id) ?? []
@@ -325,8 +333,34 @@ export async function getAdminPackageRows(): Promise<AdminPackageRow[]> {
       cost_layers: layers,
       cost_summary: summary,
       sales_breakdown: salesByPkg.get(p.id) ?? emptyPackageSalesBreakdown(p.id),
+      salesforce_inventory:
+        p.salesforce_product_id?.trim() ? (sfInventoryByProduct.get(p.salesforce_product_id.trim()) ?? null) : null,
     }
   })
+}
+
+async function getSalesforceInventorySnapshotsForPackages(
+  packages: DbPackage[],
+): Promise<Map<string, SfInventorySnapshot>> {
+  if (!isSalesforceConfigured()) return new Map()
+  const connection = await getSalesforceConnectionStatus()
+  if (!connection.connected) return new Map()
+
+  const instanceUrl = (await getStoredInstanceUrl()) ?? process.env.SALESFORCE_INSTANCE_URL?.trim() ?? ""
+  const config = getSalesforceConfig(instanceUrl || undefined)
+  if (!config) return new Map()
+
+  const productIds = packages
+    .map((pkg) => pkg.salesforce_product_id?.trim() ?? "")
+    .filter(Boolean)
+  if (productIds.length === 0) return new Map()
+
+  try {
+    return await readSfInventorySnapshotsBulk(productIds, config)
+  } catch (e) {
+    console.warn("[admin] Salesforce inventory snapshot unavailable:", e instanceof Error ? e.message : e)
+    return new Map()
+  }
 }
 
 export type InventoryHoldRow = {
