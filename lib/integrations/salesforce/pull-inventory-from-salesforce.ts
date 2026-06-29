@@ -1,4 +1,5 @@
 import { getSalesforceConfig, isSalesforceConfigured } from "@/lib/integrations/salesforce/config"
+import { salesforceQuery } from "@/lib/integrations/salesforce/client"
 import {
   readSfInventorySnapshotsBulk,
   salesforceTargetSellable,
@@ -44,6 +45,7 @@ export type SalesforceInventoryPullResult = {
 type PackagePullRow = {
   id: string
   salesforce_product_id: string
+  product_code: string | null
   integration_sync_status: string | null
   duration: string | null
   inventory_group_id: string | null
@@ -54,6 +56,30 @@ type PackagePullRow = {
 
 function portalSellable(qtyAvailable: number, qtyHeld: number): number {
   return Math.max(0, Math.floor(qtyAvailable) - Math.floor(qtyHeld))
+}
+
+async function readClosedWonQuantityByProduct(
+  product2Ids: string[],
+  wonStageName: string,
+): Promise<Map<string, number>> {
+  const uniqueIds = [...new Set(product2Ids.map((id) => id.trim()).filter(Boolean))]
+  const result = new Map<string, number>()
+  if (uniqueIds.length === 0) return result
+
+  const won = wonStageName.trim().replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+  for (let i = 0; i < uniqueIds.length; i += 200) {
+    const batch = uniqueIds.slice(i, i + 200)
+    const inList = batch.map((id) => `'${id.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`).join(",")
+    const rows = await salesforceQuery<{ Product2Id: string; totalQty: number | null }>(
+      `SELECT Product2Id, SUM(Quantity) totalQty FROM OpportunityLineItem WHERE Product2Id IN (${inList}) AND (Opportunity.IsWon = true OR Opportunity.StageName = '${won}') GROUP BY Product2Id`,
+    )
+    for (const row of rows) {
+      const product2Id = typeof row.Product2Id === "string" ? row.Product2Id.trim() : ""
+      const qty = Math.max(0, Math.floor(Number(row.totalQty) || 0))
+      if (product2Id && qty > 0) result.set(product2Id, qty)
+    }
+  }
+  return result
 }
 
 async function shouldThrottleAvailablePull(force: boolean): Promise<boolean> {
@@ -77,6 +103,7 @@ async function pullAvailableQuantityFromSalesforce(
       `
       id,
       salesforce_product_id,
+      product_code,
       integration_sync_status,
       duration,
       inventory_group_id,
@@ -110,6 +137,7 @@ async function pullAvailableQuantityFromSalesforce(
     packages.push({
       id,
       salesforce_product_id: product2Id,
+      product_code: typeof raw.product_code === "string" ? raw.product_code.trim() : null,
       integration_sync_status:
         typeof raw.integration_sync_status === "string" ? raw.integration_sync_status : null,
       duration: typeof raw.duration === "string" ? raw.duration : null,
@@ -132,16 +160,30 @@ async function pullAvailableQuantityFromSalesforce(
     }
   }
 
+  const byProduct2Id = new Map<string, PackagePullRow>()
+  for (const pkg of packages) {
+    const existing = byProduct2Id.get(pkg.salesforce_product_id)
+    if (!existing || (!existing.product_code && pkg.product_code)) {
+      byProduct2Id.set(pkg.salesforce_product_id, pkg)
+    }
+  }
+  const uniquePackages = [...byProduct2Id.values()]
+
   let snapshots: Map<string, SfInventorySnapshot>
+  let closedWonQtyByProduct: Map<string, number>
   try {
     snapshots = await readSfInventorySnapshotsBulk(
-      packages.map((p) => p.salesforce_product_id),
+      uniquePackages.map((p) => p.salesforce_product_id),
       config,
+    )
+    closedWonQtyByProduct = await readClosedWonQuantityByProduct(
+      uniquePackages.map((p) => p.salesforce_product_id),
+      config.opportunityStageWon,
     )
   } catch (e) {
     const message = e instanceof Error ? e.message : "Salesforce inventory query failed."
     return {
-      checked: packages.length,
+      checked: uniquePackages.length,
       adjusted: 0,
       skippedPackages: 0,
       adjustments: [],
@@ -154,7 +196,7 @@ async function pullAvailableQuantityFromSalesforce(
   const errors: string[] = []
   let skippedPackages = 0
 
-  for (const pkg of packages) {
+  for (const pkg of uniquePackages) {
     if (pkg.integration_sync_status === "pending" || pkg.integration_sync_status === "failed") {
       skippedPackages++
       continue
@@ -167,16 +209,26 @@ async function pullAvailableQuantityFromSalesforce(
     }
 
     const sfSellable = salesforceTargetSellable(snapshot)
-    if (sfSellable == null) {
+    const closedWonQty = closedWonQtyByProduct.get(pkg.salesforce_product_id) ?? 0
+    const sfLineSellable =
+      snapshot.stock != null && closedWonQty > 0
+        ? Math.max(0, Math.floor(snapshot.stock) - closedWonQty)
+        : null
+
+    const currentSellable = portalSellable(pkg.qty_available, pkg.qty_held)
+    const targetSellable =
+      sfLineSellable != null &&
+      (sfLineSellable < currentSellable || (currentSellable === 0 && sfSellable === 0 && sfLineSellable > 0))
+        ? sfLineSellable
+        : sfSellable
+    if (targetSellable == null) {
       skippedPackages++
       continue
     }
-
-    const currentSellable = portalSellable(pkg.qty_available, pkg.qty_held)
     const sfStockTotal = snapshot.stock == null ? null : Math.max(0, Math.floor(snapshot.stock))
     const totalChanged = sfStockTotal != null && sfStockTotal !== pkg.total_capacity
-    const sellableChanged = sfSellable !== currentSellable
-    const delta = sfSellable - currentSellable
+    const sellableChanged = targetSellable !== currentSellable
+    const delta = targetSellable - currentSellable
 
     if (!totalChanged && !sellableChanged) {
       skippedPackages++
@@ -186,7 +238,7 @@ async function pullAvailableQuantityFromSalesforce(
     if (sellableChanged) {
       const { error: invErr } = await admin
         .from("package_inventory")
-        .update({ qty_available: sfSellable + Math.max(0, Math.floor(pkg.qty_held)) })
+        .update({ qty_available: targetSellable + Math.max(0, Math.floor(pkg.qty_held)) })
         .eq("package_id", pkg.id)
       if (invErr) {
         errors.push(`${pkg.id}: ${invErr.message}`)
@@ -218,7 +270,7 @@ async function pullAvailableQuantityFromSalesforce(
       packageId: pkg.id,
       product2Id: pkg.salesforce_product_id,
       portalSellableBefore: currentSellable,
-      salesforceSellable: sfSellable,
+      salesforceSellable: targetSellable,
       delta,
     })
   }
@@ -234,7 +286,7 @@ async function pullAvailableQuantityFromSalesforce(
   }
 
   return {
-    checked: packages.length,
+    checked: uniquePackages.length,
     adjusted: adjustments.length,
     skippedPackages,
     adjustments,

@@ -92,6 +92,29 @@ function buildStockSourceSummary(
     .join("; ")
 }
 
+async function readLocalSoldForPackage(
+  admin: NonNullable<ReturnType<typeof createAdminClient>>,
+  packageId: string,
+): Promise<number> {
+  const { data: orders } = await admin
+    .from("orders")
+    .select("guests")
+    .eq("package_id", packageId)
+    .neq("status", "cancelled")
+  const portalSold = (orders ?? []).reduce((sum, row) => sum + (Math.floor(Number(row.guests) || 0)), 0)
+
+  const { data: offlineRows } = await admin
+    .from("salesforce_offline_sale_applications")
+    .select("quantity")
+    .eq("package_id", packageId)
+  const offlineSold = (offlineRows ?? []).reduce(
+    (sum, row) => sum + Math.max(0, Math.floor(Number(row.quantity) || 0)),
+    0,
+  )
+
+  return Math.max(0, portalSold + offlineSold)
+}
+
 export async function syncPackageToSalesforce(packageId: string): Promise<ProductSyncResult> {
   const syncStarted = Date.now()
   const admin = createAdminClient()
@@ -215,8 +238,14 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
     return 0
   })
   const existingSfSold = Math.max(0, Math.floor(sfSnapshot?.quantitySold ?? 0), wonLineQty)
+  const localRecordedSold = await readLocalSoldForPackage(admin, packageId).catch(() => 0)
   let availableForSalesforce = sellable
-  if (existingSfSold > 0) {
+  if (wonLineQty > localRecordedSold && stockTotal > wonLineQty) {
+    availableForSalesforce = Math.max(sellable, stockTotal - wonLineQty)
+    fieldsSkipped.push(
+      `Available Quantity protected at ${availableForSalesforce} because Salesforce has ${wonLineQty} won line unit(s) but the portal has only recorded ${localRecordedSold}. Run Pull offline sales to import them.`,
+    )
+  } else if (existingSfSold > 0) {
     const availableBySold = Math.max(0, stockTotal - existingSfSold)
     const sfAvailable = sfSnapshot?.available == null ? null : Math.max(0, Math.floor(sfSnapshot.available))
     if (availableBySold < sellable && sfAvailable !== sellable) {

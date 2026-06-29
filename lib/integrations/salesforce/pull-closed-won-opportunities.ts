@@ -350,7 +350,10 @@ export async function pullClosedWonOpportunitySales(
       }
     }
     if (product2Id && packageId) {
-      packageByProduct2.set(product2Id, packageId)
+      const existingPackageId = packageByProduct2.get(product2Id)
+      if (!existingPackageId || productCode) {
+        packageByProduct2.set(product2Id, packageId)
+      }
       product2Ids.push(product2Id)
       const inv = Array.isArray(row.package_inventory) ? row.package_inventory[0] : row.package_inventory
       const available = Number(inv?.qty_available) || 0
