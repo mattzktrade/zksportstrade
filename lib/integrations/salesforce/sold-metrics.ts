@@ -39,6 +39,20 @@ export async function computeProductQuantitySoldFromWonLines(
   return Math.max(0, Math.floor(Number(v)))
 }
 
+export async function computeProductCommittedQuantityFromLines(
+  product2Id: string,
+  lostStageName: string,
+): Promise<number> {
+  const lost = escapeSoqlString(lostStageName.trim())
+  const pid = escapeSoqlString(product2Id)
+  const rows = await salesforceQuery<{ totalQty: number | null }>(
+    `SELECT SUM(Quantity) totalQty FROM OpportunityLineItem WHERE Product2Id = '${pid}' AND Opportunity.StageName != '${lost}'`,
+  )
+  const v = rows[0]?.totalQty
+  if (v == null || !Number.isFinite(Number(v))) return 0
+  return Math.max(0, Math.floor(Number(v)))
+}
+
 /** Push Value Sold on Product2 from actual non-lost OpportunityLineItem totals only. */
 export async function syncProductValueSold(args: {
   product2Id: string

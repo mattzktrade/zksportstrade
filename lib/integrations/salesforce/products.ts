@@ -14,6 +14,7 @@ import { getStoredInstanceUrl } from "@/lib/integrations/salesforce/settings-sto
 import { productCodeLookupVariants } from "@/lib/integrations/salesforce/product-code"
 import { findEventId, linkProductToEvent, resolveEventLookup } from "@/lib/integrations/salesforce/events"
 import {
+  computeProductCommittedQuantityFromLines,
   computeProductQuantitySoldFromWonLines,
   syncProductValueSold,
 } from "@/lib/integrations/salesforce/sold-metrics"
@@ -246,17 +247,26 @@ export async function syncPackageToSalesforce(packageId: string): Promise<Produc
     fieldsSkipped.push(`Closed Won line quantity: ${e instanceof Error ? e.message : String(e)}`)
     return 0
   })
+  const committedLineQty = await computeProductCommittedQuantityFromLines(product2Id, config.opportunityStageLost).catch((e) => {
+    fieldsSkipped.push(`Non-lost line quantity: ${e instanceof Error ? e.message : String(e)}`)
+    return wonLineQty
+  })
+  const sfStockTotal = sfSnapshot?.stock == null ? 0 : Math.max(0, Math.floor(sfSnapshot.stock))
   stockTotal = resolveSalesforceStockTotal({
     totalReceived,
     sellable,
-    sold: Math.max(localRecordedSold, wonLineQty),
+    sold: Math.max(localRecordedSold, wonLineQty, committedLineQty),
   })
-  const existingSfSold = Math.max(0, Math.floor(sfSnapshot?.quantitySold ?? 0), wonLineQty)
+  if (sfStockTotal > stockTotal) {
+    stockTotal = sfStockTotal
+  }
+  const actualSoldForProtection = Math.max(localRecordedSold, wonLineQty, committedLineQty)
+  const existingSfSold = actualSoldForProtection
   let availableForSalesforce = sellable
-  if (wonLineQty > localRecordedSold && stockTotal > wonLineQty) {
-    availableForSalesforce = Math.max(sellable, stockTotal - wonLineQty)
+  if (committedLineQty > localRecordedSold && stockTotal > committedLineQty) {
+    availableForSalesforce = Math.max(sellable, stockTotal - committedLineQty)
     fieldsSkipped.push(
-      `Available Quantity protected at ${availableForSalesforce} because Salesforce has ${wonLineQty} won line unit(s) but the portal has only recorded ${localRecordedSold}. Run Pull offline sales to import them.`,
+      `Available Quantity protected at ${availableForSalesforce} because Salesforce has ${committedLineQty} non-lost line unit(s) but the portal has only recorded ${localRecordedSold}. Run Pull offline sales to import closed-won sales.`,
     )
   } else if (existingSfSold > 0) {
     const availableBySold = Math.max(0, stockTotal - existingSfSold)
