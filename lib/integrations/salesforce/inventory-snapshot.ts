@@ -15,6 +15,34 @@ export type SfInventorySnapshot = {
   quantitySoldEstimated: boolean
 }
 
+const LINKED_SELLABLE_DAY_DURATIONS = new Set([
+  "thursday_only",
+  "friday_only",
+  "saturday_only",
+  "sunday_only",
+])
+
+/** Sellable single-day sibling in a linked inventory group (not a shell). */
+export function isLinkedSellableDayPackage(input: {
+  inventory_group_id?: string | null
+  shell_parent_package_id?: string | null
+  duration?: string | null
+}): boolean {
+  if (!input.inventory_group_id?.trim() || input.shell_parent_package_id?.trim()) return false
+  const duration = input.duration?.trim() ?? ""
+  return LINKED_SELLABLE_DAY_DURATIONS.has(duration)
+}
+
+/**
+ * Blank Product2 created by a failed auto-match (Stock/Available/Sold all zero). Pulling this
+ * onto a linked group would zero the portal and then min() the 3-day row to 0.
+ */
+export function isUninitializedSfInventorySnapshot(snapshot: SfInventorySnapshot): boolean {
+  const stock = snapshot.stock ?? 0
+  const available = snapshot.available ?? 0
+  return stock <= 0 && available <= 0 && snapshot.quantitySold <= 0
+}
+
 function escapeSoqlString(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
 }
@@ -50,8 +78,28 @@ export function parseSfInventorySnapshotFromRow(
   let quantitySold = 0
   let quantitySoldEstimated = false
 
-  if (explicitSold != null && explicitSold > 0) {
-    quantitySold = explicitSold
+  // When Available is 0 and Quantity_Sold equals Stock, the Product2 formula
+  // (Stock − Available) is feeding back a corrupt Available push — treat that
+  // explicit sold as untrusted so pull can recover from closed-won lines.
+  const formulaFeedbackCorrupt =
+    stock != null &&
+    stock > 0 &&
+    available != null &&
+    Math.floor(available) === 0 &&
+    explicitSold != null &&
+    Math.floor(explicitSold) >= Math.floor(stock)
+
+  if (explicitSold != null && explicitSold > 0 && !formulaFeedbackCorrupt) {
+    quantitySold = Math.floor(explicitSold)
+  } else if (explicitSold != null && explicitSold < 0) {
+    // Corrupt DLRS rollup (e.g. Stock=0, Sold=-22 after a bad portal sync). Ignore the negative
+    // field and derive from other signals.
+    if (stock != null && available != null && stock > 0) {
+      quantitySold = Math.max(0, Math.floor(stock) - Math.floor(available))
+    } else if (valueSold != null && valueSold > 0 && unitPrice != null && unitPrice > 0) {
+      quantitySold = Math.max(0, Math.floor(valueSold / unitPrice))
+      quantitySoldEstimated = true
+    }
   } else if (valueSold != null && valueSold > 0 && unitPrice != null && unitPrice > 0) {
     quantitySold = Math.max(0, Math.floor(valueSold / unitPrice))
     quantitySoldEstimated = true
@@ -64,13 +112,69 @@ export function parseSfInventorySnapshotFromRow(
 
 /** Portal sellable units implied by Salesforce Product2 inventory fields. */
 export function salesforceTargetSellable(snapshot: SfInventorySnapshot): number | null {
-  if (snapshot.available != null) {
-    return Math.max(0, Math.floor(snapshot.available))
+  const fromAvailable =
+    snapshot.available != null ? Math.max(0, Math.floor(snapshot.available)) : null
+  const stock = snapshot.stock != null ? Math.max(0, Math.floor(snapshot.stock)) : null
+  const sold = Math.max(0, snapshot.quantitySold)
+
+  // Available wiped to 0 while Sold claims the full stock — classic formula feedback after a
+  // bad Available push. Callers should fall back to closed-won lines / Stock Sources.
+  if (stock != null && stock > 0 && fromAvailable === 0 && sold >= stock) {
+    return null
   }
-  if (snapshot.stock != null) {
-    return Math.max(0, Math.floor(snapshot.stock - snapshot.quantitySold))
+
+  const fromStock =
+    stock != null && stock > 0 ? Math.max(0, stock - sold) : null
+
+  if (fromAvailable != null && fromStock != null) {
+    // Available__c is sometimes stale (0) while Stock − Sold is correct — use the higher.
+    return Math.max(fromAvailable, fromStock)
   }
-  return null
+  // When Stock Quantity is 0/corrupt, trust Available alone (e.g. Sat Stock=0 Sold=-22).
+  return fromAvailable ?? fromStock
+}
+
+/**
+ * Sellable for a linked day package sharing a pool with the 3-day parent.
+ * Each 3-day sale consumes one unit from every day; day-only sales consume that day only.
+ */
+export function linkedDayPoolSellable(input: {
+  poolStock: number | null
+  threeDayCommitted: number
+  dayCommitted: number
+  snapshot: SfInventorySnapshot
+}): number | null {
+  const poolStock =
+    input.poolStock != null && input.poolStock > 0
+      ? Math.max(0, Math.floor(input.poolStock))
+      : null
+  const threeDayCommitted = Math.max(0, Math.floor(input.threeDayCommitted))
+  const dayCommitted = Math.max(0, Math.floor(input.dayCommitted))
+
+  if (poolStock != null) {
+    return Math.max(0, poolStock - threeDayCommitted - dayCommitted)
+  }
+
+  const stock = input.snapshot.stock != null ? Math.max(0, Math.floor(input.snapshot.stock)) : null
+  if (stock != null && stock > 0) {
+    return Math.max(0, stock - threeDayCommitted - dayCommitted)
+  }
+
+  const fromFields = salesforceTargetSellable(input.snapshot)
+  if (fromFields == null) return null
+  if (dayCommitted > 0 || threeDayCommitted > 0) {
+    return Math.max(0, fromFields - dayCommitted)
+  }
+  return fromFields
+}
+
+/** Total stock for a linked pool — prefer the 3-day parent Product2 stock. */
+export function linkedPoolStockQuantity(
+  parentSnapshot: SfInventorySnapshot | null | undefined,
+): number | null {
+  const parentStock =
+    parentSnapshot?.stock != null ? Math.max(0, Math.floor(parentSnapshot.stock)) : null
+  return parentStock != null && parentStock > 0 ? parentStock : null
 }
 
 /**

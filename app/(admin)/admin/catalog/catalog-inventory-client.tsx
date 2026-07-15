@@ -1,8 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useLayoutEffect, useState } from "react"
 import type { AdminPackageRow, AdminRaceOption } from "@/lib/admin/queries"
-import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
+import { salesforcePlacesSold } from "@/lib/admin/package-sales-breakdown"
+import {
+  clearCatalogClientCache,
+  readCatalogClientCache,
+  writeCatalogClientCache,
+} from "@/lib/admin/catalog-client-cache"
+import { fetchAdminCatalogList, fetchInventoryCsvRows } from "@/app/(admin)/actions"
 import { CatalogNewPackage } from "./catalog-new-package"
 import { CatalogAdminTable } from "./catalog-admin-table"
 
@@ -30,10 +36,13 @@ function downloadInventoryCsv(rows: AdminPackageRow[]): void {
   const body = rows.map((p) => {
     const portalAvailable = Number(p.inventory?.qty_available ?? 0)
     const held = Number(p.inventory?.qty_held ?? 0)
-    const portalStockPurchased = p.cost_layers.reduce((sum, layer) => sum + Number(layer.quantity ?? 0), 0)
+    const portalStockPurchased =
+      p.cost_layers.reduce((sum, layer) => sum + Number(layer.quantity ?? 0), 0) ||
+      Number(p.layer_units_purchased ?? 0)
     const salesforceStock = p.salesforce_inventory?.stock
     const totalStockStarted = salesforceStock ?? Math.max(portalStockPurchased, portalAvailable)
-    const salesforceSold = p.salesforce_inventory?.quantitySold ?? p.sales_breakdown.salesforceOffline
+    const salesforceSold =
+      p.salesforce_inventory?.quantitySold ?? salesforcePlacesSold(p.sales_breakdown)
     return [
       p.race_name,
       p.name,
@@ -62,16 +71,57 @@ function downloadInventoryCsv(rows: AdminPackageRow[]): void {
   URL.revokeObjectURL(url)
 }
 
-export function CatalogInventoryClient({
-  rows,
-  races,
-  wixListingsByPackage,
-}: {
-  rows: AdminPackageRow[]
-  races: AdminRaceOption[]
-  wixListingsByPackage: Record<string, WixChannelListingRow[]>
-}) {
+export function CatalogInventoryClient({ races }: { races: AdminRaceOption[] }) {
+  const [rows, setRows] = useState<AdminPackageRow[]>([])
+  const [listLoading, setListLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
+  const [csvLoading, setCsvLoading] = useState(false)
+
+  useLayoutEffect(() => {
+    const cached = readCatalogClientCache()
+    if (cached?.rows.length) {
+      setRows(cached.rows)
+      setListLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const fresh = await fetchAdminCatalogList()
+      if (cancelled) return
+      if (fresh.length > 0) {
+        setRows(fresh)
+        writeCatalogClientCache(fresh, races)
+      }
+      setListLoading(false)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [races])
+
+  async function handleExportCsv() {
+    setCsvLoading(true)
+    try {
+      const csvRows = await fetchInventoryCsvRows()
+      downloadInventoryCsv(csvRows.length > 0 ? csvRows : rows)
+    } finally {
+      setCsvLoading(false)
+    }
+  }
+
+  function handlePackageCreated() {
+    clearCatalogClientCache()
+    setListLoading(true)
+    void fetchAdminCatalogList().then((fresh) => {
+      if (fresh.length > 0) {
+        setRows(fresh)
+        writeCatalogClientCache(fresh, races)
+      }
+      setListLoading(false)
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -86,10 +136,11 @@ export function CatalogInventoryClient({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => downloadInventoryCsv(rows)}
-            className="shrink-0 px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted"
+            onClick={() => void handleExportCsv()}
+            disabled={csvLoading || listLoading}
+            className="shrink-0 px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted disabled:opacity-60"
           >
-            Export inventory CSV
+            {csvLoading ? "Preparing CSV…" : "Export inventory CSV"}
           </button>
           <button
             type="button"
@@ -101,8 +152,20 @@ export function CatalogInventoryClient({
         </div>
       </div>
 
-      <CatalogNewPackage races={races} open={createOpen} onOpenChange={setCreateOpen} />
-      <CatalogAdminTable rows={rows} races={races} wixListingsByPackage={wixListingsByPackage} />
+      <CatalogNewPackage
+        races={races}
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={handlePackageCreated}
+      />
+
+      {listLoading && rows.length === 0 ? (
+        <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground animate-pulse">
+          Loading inventory…
+        </div>
+      ) : (
+        <CatalogAdminTable rows={rows} races={races} />
+      )}
     </div>
   )
 }

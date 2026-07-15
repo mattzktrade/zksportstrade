@@ -1,4 +1,4 @@
-/** Mock catalog seed data � used only by `scripts/seed-catalog.ts`. */
+/** Mock catalog seed data � used only by `scripts/seed-catalog.ts`. */
 import type { Booking, Invoice, Package, Race } from "./types/catalog"
 import { pastPackages2026 } from "./seed-data/past-packages-2026"
 import { livePackages2026 } from "./seed-data/live-packages-2026"
@@ -266,7 +266,7 @@ export const races2026: Race[] = [
   },
   {
     id: "brazil-2026",
-    name: "São Paulo Grand Prix",
+    name: "Brazilian Grand Prix",
     shortName: "Brazil",
     location: "São Paulo",
     country: "Brazil",

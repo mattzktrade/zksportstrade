@@ -2,7 +2,7 @@ import dynamic from "next/dynamic"
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { releaseExpiredInventoryHoldsAndSync } from "@/lib/integrations/release-expired-holds"
 import {
-  getAdminPackageRows,
+  getAdminCatalogListRows,
   getApprovedAgents,
   getInventoryHoldsWithDetails,
   type InventoryPackageOption,
@@ -14,7 +14,7 @@ const InventoryAdminClient = dynamic(
   { loading: () => <PageLoadingSpinner /> },
 )
 
-function toInventoryOptions(pkgRows: Awaited<ReturnType<typeof getAdminPackageRows>>): InventoryPackageOption[] {
+function toInventoryOptions(pkgRows: Awaited<ReturnType<typeof getAdminCatalogListRows>>): InventoryPackageOption[] {
   return pkgRows
     .filter((p) => p.inventory != null)
     .map((p) => ({
@@ -40,7 +40,7 @@ export default async function AdminInventoryPage() {
   const [holds, agents, pkgRows] = await Promise.all([
     getInventoryHoldsWithDetails(),
     getApprovedAgents(),
-    getAdminPackageRows(),
+    getAdminCatalogListRows(),
   ])
   const packages = toInventoryOptions(pkgRows)
 

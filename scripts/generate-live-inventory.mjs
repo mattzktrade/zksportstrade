@@ -139,7 +139,7 @@ const RACES = {
   },
   brazil: {
     raceId: "brazil-2026",
-    circuit: "São Paulo Grand Prix",
+    circuit: "Brazilian Grand Prix",
     location: "São Paulo",
     country: "Brazil",
     countryCode: "BR",

@@ -3,7 +3,12 @@
 import { useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { clearPackageSalesforceLink, retryPackageIntegrationSync, updatePackageIntegration } from "@/app/(admin)/actions"
+import {
+  clearPackageSalesforceLink,
+  retryPackageIntegrationSync,
+  updatePackageIntegration,
+  type PackageIntegrationSnapshot,
+} from "@/app/(admin)/actions"
 import type { AdminPackageRow } from "@/lib/admin/queries"
 import { retailPriceFromTrade } from "@/lib/integrations/retail-price"
 import { packageSyncStatusClass, packageSyncStatusLabel } from "@/lib/integrations/sync-status"
@@ -24,6 +29,16 @@ function formatSyncDate(value: string): string {
   }).format(new Date(value))
 }
 
+function integrationFromRow(row: AdminPackageRow): PackageIntegrationSnapshot {
+  return {
+    integration_sync_status: row.integration_sync_status ?? "idle",
+    integration_sync_error: row.integration_sync_error ?? null,
+    integration_synced_at: row.integration_synced_at ?? null,
+    product_code: row.product_code?.trim() || null,
+    salesforce_product_id: row.salesforce_product_id?.trim() || null,
+  }
+}
+
 export function PackageIntegrationPanel({
   initial,
   wixListings = [],
@@ -37,6 +52,7 @@ export function PackageIntegrationPanel({
   const router = useRouter()
   const [pending, start] = useTransition()
   const [showLinkWix, setShowLinkWix] = useState(false)
+  const [integration, setIntegration] = useState<PackageIntegrationSnapshot>(() => integrationFromRow(initial))
 
   const [salesforceProductId, setSalesforceProductId] = useState(initial.salesforce_product_id ?? "")
   const [retailMultiplier, setRetailMultiplier] = useState(
@@ -49,7 +65,9 @@ export function PackageIntegrationPanel({
   const [sellWix, setSellWix] = useState(initial.sell_on_wix === true)
 
   useEffect(() => {
-    setSalesforceProductId(initial.salesforce_product_id ?? "")
+    const next = integrationFromRow(initial)
+    setIntegration(next)
+    setSalesforceProductId(next.salesforce_product_id ?? "")
     setRetailMultiplier(initial.retail_price_multiplier != null ? String(initial.retail_price_multiplier) : "")
     setWixRetailPrice(initial.wix_retail_price != null ? String(initial.wix_retail_price) : "")
     setSellTrade(initial.sell_on_trade_portal !== false)
@@ -61,6 +79,11 @@ export function PackageIntegrationPanel({
   const manualWixPrice = wixRetailPrice.trim() === "" ? null : Number(wixRetailPrice)
   const websitePrice =
     tradePrice != null ? retailPriceFromTrade(tradePrice, overrideMult ?? undefined, manualWixPrice) : manualWixPrice
+
+  function applyIntegrationSnapshot(snapshot: PackageIntegrationSnapshot) {
+    setIntegration(snapshot)
+    if (snapshot.salesforce_product_id) setSalesforceProductId(snapshot.salesforce_product_id)
+  }
 
   function save() {
     start(async () => {
@@ -85,7 +108,7 @@ export function PackageIntegrationPanel({
 
       const res = await updatePackageIntegration({
         packageId: initial.id,
-        product_code: initial.product_code?.trim() || null,
+        product_code: integration.product_code,
         salesforce_product_id: salesforceProductId.trim() || null,
         retail_price_multiplier: mult,
         wix_retail_price: manualPrice,
@@ -104,13 +127,20 @@ export function PackageIntegrationPanel({
   }
 
   function retrySync() {
+    setIntegration((prev) => ({
+      ...prev,
+      integration_sync_status: "pending",
+      integration_sync_error: null,
+    }))
     start(async () => {
       const res = await retryPackageIntegrationSync(initial.id)
+      if (res.integration) applyIntegrationSnapshot(res.integration)
       if (!res.ok) {
         toast.error(res.message, { duration: 12000 })
+        router.refresh()
         return
       }
-      toast.success(res.message ?? "Sync queued.", { duration: 8000 })
+      toast.success(res.message ?? "Synced to Salesforce successfully.", { duration: 8000 })
       router.refresh()
     })
   }
@@ -129,12 +159,21 @@ export function PackageIntegrationPanel({
         toast.error(res.message)
         return
       }
-      toast.success("Salesforce link cleared. Queue Salesforce sync to create/link the live product.")
+      applyIntegrationSnapshot({
+        integration_sync_status: "idle",
+        integration_sync_error: null,
+        integration_synced_at: null,
+        product_code: null,
+        salesforce_product_id: null,
+      })
+      setSalesforceProductId("")
+      toast.success("Salesforce link cleared. Sync to Salesforce to create/link the live product.")
       router.refresh()
     })
   }
 
-  const syncStatus = initial.integration_sync_status ?? "idle"
+  const syncStatus = integration.integration_sync_status ?? "idle"
+  const syncBusy = pending
 
   return (
     <div className={cn("space-y-4", compact ? "" : "rounded-xl border border-border bg-muted/20 p-4")}>
@@ -154,13 +193,13 @@ export function PackageIntegrationPanel({
             packageSyncStatusClass(syncStatus),
           )}
         >
-          {packageSyncStatusLabel(syncStatus)}
+          {syncBusy ? "Syncing…" : packageSyncStatusLabel(syncStatus)}
         </span>
       </div>
 
-      {initial.product_code ? (
+      {integration.product_code ? (
         <p className="text-xs text-muted-foreground">
-          Salesforce code: <span className="font-mono text-foreground">{initial.product_code}</span>
+          Salesforce code: <span className="font-mono text-foreground">{integration.product_code}</span>
         </p>
       ) : null}
 
@@ -173,7 +212,7 @@ export function PackageIntegrationPanel({
             placeholder="01t… — optional; leave blank for auto-create"
             className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
           />
-          {initial.salesforce_product_id || initial.product_code ? (
+          {integration.salesforce_product_id || integration.product_code ? (
             <button
               type="button"
               disabled={pending}
@@ -224,15 +263,15 @@ export function PackageIntegrationPanel({
         </label>
       </div>
 
-      {initial.integration_sync_error ? (
+      {integration.integration_sync_error ? (
         <p className="text-xs text-destructive rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 whitespace-pre-wrap break-words">
-          {initial.integration_sync_error}
+          {integration.integration_sync_error}
         </p>
       ) : null}
 
-      {initial.integration_synced_at ? (
+      {integration.integration_synced_at ? (
         <p className="text-[11px] text-muted-foreground">
-          Last Salesforce sync: {formatSyncDate(initial.integration_synced_at)}
+          Last Salesforce sync: {formatSyncDate(integration.integration_synced_at)}
         </p>
       ) : null}
 
@@ -257,11 +296,11 @@ export function PackageIntegrationPanel({
         </button>
         <button
           type="button"
-          disabled={pending}
+          disabled={syncBusy}
           onClick={() => retrySync()}
           className="px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted disabled:opacity-50"
         >
-          Queue Salesforce sync
+          {syncBusy ? "Syncing to Salesforce…" : "Sync to Salesforce"}
         </button>
       </div>
     </div>

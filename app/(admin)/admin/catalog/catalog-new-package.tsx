@@ -20,10 +20,12 @@ export function CatalogNewPackage({
   races,
   open,
   onOpenChange,
+  onCreated,
 }: {
   races: AdminRaceOption[]
   open: boolean
   onOpenChange: (open: boolean) => void
+  onCreated?: () => void
 }) {
   const router = useRouter()
   const [pending, start] = useTransition()
@@ -142,6 +144,10 @@ export function CatalogNewPackage({
         toast.error("Enter a display name.")
         return
       }
+      if (!duration.trim()) {
+        toast.error("Choose a duration (linked day splits).")
+        return
+      }
       const price = parsePrice()
       if (tradePrice.trim() !== "" && price === null) {
         toast.error("Trade price must be a number or empty.")
@@ -202,6 +208,7 @@ export function CatalogNewPackage({
       }
       toast.success(res.message ?? "Package created.")
       resetForm()
+      onCreated?.()
       onOpenChange(false)
       router.refresh()
     })
@@ -276,14 +283,15 @@ export function CatalogNewPackage({
         </label>
 
         <label className="block text-xs text-muted-foreground sm:col-span-2 sm:max-w-md">
-          Duration (linked day splits)
+          Duration (linked day splits) <span className="text-primary">*</span>
           <select
+            required
             value={duration}
             onChange={(e) => setDuration(e.target.value)}
             className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
           >
             {PACKAGE_DURATION_OPTIONS.map((o) => (
-              <option key={o.value || "none"} value={o.value}>
+              <option key={o.value || "none"} value={o.value} disabled={o.value === ""}>
                 {o.label}
               </option>
             ))}

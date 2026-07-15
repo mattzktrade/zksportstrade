@@ -9,6 +9,16 @@ export type LinkedInventoryPackage = {
   duration: string | null
   qty_available: number | null
   qty_held: number | null
+  salesforce_product_id: string | null
+  sales_breakdown: PackageSalesBreakdown
+}
+
+/** Hidden Single Ticket shell — shown in linked inventory table only (not sellable). */
+export type LinkedInventoryShellPackage = {
+  id: string
+  name: string
+  duration: string | null
+  salesforce_product_id: string | null
   sales_breakdown: PackageSalesBreakdown
 }
 
@@ -42,6 +52,7 @@ export function linkedPackagesFromAdminRows(
       duration: p.duration ?? null,
       qty_available: p.inventory?.qty_available ?? null,
       qty_held: p.inventory?.qty_held ?? null,
+      salesforce_product_id: (p as { salesforce_product_id?: string | null }).salesforce_product_id ?? null,
       sales_breakdown: p.sales_breakdown ?? emptyPackageSalesBreakdown(p.id),
     }))
     .sort((a, b) => a.name.localeCompare(b.name))

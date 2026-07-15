@@ -1,10 +1,9 @@
-import { runIntegrationCronJob } from "@/lib/integrations/run-integration-cron"
-
 const DEFAULT_LOCAL_INTERVAL_SEC = 60
 
 type GlobalCron = typeof globalThis & {
   __zkLocalIntegrationCronStarted?: boolean
   __zkLocalIntegrationCronTimer?: ReturnType<typeof setInterval>
+  __zkLocalIntegrationCronInitial?: ReturnType<typeof setTimeout>
 }
 
 function intervalMs(): number {
@@ -23,13 +22,18 @@ async function tick(): Promise<void> {
   running = true
   const started = Date.now()
   try {
+    // Dynamic import so HMR / long-running `next dev` never keeps a stale cron graph that
+    // still double-counts offline Salesforce sales (−8 inventory per tick).
+    const { runIntegrationCronJob } = await import("@/lib/integrations/run-integration-cron")
     const result = await runIntegrationCronJob()
     const applied = result.salesforceInventory.closedWon?.lineItemsApplied ?? 0
     const adjusted = result.salesforceInventory.adjusted
+    const healed = result.linkedInventoryHeal?.packagesFixed ?? 0
     const drained = result.completed
     const parts = [`${drained} sync job(s)`]
     if (applied > 0) parts.push(`${applied} offline sale(s)`)
     if (adjusted > 0) parts.push(`${adjusted} inventory adjust(s)`)
+    if (healed > 0) parts.push(`${healed} linked heal(s)`)
     console.log(
       `[local-cron] ${new Date().toISOString()} done in ${Date.now() - started}ms — ${parts.join(", ")}`,
     )
@@ -49,7 +53,17 @@ async function tick(): Promise<void> {
 /** Start automatic integration cron in local development (same work as production Vercel cron). */
 export function startLocalIntegrationCron(): void {
   const g = globalThis as GlobalCron
-  if (g.__zkLocalIntegrationCronStarted) return
+  if (g.__zkLocalIntegrationCronTimer) {
+    clearInterval(g.__zkLocalIntegrationCronTimer)
+    g.__zkLocalIntegrationCronTimer = undefined
+  }
+  if (g.__zkLocalIntegrationCronInitial) {
+    clearTimeout(g.__zkLocalIntegrationCronInitial)
+    g.__zkLocalIntegrationCronInitial = undefined
+  }
+  if (g.__zkLocalIntegrationCronStarted) {
+    console.log("[local-cron] Re-binding scheduler after hot reload.")
+  }
   g.__zkLocalIntegrationCronStarted = true
 
   const ms = intervalMs()
@@ -59,7 +73,7 @@ export function startLocalIntegrationCron(): void {
   console.log("[local-cron] Set LOCAL_CRON_INTERVAL_SEC in .env.local to change the interval.")
 
   const initialDelayMs = 10_000
-  setTimeout(() => {
+  g.__zkLocalIntegrationCronInitial = setTimeout(() => {
     void tick()
     g.__zkLocalIntegrationCronTimer = setInterval(() => {
       void tick()
@@ -94,9 +108,11 @@ export async function runLocalIntegrationCronHttp(options?: {
       })
       const body = await res.json().catch(() => ({}))
       const applied = body?.salesforceInventory?.closedWon?.lineItemsApplied ?? 0
+      const healed = body?.linkedInventoryHeal?.packagesFixed ?? 0
       console.log(
         `[local-cron] ${new Date().toISOString()} HTTP ${res.status}` +
-          (applied ? ` — ${applied} offline sale(s) applied` : ""),
+          (applied ? ` — ${applied} offline sale(s) applied` : "") +
+          (healed ? ` — ${healed} linked heal(s)` : ""),
       )
       if (!res.ok) {
         console.warn("[local-cron] response:", JSON.stringify(body).slice(0, 400))

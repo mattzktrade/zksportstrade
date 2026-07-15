@@ -2151,7 +2151,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "brazil-legend-paddock-club-2026",
     "name": "3 Day Legend Paddock Club",
-    "circuit": "São Paulo Grand Prix",
+    "circuit": "Brazilian Grand Prix",
     "location": "São Paulo",
     "country": "Brazil",
     "countryCode": "BR",
@@ -2177,7 +2177,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "brazil-paddock-club-red-bull-2026",
     "name": "3 Day Paddock Club - Red Bull",
-    "circuit": "São Paulo Grand Prix",
+    "circuit": "Brazilian Grand Prix",
     "location": "São Paulo",
     "country": "Brazil",
     "countryCode": "BR",
@@ -2202,7 +2202,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "brazil-f1-experiences-paddock-club-2026",
     "name": "3 Day F1 Experiences Paddock Club",
-    "circuit": "São Paulo Grand Prix",
+    "circuit": "Brazilian Grand Prix",
     "location": "São Paulo",
     "country": "Brazil",
     "countryCode": "BR",
@@ -2227,7 +2227,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "brazil-paddock-club-club-suite-2026",
     "name": "3 Day Paddock Club - Club Suite",
-    "circuit": "São Paulo Grand Prix",
+    "circuit": "Brazilian Grand Prix",
     "location": "São Paulo",
     "country": "Brazil",
     "countryCode": "BR",
@@ -2252,7 +2252,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "brazil-f1-experiences-lounge-2026",
     "name": "3 Day F1 Experiences Lounge",
-    "circuit": "São Paulo Grand Prix",
+    "circuit": "Brazilian Grand Prix",
     "location": "São Paulo",
     "country": "Brazil",
     "countryCode": "BR",
@@ -2277,7 +2277,7 @@ export const livePackages2026: Package[] = [
   {
     "id": "brazil-champions-club-2026",
     "name": "3 Day Champions Club",
-    "circuit": "São Paulo Grand Prix",
+    "circuit": "Brazilian Grand Prix",
     "location": "São Paulo",
     "country": "Brazil",
     "countryCode": "BR",

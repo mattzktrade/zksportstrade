@@ -7,6 +7,7 @@ import Link from "next/link"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import type { AdminPackageRow, AdminRaceOption } from "@/lib/admin/queries"
 import { linkedPackagesFromAdminRows, type LinkedInventoryPackage } from "@/lib/admin/linked-inventory"
+import { fetchAdminPackageForCatalogExpand } from "@/app/(admin)/actions"
 import { adminCatalogProductTitleFromPackage } from "@/lib/admin/catalog-product-title"
 import { adminRaceLabel } from "@/lib/admin/race-label"
 import { adminPackagePath } from "@/lib/admin/package-link"
@@ -14,9 +15,8 @@ import { isBookableEventDate } from "@/lib/catalog/bookable-events"
 import { PackageAdminPanel } from "@/components/admin/package-admin-panel"
 import { formatMoneyCompact } from "@/lib/format/money"
 import { cn } from "@/lib/utils"
-import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
 
-const CATALOG_FILTER_STORAGE_KEY = "zk-admin-catalog-filters-v1"
+const CATALOG_FILTER_STORAGE_KEY = "zk-admin-catalog-filters-v2"
 
 function sellableFromInventory(inv: { qty_available: number; qty_held: number } | null): number | null {
   if (!inv) return null
@@ -41,6 +41,11 @@ type SavedCatalogFilters = {
   scheduleFilter?: ScheduleFilter
   visibilityFilter?: VisibilityFilter
   stockFilter?: StockFilter
+  showShellTickets?: boolean
+}
+
+function isShellTicketRow(row: AdminPackageRow): boolean {
+  return !!row.shell_parent_package_id?.trim()
 }
 
 function rowMatchesVisibility(row: AdminPackageRow, f: VisibilityFilter): boolean {
@@ -70,11 +75,9 @@ function formatTradeSummary(currency: string, tradePrice: number | null, isEnqui
 export function CatalogAdminTable({
   rows,
   races,
-  wixListingsByPackage = {},
 }: {
   rows: AdminPackageRow[]
   races: AdminRaceOption[]
-  wixListingsByPackage?: Record<string, WixChannelListingRow[]>
 }) {
   const sorted = useMemo(
     () =>
@@ -95,6 +98,7 @@ export function CatalogAdminTable({
   const [scheduleFilter, setScheduleFilter] = useState<ScheduleFilter>("upcoming")
   const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>("all")
   const [stockFilter, setStockFilter] = useState<StockFilter>("all")
+  const [showShellTickets, setShowShellTickets] = useState(false)
   const [filtersReady, setFiltersReady] = useState(false)
 
   useEffect(() => {
@@ -113,6 +117,7 @@ export function CatalogAdminTable({
       if (saved.stockFilter === "all" || saved.stockFilter === "in_stock" || saved.stockFilter === "out_of_stock") {
         setStockFilter(saved.stockFilter)
       }
+      if (typeof saved.showShellTickets === "boolean") setShowShellTickets(saved.showShellTickets)
     } catch {
       /* ignore */
     } finally {
@@ -128,9 +133,10 @@ export function CatalogAdminTable({
       scheduleFilter,
       visibilityFilter,
       stockFilter,
+      showShellTickets,
     }
     localStorage.setItem(CATALOG_FILTER_STORAGE_KEY, JSON.stringify(payload))
-  }, [search, raceFilter, scheduleFilter, visibilityFilter, stockFilter, filtersReady])
+  }, [search, raceFilter, scheduleFilter, visibilityFilter, stockFilter, showShellTickets, filtersReady])
 
   const searchNorm = search.trim().toLowerCase()
 
@@ -141,6 +147,7 @@ export function CatalogAdminTable({
 
   const filtered = useMemo(() => {
     return sorted.filter((row) => {
+      if (!showShellTickets && isShellTicketRow(row)) return false
       if (!rowMatchesScheduleFilter(row, scheduleFilter)) return false
       if (!rowMatchesVisibility(row, visibilityFilter)) return false
       if (searchNorm && !rowMatchesSearch(row, searchNorm)) return false
@@ -148,7 +155,7 @@ export function CatalogAdminTable({
       if (!rowMatchesStockFilter(row, stockFilter)) return false
       return true
     })
-  }, [sorted, searchNorm, raceFilter, scheduleFilter, visibilityFilter, stockFilter])
+  }, [sorted, searchNorm, raceFilter, scheduleFilter, visibilityFilter, stockFilter, showShellTickets])
 
   const grouped = useMemo(() => {
     const map = new Map<string, { label: string; rows: AdminPackageRow[] }>()
@@ -168,12 +175,25 @@ export function CatalogAdminTable({
     [sorted],
   )
 
+  const linkedPackagesByGroupId = useMemo(() => {
+    const map = new Map<string, LinkedInventoryPackage[]>()
+    for (const row of sorted) {
+      const groupId = row.inventory_group_id?.trim()
+      if (!groupId || map.has(groupId)) continue
+      map.set(groupId, linkedPackagesFromAdminRows(row, sorted))
+    }
+    return map
+  }, [sorted])
+
+  const shellTicketCount = useMemo(() => sorted.filter(isShellTicketRow).length, [sorted])
+
   function resetFilters() {
     setSearch("")
     setRaceFilter("")
     setScheduleFilter("upcoming")
     setVisibilityFilter("all")
     setStockFilter("all")
+    setShowShellTickets(false)
   }
 
   const hasActiveFilters =
@@ -181,7 +201,8 @@ export function CatalogAdminTable({
     raceFilter !== "" ||
     scheduleFilter !== "upcoming" ||
     visibilityFilter !== "all" ||
-    stockFilter !== "all"
+    stockFilter !== "all" ||
+    showShellTickets
 
   if (sorted.length === 0) {
     return (
@@ -271,12 +292,31 @@ export function CatalogAdminTable({
               <option value="out_of_stock">Out of stock / no inventory</option>
             </select>
           </label>
+          <label className="flex items-end gap-2 text-sm pb-2 sm:min-w-[200px]">
+            <input
+              type="checkbox"
+              checked={showShellTickets}
+              onChange={(e) => setShowShellTickets(e.target.checked)}
+              className="rounded border-border"
+            />
+            <span className="text-xs text-muted-foreground leading-snug">
+              Show single ticket shells
+              {!showShellTickets && shellTicketCount > 0 ? (
+                <span className="block text-[11px] text-muted-foreground/80">
+                  {shellTicketCount} hidden
+                </span>
+              ) : null}
+            </span>
+          </label>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">
             Showing {filtered.length} of {scheduleFilter === "upcoming" ? upcomingCount : sorted.length} packages
             {scheduleFilter === "upcoming" && upcomingCount < sorted.length
               ? ` (${sorted.length - upcomingCount} past hidden — switch schedule to view)`
+              : ""}
+            {!showShellTickets && shellTicketCount > 0
+              ? ` · ${shellTicketCount} single ticket shell${shellTicketCount === 1 ? "" : "s"} hidden`
               : ""}
             {filtered.length === 0 ? " — try clearing search or filters." : ""}
           </p>
@@ -313,8 +353,11 @@ export function CatalogAdminTable({
                     key={row.id}
                     initial={row}
                     races={races}
-                    wixListings={wixListingsByPackage[row.id] ?? []}
-                    linkedPackages={linkedPackagesFromAdminRows(row, sorted)}
+                    linkedPackages={
+                      row.inventory_group_id?.trim()
+                        ? (linkedPackagesByGroupId.get(row.inventory_group_id.trim()) ?? [])
+                        : []
+                    }
                   />
                 ))}
               </div>
@@ -329,15 +372,37 @@ export function CatalogAdminTable({
 function CatalogRow({
   initial,
   races,
-  wixListings = [],
   linkedPackages = [],
 }: {
   initial: AdminPackageRow
   races: AdminRaceOption[]
-  wixListings?: WixChannelListingRow[]
   linkedPackages?: LinkedInventoryPackage[]
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [expandedPackage, setExpandedPackage] = useState<AdminPackageRow | null>(null)
+  const [expandedLinkedPackages, setExpandedLinkedPackages] = useState<LinkedInventoryPackage[] | null>(
+    null,
+  )
+  const [expandLoading, setExpandLoading] = useState(false)
+
+  async function toggleExpanded() {
+    const next = !expanded
+    setExpanded(next)
+    if (!next) return
+    setExpandLoading(true)
+    try {
+      const full = await fetchAdminPackageForCatalogExpand(initial.id)
+      if (full) {
+        setExpandedPackage(full.pkg)
+        setExpandedLinkedPackages(full.linkedPackages)
+      }
+    } finally {
+      setExpandLoading(false)
+    }
+  }
+
+  const panelPackage = expandedPackage ?? initial
+  const panelLinkedPackages = expandedLinkedPackages ?? linkedPackages
 
   const currency = initial.currency
   const tradePrice = initial.trade_price
@@ -372,7 +437,7 @@ function CatalogRow({
       <div className="flex items-stretch gap-0">
         <button
           type="button"
-          onClick={() => setExpanded((e) => !e)}
+          onClick={() => void toggleExpanded()}
           className="shrink-0 px-3 py-3.5 text-muted-foreground hover:bg-muted/40 transition-colors"
           aria-expanded={expanded}
           aria-label={expanded ? "Collapse" : "Expand"}
@@ -425,12 +490,22 @@ function CatalogRow({
               Open full product page →
             </Link>
           </div>
-          <PackageAdminPanel
-            initial={initial}
-            races={races}
-            wixListings={wixListings}
-            linkedPackages={linkedPackages}
-          />
+          {expandLoading ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">Loading package details…</p>
+          ) : (
+            <PackageAdminPanel
+              initial={panelPackage}
+              races={races}
+              linkedPackages={panelLinkedPackages}
+              onInventoryChanged={async () => {
+                const full = await fetchAdminPackageForCatalogExpand(initial.id)
+                if (full) {
+                  setExpandedPackage(full.pkg)
+                  setExpandedLinkedPackages(full.linkedPackages)
+                }
+              }}
+            />
+          )}
         </div>
       )}
     </div>

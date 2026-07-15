@@ -9,8 +9,10 @@ import { findProduct2IdByCode } from "@/lib/integrations/salesforce/products"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 const CURSOR_KEY = "salesforce_closed_won_inventory_cursor"
-const FORCE_LOOKBACK_MS = 730 * 24 * 60 * 60 * 1000
+/** Force pull lookback — long enough to catch missed offline sales without scanning years. */
+const FORCE_LOOKBACK_MS = 120 * 24 * 60 * 60 * 1000
 const FIRST_RUN_OVERLAP_MS = 5 * 60 * 1000
+const CLOSED_WON_QUERY_LIMIT = 200
 
 export type ClosedWonOpportunityAdjustment = {
   opportunityId: string
@@ -167,7 +169,10 @@ export async function pullClosedWonOpportunitySales(
     ? `(IsWon = true OR StageName = '${escapeSoqlString(wonStage)}')`
     : `IsWon = true`
 
-  const soql = `SELECT Id, Name, LastModifiedDate, (SELECT Id, Product2Id, Quantity FROM OpportunityLineItems WHERE Product2Id != null) FROM Opportunity WHERE ${stageClause} AND LastModifiedDate >= ${soqlDateTime(since)} ORDER BY LastModifiedDate ASC LIMIT 500`
+  // Force pulls prefer newest first so recent offline sales apply immediately.
+  // Incremental cron keeps ASC so the cursor advances through history safely.
+  const orderDir = options?.force ? "DESC" : "ASC"
+  const soql = `SELECT Id, Name, LastModifiedDate, (SELECT Id, Product2Id, Quantity FROM OpportunityLineItems WHERE Product2Id != null) FROM Opportunity WHERE ${stageClause} AND LastModifiedDate >= ${soqlDateTime(since)} ORDER BY LastModifiedDate ${orderDir} LIMIT ${CLOSED_WON_QUERY_LIMIT}`
 
   let rows: OpportunityRow[]
   try {
@@ -193,23 +198,15 @@ export async function pullClosedWonOpportunitySales(
   const packageByProduct2 = new Map<string, string>()
   const currentSellableByPackage = new Map<string, number>()
   const product2Ids: string[] = []
+  const needsCodeLookup: PackageMappingRow[] = []
   for (const row of (packageRows ?? []) as PackageMappingRow[]) {
-    let product2Id =
+    const product2Id =
       typeof row.salesforce_product_id === "string" ? row.salesforce_product_id.trim() : ""
     const packageId = typeof row.id === "string" ? row.id.trim() : ""
     const productCode = typeof row.product_code === "string" ? row.product_code.trim() : ""
     if (!product2Id && productCode && packageId) {
-      try {
-        product2Id = (await findProduct2IdByCode(productCode)) ?? ""
-        if (product2Id) {
-          await admin
-            .from("packages")
-            .update({ salesforce_product_id: product2Id, integration_sync_error: null })
-            .eq("id", packageId)
-        }
-      } catch (e) {
-        result.errors.push(`${packageId}: Product Code "${productCode}" lookup failed: ${e instanceof Error ? e.message : String(e)}`)
-      }
+      needsCodeLookup.push(row)
+      continue
     }
     if (product2Id && packageId) {
       const existingPackageId = packageByProduct2.get(product2Id)
@@ -222,6 +219,37 @@ export async function pullClosedWonOpportunitySales(
       const held = Number(inv?.qty_held) || 0
       currentSellableByPackage.set(packageId, Math.max(0, Math.floor(available) - Math.floor(held)))
     }
+  }
+
+  // Resolve missing Product2 Ids in small parallel batches (avoid one SF round-trip per package).
+  const CODE_LOOKUP_CONCURRENCY = 8
+  for (let i = 0; i < needsCodeLookup.length; i += CODE_LOOKUP_CONCURRENCY) {
+    const batch = needsCodeLookup.slice(i, i + CODE_LOOKUP_CONCURRENCY)
+    await Promise.all(
+      batch.map(async (row) => {
+        const packageId = typeof row.id === "string" ? row.id.trim() : ""
+        const productCode = typeof row.product_code === "string" ? row.product_code.trim() : ""
+        if (!packageId || !productCode) return
+        try {
+          const product2Id = (await findProduct2IdByCode(productCode)) ?? ""
+          if (!product2Id) return
+          await admin
+            .from("packages")
+            .update({ salesforce_product_id: product2Id, integration_sync_error: null })
+            .eq("id", packageId)
+          packageByProduct2.set(product2Id, packageId)
+          product2Ids.push(product2Id)
+          const inv = Array.isArray(row.package_inventory) ? row.package_inventory[0] : row.package_inventory
+          const available = Number(inv?.qty_available) || 0
+          const held = Number(inv?.qty_held) || 0
+          currentSellableByPackage.set(packageId, Math.max(0, Math.floor(available) - Math.floor(held)))
+        } catch (e) {
+          result.errors.push(
+            `${packageId}: Product Code "${productCode}" lookup failed: ${e instanceof Error ? e.message : String(e)}`,
+          )
+        }
+      }),
+    )
   }
 
   const sfSnapshots = await readSfInventorySnapshotsBulk(product2Ids, config)
@@ -261,18 +289,21 @@ export async function pullClosedWonOpportunitySales(
         continue
       }
 
-      const currentSellable = currentSellableByPackage.get(packageId)
+      const currentSellable = currentSellableByPackage.get(packageId) ?? 0
       const sfTargetSellable = salesforceTargetSellable(sfSnapshots.get(product2Id) ?? {
         quantitySold: 0,
         stock: null,
         available: null,
         quantitySoldEstimated: false,
       })
+      // When Product2 Available/Sold looks corrupt (null target), do not invent a decrement —
+      // linked-group heal / Available pull owns sellable. Still record the offline application.
       const reflectedInPortal =
-        currentSellable != null && sfTargetSellable != null
+        sfTargetSellable != null
           ? Math.max(0, currentSellable - sfTargetSellable)
-          : quantity
-      const decrement = Math.min(quantity, reflectedInPortal)
+          : 0
+      // Never reduce qty_available below qty_held (package_inventory_held_lte_available).
+      const decrement = Math.min(quantity, reflectedInPortal, currentSellable)
 
       if (decrement > 0) {
         const { error: rpcErr } = await admin.rpc("adjust_linked_inventory_available", {
@@ -283,9 +314,7 @@ export async function pullClosedWonOpportunitySales(
           result.errors.push(`${oppId} line ${lineItemId}: ${rpcErr.message}`)
           continue
         }
-        if (currentSellable != null) {
-          currentSellableByPackage.set(packageId, Math.max(0, currentSellable - decrement))
-        }
+        currentSellableByPackage.set(packageId, Math.max(0, currentSellable - decrement))
       }
 
       const { error: insertErr } = await admin.from("salesforce_offline_sale_applications").insert({
@@ -314,7 +343,9 @@ export async function pullClosedWonOpportunitySales(
     }
   }
 
-  if (rows.length > 0) {
+  // Force pulls scan newest-first and must not advance the incremental cursor —
+  // otherwise older unapplied Closed Won rows in the lookback window are skipped forever.
+  if (rows.length > 0 && !options?.force) {
     await setIntegrationSetting(CURSOR_KEY, maxModified.toISOString())
   }
 

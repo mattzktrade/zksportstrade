@@ -9,14 +9,25 @@ import {
   updateInventoryRow,
   updatePackageFields,
 } from "@/app/(admin)/actions"
-import type { LinkedInventoryPackage } from "@/lib/admin/linked-inventory"
+import type { LinkedInventoryPackage, LinkedInventoryShellPackage } from "@/lib/admin/linked-inventory"
 import type { AdminPackageRow, AdminRaceOption } from "@/lib/admin/queries"
+import type { LinkedDayPackageOverview } from "@/lib/admin/linked-day-package-overview"
 import { adminRaceLabel } from "@/lib/admin/race-label"
 import { cn } from "@/lib/utils"
 import { PackageCostLayers } from "@/components/admin/package-cost-layers"
 import { PackagePortalVisibilityCheckbox } from "@/components/admin/package-portal-visibility"
 import { PackageIntegrationPanel } from "@/components/admin/package-integration-panel"
+import { LinkedDayInventoryToolbar } from "@/components/admin/linked-day-packages-panel"
+import { FulfilmentBlocksPanel } from "@/components/admin/fulfilment-blocks-panel"
 import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
+import type { FulfilmentBlockWithUsage } from "@/lib/admin/fulfilment-blocks"
+import type { PurchaseOrderRow } from "@/lib/admin/purchase-orders"
+import {
+  commitmentSellable,
+  linkedPoolSellableForPackage,
+  salesforceClosedWonSold,
+  type LinkedSellableMember,
+} from "@/lib/admin/package-sales-breakdown"
 import { PACKAGE_DURATION_OPTIONS, packageDurationLabel } from "@/lib/catalog/package-duration"
 
 function linesToList(s: string): string[] {
@@ -51,17 +62,30 @@ export function PackageAdminPanel({
   races,
   wixListings = [],
   linkedPackages = [],
+  linkedShellPackages = [],
+  linkedDayOverview,
   onDeleted,
   section = "all",
+  purchaseOrders = [],
+  fulfilmentBlocks = [],
+  onInventoryChanged,
 }: {
   initial: AdminPackageRow
   races: AdminRaceOption[]
   wixListings?: WixChannelListingRow[]
   linkedPackages?: LinkedInventoryPackage[]
+  linkedShellPackages?: LinkedInventoryShellPackage[]
+  linkedDayOverview?: LinkedDayPackageOverview
   /** Called after successful delete (e.g. redirect from detail page). */
   onDeleted?: () => void
   /** Which block to show. Catalog expand uses `all`; product page uses separate tabs. */
   section?: PackageAdminPanelSection
+  /** All portal purchase orders — layer editor uses these to link a PO to a cost layer. */
+  purchaseOrders?: PurchaseOrderRow[]
+  /** Fulfilment blocks for this package (with usage counts). */
+  fulfilmentBlocks?: FulfilmentBlockWithUsage[]
+  /** Refetch inventory after cost-layer mutations. */
+  onInventoryChanged?: () => Promise<void> | void
 }) {
   const router = useRouter()
   const [pending, start] = useTransition()
@@ -234,13 +258,69 @@ export function PackageAdminPanel({
   const salePrice = section === "inventory" || section === "all" ? initial.trade_price : parsePrice()
   const qtyAvailable = initial.inventory?.qty_available ?? 0
   const qtyHeldNum = initial.inventory?.qty_held ?? 0
-  const sellable = Math.max(0, qtyAvailable - qtyHeldNum)
-  const soldTotal = initial.sales_breakdown?.total ?? 0
+  const inventorySellable = Math.max(0, qtyAvailable - qtyHeldNum)
+  const salesBreakdown = initial.sales_breakdown ?? {
+    package_id: initial.id,
+    wix: 0,
+    salesforceOffline: 0,
+    salesforceOpenPipeline: 0,
+    tradePortal: 0,
+    total: 0,
+  }
+  const soldTotal = salesBreakdown.total
+  const sfInv = initial.salesforce_inventory
+  const usesSalesforceInventory =
+    !!initial.inventory_group_id?.trim() && sfInv != null
+  const layerStock = (initial.cost_layers ?? []).reduce(
+    (sum, l) => sum + Math.max(0, Math.floor(Number(l.quantity) || 0)),
+    0,
+  )
+  // Cost layers are the purchase ledger — prefer them over a stale higher SF Stock
+  // (e.g. after deleting extra stock purchases that Salesforce has not yet been told about).
+  const stockDisplay =
+    layerStock > 0
+      ? layerStock
+      : usesSalesforceInventory && sfInv.stock != null
+        ? Math.max(0, Math.floor(sfInv.stock))
+        : Math.max(qtyAvailable, layerStock)
+  // Prefer closed-won places sold when Product2 Quantity_Sold looks like formula feedback
+  // (Available wiped to 0 while Sold claims the full stock).
+  const closedWonSold = salesforceClosedWonSold(salesBreakdown)
+  // Prefer portal closed-won ledger over Product2 Quantity_Sold — that field is often a
+  // Stock−Available formula and incorrectly counts day-pool holds on the 3-day product.
+  const soldDisplay = usesSalesforceInventory ? closedWonSold : soldTotal
+
+  const linkedMembers: LinkedSellableMember[] =
+    linkedPackages.length > 1
+      ? linkedPackages.map((p) => ({
+          id: p.id,
+          duration: p.duration,
+          breakdown: p.id === initial.id ? salesBreakdown : p.sales_breakdown,
+        }))
+      : []
+
+  // Per-package pool Remaining (Fri ≠ Sun ≠ 3-day). Do not sum every sibling's pipeline.
+  const sellable =
+    linkedMembers.length > 0
+      ? linkedPoolSellableForPackage({
+          stock: stockDisplay,
+          targetId: initial.id,
+          targetDuration: initial.duration,
+          members: linkedMembers,
+        })
+      : commitmentSellable({
+          stock: stockDisplay,
+          breakdown: salesBreakdown,
+        })
+  const openPipelineHolds =
+    linkedMembers.length > 0
+      ? linkedMembers.reduce((sum, m) => sum + Math.max(0, Math.floor(m.breakdown.salesforceOpenPipeline)), 0)
+      : Math.max(0, Math.floor(salesBreakdown.salesforceOpenPipeline))
 
   return (
     <div className="space-y-6 min-w-0 w-full">
       {showDetails ? (
-      <div className="space-y-3 min-w-0">
+      <div className="space-y-4 min-w-0">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Package details</p>
         <PackagePortalVisibilityCheckbox packageId={initial.id} isHidden={initial.is_hidden} className="mb-1" />
         <div className="grid gap-4 sm:grid-cols-2">
@@ -471,21 +551,41 @@ export function PackageAdminPanel({
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-2xl">
               <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Sellable</p>
-                <p className="text-lg font-semibold tabular-nums">{sellable}</p>
+                <p
+                  className={`text-lg font-semibold tabular-nums ${
+                    sellable < 0 ? "text-destructive" : ""
+                  }`}
+                >
+                  {sellable}
+                </p>
+                {sellable < 0 ? (
+                  <p className="text-[10px] text-destructive/90 mt-0.5">
+                    Oversold (pipeline holds stock)
+                  </p>
+                ) : openPipelineHolds > 0 ? (
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    After SF pipeline
+                  </p>
+                ) : null}
               </div>
               <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wide text-muted-foreground">On hold</p>
                 <p className="text-lg font-semibold tabular-nums">{qtyHeldNum}</p>
               </div>
               <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
-                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Stock</p>
-                <p className="text-lg font-semibold tabular-nums">{qtyAvailable}</p>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {usesSalesforceInventory ? "Stock (SF)" : "Stock"}
+                </p>
+                <p className="text-lg font-semibold tabular-nums">{stockDisplay}</p>
               </div>
               <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
-                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Sold</p>
-                <p className="text-lg font-semibold tabular-nums">{soldTotal}</p>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {usesSalesforceInventory ? "Sold (SF)" : "Sold"}
+                </p>
+                <p className="text-lg font-semibold tabular-nums">{soldDisplay}</p>
               </div>
             </div>
+            {linkedDayOverview ? <LinkedDayInventoryToolbar overview={linkedDayOverview} /> : null}
             <PackageCostLayers
               packageId={initial.id}
               packageName={initial.name}
@@ -493,10 +593,20 @@ export function PackageAdminPanel({
               packageCurrency={(initial.currency || "USD").trim() || "USD"}
               salePrice={salePrice}
               layers={initial.cost_layers}
-              salesBreakdown={initial.sales_breakdown}
+              salesBreakdown={salesBreakdown}
               linkedPackages={linkedPackages}
+              linkedShellPackages={linkedShellPackages}
               sellable={sellable}
+              stockTotal={stockDisplay}
+              qtyAvailable={qtyAvailable}
+              purchaseOrders={purchaseOrders}
+              fulfilmentBlocks={fulfilmentBlocks}
+              hasSalesforceProduct={!!initial.salesforce_product_id?.trim()}
+              onInventoryChanged={onInventoryChanged}
             />
+            <div className="border-t border-border pt-4">
+              <FulfilmentBlocksPanel packageId={initial.id} blocks={fulfilmentBlocks} />
+            </div>
             <div className="rounded-lg border border-dashed border-border p-3 space-y-3 max-w-xs">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Manual hold</p>
               {linkedPackages.length > 1 ? (

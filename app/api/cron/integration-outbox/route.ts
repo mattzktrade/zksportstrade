@@ -1,4 +1,3 @@
-import { runIntegrationCronJob } from "@/lib/integrations/run-integration-cron"
 import { NextResponse } from "next/server"
 
 export async function GET(request: Request) {
@@ -15,6 +14,7 @@ export async function GET(request: Request) {
   }
 
   try {
+    const { runIntegrationCronJob } = await import("@/lib/integrations/run-integration-cron")
     const result = await runIntegrationCronJob()
     return NextResponse.json(result)
   } catch (e) {

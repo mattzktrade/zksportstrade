@@ -1,9 +1,16 @@
+import { cache } from "react"
 import { createClient } from "@/lib/supabase/server"
 import { isOutstandingInvoiceStatus } from "@/lib/invoices/status"
 import type { PortalProfile } from "@/lib/types/profile"
-import { INVENTORY_COLUMNS, PACKAGE_COLUMNS } from "@/lib/catalog/columns"
+import { CATALOG_LIST_PACKAGE_COLUMNS, INVENTORY_COLUMNS, PACKAGE_COLUMNS } from "@/lib/catalog/columns"
 import type { DbInventory, DbPackage } from "@/lib/catalog/map-rows"
-import { getCostLayersByPackage, summarizePackageCost, type CostLayerRow, type PackageCostSummary } from "@/lib/admin/cost-layers"
+import {
+  getCostLayerQuantityTotalsByPackage,
+  getCostLayersByPackage,
+  summarizePackageCost,
+  type CostLayerRow,
+  type PackageCostSummary,
+} from "@/lib/admin/cost-layers"
 import {
   getPackageSalesBreakdownByPackage,
 } from "@/lib/admin/package-sales-breakdown-queries"
@@ -11,6 +18,7 @@ import {
   emptyPackageSalesBreakdown,
   type PackageSalesBreakdown,
 } from "@/lib/admin/package-sales-breakdown"
+import type { LinkedInventoryPackage, LinkedInventoryShellPackage } from "@/lib/admin/linked-inventory"
 import { getSalesforceConfig, isSalesforceConfigured } from "@/lib/integrations/salesforce/config"
 import {
   readSfInventorySnapshotsBulk,
@@ -28,11 +36,11 @@ export type AdminPackageRow = DbPackage & {
   race_name: string
   cost_layers: CostLayerRow[]
   cost_summary: PackageCostSummary | null
+  /** Sum of layer quantities — populated on list loads that skip full cost_layers. */
+  layer_units_purchased?: number
   sales_breakdown: PackageSalesBreakdown
   salesforce_inventory: SfInventorySnapshot | null
 }
-
-import type { LinkedInventoryPackage } from "@/lib/admin/linked-inventory"
 
 export type LinkedInventorySibling = LinkedInventoryPackage
 
@@ -45,7 +53,7 @@ export async function getLinkedInventoryPackages(
 
   const { data: packages } = await supabase
     .from("packages")
-    .select("id, name, duration")
+    .select("id, name, duration, salesforce_product_id")
     .eq("inventory_group_id", groupId)
     .order("name")
 
@@ -53,7 +61,9 @@ export async function getLinkedInventoryPackages(
   if (rows.length === 0) return []
 
   const ids = rows.map((p) => p.id)
-  const [invBy, salesByPkg] = await Promise.all([
+  const salesByPkg = await getPackageSalesBreakdownByPackage(ids)
+
+  const [invBy] = await Promise.all([
     (async () => {
       const { data: inv } = await supabase
         .from("package_inventory")
@@ -61,17 +71,18 @@ export async function getLinkedInventoryPackages(
         .in("package_id", ids)
       return new Map((inv ?? []).map((i) => [i.package_id, i]))
     })(),
-    getPackageSalesBreakdownByPackage(ids),
   ])
 
   return rows.map((p) => {
     const row = invBy.get(p.id)
+    const typed = p as { salesforce_product_id: string | null }
     return {
       id: p.id,
       name: p.name,
       duration: p.duration,
       qty_available: row?.qty_available ?? null,
       qty_held: row?.qty_held ?? null,
+      salesforce_product_id: typed.salesforce_product_id ?? null,
       sales_breakdown: salesByPkg.get(p.id) ?? emptyPackageSalesBreakdown(p.id),
     }
   })
@@ -87,6 +98,38 @@ export async function getLinkedInventorySiblings(
   return all.filter((p) => p.id !== excludePackageId)
 }
 
+/** Single Ticket shells for a 3-day parent — for the linked inventory Places sold table. */
+export async function getLinkedShellInventoryPackages(
+  threeDayParentId: string,
+): Promise<LinkedInventoryShellPackage[]> {
+  const supabase = await createClient()
+  const parentId = threeDayParentId.trim()
+  if (!parentId) return []
+
+  const { data: shells } = await supabase
+    .from("packages")
+    .select("id, name, duration, salesforce_product_id")
+    .eq("shell_parent_package_id", parentId)
+    .order("duration")
+
+  const rows = shells ?? []
+  if (rows.length === 0) return []
+
+  const ids = rows.map((p) => p.id)
+  const salesByPkg = await getPackageSalesBreakdownByPackage(ids)
+
+  return rows.map((p) => {
+    const typed = p as { salesforce_product_id: string | null }
+    return {
+      id: p.id,
+      name: p.name,
+      duration: p.duration,
+      salesforce_product_id: typed.salesforce_product_id ?? null,
+      sales_breakdown: salesByPkg.get(p.id) ?? emptyPackageSalesBreakdown(p.id),
+    }
+  })
+}
+
 export type AdminRaceOption = {
   id: string
   name: string
@@ -100,6 +143,10 @@ export type AdminRaceOption = {
 }
 
 export async function getAdminRaceOptions(): Promise<AdminRaceOption[]> {
+  return getAdminRaceOptionsCached()
+}
+
+const getAdminRaceOptionsCached = cache(async (): Promise<AdminRaceOption[]> => {
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("races")
@@ -108,7 +155,7 @@ export async function getAdminRaceOptions(): Promise<AdminRaceOption[]> {
     .order("event_date")
   if (error || !data) return []
   return data as AdminRaceOption[]
-}
+})
 
 export async function getPendingProfiles(): Promise<PortalProfile[]> {
   const supabase = await createClient()
@@ -302,11 +349,100 @@ export async function getAdminAgentsWithOrderStats(): Promise<AdminAgentWithStat
 }
 
 export async function getAdminPackageById(packageId: string): Promise<AdminPackageRow | null> {
-  const rows = await getAdminPackageRows()
-  return rows.find((p) => p.id === packageId) ?? null
+  const supabase = await createClient()
+  const id = packageId.trim()
+  if (!id) return null
+
+  const [{ data: pkg, error: pe }, { data: inv }] = await Promise.all([
+    supabase.from("packages").select(PACKAGE_COLUMNS).eq("id", id).maybeSingle(),
+    supabase.from("package_inventory").select(INVENTORY_COLUMNS).eq("package_id", id).maybeSingle(),
+  ])
+  if (pe || !pkg) return null
+
+  const row = pkg as DbPackage
+
+  const [{ data: race }, layersByPkg, salesByPkg, sfInventoryByProduct] = await Promise.all([
+    supabase.from("races").select("id,name").eq("id", row.race_id).maybeSingle(),
+    getCostLayersByPackage([id]),
+    getPackageSalesBreakdownByPackage([id]),
+    getSalesforceInventorySnapshotsForPackages([row]),
+  ])
+  const layers = layersByPkg.get(id) ?? []
+  const summary = summarizePackageCost(row.currency || "USD", layers)
+  if (summary) summary.package_id = id
+  const raceName = (race as { id: string; name: string } | null)?.name ?? row.race_id
+  return {
+    ...row,
+    inventory: (inv as DbInventory | null) ?? null,
+    race_name: raceName,
+    cost_layers: layers,
+    cost_summary: summary,
+    sales_breakdown: salesByPkg.get(id) ?? emptyPackageSalesBreakdown(id),
+    salesforce_inventory:
+      row.salesforce_product_id?.trim()
+        ? sfInventoryByProduct.get(row.salesforce_product_id.trim()) ?? null
+        : null,
+  }
 }
 
-export async function getAdminPackageRows(): Promise<AdminPackageRow[]> {
+/**
+ * Fast catalog list — slim package columns, no cost layers, sales breakdown, SF, or Wix.
+ * Full detail is loaded on the product page or when a catalog row is expanded.
+ */
+export async function getAdminCatalogListRows(): Promise<AdminPackageRow[]> {
+  const supabase = await createClient()
+  const [{ data: races, error: re }, { data: packages, error: pe }, { data: inv, error: ie }] =
+    await Promise.all([
+      supabase.from("races").select("id,name").order("event_date"),
+      supabase.from("packages").select(CATALOG_LIST_PACKAGE_COLUMNS).order("sort_order"),
+      supabase.from("package_inventory").select(INVENTORY_COLUMNS),
+    ])
+  if (re || pe || ie || !packages) return []
+  const raceName = new Map((races ?? []).map((r: { id: string; name: string }) => [r.id, r.name]))
+  const invBy = new Map((inv ?? []).map((i: DbInventory) => [i.package_id, i]))
+  return (packages as DbPackage[]).map((p) => ({
+    ...p,
+    total_capacity: 0,
+    requires_booking_approval: false,
+    image: null,
+    tier: "",
+    includes: [],
+    featured: false,
+    brochure_url: null,
+    description: null,
+    gallery_images: [],
+    salesforce_product_family: null,
+    retail_price_multiplier: null,
+    wix_retail_price: null,
+    sell_on_trade_portal: true,
+    sell_on_wix: false,
+    sell_on_partners: false,
+    integration_sync_status: "idle",
+    integration_synced_at: null,
+    integration_sync_error: null,
+    inventory: invBy.get(p.id) ?? null,
+    race_name: raceName.get(p.race_id) ?? p.race_id,
+    cost_layers: [],
+    cost_summary: null,
+    sales_breakdown: emptyPackageSalesBreakdown(p.id),
+    salesforce_inventory: null,
+  }))
+}
+
+/**
+ * Options for {@link getAdminPackageRows}. Salesforce inventory and full cost layers are
+ * skipped by default so the catalog page loads fast — CSV export opts in via a follow-up fetch.
+ */
+export type GetAdminPackageRowsOptions = {
+  /** When true, bulk-read Salesforce Product2 for every package. */
+  includeSalesforceInventory?: boolean
+  /** When true, load full cost layer rows (heavier). Default false for catalog list. */
+  includeCostLayers?: boolean
+}
+
+export async function getAdminPackageRows(
+  options?: GetAdminPackageRowsOptions,
+): Promise<AdminPackageRow[]> {
   const supabase = await createClient()
   const [{ data: races, error: re }, { data: packages, error: pe }, { data: inv, error: ie }] = await Promise.all([
     supabase.from("races").select("id,name").order("event_date"),
@@ -317,14 +453,19 @@ export async function getAdminPackageRows(): Promise<AdminPackageRow[]> {
   const raceName = new Map((races ?? []).map((r: { id: string; name: string }) => [r.id, r.name]))
   const invBy = new Map((inv ?? []).map((i: DbInventory) => [i.package_id, i]))
   const packageIds = (packages as DbPackage[]).map((p) => p.id)
-  const [layersByPkg, salesByPkg, sfInventoryByProduct] = await Promise.all([
-    getCostLayersByPackage(packageIds),
+  const includeCostLayers = options?.includeCostLayers === true
+  const [layersByPkg, layerTotalsByPkg, salesByPkg, sfInventoryByProduct] = await Promise.all([
+    includeCostLayers ? getCostLayersByPackage(packageIds) : Promise.resolve(new Map<string, CostLayerRow[]>()),
+    includeCostLayers ? Promise.resolve(new Map<string, { quantity_purchased: number; quantity_remaining: number }>()) : getCostLayerQuantityTotalsByPackage(packageIds),
     getPackageSalesBreakdownByPackage(packageIds),
-    getSalesforceInventorySnapshotsForPackages(packages as DbPackage[]),
+    options?.includeSalesforceInventory
+      ? getSalesforceInventorySnapshotsForPackages(packages as DbPackage[])
+      : Promise.resolve(new Map<string, SfInventorySnapshot>()),
   ])
   return (packages as DbPackage[]).map((p) => {
     const layers = layersByPkg.get(p.id) ?? []
-    const summary = summarizePackageCost(p.currency || "USD", layers)
+    const totals = layerTotalsByPkg.get(p.id)
+    const summary = includeCostLayers ? summarizePackageCost(p.currency || "USD", layers) : null
     if (summary) summary.package_id = p.id
     return {
       ...p,
@@ -332,6 +473,7 @@ export async function getAdminPackageRows(): Promise<AdminPackageRow[]> {
       race_name: raceName.get(p.race_id) ?? p.race_id,
       cost_layers: layers,
       cost_summary: summary,
+      layer_units_purchased: totals?.quantity_purchased,
       sales_breakdown: salesByPkg.get(p.id) ?? emptyPackageSalesBreakdown(p.id),
       salesforce_inventory:
         p.salesforce_product_id?.trim() ? (sfInventoryByProduct.get(p.salesforce_product_id.trim()) ?? null) : null,

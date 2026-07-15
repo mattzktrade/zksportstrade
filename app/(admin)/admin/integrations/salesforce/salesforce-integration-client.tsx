@@ -3,7 +3,7 @@
 import { useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { clearSalesforceSyncFailures, runIntegrationOutboxNow, pullSalesforceInventoryNow } from "@/app/(admin)/actions"
+import { clearSalesforceSyncFailures, runIntegrationOutboxNow, pullSalesforceInventoryNow, backfillShellSingleTicketsForAllThreeDayPackages } from "@/app/(admin)/actions"
 import type { RecentSyncFailure } from "@/lib/admin/integration-failures"
 
 export function SalesforceIntegrationClient({
@@ -25,6 +25,7 @@ export function SalesforceIntegrationClient({
   const [pending, start] = useTransition()
   const [pullPending, startPull] = useTransition()
   const [clearPending, startClear] = useTransition()
+  const [shellBackfillPending, startShellBackfill] = useTransition()
 
   function processQueue() {
     start(async () => {
@@ -65,9 +66,9 @@ export function SalesforceIntegrationClient({
       const { pull, outbox } = res
       if (pull.errors.length > 0) {
         toast.error(`Pull had errors: ${pull.errors[0]}`, { duration: 12000 })
-      } else if (pull.closedWon?.lineItemsApplied) {
+      } else if ((pull.closedWon?.lineItemsApplied ?? 0) > 0) {
         toast.success(
-          `Applied ${pull.closedWon.lineItemsApplied} offline sale(s) from Closed Won opportunities and refreshed portal/Wix inventory.`,
+          `Recorded ${pull.closedWon!.lineItemsApplied} new offline sale(s) for audit (inventory already in Salesforce Available).`,
         )
       } else if (pull.adjusted > 0) {
         toast.success(
@@ -96,6 +97,22 @@ export function SalesforceIntegrationClient({
         return
       }
       toast.success("Old Salesforce sync errors cleared.")
+      router.refresh()
+    })
+  }
+
+  function backfillShells() {
+    startShellBackfill(async () => {
+      const res = await backfillShellSingleTicketsForAllThreeDayPackages()
+      if (!res.ok) {
+        toast.error(res.message)
+        return
+      }
+      const errNote = res.errors.length > 0 ? ` ${res.errors.length} warning(s) — see server logs.` : ""
+      toast.success(
+        `Processed ${res.processed} three-day package(s): ${res.shellsCreated} new shell(s), ${res.queued} queued for Salesforce sync.${errNote}`,
+        { duration: 10000 },
+      )
       router.refresh()
     })
   }
@@ -152,6 +169,15 @@ export function SalesforceIntegrationClient({
           className="px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted disabled:opacity-50"
         >
           {pullPending ? "Pulling…" : "Pull offline sales from Salesforce"}
+        </button>
+        <button
+          type="button"
+          disabled={shellBackfillPending || !connected}
+          onClick={() => backfillShells()}
+          className="px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted disabled:opacity-50"
+          title="Create hidden Single Ticket shell children for every 3-day package and queue Salesforce sync"
+        >
+          {shellBackfillPending ? "Backfilling…" : "Backfill Single Ticket shells"}
         </button>
       </div>
 

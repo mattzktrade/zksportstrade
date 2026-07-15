@@ -1,6 +1,7 @@
 import { getSalesforceConfig, isSalesforceConfigured } from "@/lib/integrations/salesforce/config"
 import { salesforceQuery } from "@/lib/integrations/salesforce/client"
 import {
+  isUninitializedSfInventorySnapshot,
   readSfInventorySnapshotsBulk,
   salesforceTargetSellable,
   type SfInventorySnapshot,
@@ -15,7 +16,10 @@ import {
   getStoredInstanceUrl,
   setIntegrationSetting,
 } from "@/lib/integrations/salesforce/settings-store"
+import { syncStaleLinkedGroupsFromSalesforce } from "@/lib/inventory/linked-group-inventory"
 import { syncPackageCatalogToWix } from "@/lib/integrations/wix/catalog-sync"
+import { importMissingStockSourcesFromSalesforce } from "@/lib/integrations/salesforce/stock-sources"
+import { readOpenPipelineQuantityByProductBulk } from "@/lib/integrations/salesforce/sold-metrics"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 const LAST_PULL_KEY = "salesforce_inventory_pull_last_run"
@@ -39,6 +43,10 @@ export type SalesforceInventoryPullResult = {
   skippedPackages: number
   adjustments: SalesforceInventoryPullAdjustment[]
   channelSyncQueued: number
+  /** Re-sync all linked groups from SF after pull (repairs drift / cron races). */
+  linkedGroupHeal: { groups: number; packagesFixed: number } | null
+  /** Ledger-only import of SF Stock Sources into portal cost layers (no qty bump). */
+  stockSourcesImported: { packagesChecked: number; imported: number; claimed: number } | null
   errors: string[]
 }
 
@@ -47,8 +55,8 @@ type PackagePullRow = {
   salesforce_product_id: string
   product_code: string | null
   integration_sync_status: string | null
-  duration: string | null
   inventory_group_id: string | null
+  shell_parent_package_id: string | null
   qty_available: number
   qty_held: number
 }
@@ -89,6 +97,10 @@ async function shouldThrottleAvailablePull(force: boolean): Promise<boolean> {
   return elapsed >= 0 && elapsed < PULL_THROTTLE_MS
 }
 
+function isStandalonePullPackage(pkg: PackagePullRow): boolean {
+  return !pkg.inventory_group_id?.trim() && !pkg.shell_parent_package_id?.trim()
+}
+
 async function pullAvailableQuantityFromSalesforce(
   admin: NonNullable<ReturnType<typeof createAdminClient>>,
   config: NonNullable<ReturnType<typeof getSalesforceConfig>>,
@@ -104,8 +116,8 @@ async function pullAvailableQuantityFromSalesforce(
       salesforce_product_id,
       product_code,
       integration_sync_status,
-      duration,
       inventory_group_id,
+      shell_parent_package_id,
       package_inventory ( qty_available, qty_held )
     `,
     )
@@ -123,6 +135,7 @@ async function pullAvailableQuantityFromSalesforce(
   }
 
   const packages: PackagePullRow[] = []
+  const linkedGroupIds = new Set<string>()
   for (const raw of rows ?? []) {
     const id = typeof raw.id === "string" ? raw.id.trim() : ""
     const product2Id =
@@ -132,15 +145,21 @@ async function pullAvailableQuantityFromSalesforce(
     const inv = Array.isArray(raw.package_inventory)
       ? raw.package_inventory[0]
       : raw.package_inventory
+    const inventoryGroupId =
+      typeof raw.inventory_group_id === "string" ? raw.inventory_group_id.trim() : ""
+    const shellParentId =
+      typeof raw.shell_parent_package_id === "string" ? raw.shell_parent_package_id.trim() : ""
+
+    if (inventoryGroupId) linkedGroupIds.add(inventoryGroupId)
+
     packages.push({
       id,
       salesforce_product_id: product2Id,
       product_code: typeof raw.product_code === "string" ? raw.product_code.trim() : null,
       integration_sync_status:
         typeof raw.integration_sync_status === "string" ? raw.integration_sync_status : null,
-      duration: typeof raw.duration === "string" ? raw.duration : null,
-      inventory_group_id:
-        typeof raw.inventory_group_id === "string" ? raw.inventory_group_id : null,
+      inventory_group_id: inventoryGroupId || null,
+      shell_parent_package_id: shellParentId || null,
       qty_available: Number(inv?.qty_available) || 0,
       qty_held: Number(inv?.qty_held) || 0,
     })
@@ -157,80 +176,111 @@ async function pullAvailableQuantityFromSalesforce(
     }
   }
 
+  const adjustments: SalesforceInventoryPullAdjustment[] = []
+  const errors: string[] = []
+  let skippedPackages = 0
+  let checked = 0
+
+  // Linked groups are synced in one heal pass at the end of pullInventoryFromSalesforce.
+  // Syncing each group here (~57 sequential SF reads) left a long window where cron could
+  // corrupt Hungary etc., and the final state depended on loop order.
+  for (const groupId of linkedGroupIds) {
+    const members = packages.filter((p) => p.inventory_group_id === groupId && !p.shell_parent_package_id)
+    checked += members.length
+    skippedPackages += members.length
+  }
+
+  // Standalone packages only (not linked group members, not shells).
+  const standalonePackages = packages.filter(isStandalonePullPackage)
+
   const byProduct2Id = new Map<string, PackagePullRow>()
-  for (const pkg of packages) {
+  for (const pkg of standalonePackages) {
     const existing = byProduct2Id.get(pkg.salesforce_product_id)
     if (!existing || (!existing.product_code && pkg.product_code)) {
       byProduct2Id.set(pkg.salesforce_product_id, pkg)
     }
   }
-  const uniquePackages = [...byProduct2Id.values()]
+  const uniqueStandalone = [...byProduct2Id.values()]
+  checked += uniqueStandalone.length
 
-  let snapshots: Map<string, SfInventorySnapshot>
-  let closedWonQtyByProduct: Map<string, number>
-  try {
-    snapshots = await readSfInventorySnapshotsBulk(
-      uniquePackages.map((p) => p.salesforce_product_id),
-      config,
-    )
-    closedWonQtyByProduct = await readClosedWonQuantityByProduct(
-      uniquePackages.map((p) => p.salesforce_product_id),
-      config.opportunityStageWon,
-    )
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "Salesforce inventory query failed."
-    return {
-      checked: uniquePackages.length,
-      adjusted: 0,
-      skippedPackages: 0,
-      adjustments: [],
-      channelSyncQueued: 0,
-      errors: [message],
-    }
-  }
-
-  const adjustments: SalesforceInventoryPullAdjustment[] = []
-  const errors: string[] = []
-  let skippedPackages = 0
-
-  for (const pkg of uniquePackages) {
-    if (pkg.integration_sync_status === "pending" || pkg.integration_sync_status === "failed") {
-      skippedPackages++
-      continue
+  if (uniqueStandalone.length > 0) {
+    let snapshots: Map<string, SfInventorySnapshot>
+    let closedWonQtyByProduct: Map<string, number>
+    let openPipelineByProduct: Map<string, number>
+    try {
+      const productIds = uniqueStandalone.map((p) => p.salesforce_product_id)
+      snapshots = await readSfInventorySnapshotsBulk(productIds, config)
+      ;[closedWonQtyByProduct, openPipelineByProduct] = await Promise.all([
+        readClosedWonQuantityByProduct(productIds, config.opportunityStageWon),
+        readOpenPipelineQuantityByProductBulk(
+          productIds,
+          config.opportunityStageLost,
+          config.opportunityStageWon,
+        ),
+      ])
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Salesforce inventory query failed."
+      errors.push(message)
+      snapshots = new Map()
+      closedWonQtyByProduct = new Map()
+      openPipelineByProduct = new Map()
     }
 
-    const snapshot = snapshots.get(pkg.salesforce_product_id)
-    if (!snapshot) {
-      skippedPackages++
-      continue
-    }
+    for (const pkg of uniqueStandalone) {
+      const currentSellable = portalSellable(pkg.qty_available, pkg.qty_held)
+      if (pkg.integration_sync_status === "pending" || pkg.integration_sync_status === "failed") {
+        // After relink the package is queued for sync — still pull SF stock when portal is empty.
+        if (currentSellable > 0) {
+          skippedPackages++
+          continue
+        }
+      }
 
-    const sfSellable = salesforceTargetSellable(snapshot)
-    const closedWonQty = closedWonQtyByProduct.get(pkg.salesforce_product_id) ?? 0
-    const sfLineSellable =
-      snapshot.stock != null && closedWonQty > 0
-        ? Math.max(0, Math.floor(snapshot.stock) - closedWonQty)
-        : null
+      const snapshot = snapshots.get(pkg.salesforce_product_id)
+      if (!snapshot) {
+        skippedPackages++
+        continue
+      }
 
-    const currentSellable = portalSellable(pkg.qty_available, pkg.qty_held)
-    const targetSellable =
-      sfLineSellable != null &&
-      (sfLineSellable < currentSellable || (currentSellable === 0 && sfSellable === 0 && sfLineSellable > 0))
-        ? sfLineSellable
-        : sfSellable
-    if (targetSellable == null) {
-      skippedPackages++
-      continue
-    }
-    const sellableChanged = targetSellable !== currentSellable
-    const delta = targetSellable - currentSellable
+      const closedWonQty = closedWonQtyByProduct.get(pkg.salesforce_product_id) ?? 0
+      const openQty = openPipelineByProduct.get(pkg.salesforce_product_id) ?? 0
+      const sfLineSellable =
+        snapshot.stock != null && (closedWonQty > 0 || openQty > 0)
+          ? Math.max(0, Math.floor(snapshot.stock) - closedWonQty - openQty)
+          : null
 
-    if (!sellableChanged) {
-      skippedPackages++
-      continue
-    }
+      const sfSellable = salesforceTargetSellable(snapshot)
 
-    if (sellableChanged) {
+      // Prefer commitment sellable when Product2 Available/Sold look corrupt
+      // (Available=0 while closed-won implies remaining stock) or when it is
+      // lower than the portal (offline sales / pipeline not yet reflected).
+      const product2LooksCorrupt =
+        snapshot.available != null &&
+        Math.floor(snapshot.available) === 0 &&
+        snapshot.stock != null &&
+        snapshot.stock > 0 &&
+        sfLineSellable != null &&
+        sfLineSellable > 0
+
+      const targetSellable =
+        sfLineSellable != null &&
+        (product2LooksCorrupt ||
+          sfLineSellable < currentSellable ||
+          (currentSellable === 0 && (sfSellable == null || sfSellable === 0) && sfLineSellable > 0))
+          ? sfLineSellable
+          : sfSellable != null && openQty > 0 && snapshot.stock != null
+            ? Math.min(sfSellable, Math.max(0, Math.floor(snapshot.stock) - closedWonQty - openQty))
+            : sfSellable
+
+      if (targetSellable == null) {
+        skippedPackages++
+        continue
+      }
+      if (targetSellable === currentSellable) {
+        skippedPackages++
+        continue
+      }
+
       const { error: invErr } = await admin
         .from("package_inventory")
         .update({ qty_available: targetSellable + Math.max(0, Math.floor(pkg.qty_held)) })
@@ -239,21 +289,24 @@ async function pullAvailableQuantityFromSalesforce(
         errors.push(`${pkg.id}: ${invErr.message}`)
         continue
       }
+
+      await admin
+        .from("packages")
+        .update({ integration_sync_status: "synced", integration_sync_error: null })
+        .eq("id", pkg.id)
+
+      adjustments.push({
+        packageId: pkg.id,
+        product2Id: pkg.salesforce_product_id,
+        portalSellableBefore: currentSellable,
+        salesforceSellable: targetSellable,
+        delta: targetSellable - currentSellable,
+      })
     }
-
-    await admin
-      .from("packages")
-      .update({ integration_sync_status: "synced", integration_sync_error: null })
-      .eq("id", pkg.id)
-
-    adjustments.push({
-      packageId: pkg.id,
-      product2Id: pkg.salesforce_product_id,
-      portalSellableBefore: currentSellable,
-      salesforceSellable: targetSellable,
-      delta,
-    })
   }
+
+  // Shells are synced via their parent — count as skipped for metrics.
+  skippedPackages += packages.filter((p) => p.shell_parent_package_id?.trim()).length
 
   let channelSyncQueued = 0
   for (const adj of adjustments) {
@@ -266,7 +319,7 @@ async function pullAvailableQuantityFromSalesforce(
   }
 
   return {
-    checked: uniquePackages.length,
+    checked,
     adjusted: adjustments.length,
     skippedPackages,
     adjustments,
@@ -276,9 +329,10 @@ async function pullAvailableQuantityFromSalesforce(
 }
 
 /**
- * Reconcile portal inventory with offline Salesforce sales:
- * 1) Closed Won opportunities (manual SF deals) — applies line-item quantities with idempotency
- * 2) Available Quantity snapshot pull (decrease-only safety net for all mapped products)
+ * Reconcile portal inventory with Salesforce:
+ * 1) Closed Won opportunities — audit/idempotency only (no portal decrement)
+ * 2) Linked groups — syncLinkedGroupInventoryFromSalesforce per group (same as admin repair)
+ * 3) Standalone packages — per-Product2 Available pull
  */
 export async function pullInventoryFromSalesforce(options?: {
   force?: boolean
@@ -291,6 +345,8 @@ export async function pullInventoryFromSalesforce(options?: {
     skippedPackages: 0,
     adjustments: [],
     channelSyncQueued: 0,
+    linkedGroupHeal: null,
+    stockSourcesImported: null,
     errors: [],
   }
 
@@ -340,12 +396,43 @@ export async function pullInventoryFromSalesforce(options?: {
       skippedPackages: 0,
       adjustments: [],
       channelSyncQueued: 0,
+      linkedGroupHeal: null,
+      stockSourcesImported: null,
       errors,
     }
   }
 
   const available = await pullAvailableQuantityFromSalesforce(admin, config)
   errors.push(...available.errors)
+
+  let linkedGroupHeal: SalesforceInventoryPullResult["linkedGroupHeal"] = null
+  try {
+    // syncStaleLinkedGroupsFromSalesforce already runs an internal drift-repair pass —
+    // do not call repairAllDriftedLinkedGroupsFromSalesforce again (that doubled SF work).
+    const stale = await syncStaleLinkedGroupsFromSalesforce(admin, config)
+    linkedGroupHeal = {
+      groups: stale.groups,
+      packagesFixed: stale.packagesFixed,
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Linked group inventory heal failed."
+    errors.push(message)
+  }
+
+  let stockSourcesImported: SalesforceInventoryPullResult["stockSourcesImported"] = null
+  try {
+    // Only scan packages that still have no cost layers — and cap work per pull.
+    const imported = await importMissingStockSourcesFromSalesforce(admin, { limit: 40 })
+    stockSourcesImported = {
+      packagesChecked: imported.packagesChecked,
+      imported: imported.imported,
+      claimed: imported.claimed,
+    }
+    errors.push(...imported.errors)
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Stock source import failed."
+    errors.push(message)
+  }
 
   await setIntegrationSetting(LAST_PULL_KEY, new Date().toISOString())
 
@@ -357,6 +444,8 @@ export async function pullInventoryFromSalesforce(options?: {
     skippedPackages: available.skippedPackages,
     adjustments: available.adjustments,
     channelSyncQueued: available.channelSyncQueued,
+    linkedGroupHeal,
+    stockSourcesImported,
     errors,
   }
 }

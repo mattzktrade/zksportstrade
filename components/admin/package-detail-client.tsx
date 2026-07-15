@@ -1,14 +1,19 @@
 "use client"
 
-import { useRouter, useSearchParams } from "next/navigation"
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
-import type { LinkedInventoryPackage } from "@/lib/admin/linked-inventory"
+import type { LinkedInventoryPackage, LinkedInventoryShellPackage } from "@/lib/admin/linked-inventory"
 import type { AdminPackageRow, AdminRaceOption } from "@/lib/admin/queries"
+import type { LinkedDayPackageOverview } from "@/lib/admin/linked-day-package-overview"
 import { adminCatalogProductTitleFromPackage } from "@/lib/admin/catalog-product-title"
 import type { AdminOrderListRow } from "@/lib/orders/queries"
 import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
-import { adminPackagePath, parseAdminPackageTab, type AdminPackageTab } from "@/lib/admin/package-link"
+import type { FulfilmentBlockWithUsage } from "@/lib/admin/fulfilment-blocks"
+import type { PurchaseOrderRow } from "@/lib/admin/purchase-orders"
+import { adminPackagePath, type AdminPackageTab } from "@/lib/admin/package-link"
+import { fetchAdminPackageForCatalogExpand } from "@/app/(admin)/actions"
 import { PackageAdminPanel } from "@/components/admin/package-admin-panel"
 import { PackageOrdersTable } from "@/components/admin/package-orders-table"
 
@@ -30,24 +35,54 @@ export function PackageDetailClient({
   orders,
   wixListings = [],
   linkedPackages = [],
+  linkedShellPackages = [],
+  linkedDayOverview,
+  purchaseOrders = [],
+  fulfilmentBlocks = [],
+  initialTab = "details",
 }: {
   pkg: AdminPackageRow
   races: AdminRaceOption[]
   orders: AdminOrderListRow[]
   wixListings?: WixChannelListingRow[]
   linkedPackages?: LinkedInventoryPackage[]
+  linkedShellPackages?: LinkedInventoryShellPackage[]
+  linkedDayOverview?: LinkedDayPackageOverview
+  purchaseOrders?: PurchaseOrderRow[]
+  fulfilmentBlocks?: FulfilmentBlockWithUsage[]
+  initialTab?: AdminPackageTab
 }) {
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const activeTab = parseAdminPackageTab(searchParams.get("tab"))
+  const [activeTab, setActiveTab] = useState<AdminPackageTab>(initialTab)
+  const [livePkg, setLivePkg] = useState(pkg)
+  const [liveLinkedPackages, setLiveLinkedPackages] = useState(linkedPackages)
 
-  function setTab(tab: AdminPackageTab) {
-    router.replace(adminPackagePath(pkg.id, tab === "details" ? undefined : tab), { scroll: false })
+  useEffect(() => {
+    setLivePkg(pkg)
+  }, [pkg])
+
+  useEffect(() => {
+    setLiveLinkedPackages(linkedPackages)
+  }, [linkedPackages])
+
+  async function refreshInventory() {
+    const full = await fetchAdminPackageForCatalogExpand(livePkg.id)
+    if (full) {
+      setLivePkg(full.pkg)
+      setLiveLinkedPackages(full.linkedPackages)
+    }
+    router.refresh()
   }
 
-  const raceMatch = races.find((r) => r.id === pkg.race_id)
-  const displayTitle = adminCatalogProductTitleFromPackage(pkg, raceMatch)
-  const sellable = sellableQty(pkg)
+  function setTab(tab: AdminPackageTab) {
+    setActiveTab(tab)
+    const path = adminPackagePath(livePkg.id, tab === "details" ? undefined : tab)
+    window.history.replaceState(null, "", path)
+  }
+
+  const raceMatch = races.find((r) => r.id === livePkg.race_id)
+  const displayTitle = adminCatalogProductTitleFromPackage(livePkg, raceMatch)
+  const sellable = sellableQty(livePkg)
 
   return (
     <div className="space-y-6 min-w-0">
@@ -57,7 +92,7 @@ export function PackageDetailClient({
             ← Inventory
           </Link>
           <h1 className="text-2xl font-bold text-foreground leading-snug">{displayTitle}</h1>
-          {pkg.is_hidden ? (
+          {livePkg.is_hidden ? (
             <p className="text-xs text-muted-foreground">Hidden from agent portal</p>
           ) : null}
         </div>
@@ -105,31 +140,35 @@ export function PackageDetailClient({
       >
         {activeTab === "details" ? (
           <PackageAdminPanel
-            initial={pkg}
+            initial={livePkg}
             races={races}
             wixListings={wixListings}
-            linkedPackages={linkedPackages}
             section="details"
             onDeleted={() => router.push("/admin/catalog")}
           />
         ) : activeTab === "inventory" ? (
           <PackageAdminPanel
-            initial={pkg}
+            initial={livePkg}
             races={races}
             wixListings={wixListings}
-            linkedPackages={linkedPackages}
+            linkedPackages={liveLinkedPackages}
+            linkedShellPackages={linkedShellPackages}
+            linkedDayOverview={linkedDayOverview}
             section="inventory"
+            purchaseOrders={purchaseOrders}
+            fulfilmentBlocks={fulfilmentBlocks}
+            onInventoryChanged={refreshInventory}
           />
         ) : activeTab === "integrations" ? (
           <PackageAdminPanel
-            initial={pkg}
+            initial={livePkg}
             races={races}
             wixListings={wixListings}
-            linkedPackages={linkedPackages}
+            linkedPackages={liveLinkedPackages}
             section="integrations"
           />
         ) : (
-          <PackageOrdersTable orders={orders} costLayers={pkg.cost_layers} />
+          <PackageOrdersTable orders={orders} costLayers={livePkg.cost_layers} />
         )}
       </div>
     </div>

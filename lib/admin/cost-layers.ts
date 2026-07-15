@@ -13,6 +13,8 @@ export type CostLayerRow = {
   received_at: string
   created_at: string
   updated_at: string
+  purchase_order_id: string | null
+  fulfilment_block_id: string | null
 }
 
 export type CostConsumptionRow = {
@@ -24,6 +26,7 @@ export type CostConsumptionRow = {
   unit_cost: number | null
   currency: string
   supplier_source_snapshot: string | null
+  fulfilment_block_snapshot: string | null
   created_at: string
 }
 
@@ -56,10 +59,10 @@ export type OrderCostSummary = {
 }
 
 const COST_LAYER_COLUMNS =
-  "id, package_id, quantity, quantity_remaining, unit_cost, currency, note, source, received_at, created_at, updated_at" as const
+  "id, package_id, quantity, quantity_remaining, unit_cost, currency, note, source, received_at, created_at, updated_at, purchase_order_id, fulfilment_block_id" as const
 
 const CONSUMPTION_COLUMNS =
-  "id, order_id, cost_layer_id, package_id, quantity, unit_cost, currency, supplier_source_snapshot, created_at" as const
+  "id, order_id, cost_layer_id, package_id, quantity, unit_cost, currency, supplier_source_snapshot, fulfilment_block_snapshot, created_at" as const
 
 function n(value: number | string | null | undefined): number {
   if (value == null) return 0
@@ -87,6 +90,28 @@ export async function getCostLayersForPackage(packageId: string): Promise<CostLa
     quantity_remaining: Math.floor(n((row as CostLayerRow).quantity_remaining)),
     unit_cost: n((row as CostLayerRow).unit_cost),
   }))
+}
+
+/** Lightweight totals for catalog list / CSV without loading full layer rows. */
+export async function getCostLayerQuantityTotalsByPackage(
+  packageIds: readonly string[],
+): Promise<Map<string, { quantity_purchased: number; quantity_remaining: number }>> {
+  const out = new Map<string, { quantity_purchased: number; quantity_remaining: number }>()
+  if (packageIds.length === 0) return out
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from("package_cost_layers")
+    .select("package_id, quantity, quantity_remaining")
+    .in("package_id", packageIds)
+  if (error || !data) return out
+  for (const raw of data) {
+    const row = raw as { package_id: string; quantity: number; quantity_remaining: number }
+    const prev = out.get(row.package_id) ?? { quantity_purchased: 0, quantity_remaining: 0 }
+    prev.quantity_purchased += Math.floor(n(row.quantity))
+    prev.quantity_remaining += Math.floor(n(row.quantity_remaining))
+    out.set(row.package_id, prev)
+  }
+  return out
 }
 
 export async function getCostLayersByPackage(

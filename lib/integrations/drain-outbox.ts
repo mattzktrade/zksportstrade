@@ -55,7 +55,10 @@ async function hasPendingOutboxForPackage(packageId: string): Promise<boolean> {
 async function drainIntegrationOutboxInner(
   options: DrainOutboxOptions = {},
 ): Promise<ProcessOutboxResult> {
-  if (!options.skipInventoryPull) {
+  // Inventory pull runs on the integration cron (and explicit admin "Pull" actions), not on
+  // every outbox drain — otherwise each "Queue Salesforce sync" re-ran closed-won logic.
+  const skipInventoryPull = options.skipInventoryPull ?? true
+  if (!skipInventoryPull) {
     try {
       await pullInventoryFromSalesforce()
     } catch (e) {

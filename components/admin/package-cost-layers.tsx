@@ -1,14 +1,28 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useMemo, useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { addCostLayer, deleteCostLayer, updateCostLayer, updateCostLayerQuantity } from "@/app/(admin)/actions"
+import {
+  addStockPurchaseLayer,
+  deleteCostLayer,
+  importPackageStockSourcesFromSalesforce,
+  updateCostLayer,
+  updateCostLayerQuantity,
+  updateOrphanPackageStock,
+} from "@/app/(admin)/actions"
 import type { CostLayerRow } from "@/lib/admin/cost-layers"
-import type { LinkedInventoryPackage } from "@/lib/admin/linked-inventory"
-import { linkedPackageSellable } from "@/lib/admin/linked-inventory"
+import type { FulfilmentBlockRow } from "@/lib/admin/fulfilment-blocks"
+import type { PurchaseOrderRow } from "@/lib/admin/purchase-orders"
+import type { LinkedInventoryPackage, LinkedInventoryShellPackage } from "@/lib/admin/linked-inventory"
 import type { PackageSalesBreakdown } from "@/lib/admin/package-sales-breakdown"
+import {
+  linkedPoolSellableForPackage,
+  salesforceClosedWonSold,
+  type LinkedSellableMember,
+} from "@/lib/admin/package-sales-breakdown"
+import { resolveSoldByCostLayer } from "@/lib/integrations/salesforce/stock-sources"
 import { packageDurationLabel } from "@/lib/catalog/package-duration"
 import { formatMoney } from "@/lib/format/money"
 
@@ -22,8 +36,27 @@ type Props = {
   layers: CostLayerRow[]
   salesBreakdown: PackageSalesBreakdown
   linkedPackages?: LinkedInventoryPackage[]
-  /** Sellable for this package when not in a linked group. */
+  linkedShellPackages?: LinkedInventoryShellPackage[]
+  /**
+   * Admin commitment sellable (stock − closed-won − pipeline − portal/Wix).
+   * Can be negative when oversold.
+   */
   sellable?: number
+  /** Total stock units (SF Stock or cost-layer sum) for commitment sellable on linked rows. */
+  stockTotal?: number
+  /**
+   * Portal qty_available. When there are no cost layers but this is &gt; 0, stock exists
+   * without a purchase row — we show an editable "untracked stock" row.
+   */
+  qtyAvailable?: number
+  /** All purchase orders (any supplier) — layer can pick one, supplier auto-fills. */
+  purchaseOrders?: PurchaseOrderRow[]
+  /** Fulfilment blocks scoped to this package. */
+  fulfilmentBlocks?: FulfilmentBlockRow[]
+  /** When set, show "Import from Salesforce Stock Sources" for empty ledgers. */
+  hasSalesforceProduct?: boolean
+  /** Refetch package inventory into parent state (preferred over router.refresh alone). */
+  onInventoryChanged?: () => Promise<void> | void
 }
 
 function formatPct(value: number): string {
@@ -45,7 +78,7 @@ function formatDisplayDate(iso: string): string {
 }
 
 function soldCount(n: number): string {
-  return String(Math.max(0, Math.floor(n)))
+  return String(Math.floor(n))
 }
 
 export function PackageCostLayers({
@@ -57,23 +90,120 @@ export function PackageCostLayers({
   layers,
   salesBreakdown,
   linkedPackages = [],
+  linkedShellPackages = [],
   sellable = 0,
+  stockTotal,
+  qtyAvailable = 0,
+  purchaseOrders = [],
+  fulfilmentBlocks = [],
+  hasSalesforceProduct = false,
+  onInventoryChanged,
 }: Props) {
   const router = useRouter()
   const [pending, start] = useTransition()
+  const addFileRef = useRef<HTMLInputElement | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [addQty, setAddQty] = useState("")
   const [addCost, setAddCost] = useState("")
   const [addNote, setAddNote] = useState("")
-  const [addSource, setAddSource] = useState("")
+  const [addSupplier, setAddSupplier] = useState("")
+  const [addPoNumber, setAddPoNumber] = useState("")
+  const [addPoIssuedAt, setAddPoIssuedAt] = useState("")
   const [addDate, setAddDate] = useState("")
+
+  async function refreshInventoryUi() {
+    if (onInventoryChanged) {
+      await onInventoryChanged()
+      return
+    }
+    router.refresh()
+  }
+  const [addFulfilmentBlockId, setAddFulfilmentBlockId] = useState("")
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editCost, setEditCost] = useState("")
   const [editNote, setEditNote] = useState("")
-  const [editSource, setEditSource] = useState("")
+  const [editSupplier, setEditSupplier] = useState("")
+  const [editPoNumber, setEditPoNumber] = useState("")
+  const [editPoIssuedAt, setEditPoIssuedAt] = useState("")
   const [editDate, setEditDate] = useState("")
   const [editQty, setEditQty] = useState("")
   const [editCascade, setEditCascade] = useState(true)
+  const [editFulfilmentBlockId, setEditFulfilmentBlockId] = useState("")
+  const [orphanEditing, setOrphanEditing] = useState(false)
+  const [orphanQty, setOrphanQty] = useState("")
+  const [orphanConvert, setOrphanConvert] = useState(false)
+  const [orphanSupplier, setOrphanSupplier] = useState("")
+  const [orphanCost, setOrphanCost] = useState("0")
+  const [orphanNote, setOrphanNote] = useState("")
+  const [orphanDate, setOrphanDate] = useState("")
+  const [orphanPoNumber, setOrphanPoNumber] = useState("")
+  const [orphanPoIssuedAt, setOrphanPoIssuedAt] = useState("")
+  const [orphanBlockId, setOrphanBlockId] = useState("")
+
+  const hasOrphanStock = layers.length === 0 && qtyAvailable > 0
+
+  const resolvedStockTotal = useMemo(() => {
+    if (stockTotal != null && Number.isFinite(stockTotal) && stockTotal > 0) {
+      return Math.max(0, Math.floor(stockTotal))
+    }
+    const fromLayers = layers.reduce(
+      (sum, l) => sum + Math.max(0, Math.floor(Number(l.quantity) || 0)),
+      0,
+    )
+    return fromLayers > 0 ? fromLayers : Math.max(0, Math.floor(qtyAvailable))
+  }, [stockTotal, layers, qtyAvailable])
+
+  /** Closed-won places sold attributed to this package's stock pool (excl. open pipeline). */
+  const poolSoldTotal = useMemo(() => {
+    let total = salesforceClosedWonSold(salesBreakdown)
+    if (linkedPackages.length > 1) {
+      for (const p of linkedPackages) {
+        if (p.id === packageId) continue
+        total += salesforceClosedWonSold(p.sales_breakdown)
+      }
+    }
+    // Also count portal / Wix bookings on this package (and linked siblings).
+    total += Math.max(0, Math.floor(salesBreakdown.wix) + Math.floor(salesBreakdown.tradePortal))
+    if (linkedPackages.length > 1) {
+      for (const p of linkedPackages) {
+        if (p.id === packageId) continue
+        total +=
+          Math.max(0, Math.floor(p.sales_breakdown.wix)) +
+          Math.max(0, Math.floor(p.sales_breakdown.tradePortal))
+      }
+    }
+    return total
+  }, [salesBreakdown, linkedPackages, packageId])
+
+  const soldByLayerId = useMemo(
+    () =>
+      resolveSoldByCostLayer({
+        layers,
+        totalPackageSold: poolSoldTotal,
+      }),
+    [layers, poolSoldTotal],
+  )
+
+  const purchaseOrderById = useMemo(
+    () => new Map(purchaseOrders.map((po) => [po.id, po])),
+    [purchaseOrders],
+  )
+  const blockById = useMemo(
+    () => new Map(fulfilmentBlocks.map((b) => [b.id, b])),
+    [fulfilmentBlocks],
+  )
+  const uniqueSuppliers = useMemo(() => {
+    const names = new Set<string>()
+    for (const po of purchaseOrders) {
+      const s = po.supplier.trim()
+      if (s) names.add(s)
+    }
+    for (const layer of layers) {
+      const s = layer.source?.trim()
+      if (s) names.add(s)
+    }
+    return [...names].sort((a, b) => a.localeCompare(b))
+  }, [purchaseOrders, layers])
 
   const { totalRemaining, totalCostBasis, weightedCost } = useMemo(() => {
     let units = 0
@@ -101,18 +231,59 @@ export function PackageCostLayers({
     return grossUnit / salePrice
   }, [grossUnit, salePrice])
 
-  const isLinkedGroup = linkedPackages.length > 1
+  const isLinkedGroup = linkedPackages.length > 1 || linkedShellPackages.length > 0
+
+  const linkedMembers: LinkedSellableMember[] = useMemo(
+    () =>
+      linkedPackages.map((p) => ({
+        id: p.id,
+        duration: p.duration,
+        breakdown: p.id === packageId ? salesBreakdown : p.sales_breakdown,
+      })),
+    [linkedPackages, packageId, salesBreakdown],
+  )
 
   const packageSalesRows = useMemo(() => {
+    type Row = {
+      id: string
+      name: string
+      duration: string | null
+      salesBreakdown: PackageSalesBreakdown
+      sellable: number | null
+      isCurrent: boolean
+      isShell?: boolean
+    }
+
     if (isLinkedGroup) {
-      return linkedPackages.map((p) => ({
+      const packageRows: Row[] = linkedPackages.map((p) => ({
         id: p.id,
         name: p.name,
         duration: p.duration,
-        salesBreakdown: p.sales_breakdown,
-        sellable: linkedPackageSellable(p),
+        salesBreakdown: p.id === packageId ? salesBreakdown : p.sales_breakdown,
+        sellable: linkedPoolSellableForPackage({
+          stock: resolvedStockTotal,
+          targetId: p.id,
+          targetDuration: p.duration,
+          members: linkedMembers,
+        }),
         isCurrent: p.id === packageId,
       }))
+      const shellRows: Row[] = linkedShellPackages.map((sh) => ({
+        id: sh.id,
+        name: sh.name,
+        duration: sh.duration,
+        salesBreakdown: sh.sales_breakdown,
+        sellable: linkedPoolSellableForPackage({
+          stock: resolvedStockTotal,
+          targetId: sh.id,
+          targetDuration: sh.duration,
+          members: linkedMembers,
+          shellMirrorDuration: sh.duration,
+        }),
+        isCurrent: sh.id === packageId,
+        isShell: true,
+      }))
+      return [...packageRows, ...shellRows]
     }
     return [
       {
@@ -124,7 +295,18 @@ export function PackageCostLayers({
         isCurrent: true,
       },
     ]
-  }, [isLinkedGroup, linkedPackages, packageId, packageName, packageDuration, salesBreakdown, sellable])
+  }, [
+    isLinkedGroup,
+    linkedPackages,
+    linkedShellPackages,
+    linkedMembers,
+    packageId,
+    packageName,
+    packageDuration,
+    salesBreakdown,
+    sellable,
+    resolvedStockTotal,
+  ])
   const sortedLayers = useMemo(
     () => [...layers].sort((a, b) => {
       const da = new Date(a.received_at).getTime()
@@ -139,8 +321,12 @@ export function PackageCostLayers({
     setAddQty("")
     setAddCost("")
     setAddNote("")
-    setAddSource("")
+    setAddSupplier("")
+    setAddPoNumber("")
+    setAddPoIssuedAt("")
     setAddDate("")
+    setAddFulfilmentBlockId("")
+    if (addFileRef.current) addFileRef.current.value = ""
   }
 
   function submitAdd() {
@@ -154,34 +340,48 @@ export function PackageCostLayers({
       toast.error("Unit cost must be a non-negative number.")
       return
     }
+    if (!addSupplier.trim()) {
+      toast.error("Supplier is required — a purchase order is created automatically.")
+      return
+    }
     start(async () => {
-      const res = await addCostLayer({
-        packageId,
-        quantity: q,
-        unitCost: c,
-        note: addNote.trim() || null,
-        source: addSource.trim() || null,
-        receivedAt: addDate || null,
-      })
+      const fd = new FormData()
+      fd.set("packageId", packageId)
+      fd.set("quantity", String(q))
+      fd.set("unitCost", String(c))
+      fd.set("supplier", addSupplier.trim())
+      if (addPoNumber.trim()) fd.set("poNumber", addPoNumber.trim())
+      if (addPoIssuedAt.trim()) fd.set("poIssuedAt", addPoIssuedAt.trim())
+      if (addNote.trim()) fd.set("note", addNote.trim())
+      if (addDate.trim()) fd.set("receivedAt", addDate.trim())
+      if (addFulfilmentBlockId.trim()) fd.set("fulfilmentBlockId", addFulfilmentBlockId.trim())
+      const file = addFileRef.current?.files?.[0]
+      if (file && file.size > 0) fd.set("file", file)
+
+      const res = await addStockPurchaseLayer(fd)
       if (!res.ok) {
         toast.error(res.message)
         return
       }
-      toast.success("Stock added with buy price.")
+      toast.success(res.message ?? "Stock added with purchase order.")
       resetAddForm()
       setAddOpen(false)
-      router.refresh()
+      await refreshInventoryUi()
     })
   }
 
   function startEdit(layer: CostLayerRow) {
+    const linkedPo = layer.purchase_order_id ? purchaseOrderById.get(layer.purchase_order_id) : null
     setEditingId(layer.id)
     setEditCost(String(layer.unit_cost))
     setEditNote(layer.note ?? "")
-    setEditSource(layer.source ?? "")
+    setEditSupplier(linkedPo?.supplier ?? layer.source ?? "")
+    setEditPoNumber(linkedPo?.po_number ?? "")
+    setEditPoIssuedAt(linkedPo?.issued_at ?? "")
     setEditDate(formatDateInput(layer.received_at))
     setEditQty(String(layer.quantity))
     setEditCascade(true)
+    setEditFulfilmentBlockId(layer.fulfilment_block_id ?? "")
   }
 
   function submitEdit(layer: CostLayerRow) {
@@ -195,11 +395,17 @@ export function PackageCostLayers({
       toast.error("Quantity must be a non-negative whole number.")
       return
     }
+    if (!editSupplier.trim()) {
+      toast.error("Supplier is required.")
+      return
+    }
     const consumed = layer.quantity - layer.quantity_remaining
     if (newQty < consumed) {
       toast.error(`Quantity cannot be less than ${consumed} (units already sold from this layer).`)
       return
     }
+    const nextBlockId = editFulfilmentBlockId.trim() || null
+    const blockChanged = (layer.fulfilment_block_id ?? null) !== nextBlockId
     start(async () => {
       if (newQty !== layer.quantity) {
         const qtyRes = await updateCostLayerQuantity({
@@ -217,9 +423,12 @@ export function PackageCostLayers({
         packageId,
         unitCost: c,
         note: editNote,
-        source: editSource,
         receivedAt: editDate || null,
         cascadeToConsumptions: editCascade,
+        purchaseOrderSupplier: editSupplier.trim(),
+        purchaseOrderNumber: editPoNumber.trim() || null,
+        purchaseOrderIssuedAt: editPoIssuedAt.trim() || null,
+        fulfilmentBlockId: blockChanged ? nextBlockId : undefined,
       })
       if (!res.ok) {
         toast.error(res.message)
@@ -229,14 +438,14 @@ export function PackageCostLayers({
       toast.success(
         qtyChanged
           ? editCascade
-            ? "Cost layer updated; stock and historical sales adjusted."
-            : "Cost layer updated; stock adjusted."
+            ? "Stock purchase updated; stock and historical sales adjusted."
+            : "Stock purchase updated."
           : editCascade
             ? "Buy price updated (historical sales rewritten)."
-            : "Buy price updated.",
+            : "Stock purchase updated.",
       )
       setEditingId(null)
-      router.refresh()
+      await refreshInventoryUi()
     })
   }
 
@@ -255,7 +464,87 @@ export function PackageCostLayers({
         return
       }
       toast.success("Cost layer deleted.")
-      router.refresh()
+      await refreshInventoryUi()
+    })
+  }
+
+  function beginOrphanEdit() {
+    setOrphanEditing(true)
+    setOrphanQty(String(qtyAvailable))
+    setOrphanConvert(false)
+    setOrphanSupplier("")
+    setOrphanCost("0")
+    setOrphanNote("")
+    setOrphanDate("")
+    setOrphanPoNumber("")
+    setOrphanPoIssuedAt("")
+    setOrphanBlockId("")
+  }
+
+  function submitOrphanEdit() {
+    const newQty = Math.floor(Number(orphanQty))
+    if (!Number.isFinite(newQty) || newQty < 0) {
+      toast.error("Quantity must be a non-negative whole number.")
+      return
+    }
+    if (orphanConvert) {
+      if (!orphanSupplier.trim()) {
+        toast.error("Supplier is required to record a stock purchase.")
+        return
+      }
+      if (newQty <= 0) {
+        toast.error("Quantity must be greater than zero to create a stock purchase.")
+        return
+      }
+      const c = Number(orphanCost)
+      if (!Number.isFinite(c) || c < 0) {
+        toast.error("Buy price must be a non-negative number.")
+        return
+      }
+    }
+    start(async () => {
+      const res = await updateOrphanPackageStock({
+        packageId,
+        quantity: newQty,
+        convertToPurchase: orphanConvert
+          ? {
+              supplier: orphanSupplier.trim(),
+              unitCost: Number(orphanCost),
+              note: orphanNote.trim() || null,
+              poNumber: orphanPoNumber.trim() || null,
+              poIssuedAt: orphanPoIssuedAt.trim() || null,
+              receivedAt: orphanDate.trim() || null,
+              fulfilmentBlockId: orphanBlockId.trim() || null,
+            }
+          : null,
+      })
+      if (!res.ok) {
+        toast.error(res.message)
+        return
+      }
+      toast.success(res.message ?? "Stock updated.")
+      setOrphanEditing(false)
+      await refreshInventoryUi()
+    })
+  }
+
+  function confirmClearOrphanStock() {
+    if (
+      !window.confirm(
+        `Clear this untracked stock (${qtyAvailable} units)? Available inventory will be set to 0. This cannot be undone except by adding stock again.`,
+      )
+    ) {
+      return
+    }
+    start(async () => {
+      const res = await updateOrphanPackageStock({ packageId, quantity: 0 })
+      if (!res.ok) {
+        toast.error(res.message)
+        return
+      }
+      toast.success(res.message ?? "Untracked stock cleared.")
+      setOrphanEditing(false)
+      await refreshInventoryUi()
     })
   }
 
@@ -310,7 +599,8 @@ export function PackageCostLayers({
               <th className="px-3 py-2 font-medium text-right">Portal</th>
               <th className="px-3 py-2 font-medium text-right">Wix</th>
               <th className="px-3 py-2 font-medium text-right">Salesforce</th>
-              <th className="px-3 py-2 font-medium text-right">Total</th>
+              <th className="px-3 py-2 font-medium text-right">SF pipeline</th>
+              <th className="px-3 py-2 font-medium text-right">Total sold</th>
               <th className="px-3 py-2 font-medium text-right">Sellable</th>
             </tr>
           </thead>
@@ -318,18 +608,16 @@ export function PackageCostLayers({
             {packageSalesRows.map((row) => {
               const duration = packageDurationLabel(row.duration)
               const label = duration ? `${row.name} · ${duration}` : row.name
+              const rowClass = row.isShell
+                ? "border-t border-border bg-muted/20 text-muted-foreground"
+                : row.isCurrent
+                  ? "border-t border-border bg-muted/15 font-medium text-foreground"
+                  : "border-t border-border text-muted-foreground"
               return (
-                <tr
-                  key={row.id}
-                  className={
-                    row.isCurrent
-                      ? "border-t border-border bg-muted/15 font-medium text-foreground"
-                      : "border-t border-border text-muted-foreground"
-                  }
-                >
+                <tr key={row.id} className={rowClass}>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                      {row.isCurrent ? (
+                      {row.isShell || row.isCurrent ? (
                         <span>{label}</span>
                       ) : (
                         <Link
@@ -339,7 +627,11 @@ export function PackageCostLayers({
                           {label}
                         </Link>
                       )}
-                      {isLinkedGroup ? (
+                      {row.isShell ? (
+                        <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/80 border border-border rounded px-1 py-px">
+                          Shell
+                        </span>
+                      ) : isLinkedGroup ? (
                         <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/80 border border-border rounded px-1 py-px">
                           Linked
                         </span>
@@ -347,14 +639,37 @@ export function PackageCostLayers({
                     </div>
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
-                    {soldCount(row.salesBreakdown.tradePortal)}
+                    {row.isShell ? "—" : soldCount(row.salesBreakdown.tradePortal)}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{soldCount(row.salesBreakdown.wix)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">
-                    {soldCount(row.salesBreakdown.salesforceOffline)}
+                    {row.isShell ? "—" : soldCount(row.salesBreakdown.wix)}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{soldCount(row.salesBreakdown.total)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{soldCount(row.sellable)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {row.isShell ? "—" : soldCount(salesforceClosedWonSold(row.salesBreakdown))}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {row.isShell
+                      ? "—"
+                      : soldCount(Math.max(0, Math.floor(row.salesBreakdown.salesforceOpenPipeline)))}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {row.isShell
+                      ? soldCount(salesforceClosedWonSold(row.salesBreakdown))
+                      : soldCount(
+                          Math.max(0, Math.floor(row.salesBreakdown.wix)) +
+                            Math.max(0, Math.floor(row.salesBreakdown.tradePortal)) +
+                            salesforceClosedWonSold(row.salesBreakdown),
+                        )}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {row.sellable != null ? (
+                      <span className={row.sellable < 0 ? "text-destructive font-medium" : undefined}>
+                        {soldCount(row.sellable)}
+                      </span>
+                    ) : (
+                      <span className="italic text-muted-foreground/80">mirrors day</span>
+                    )}
+                  </td>
                 </tr>
               )
             })}
@@ -365,29 +680,214 @@ export function PackageCostLayers({
 
       <div className="space-y-2">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Stock purchased</p>
+        <p className="text-[10px] text-muted-foreground">
+          Sold / Left count closed-won and portal bookings only — open SF pipeline holds Remaining but does not consume purchase layers until Closed Won.
+        </p>
+        <datalist id="supplier-suggestions">
+          {uniqueSuppliers.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
         <div className="rounded-lg border border-border overflow-x-auto">
-        <table className="w-full text-xs min-w-[640px]">
+        <table className="w-full text-xs min-w-[860px]">
           <thead>
             <tr className="bg-muted/40 text-left text-[10px] uppercase tracking-wide text-muted-foreground">
               <th className="px-3 py-2 font-medium">Received</th>
               <th className="px-3 py-2 font-medium text-right">Qty bought</th>
+              <th className="px-3 py-2 font-medium text-right">Sold</th>
+              <th className="px-3 py-2 font-medium text-right">Left</th>
               <th className="px-3 py-2 font-medium text-right">Buy price</th>
-              <th className="px-3 py-2 font-medium">Source</th>
+              <th className="px-3 py-2 font-medium">Purchase</th>
+              <th className="px-3 py-2 font-medium">Block</th>
               <th className="px-3 py-2 font-medium">Note</th>
               <th className="px-3 py-2 font-medium min-w-[11rem]" />
             </tr>
           </thead>
           <tbody>
-            {sortedLayers.length === 0 ? (
+            {sortedLayers.length === 0 && !hasOrphanStock ? (
               <tr>
-                <td colSpan={6} className="px-3 py-4 text-center text-muted-foreground">
-                  No cost layers yet. Use “Add stock + buy price” below.
+                <td colSpan={9} className="px-3 py-4 text-center text-muted-foreground">
+                  No cost layers yet. Use &ldquo;Add stock purchase&rdquo; below.
                 </td>
               </tr>
-            ) : (
-              sortedLayers.map((layer) => {
+            ) : null}
+            {hasOrphanStock ? (
+              <tr className="border-t border-border align-top bg-amber-50/40 dark:bg-amber-950/20">
+                <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                  {orphanEditing ? (
+                    <input
+                      type="date"
+                      value={orphanDate}
+                      onChange={(e) => setOrphanDate(e.target.value)}
+                      disabled={!orphanConvert || pending}
+                      className="px-2 py-1 rounded border border-border bg-background text-xs disabled:opacity-50"
+                    />
+                  ) : (
+                    "—"
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {orphanEditing ? (
+                    <input
+                      inputMode="numeric"
+                      value={orphanQty}
+                      onChange={(e) => setOrphanQty(e.target.value)}
+                      disabled={pending}
+                      className="w-[80px] px-2 py-1 rounded border border-border bg-background text-xs text-right"
+                    />
+                  ) : (
+                    <div className="font-medium text-foreground">{qtyAvailable}</div>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">—</td>
+                <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                  {orphanEditing ? "—" : qtyAvailable}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {orphanEditing && orphanConvert ? (
+                    <input
+                      inputMode="decimal"
+                      value={orphanCost}
+                      onChange={(e) => setOrphanCost(e.target.value)}
+                      disabled={pending}
+                      className="w-[110px] px-2 py-1 rounded border border-border bg-background text-xs text-right"
+                    />
+                  ) : (
+                    <span className="text-amber-700 dark:text-amber-300">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {orphanEditing && orphanConvert ? (
+                    <div className="flex flex-col gap-1.5 min-w-[140px]">
+                      <input
+                        value={orphanSupplier}
+                        onChange={(e) => setOrphanSupplier(e.target.value)}
+                        placeholder="Supplier"
+                        list="supplier-suggestions"
+                        disabled={pending}
+                        className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
+                      />
+                      <input
+                        value={orphanPoNumber}
+                        onChange={(e) => setOrphanPoNumber(e.target.value)}
+                        placeholder="PO / invoice ref"
+                        disabled={pending}
+                        className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
+                      />
+                      <input
+                        type="date"
+                        value={orphanPoIssuedAt}
+                        onChange={(e) => setOrphanPoIssuedAt(e.target.value)}
+                        disabled={pending}
+                        className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
+                      />
+                    </div>
+                  ) : (
+                    <span className="italic text-amber-800/90 dark:text-amber-200/90">Untracked stock</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {orphanEditing && orphanConvert && fulfilmentBlocks.length > 0 ? (
+                    <select
+                      value={orphanBlockId}
+                      onChange={(e) => setOrphanBlockId(e.target.value)}
+                      disabled={pending}
+                      className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
+                    >
+                      <option value="">— no block —</option>
+                      {fulfilmentBlocks.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="text-muted-foreground/60">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {orphanEditing ? (
+                    <div className="flex flex-col gap-1.5 min-w-[160px]">
+                      <label className="flex items-start gap-1.5 text-[11px] text-foreground">
+                        <input
+                          type="checkbox"
+                          checked={orphanConvert}
+                          onChange={(e) => setOrphanConvert(e.target.checked)}
+                          disabled={pending}
+                          className="mt-0.5"
+                        />
+                        <span>Record as stock purchase (supplier + buy price)</span>
+                      </label>
+                      {orphanConvert ? (
+                        <input
+                          value={orphanNote}
+                          onChange={(e) => setOrphanNote(e.target.value)}
+                          placeholder="Optional note"
+                          disabled={pending}
+                          className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
+                        />
+                      ) : (
+                        <p className="text-[10px] text-muted-foreground leading-relaxed">
+                          Change quantity only, or tick above to create a proper purchase row.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-[11px] leading-relaxed">
+                      Inventory without a purchase row — edit quantity or convert to a stock purchase.
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right align-top min-w-[11rem]">
+                  {orphanEditing ? (
+                    <div className="flex gap-2 justify-end">
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => setOrphanEditing(false)}
+                        className="text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={submitOrphanEdit}
+                        className="text-[11px] font-medium text-primary hover:underline disabled:opacity-50"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-3 justify-end">
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={beginOrphanEdit}
+                        className="text-[11px] font-medium text-primary hover:underline disabled:opacity-50"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={confirmClearOrphanStock}
+                        className="text-[11px] font-medium text-destructive hover:underline disabled:opacity-50"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ) : null}
+            {sortedLayers.map((layer) => {
                 const editing = editingId === layer.id
                 const consumed = layer.quantity - layer.quantity_remaining
+                const attributedSold = Math.max(0, Math.floor(soldByLayerId.get(layer.id) ?? consumed))
+                const left = Math.max(0, layer.quantity - attributedSold)
+                const linkedPo = layer.purchase_order_id ? purchaseOrderById.get(layer.purchase_order_id) : null
+                const linkedBlock = layer.fulfilment_block_id ? blockById.get(layer.fulfilment_block_id) : null
                 return (
                   <tr key={layer.id} className="border-t border-border align-top">
                     <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
@@ -420,6 +920,15 @@ export function PackageCostLayers({
                       )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
+                      <div className="font-medium text-foreground">{attributedSold}</div>
+                      {attributedSold > consumed ? (
+                        <div className="text-[10px] text-muted-foreground">incl. offline SF</div>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      <div className="font-medium text-foreground">{left}</div>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
                       {editing ? (
                         <input
                           inputMode="decimal"
@@ -435,14 +944,70 @@ export function PackageCostLayers({
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">
                       {editing ? (
-                        <input
-                          value={editSource}
-                          onChange={(e) => setEditSource(e.target.value)}
-                          placeholder="e.g. F1 Direct"
-                          className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
-                        />
+                        <div className="flex flex-col gap-1.5 min-w-[140px]">
+                          <input
+                            value={editSupplier}
+                            onChange={(e) => setEditSupplier(e.target.value)}
+                            placeholder="Supplier"
+                            list="supplier-suggestions"
+                            className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
+                          />
+                          <input
+                            value={editPoNumber}
+                            onChange={(e) => setEditPoNumber(e.target.value)}
+                            placeholder="PO / invoice ref"
+                            className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
+                          />
+                          <input
+                            type="date"
+                            value={editPoIssuedAt}
+                            onChange={(e) => setEditPoIssuedAt(e.target.value)}
+                            className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
+                          />
+                        </div>
+                      ) : linkedPo ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-foreground">{linkedPo.supplier}</span>
+                          <Link
+                            href="/admin/purchase-orders"
+                            className="text-[10px] text-primary hover:underline w-fit"
+                          >
+                            PO {linkedPo.po_number}
+                          </Link>
+                        </div>
+                      ) : layer.source ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span>{layer.source}</span>
+                          <span className="text-[10px] italic text-muted-foreground/70">No PO yet — edit to add</span>
+                        </div>
                       ) : (
-                        <span className={layer.source ? "" : "text-muted-foreground/60"}>{layer.source || "—"}</span>
+                        <span className="text-muted-foreground/60">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {editing ? (
+                        fulfilmentBlocks.length > 0 ? (
+                          <select
+                            value={editFulfilmentBlockId}
+                            onChange={(e) => setEditFulfilmentBlockId(e.target.value)}
+                            className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
+                          >
+                            <option value="">— no block —</option>
+                            {fulfilmentBlocks.map((b) => (
+                              <option key={b.id} value={b.id}>
+                                {b.name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground/70 italic">
+                            Add blocks below
+                          </span>
+                        )
+                      ) : (
+                        <span className={linkedBlock ? "" : "text-muted-foreground/60"}>
+                          {linkedBlock?.name ?? "—"}
+                        </span>
                       )}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">
@@ -512,81 +1077,183 @@ export function PackageCostLayers({
                     </td>
                   </tr>
                 )
-              })
-            )}
+              })}
           </tbody>
         </table>
         </div>
       </div>
 
       <div className="rounded-lg border border-border p-3 space-y-3">
+        {hasOrphanStock ? (
+          <p className="text-[11px] text-amber-800 dark:text-amber-200 leading-relaxed">
+            This package already has {qtyAvailable} untracked unit{qtyAvailable === 1 ? "" : "s"}. Prefer{" "}
+            <strong>Edit</strong> on that row (optionally convert to a purchase) instead of adding another
+            purchase, or stock will be counted twice.
+          </p>
+        ) : null}
+        {layers.length === 0 && hasSalesforceProduct ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                start(async () => {
+                  const res = await importPackageStockSourcesFromSalesforce(packageId)
+                  if (!res.ok) {
+                    toast.error(res.message)
+                    return
+                  }
+                  toast.success(res.message ?? "Stock sources imported.")
+                  await refreshInventoryUi()
+                })
+              }}
+              className="text-sm font-medium text-primary hover:underline disabled:opacity-50"
+            >
+              Import stock purchases from Salesforce
+            </button>
+            <span className="text-[11px] text-muted-foreground">
+              Records supplier / qty from SF Stock Sources without adding extra sellable stock.
+            </span>
+          </div>
+        ) : null}
         <button
           type="button"
           onClick={() => setAddOpen((o) => !o)}
           className="text-sm font-medium text-primary hover:underline"
         >
-          {addOpen ? "Cancel adding stock" : "Add stock + buy price"}
+          {addOpen ? "Cancel adding stock" : "Add stock purchase"}
         </button>
         {addOpen && (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-xs text-muted-foreground">
-              Quantity added
-              <input
-                inputMode="numeric"
-                value={addQty}
-                onChange={(e) => setAddQty(e.target.value)}
-                placeholder="e.g. 10"
-                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-              />
-            </label>
-            <label className="block text-xs text-muted-foreground">
-              Unit buy price ({packageCurrency})
-              <input
-                inputMode="decimal"
-                value={addCost}
-                onChange={(e) => setAddCost(e.target.value)}
-                placeholder="e.g. 2500"
-                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-              />
-            </label>
-            <label className="block text-xs text-muted-foreground">
-              Received date (optional)
-              <input
-                type="date"
-                value={addDate}
-                onChange={(e) => setAddDate(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-              />
-            </label>
-            <label className="block text-xs text-muted-foreground">
-              Source (who we bought from)
-              <input
-                value={addSource}
-                onChange={(e) => setAddSource(e.target.value)}
-                placeholder="e.g. F1 Direct"
-                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-              />
-            </label>
-            <label className="block text-xs text-muted-foreground">
-              Note (optional)
-              <input
-                value={addNote}
-                onChange={(e) => setAddNote(e.target.value)}
-                placeholder="Supplier reference, batch, etc."
-                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-              />
-            </label>
-            <div className="sm:col-span-2">
+          <div className="space-y-4">
+            <datalist id="supplier-suggestions">
+              {uniqueSuppliers.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+            <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Purchase order
+              </p>
+              <p className="text-[11px] text-muted-foreground leading-relaxed -mt-1">
+                A purchase order is created automatically and linked to this stock. Re-use the same PO
+                reference if you are adding more units from an existing contract.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-xs text-muted-foreground sm:col-span-2">
+                  Supplier
+                  <input
+                    value={addSupplier}
+                    onChange={(e) => setAddSupplier(e.target.value)}
+                    placeholder="e.g. F1 Direct"
+                    list="supplier-suggestions"
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                  />
+                </label>
+                <label className="block text-xs text-muted-foreground">
+                  PO / invoice reference (optional)
+                  <input
+                    value={addPoNumber}
+                    onChange={(e) => setAddPoNumber(e.target.value)}
+                    placeholder="Leave blank to auto-generate"
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                  />
+                </label>
+                <label className="block text-xs text-muted-foreground">
+                  PO date (optional)
+                  <input
+                    type="date"
+                    value={addPoIssuedAt}
+                    onChange={(e) => setAddPoIssuedAt(e.target.value)}
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                  />
+                </label>
+                <label className="block text-xs text-muted-foreground sm:col-span-2">
+                  Attach contract / invoice (optional)
+                  <input
+                    ref={addFileRef}
+                    type="file"
+                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,image/webp"
+                    className="mt-1 block w-full text-xs"
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="rounded-lg border border-border p-3 space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Stock</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-xs text-muted-foreground">
+                  Quantity
+                  <input
+                    inputMode="numeric"
+                    value={addQty}
+                    onChange={(e) => setAddQty(e.target.value)}
+                    placeholder="e.g. 10"
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                  />
+                </label>
+                <label className="block text-xs text-muted-foreground">
+                  Unit buy price ({packageCurrency})
+                  <input
+                    inputMode="decimal"
+                    value={addCost}
+                    onChange={(e) => setAddCost(e.target.value)}
+                    placeholder="e.g. 2500"
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                  />
+                </label>
+                <label className="block text-xs text-muted-foreground">
+                  Received date (optional)
+                  <input
+                    type="date"
+                    value={addDate}
+                    onChange={(e) => setAddDate(e.target.value)}
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                  />
+                </label>
+                <label className="block text-xs text-muted-foreground">
+                  Fulfilment block (optional)
+                  {fulfilmentBlocks.length > 0 ? (
+                    <select
+                      value={addFulfilmentBlockId}
+                      onChange={(e) => setAddFulfilmentBlockId(e.target.value)}
+                      className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                    >
+                      <option value="">— no block —</option>
+                      {fulfilmentBlocks.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="mt-1 text-[11px] text-muted-foreground/80 leading-relaxed">
+                      Add fulfilment blocks below to group stock by suite / area.
+                    </div>
+                  )}
+                </label>
+                <label className="block text-xs text-muted-foreground sm:col-span-2">
+                  Note (optional)
+                  <input
+                    value={addNote}
+                    onChange={(e) => setAddNote(e.target.value)}
+                    placeholder="Batch reference, payment terms, etc."
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                  />
+                </label>
+              </div>
+            </div>
+            <div>
               <button
                 type="button"
                 disabled={pending}
                 onClick={() => submitAdd()}
                 className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"
               >
-                Add stock
+                Add stock purchase
               </button>
               <p className="text-[11px] text-muted-foreground mt-2">
-                Increases capacity by the quantity above and links the new units to this buy price. Future sales consume layers in receive-date order (FIFO). The Source is pushed to the Salesforce product so you can see who the stock was bought from.
+                Creates the purchase order, adds stock at this buy price, and syncs supplier breakdown to
+                Salesforce Stock Sources on the next product sync.
               </p>
             </div>
           </div>

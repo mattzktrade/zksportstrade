@@ -35,6 +35,7 @@ type DbPackage = {
   tier: string
   duration?: string | null
   inventory_group_id?: string | null
+  shell_parent_package_id?: string | null
   includes: unknown
   featured: boolean
   sort_order: number

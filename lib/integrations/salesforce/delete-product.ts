@@ -1,4 +1,4 @@
-import { salesforceRequest } from "@/lib/integrations/salesforce/client"
+import { SalesforceApiError, salesforceRequest } from "@/lib/integrations/salesforce/client"
 import { findProduct2IdByCode } from "@/lib/integrations/salesforce/products"
 import { getSalesforceConnectionStatus } from "@/lib/integrations/salesforce/settings-store"
 import { createAdminClient } from "@/lib/supabase/admin"
@@ -8,6 +8,26 @@ export type SalesforceProductDeleteResult = {
   product2Id: string | null
   error: string | null
   skipped: boolean
+}
+
+/** True when SF already removed the Product2 (or it was never there). Safe to treat as success. */
+function isAlreadyDeletedError(e: unknown): boolean {
+  if (e instanceof SalesforceApiError) {
+    if (e.status === 404) return true
+    const body = e.body
+    const rows = Array.isArray(body) ? body : body ? [body] : []
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue
+      const code = String((row as { errorCode?: string }).errorCode ?? "").toUpperCase()
+      if (code === "ENTITY_IS_DELETED" || code === "NOT_FOUND") return true
+    }
+  }
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase()
+  return (
+    msg.includes("entity is deleted") ||
+    msg.includes("entity_is_deleted") ||
+    msg.includes("not found")
+  )
 }
 
 /** Delete the Salesforce Product2 linked to a portal package, if any. */
@@ -51,6 +71,11 @@ export async function deleteSalesforceProductForPackage(
     await salesforceRequest("DELETE", `/sobjects/Product2/${product2Id}`)
     return { deleted: true, product2Id, error: null, skipped: false }
   } catch (e) {
+    // Shell/parent Product2 may already be gone in SF (manual delete, prior attempt, recycle bin).
+    // Treat as success so portal package delete can finish.
+    if (isAlreadyDeletedError(e)) {
+      return { deleted: true, product2Id, error: null, skipped: false }
+    }
     return {
       deleted: false,
       product2Id,
