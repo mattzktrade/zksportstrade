@@ -3102,6 +3102,7 @@ export async function fetchAdminPackageForCatalogExpand(
 ): Promise<{
   pkg: import("@/lib/admin/queries").AdminPackageRow
   linkedPackages: import("@/lib/admin/linked-inventory").LinkedInventoryPackage[]
+  wixListings: import("@/lib/admin/wix-channel-listings").WixChannelListingRow[]
 } | null> {
   const gate = await requireAdminAction()
   if (!gate.ok) return null
@@ -3113,8 +3114,12 @@ export async function fetchAdminPackageForCatalogExpand(
   const { enrichPackageSalesBreakdownWithOpenPipeline } = await import(
     "@/lib/admin/package-sales-breakdown-sf"
   )
+  const { getWixChannelListingsForPackage } = await import("@/lib/admin/wix-channel-listings")
 
-  const pkg = await getAdminPackageById(id)
+  const [pkg, wixListings] = await Promise.all([
+    getAdminPackageById(id),
+    getWixChannelListingsForPackage(id),
+  ])
   if (!pkg) return null
 
   const groupId = pkg.inventory_group_id?.trim() || null
@@ -3137,7 +3142,7 @@ export async function fetchAdminPackageForCatalogExpand(
     ...linkedPackages.map((p) => ({ id: p.id, salesforce_product_id: p.salesforce_product_id })),
   ])
 
-  return { pkg, linkedPackages }
+  return { pkg, linkedPackages, wixListings }
 }
 
 export async function fetchInventoryCsvRows(): Promise<import("@/lib/admin/queries").AdminPackageRow[]> {

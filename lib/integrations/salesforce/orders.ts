@@ -11,6 +11,7 @@ import { enqueuePackageInventoryChannelSyncServer } from "@/lib/integrations/enq
 import { syncOpportunityOutcomeForOrder } from "@/lib/integrations/salesforce/opportunity-lifecycle"
 import { resolveProduct2IdForPackage } from "@/lib/integrations/salesforce/resolve-product"
 import { syncProductValueSold } from "@/lib/integrations/salesforce/sold-metrics"
+import { resolveOpportunityLineItemSupplyFields } from "@/lib/integrations/salesforce/describe"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { PACKAGE_COLUMNS } from "@/lib/catalog/columns"
 import type { OrderChannel } from "@/lib/integrations/types"
@@ -47,6 +48,111 @@ function isDlrsConfigError(e: unknown): boolean {
   )
 }
 
+/**
+ * Supplier + weighted buy price from portal cost allocations for this order.
+ * Used to fill Opportunity Product Supplier / Buy Price in Salesforce.
+ */
+async function loadOrderLineSupplyFields(
+  admin: NonNullable<ReturnType<typeof createAdminClient>>,
+  orderId: string,
+): Promise<{ supplier: string | null; buyPrice: number | null }> {
+  const { data, error } = await admin
+    .from("order_cost_consumptions")
+    .select(
+      "quantity, unit_cost, supplier_source_snapshot, package_cost_layers ( source, purchase_orders ( supplier ) )",
+    )
+    .eq("order_id", orderId)
+  if (error) {
+    console.warn("[salesforce] order cost consumptions for OLI supply fields:", error.message)
+    return { supplier: null, buyPrice: null }
+  }
+
+  type LayerJoin = {
+    source?: string | null
+    purchase_orders?: { supplier?: string | null } | { supplier?: string | null }[] | null
+  }
+  type Row = {
+    quantity: number | null
+    unit_cost: number | null
+    supplier_source_snapshot: string | null
+    package_cost_layers?: LayerJoin | LayerJoin[] | null
+  }
+
+  const bySupplier = new Map<string, number>()
+  let costQty = 0
+  let costSum = 0
+
+  for (const raw of (data ?? []) as Row[]) {
+    const qty = Math.max(0, Math.floor(Number(raw.quantity) || 0))
+    if (qty <= 0) continue
+
+    const layerRaw = raw.package_cost_layers
+    const layer = Array.isArray(layerRaw) ? layerRaw[0] : layerRaw
+    const poRaw = layer?.purchase_orders
+    const po = Array.isArray(poRaw) ? poRaw[0] : poRaw
+    const label =
+      raw.supplier_source_snapshot?.trim() ||
+      po?.supplier?.trim() ||
+      layer?.source?.trim() ||
+      "Unassigned"
+    bySupplier.set(label, (bySupplier.get(label) ?? 0) + qty)
+
+    const unit = raw.unit_cost != null ? Number(raw.unit_cost) : NaN
+    if (Number.isFinite(unit) && unit >= 0) {
+      costQty += qty
+      costSum += unit * qty
+    }
+  }
+
+  if (bySupplier.size === 0) return { supplier: null, buyPrice: null }
+
+  const supplier = [...bySupplier.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([name, qty]) => (bySupplier.size > 1 ? `${name} (${qty})` : name))
+    .join(", ")
+    .slice(0, 255)
+
+  const buyPrice = costQty > 0 ? Math.round((costSum / costQty) * 100) / 100 : null
+  return { supplier, buyPrice }
+}
+
+async function buildOpportunityLineItemBody(input: {
+  admin: NonNullable<ReturnType<typeof createAdminClient>>
+  orderId: string
+  opportunityId: string
+  pricebookEntryId: string
+  guests: number
+  unitPrice: number
+  includeIds: boolean
+}): Promise<Record<string, unknown>> {
+  const body: Record<string, unknown> = {
+    Quantity: input.guests,
+    UnitPrice: input.unitPrice,
+  }
+  if (input.includeIds) {
+    body.OpportunityId = input.opportunityId
+    body.PricebookEntryId = input.pricebookEntryId
+  }
+
+  try {
+    const fields = await resolveOpportunityLineItemSupplyFields()
+    const supply = await loadOrderLineSupplyFields(input.admin, input.orderId)
+    if (fields.supplierField && supply.supplier) {
+      body[fields.supplierField] = supply.supplier
+    }
+    if (fields.buyPriceField && supply.buyPrice != null) {
+      body[fields.buyPriceField] = supply.buyPrice
+    }
+  } catch (e) {
+    console.warn(
+      "[salesforce] Opportunity line supply fields skipped:",
+      e instanceof Error ? e.message : e,
+    )
+  }
+
+  return body
+}
+
 export async function syncOrderToSalesforce(orderId: string): Promise<{
   opportunityId: string
   quoteId: string | null
@@ -72,8 +178,36 @@ export async function syncOrderToSalesforce(orderId: string): Promise<{
   const lineItemAlreadyDone =
     order.salesforce_line_item_status === "synced" || order.salesforce_line_item_status === "skipped"
 
-  // Opportunity already created AND line item resolved (or intentionally skipped) — nothing to do.
+  // Opportunity already created AND line item resolved (or intentionally skipped) — still
+  // refresh Supplier / Buy Price when we can (orders synced before those fields were filled).
   if (order.salesforce_opportunity_id && (lineItemAlreadyDone || (skipLineItems && order.salesforce_line_item_status))) {
+    if (!skipLineItems && order.salesforce_line_item_status === "synced") {
+      try {
+        const existing = await salesforceQuery<{ Id: string }>(
+          `SELECT Id FROM OpportunityLineItem WHERE OpportunityId = '${escapeSoqlString(order.salesforce_opportunity_id)}' LIMIT 1`,
+        )
+        const lineId = existing[0]?.Id
+        if (lineId) {
+          const patchBody = await buildOpportunityLineItemBody({
+            admin,
+            orderId,
+            opportunityId: order.salesforce_opportunity_id,
+            pricebookEntryId: "",
+            guests: Number(order.guests),
+            unitPrice: Number(order.unit_price),
+            includeIds: false,
+          })
+          await salesforceRequest("PATCH", `/sobjects/OpportunityLineItem/${lineId}`, {
+            body: patchBody,
+          })
+        }
+      } catch (e) {
+        console.warn(
+          "[salesforce] Opportunity line supply-field refresh skipped:",
+          e instanceof Error ? e.message : e,
+        )
+      }
+    }
     return {
       opportunityId: order.salesforce_opportunity_id,
       quoteId: order.salesforce_quote_id ?? null,
@@ -254,15 +388,32 @@ export async function syncOrderToSalesforce(orderId: string): Promise<{
         `SELECT Id FROM OpportunityLineItem WHERE OpportunityId = '${escapeSoqlString(opportunityId)}' LIMIT 1`,
       )
       if (existing[0]?.Id) {
+        const patchBody = await buildOpportunityLineItemBody({
+          admin,
+          orderId,
+          opportunityId,
+          pricebookEntryId,
+          guests: Number(order.guests),
+          unitPrice: Number(order.unit_price),
+          includeIds: false,
+        })
+        // Refresh qty/price and fill Supplier / Buy Price on lines created before we synced them.
+        await salesforceRequest("PATCH", `/sobjects/OpportunityLineItem/${existing[0].Id}`, {
+          body: patchBody,
+        })
         lineItemStatus = "synced"
       } else {
+        const createBody = await buildOpportunityLineItemBody({
+          admin,
+          orderId,
+          opportunityId,
+          pricebookEntryId,
+          guests: Number(order.guests),
+          unitPrice: Number(order.unit_price),
+          includeIds: true,
+        })
         await salesforceRequest("POST", "/sobjects/OpportunityLineItem", {
-          body: {
-            OpportunityId: opportunityId,
-            PricebookEntryId: pricebookEntryId,
-            Quantity: Number(order.guests),
-            UnitPrice: Number(order.unit_price),
-          },
+          body: createBody,
         })
         lineItemStatus = "synced"
       }

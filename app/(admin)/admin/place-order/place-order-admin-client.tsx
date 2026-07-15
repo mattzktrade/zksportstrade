@@ -5,7 +5,7 @@ import Link from "next/link"
 import { CatalogImage } from "@/components/catalog-image"
 import type { AdminPlaceOrderPackageOption } from "@/lib/admin/place-order"
 import { clampBookableGuests, maxBookableGuests } from "@/lib/admin/place-order"
-import { isGuestCountAllowed, lowStockGuestHint, numericSellable, stepAllowedGuestCount } from "@/lib/catalog/booking-guests"
+import { isGuestCountAllowed, lowStockGuestHint, numericSellable, stepAllowedGuestCount, suiteSplitGuestHint } from "@/lib/catalog/booking-guests"
 import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
 import type { Package } from "@/lib/types/catalog"
 import {
@@ -90,6 +90,10 @@ export function PlaceOrderAdminClient({
   const maxGuests = maxBookableGuests(previewPkg)
   const sellable = previewPkg ? (numericSellable(previewPkg.availability) ?? 0) : 0
   const stockHint = sellable > 0 ? lowStockGuestHint(sellable) : null
+  const suiteHint =
+    previewPkg && sellable > 0
+      ? suiteSplitGuestHint(form.guests, sellable, previewPkg.largestSameSuiteRemaining)
+      : null
   const canBook = maxGuests > 0 && previewPkg?.price != null
   const totalPrice = (previewPkg?.price ?? 0) * form.guests
 
@@ -402,6 +406,9 @@ export function PlaceOrderAdminClient({
                   </div>
                   {stockHint ? (
                     <p className="text-xs text-muted-foreground leading-relaxed">{stockHint}</p>
+                  ) : null}
+                  {suiteHint ? (
+                    <p className="text-xs text-muted-foreground leading-relaxed">{suiteHint}</p>
                   ) : null}
                 </div>
 

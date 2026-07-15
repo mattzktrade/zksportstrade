@@ -10,6 +10,7 @@ import {
   maxBookableGuestsFromSellable,
   numericSellable,
   stepAllowedGuestCount,
+  suiteSplitGuestHint,
 } from "@/lib/catalog/booking-guests"
 import type { Package } from "@/lib/types/catalog"
 import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
@@ -75,6 +76,8 @@ export function CheckoutClient({
     acceptPaddockDisclaimer: false,
     ...savedAddresses,
   }))
+
+  const suiteHint = suiteSplitGuestHint(formData.guests, sellable, pkg.largestSameSuiteRemaining)
 
   const backToRaceHref = pkg.raceId ? `/packages/race/${pkg.raceId}` : "/packages"
 
@@ -453,6 +456,9 @@ export function CheckoutClient({
                   </div>
                   {stockHint ? (
                     <p className="mt-2 text-xs text-muted-foreground leading-relaxed">{stockHint}</p>
+                  ) : null}
+                  {suiteHint ? (
+                    <p className="mt-2 text-xs text-muted-foreground leading-relaxed">{suiteHint}</p>
                   ) : null}
                 </div>
 

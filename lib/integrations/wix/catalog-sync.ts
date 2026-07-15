@@ -143,7 +143,15 @@ export async function syncPackageCatalogToWix(packageId: string): Promise<WixCat
     .eq("package_id", packageId)
     .maybeSingle()
 
-  const sellable = Math.max(0, (inv?.qty_available ?? 0) - (inv?.qty_held ?? 0))
+  const portalSellable = Math.max(0, (inv?.qty_available ?? 0) - (inv?.qty_held ?? 0))
+  // Wix has no suite-split warning — cap storefront stock at the largest single
+  // supplier/block remaining so online shoppers can't book a party that must split.
+  // Portal agents still see the full pool sum. If there is only one source (or no
+  // cost layers), this equals portalSellable.
+  const { largestSameSuiteRemainingForPackage } = await import("@/lib/catalog/same-suite-remaining")
+  const largestSameSuite = await largestSameSuiteRemainingForPackage(admin, packageId)
+  const sellable =
+    largestSameSuite > 0 ? Math.min(portalSellable, largestSameSuite) : portalSellable
   const retailUnit = payload.pricing.retailPrice
 
   for (const listing of listings) {

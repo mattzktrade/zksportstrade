@@ -56,6 +56,7 @@ export function PackageDetailClient({
   const [activeTab, setActiveTab] = useState<AdminPackageTab>(initialTab)
   const [livePkg, setLivePkg] = useState(pkg)
   const [liveLinkedPackages, setLiveLinkedPackages] = useState(linkedPackages)
+  const [liveWixListings, setLiveWixListings] = useState(wixListings)
 
   useEffect(() => {
     setLivePkg(pkg)
@@ -65,11 +66,16 @@ export function PackageDetailClient({
     setLiveLinkedPackages(linkedPackages)
   }, [linkedPackages])
 
+  useEffect(() => {
+    setLiveWixListings(wixListings)
+  }, [wixListings])
+
   async function refreshInventory() {
     const full = await fetchAdminPackageForCatalogExpand(livePkg.id)
     if (full) {
       setLivePkg(full.pkg)
       setLiveLinkedPackages(full.linkedPackages)
+      setLiveWixListings(full.wixListings)
     }
     router.refresh()
   }
@@ -142,7 +148,7 @@ export function PackageDetailClient({
           <PackageAdminPanel
             initial={livePkg}
             races={races}
-            wixListings={wixListings}
+            wixListings={liveWixListings}
             section="details"
             onDeleted={() => router.push("/admin/catalog")}
           />
@@ -150,7 +156,7 @@ export function PackageDetailClient({
           <PackageAdminPanel
             initial={livePkg}
             races={races}
-            wixListings={wixListings}
+            wixListings={liveWixListings}
             linkedPackages={liveLinkedPackages}
             linkedShellPackages={linkedShellPackages}
             linkedDayOverview={linkedDayOverview}
@@ -163,7 +169,7 @@ export function PackageDetailClient({
           <PackageAdminPanel
             initial={livePkg}
             races={races}
-            wixListings={wixListings}
+            wixListings={liveWixListings}
             linkedPackages={liveLinkedPackages}
             section="integrations"
           />

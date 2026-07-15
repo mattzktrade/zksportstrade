@@ -60,3 +60,24 @@ export function lowStockGuestHint(sellable: number): string | null {
   if (!appliesNoLeaveOneRule(sellable) || sellable <= 1) return null
   return "When only a few places remain, you cannot book a quantity that would leave a single place unsold. Choose a smaller group or book all remaining places."
 }
+
+/**
+ * Soft warning when the party is larger than the biggest single supplier/block remaining.
+ * Sellable stays the full pool sum — this only educates agents about possible suite splits.
+ */
+export function suiteSplitGuestHint(
+  guests: number,
+  sellable: number,
+  largestSameSuiteRemaining: number | null | undefined,
+): string | null {
+  const g = Math.floor(guests)
+  const s = Math.max(0, Math.floor(sellable))
+  const largest =
+    largestSameSuiteRemaining == null || !Number.isFinite(largestSameSuiteRemaining)
+      ? null
+      : Math.max(0, Math.floor(largestSameSuiteRemaining))
+  if (largest == null || largest <= 0) return null
+  if (s <= largest) return null
+  if (!Number.isFinite(g) || g <= largest) return null
+  return "We'll try to keep all guests in the same suite, but there's a chance they may be split across 2 suites. Contact us for more info."
+}

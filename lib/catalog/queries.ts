@@ -16,6 +16,7 @@ import {
   type DbPackage,
   type DbRace,
 } from "@/lib/catalog/map-rows"
+import { attachLargestSameSuiteRemaining } from "@/lib/catalog/same-suite-remaining"
 
 type HoldAgg = { qty: number; expiresAtMin: string }
 
@@ -96,7 +97,18 @@ async function fetchFullCatalogBase(
   if (racesError || packagesError || invError) return null
   if (!allRaces || !allPackages) return null
 
-  return buildCatalog(allRaces as DbRace[], allPackages as DbPackage[], (inventory ?? []) as DbInventory[])
+  const built = buildCatalog(allRaces as DbRace[], allPackages as DbPackage[], (inventory ?? []) as DbInventory[])
+  const packages = await attachLargestSameSuiteRemaining(
+    supabase,
+    built.packages,
+    (allPackages as DbPackage[]).map((p) => ({
+      id: p.id,
+      inventory_group_id: p.inventory_group_id,
+      duration: p.duration,
+      shell_parent_package_id: p.shell_parent_package_id,
+    })),
+  )
+  return { races: built.races, packages }
 }
 
 export async function getPortalCatalog(agentProfileId?: string | null): Promise<PortalCatalog | null> {
@@ -157,6 +169,16 @@ export async function getRaceCatalog(
   const invByPackage = new Map(inventoryRows.map((i) => [i.package_id, i]))
 
   let packages = (packageRows as DbPackage[]).map((p) => mapPackageRow(p, invByPackage.get(p.id)))
+  packages = await attachLargestSameSuiteRemaining(
+    supabase,
+    packages,
+    (packageRows as DbPackage[]).map((p) => ({
+      id: p.id,
+      inventory_group_id: p.inventory_group_id,
+      duration: p.duration,
+      shell_parent_package_id: p.shell_parent_package_id,
+    })),
+  )
   const race = mapRaceRow(raceRow as DbRace, packages)
 
   if (agentProfileId && packages.length > 0) {
@@ -189,6 +211,14 @@ export async function getPackageById(id: string, agentProfileId?: string | null)
 
   const { data: inv } = await supabase.from("package_inventory").select(INVENTORY_COLUMNS).eq("package_id", id).maybeSingle()
   let pkg = mapPackageRow(dbPkg, inv as DbInventory | undefined)
+  ;[pkg] = await attachLargestSameSuiteRemaining(supabase, [pkg], [
+    {
+      id: dbPkg.id,
+      inventory_group_id: dbPkg.inventory_group_id,
+      duration: dbPkg.duration,
+      shell_parent_package_id: dbPkg.shell_parent_package_id,
+    },
+  ])
 
   if (agentProfileId && typeof pkg.availability === "number") {
     const holdAgg = await fetchAgentHoldAggregates(supabase, agentProfileId, [id])

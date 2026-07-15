@@ -35,6 +35,11 @@ export interface Package {
   agentHoldUnits?: number
   /** Earliest expiry among your active holds on this package (ISO). */
   agentHoldExpiresAt?: string | null
+  /**
+   * Largest remaining units in one fulfilment block / supplier purchase.
+   * Used for a soft suite-split warning; storefront sellable stays the full pool sum.
+   */
+  largestSameSuiteRemaining?: number | null
 }
 
 export interface Race {

@@ -13,6 +13,7 @@ import { adminRaceLabel } from "@/lib/admin/race-label"
 import { adminPackagePath } from "@/lib/admin/package-link"
 import { isBookableEventDate } from "@/lib/catalog/bookable-events"
 import { PackageAdminPanel } from "@/components/admin/package-admin-panel"
+import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
 import { formatMoneyCompact } from "@/lib/format/money"
 import { cn } from "@/lib/utils"
 
@@ -383,6 +384,7 @@ function CatalogRow({
   const [expandedLinkedPackages, setExpandedLinkedPackages] = useState<LinkedInventoryPackage[] | null>(
     null,
   )
+  const [expandedWixListings, setExpandedWixListings] = useState<WixChannelListingRow[]>([])
   const [expandLoading, setExpandLoading] = useState(false)
 
   async function toggleExpanded() {
@@ -395,6 +397,7 @@ function CatalogRow({
       if (full) {
         setExpandedPackage(full.pkg)
         setExpandedLinkedPackages(full.linkedPackages)
+        setExpandedWixListings(full.wixListings)
       }
     } finally {
       setExpandLoading(false)
@@ -497,11 +500,13 @@ function CatalogRow({
               initial={panelPackage}
               races={races}
               linkedPackages={panelLinkedPackages}
+              wixListings={expandedWixListings}
               onInventoryChanged={async () => {
                 const full = await fetchAdminPackageForCatalogExpand(initial.id)
                 if (full) {
                   setExpandedPackage(full.pkg)
                   setExpandedLinkedPackages(full.linkedPackages)
+                  setExpandedWixListings(full.wixListings)
                 }
               }}
             />
