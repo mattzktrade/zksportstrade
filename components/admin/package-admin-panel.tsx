@@ -305,7 +305,7 @@ export function PackageAdminPanel({
       ? linkedPoolSellableForPackage({
           stock: stockDisplay,
           targetId: initial.id,
-          targetDuration: initial.duration,
+          targetDuration: initial.duration ?? null,
           members: linkedMembers,
         })
       : commitmentSellable({
