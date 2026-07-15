@@ -174,7 +174,25 @@ export function PackageDetailClient({
             section="integrations"
           />
         ) : (
-          <PackageOrdersTable orders={orders} costLayers={livePkg.cost_layers} />
+          <PackageOrdersTable
+            orders={orders}
+            costLayers={(() => {
+              const duration = livePkg.duration?.trim() ?? ""
+              const isLinkedDay =
+                duration === "thursday_only" ||
+                duration === "friday_only" ||
+                duration === "saturday_only" ||
+                duration === "sunday_only" ||
+                duration === "2_day"
+              if (isLinkedDay) {
+                const parent = liveLinkedPackages.find(
+                  (p) => p.duration === "3_day" && (p.cost_layers?.length ?? 0) > 0,
+                )
+                if (parent?.cost_layers?.length) return parent.cost_layers
+              }
+              return livePkg.cost_layers
+            })()}
+          />
         )}
       </div>
     </div>

@@ -458,7 +458,9 @@ export function CheckoutClient({
                     <p className="mt-2 text-xs text-muted-foreground leading-relaxed">{stockHint}</p>
                   ) : null}
                   {suiteHint ? (
-                    <p className="mt-2 text-xs text-muted-foreground leading-relaxed">{suiteHint}</p>
+                    <p className="mt-2 text-xs text-amber-800 dark:text-amber-200 leading-relaxed rounded-lg border border-amber-300/60 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-2">
+                      {suiteHint}
+                    </p>
                   ) : null}
                 </div>
 
@@ -855,6 +857,11 @@ export function CheckoutClient({
                   <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                   <span>{formData.guests} guests</span>
                 </div>
+                {suiteHint ? (
+                  <p className="text-xs text-amber-800 dark:text-amber-200 leading-relaxed rounded-lg border border-amber-300/60 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-2">
+                    {suiteHint}
+                  </p>
+                ) : null}
 
                 <div className="pt-3 sm:pt-4 border-t border-border space-y-2 sm:space-y-3">
                   <div className="flex justify-between text-xs sm:text-sm">

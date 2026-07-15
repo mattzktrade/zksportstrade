@@ -87,7 +87,8 @@ export function CatalogInventoryClient({ races }: { races: AdminRaceOption[] }) 
 
   useEffect(() => {
     let cancelled = false
-    void (async () => {
+    async function loadFresh() {
+      clearCatalogClientCache()
       const fresh = await fetchAdminCatalogList()
       if (cancelled) return
       if (fresh.length > 0) {
@@ -95,9 +96,17 @@ export function CatalogInventoryClient({ races }: { races: AdminRaceOption[] }) 
         writeCatalogClientCache(fresh, races)
       }
       setListLoading(false)
-    })()
+    }
+    void loadFresh()
+
+    function onVisible() {
+      if (document.visibilityState !== "visible") return
+      void loadFresh()
+    }
+    document.addEventListener("visibilitychange", onVisible)
     return () => {
       cancelled = true
+      document.removeEventListener("visibilitychange", onVisible)
     }
   }, [races])
 

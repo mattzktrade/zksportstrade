@@ -149,8 +149,9 @@ export function PackageCostLayers({
   const [orphanBlockId, setOrphanBlockId] = useState("")
 
   const duration = packageDuration?.trim() || null
+  // Linked day packages always display the 3-day purchase ledger when the parent has layers
+  // (even if this day imported its own SF Stock Source rows — those duplicates skew Sold/Left).
   const inheritsSharedLedger =
-    layers.length === 0 &&
     !!duration &&
     LINKED_DAY_DURATIONS.has(duration) &&
     linkedPackages.length > 1
@@ -165,10 +166,12 @@ export function PackageCostLayers({
     )
   }, [inheritsSharedLedger, linkedPackages, packageId])
 
-  const displayLayers = sharedLedgerParent?.cost_layers?.length
-    ? sharedLedgerParent.cost_layers
-    : layers
-  const isSharedLedgerView = !!sharedLedgerParent && displayLayers.length > 0 && layers.length === 0
+  const displayLayers =
+    inheritsSharedLedger && sharedLedgerParent?.cost_layers?.length
+      ? sharedLedgerParent.cost_layers
+      : layers
+  const isSharedLedgerView =
+    inheritsSharedLedger && !!sharedLedgerParent && displayLayers.length > 0 && displayLayers !== layers
 
   // Seeded linked-day qty is shared pool capacity — not orphan stock missing a purchase row.
   const hasOrphanStock = layers.length === 0 && qtyAvailable > 0 && !isSharedLedgerView
@@ -184,36 +187,58 @@ export function PackageCostLayers({
     return fromLayers > 0 ? fromLayers : Math.max(0, Math.floor(qtyAvailable))
   }, [stockTotal, displayLayers, qtyAvailable])
 
-  /** Closed-won places sold attributed to this package's stock pool (excl. open pipeline). */
-  const poolSoldTotal = useMemo(() => {
-    let total = salesforceClosedWonSold(salesBreakdown)
-    if (linkedPackages.length > 1) {
-      for (const p of linkedPackages) {
-        if (p.id === packageId) continue
-        total += salesforceClosedWonSold(p.sales_breakdown)
-      }
-    }
-    // Also count portal / Wix bookings on this package (and linked siblings).
-    total += Math.max(0, Math.floor(salesBreakdown.wix) + Math.floor(salesBreakdown.tradePortal))
-    if (linkedPackages.length > 1) {
-      for (const p of linkedPackages) {
-        if (p.id === packageId) continue
-        total +=
-          Math.max(0, Math.floor(p.sales_breakdown.wix)) +
-          Math.max(0, Math.floor(p.sales_breakdown.tradePortal))
-      }
-    }
-    return total
-  }, [salesBreakdown, linkedPackages, packageId])
+  /**
+   * Closed-won + portal/Wix sold attributed to THIS package's Stock Purchased ledger.
+   * Linked day packages share the 3-day cost layers but only attribute:
+   *   - day: 3-day sales + that day's sales (Fri/Sat ignore Sunday)
+   *   - 3-day: all linked non-shell sales (pool)
+   * Matches Salesforce Stock Source Quantity Sold.
+   */
+  const attributedLedgerSold = useMemo(() => {
+    const soldOf = (b: PackageSalesBreakdown) =>
+      salesforceClosedWonSold(b) +
+      Math.max(0, Math.floor(b.wix)) +
+      Math.max(0, Math.floor(b.tradePortal))
 
-  const soldByLayerId = useMemo(
-    () =>
-      resolveSoldByCostLayer({
-        layers: displayLayers,
-        totalPackageSold: poolSoldTotal,
-      }),
-    [displayLayers, poolSoldTotal],
-  )
+    const ownSold = soldOf(salesBreakdown)
+    if (linkedPackages.length <= 1) return ownSold
+
+    const dur = (packageDuration ?? "").trim()
+    const threeDay = linkedPackages.find((p) => (p.duration ?? "").trim() === "3_day")
+    const threeDaySold = threeDay
+      ? soldOf(threeDay.id === packageId ? salesBreakdown : threeDay.sales_breakdown)
+      : 0
+
+    if (dur === "3_day") {
+      let total = 0
+      for (const p of linkedPackages) {
+        total += soldOf(p.id === packageId ? salesBreakdown : p.sales_breakdown)
+      }
+      return total
+    }
+    if (LINKED_DAY_DURATIONS.has(dur) || dur === "2_day") {
+      return threeDaySold + ownSold
+    }
+    return ownSold
+  }, [salesBreakdown, linkedPackages, packageId, packageDuration])
+
+  const soldByLayerId = useMemo(() => {
+    // FIFO-allocate attributed sold; ignore shared quantity_remaining so Fri/Sat
+    // don't inherit Sunday's supplier split from the 3-day ledger.
+    const sharedLinkedLedger =
+      linkedPackages.length > 1 &&
+      ((packageDuration && LINKED_DAY_DURATIONS.has(packageDuration.trim())) ||
+        packageDuration?.trim() === "3_day" ||
+        packageDuration?.trim() === "2_day")
+    const consumptionsByLayer = sharedLinkedLedger
+      ? new Map(displayLayers.map((l) => [l.id, 0]))
+      : undefined
+    return resolveSoldByCostLayer({
+      layers: displayLayers,
+      consumptionsByLayer,
+      totalPackageSold: attributedLedgerSold,
+    })
+  }, [displayLayers, attributedLedgerSold, linkedPackages.length, packageDuration])
 
   const purchaseOrderById = useMemo(
     () => new Map(purchaseOrders.map((po) => [po.id, po])),

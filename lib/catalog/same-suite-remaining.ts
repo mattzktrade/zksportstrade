@@ -47,24 +47,40 @@ export function largestSameSuiteRemainingFromLayers(
   return Math.max(...byKey.values())
 }
 
+const LINKED_DAY_DURATIONS = new Set([
+  "thursday_only",
+  "friday_only",
+  "saturday_only",
+  "sunday_only",
+  "2_day",
+])
+
 function resolveLedgerPackageId(
   packageId: string,
   metaById: Map<string, PackageMeta>,
   remainingByPackage: Map<string, number>,
 ): string {
   const meta = metaById.get(packageId)
-  const own = remainingByPackage.get(packageId) ?? 0
-  if (own > 0 || !meta?.inventory_group_id?.trim()) return packageId
+  if (!meta?.inventory_group_id?.trim()) return packageId
 
-  for (const row of metaById.values()) {
-    if (
-      row.inventory_group_id === meta.inventory_group_id &&
-      row.duration === "3_day" &&
-      !row.shell_parent_package_id
-    ) {
-      return row.id
+  const duration = meta.duration?.trim() ?? ""
+  const isLinkedDay =
+    !meta.shell_parent_package_id?.trim() && LINKED_DAY_DURATIONS.has(duration)
+
+  // Linked day packages always use the 3-day purchase ledger for suite-split hints,
+  // even when they have imported local cost-layer rows.
+  if (isLinkedDay || (remainingByPackage.get(packageId) ?? 0) <= 0) {
+    for (const row of metaById.values()) {
+      if (
+        row.inventory_group_id === meta.inventory_group_id &&
+        row.duration === "3_day" &&
+        !row.shell_parent_package_id
+      ) {
+        return row.id
+      }
     }
   }
+
   return packageId
 }
 

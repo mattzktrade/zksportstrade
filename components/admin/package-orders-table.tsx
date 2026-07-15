@@ -38,11 +38,31 @@ function SupplierAllocationEditor({
   const router = useRouter()
   const [pending, start] = useTransition()
   const initial = useMemo<DraftAllocation[]>(() => {
-    const linked = order.supplierConsumptions
+    const fromConsumptions = order.supplierConsumptions
       .filter((c) => c.costLayerId)
       .map((c) => ({ costLayerId: c.costLayerId ?? "", quantity: String(c.quantity) }))
-    return linked.length > 0 ? linked : [{ costLayerId: "", quantity: String(order.guests) }]
-  }, [order.guests, order.supplierConsumptions])
+    if (fromConsumptions.length > 0) {
+      return fromConsumptions.map((row) => {
+        if (costLayers.some((l) => l.id === row.costLayerId)) return row
+        const cons = order.supplierConsumptions.find((c) => c.costLayerId === row.costLayerId)
+        const supplier = (cons?.supplier ?? "").trim().toLowerCase()
+        if (!supplier) return row
+        const match = costLayers.find((l) => (l.source?.trim() || "").toLowerCase() === supplier)
+        return match ? { ...row, costLayerId: match.id } : row
+      })
+    }
+    if (order.supplierAllocations.length > 0) {
+      return order.supplierAllocations.map((a) => {
+        const supplier = a.supplier.trim().toLowerCase()
+        const match = costLayers.find((l) => (l.source?.trim() || "").toLowerCase() === supplier)
+        return {
+          costLayerId: match?.id ?? "",
+          quantity: String(a.quantity),
+        }
+      })
+    }
+    return [{ costLayerId: "", quantity: String(order.guests) }]
+  }, [order.guests, order.supplierConsumptions, order.supplierAllocations, costLayers])
   const [rows, setRows] = useState<DraftAllocation[]>(initial)
   useEffect(() => {
     setRows(initial)

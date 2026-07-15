@@ -87,10 +87,12 @@ async function patchShellInventoryWithJunctionBypass(args: {
 /**
  * Push Stock + Available Quantity to Salesforce day products, 3-day parent, and shells.
  *
- * Stock = portal cost-layer pool (purchased units).
- * Available = portal sellable after Closed Won + open pipeline holds (same Remaining as
- * the portal / Wix). Open opportunities must reduce Remaining so stock cannot be
- * double-sold; Closed Lost releases it. Quantity_Sold is not written (DLRS / formula).
+ * Stock = portal cost-layer pool.
+ * Available = portal sellable (must be written AFTER Stock Source syncs — those child
+ * upserts can fire PackageInventoryManager and snap Available back to Stock − pipeline).
+ *
+ * Quantity_Sold__c is a Salesforce formula (Stock − Available) — never PATCH it. Writing
+ * Available updates Quantity Sold automatically.
  */
 export async function pushLinkedGroupAvailabilityToSalesforce(
   admin: SupabaseClient,
@@ -129,6 +131,22 @@ export async function pushLinkedGroupAvailabilityToSalesforce(
     updateable.has(config.fieldStockQty) &&
     !PROTECTED_SALESFORCE_PRODUCT_FIELDS.has(config.fieldStockQty)
 
+  async function patchProduct(product2Id: string, sellable: number, label: string): Promise<void> {
+    const body: Record<string, number> = {
+      [config.fieldAvailableQty!]: Math.max(0, Math.floor(sellable)),
+    }
+    if (canPushStock && config.fieldStockQty && stockToPush != null) {
+      body[config.fieldStockQty] = stockToPush
+    }
+
+    try {
+      await salesforceRequest("PATCH", `/sobjects/Product2/${product2Id}`, { body })
+      updated++
+    } catch (e) {
+      skipped.push(`${label}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
   for (const member of members) {
     if (member.shell_parent_package_id) continue
     const product2Id = member.salesforce_product_id?.trim() ?? ""
@@ -139,6 +157,7 @@ export async function pushLinkedGroupAvailabilityToSalesforce(
       duration !== "friday_only" &&
       duration !== "saturday_only" &&
       duration !== "sunday_only" &&
+      duration !== "thursday_only" &&
       duration !== "3_day" &&
       duration !== "2_day"
     ) {
@@ -148,19 +167,7 @@ export async function pushLinkedGroupAvailabilityToSalesforce(
     const sellable = daySellables.get(member.id)
     if (sellable == null) continue
 
-    const body: Record<string, number> = {
-      [config.fieldAvailableQty]: Math.max(0, Math.floor(sellable)),
-    }
-    if (canPushStock && config.fieldStockQty) {
-      body[config.fieldStockQty] = stockToPush!
-    }
-
-    try {
-      await salesforceRequest("PATCH", `/sobjects/Product2/${product2Id}`, { body })
-      updated++
-    } catch (e) {
-      skipped.push(`${member.id}: ${e instanceof Error ? e.message : String(e)}`)
-    }
+    await patchProduct(product2Id, sellable, member.id)
   }
 
   const threeDay = members.find((m) => m.duration === "3_day" && !m.shell_parent_package_id)
@@ -185,8 +192,8 @@ export async function pushLinkedGroupAvailabilityToSalesforce(
       const body: Record<string, number> = {
         [config.fieldAvailableQty]: Math.max(0, Math.floor(sellable)),
       }
-      if (canPushStock && config.fieldStockQty) {
-        body[config.fieldStockQty] = stockToPush!
+      if (canPushStock && config.fieldStockQty && stockToPush != null) {
+        body[config.fieldStockQty] = stockToPush
       }
 
       try {
@@ -203,15 +210,12 @@ export async function pushLinkedGroupAvailabilityToSalesforce(
               config,
             })
             updated++
-            continue
           } catch (e2) {
-            skipped.push(
-              `shell ${shellId}: ${e2 instanceof Error ? e2.message : String(e2)} (after junction bypass)`,
-            )
-            continue
+            skipped.push(`${shellId}: ${e2 instanceof Error ? e2.message : String(e2)}`)
           }
+        } else {
+          skipped.push(`${shellId}: ${msg}`)
         }
-        skipped.push(`shell ${shellId}: ${msg}`)
       }
     }
   }

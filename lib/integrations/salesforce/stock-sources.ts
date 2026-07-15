@@ -35,6 +35,14 @@ import { readLocalSoldForPackage } from "@/lib/inventory/local-sold"
  *      Wix, trade portal) that reduced sellable but never wrote consumption rows,
  *      allocated FIFO across layers by received_at — same supplier stock those
  *      sales came from.
+ *
+ * Linked inventory groups are special: day / 2-day / 3-day Product2s all share the
+ * 3-day cost ledger, but each Product2's Quantity_Sold__c is FIFO-allocated from
+ * an attributed sold total:
+ *   - 3-day → all linked non-shell sales (pool)
+ *   - day   → 3-day sales + that day's sales only (Fri ignores Sunday)
+ *   - 2-day → 3-day sales + 2-day sales
+ * Pool-wide consumptions / quantity_remaining are ignored for that attribution.
  */
 
 const SOURCE_REF_PREFIX = "zk-"
@@ -310,15 +318,27 @@ async function readExistingPortalStockSources(product2Id: string): Promise<Exist
   return rows
 }
 
+const LINKED_DAY_DURATIONS = new Set([
+  "thursday_only",
+  "friday_only",
+  "saturday_only",
+  "sunday_only",
+])
+
 /**
- * Linked day packages keep purchases on the 3-day parent. Mirror
- * `resolve_cost_ledger_package_id` so Stock Sources sync that shared ledger
- * onto Friday/Saturday/Sunday Product2s (not empty day-local layers).
+ * Linked day packages keep purchases on the 3-day parent. Always use that ledger for
+ * Stock Sources — even when the day package has imported duplicate SF stock-source rows.
  */
 async function resolveCostLedgerPackageId(
   admin: SupabaseClient,
   packageId: string,
-): Promise<{ ledgerPackageId: string; usedParentLedger: boolean }> {
+): Promise<{
+  ledgerPackageId: string
+  usedParentLedger: boolean
+  duration: string
+  groupId: string | null
+  isShell: boolean
+}> {
   const { data: pkg } = await admin
     .from("packages")
     .select("inventory_group_id, duration, shell_parent_package_id")
@@ -326,34 +346,89 @@ async function resolveCostLedgerPackageId(
     .maybeSingle()
 
   const groupId = (pkg as { inventory_group_id?: string | null } | null)?.inventory_group_id?.trim() || null
+  const duration = (pkg as { duration?: string | null } | null)?.duration?.trim() ?? ""
   const isShell = !!(pkg as { shell_parent_package_id?: string | null } | null)?.shell_parent_package_id?.trim()
 
-  const { data: ownRemaining } = await admin
-    .from("package_cost_layers")
-    .select("id")
-    .eq("package_id", packageId)
-    .gt("quantity_remaining", 0)
-    .limit(1)
-
-  if ((ownRemaining?.length ?? 0) > 0 || !groupId || isShell) {
-    return { ledgerPackageId: packageId, usedParentLedger: false }
+  if (!groupId || isShell) {
+    return { ledgerPackageId: packageId, usedParentLedger: false, duration, groupId, isShell }
   }
 
-  const { data: parent } = await admin
+  if (LINKED_DAY_DURATIONS.has(duration) || duration === "2_day") {
+    const { data: parent } = await admin
+      .from("packages")
+      .select("id")
+      .eq("inventory_group_id", groupId)
+      .eq("duration", "3_day")
+      .is("shell_parent_package_id", null)
+      .order("id")
+      .limit(1)
+      .maybeSingle()
+
+    const parentId = (parent as { id?: string } | null)?.id?.trim()
+    if (parentId && parentId !== packageId) {
+      return { ledgerPackageId: parentId, usedParentLedger: true, duration, groupId, isShell }
+    }
+  }
+
+  return { ledgerPackageId: packageId, usedParentLedger: false, duration, groupId, isShell }
+}
+
+/**
+ * How many shared-ledger units this Product2 should show as sold on Stock Sources:
+ * - 3-day: every linked sale (pool total)
+ * - day package: 3-day sales + that day's own sales only (Fri ignores Sunday sales)
+ * - 2-day: 3-day sales + 2-day own sales
+ */
+export function computeLinkedStockSourceAttributedSold(input: {
+  packageId: string
+  duration: string
+  siblings: readonly { id: string; duration: string | null; sold: number }[]
+}): number {
+  const soldById = new Map(input.siblings.map((r) => [r.id, Math.max(0, Math.floor(r.sold))]))
+  const threeDay = input.siblings.find((r) => (r.duration ?? "").trim() === "3_day")
+  const threeDaySold = threeDay ? soldById.get(threeDay.id) ?? 0 : 0
+  const ownSold = soldById.get(input.packageId) ?? 0
+
+  if (input.duration === "3_day") {
+    return input.siblings.reduce((sum, r) => sum + (soldById.get(r.id) ?? 0), 0)
+  }
+  if (LINKED_DAY_DURATIONS.has(input.duration)) {
+    return threeDaySold + ownSold
+  }
+  if (input.duration === "2_day") {
+    return threeDaySold + ownSold
+  }
+  return ownSold
+}
+
+async function linkedStockSourceAttributedSold(
+  admin: SupabaseClient,
+  input: {
+    packageId: string
+    groupId: string
+    duration: string
+  },
+): Promise<number> {
+  const { data: siblings } = await admin
     .from("packages")
-    .select("id")
-    .eq("inventory_group_id", groupId)
-    .eq("duration", "3_day")
+    .select("id, duration")
+    .eq("inventory_group_id", input.groupId)
     .is("shell_parent_package_id", null)
-    .order("id")
-    .limit(1)
-    .maybeSingle()
 
-  const parentId = (parent as { id?: string } | null)?.id?.trim()
-  if (parentId && parentId !== packageId) {
-    return { ledgerPackageId: parentId, usedParentLedger: true }
-  }
-  return { ledgerPackageId: packageId, usedParentLedger: false }
+  const rows = (siblings ?? []) as Array<{ id: string; duration: string | null }>
+  const withSold = await Promise.all(
+    rows.map(async (row) => ({
+      id: row.id,
+      duration: row.duration,
+      sold: await readLocalSoldForPackage(admin, row.id).catch(() => 0),
+    })),
+  )
+
+  return computeLinkedStockSourceAttributedSold({
+    packageId: input.packageId,
+    duration: input.duration,
+    siblings: withSold,
+  })
 }
 
 async function loadStockSourceInputsForPackage(
@@ -367,7 +442,8 @@ async function loadStockSourceInputsForPackage(
   consumptionsByLayer: Map<string, number>
   totalPackageSold: number
 }> {
-  const { ledgerPackageId, usedParentLedger } = await resolveCostLedgerPackageId(admin, packageId)
+  const { ledgerPackageId, usedParentLedger, duration, groupId, isShell } =
+    await resolveCostLedgerPackageId(admin, packageId)
 
   const { data: layerData, error: layerErr } = await admin
     .from("package_cost_layers")
@@ -433,8 +509,17 @@ async function loadStockSourceInputsForPackage(
     }
   }
 
+  // Linked shared-ledger Stock Sources: FIFO-allocate the product-specific attributed sold
+  // total. Do NOT use raw order_cost_consumptions (pool-wide) or quantity_remaining (also
+  // pool-wide) — those make Friday inherit Sunday's supplier split. Seed booked sold = 0
+  // per layer so allocateUnattributedSoldAcrossLayers FIFO-applies attributedSold only.
+  const linkedSharedLedger =
+    !!groupId && !isShell && (usedParentLedger || duration === "3_day" || duration === "2_day")
+
   const consumptionsByLayer = new Map<string, number>()
-  if (layerIds.length > 0) {
+  if (linkedSharedLedger) {
+    for (const id of layerIds) consumptionsByLayer.set(id, 0)
+  } else if (layerIds.length > 0) {
     const { data: consData } = await admin
       .from("order_cost_consumptions")
       .select("cost_layer_id, quantity, orders!inner(status)")
@@ -450,87 +535,51 @@ async function loadStockSourceInputsForPackage(
     }
   }
 
-  const totalPackageSoldBooked = await readLocalSoldForPackage(admin, packageId).catch(() => 0)
+  let totalPackageSold = await readLocalSoldForPackage(admin, packageId).catch(() => 0)
 
-  // Prefer live Closed Won opportunity lines when portal offline applications are incomplete
-  // or Product2 Available was wiped (sellable=0 → implied sold = full purchased).
-  let sfWonSold = 0
-  const { data: pkgSf } = await admin
-    .from("packages")
-    .select("salesforce_product_id")
-    .eq("id", packageId)
-    .maybeSingle()
-  const product2IdForSold = (pkgSf as { salesforce_product_id?: string | null } | null)
-    ?.salesforce_product_id?.trim()
-  if (product2IdForSold) {
-    const config = getSalesforceConfig()
-    if (config) {
-      sfWonSold = await computeProductQuantitySoldFromWonLines(
-        product2IdForSold,
-        config.opportunityStageWon,
-      ).catch(() => 0)
-    }
-  }
-
-  // Offline Closed Won pulls decrement package_inventory but do not write
-  // order_cost_consumptions / keep quantity_remaining in sync. Prefer the higher of
-  // recorded sold vs inventory-implied sold so stock-source Quantity Sold matches
-  // product Quantity Sold (Stock − Available).
-  let sellable = 0
-  const { data: inv } = await admin
-    .from("package_inventory")
-    .select("qty_available, qty_held")
-    .eq("package_id", packageId)
-    .maybeSingle()
-  if (inv) {
-    const available = Math.max(0, Math.floor(Number(inv.qty_available) || 0))
-    const held = Math.max(0, Math.floor(Number(inv.qty_held) || 0))
-    sellable = Math.max(0, available - held)
-  }
-  const totalPurchased = layers.reduce((sum, l) => sum + l.quantity, 0)
-  const impliedSoldFromInventory = Math.max(0, totalPurchased - sellable)
-
-  // Linked groups: day-only / 3-day sales all consume the shared ledger. Include sibling
-  // sold when syncing the parent OR a day product that inherits the parent ledger.
-  let linkedSiblingSold = 0
-  const { data: pkgMeta } = await admin
-    .from("packages")
-    .select("inventory_group_id, duration, shell_parent_package_id")
-    .eq("id", packageId)
-    .maybeSingle()
-  const groupId = (pkgMeta as { inventory_group_id?: string | null } | null)?.inventory_group_id?.trim()
-  const duration = (pkgMeta as { duration?: string | null } | null)?.duration?.trim() ?? ""
-  const isShell = !!(pkgMeta as { shell_parent_package_id?: string | null } | null)?.shell_parent_package_id?.trim()
-  const includeLinkedPoolSold =
-    !!groupId &&
-    !isShell &&
-    (usedParentLedger || duration === "3_day" || duration === "2_day")
-  if (includeLinkedPoolSold) {
-    const { data: siblings } = await admin
+  if (linkedSharedLedger && groupId) {
+    totalPackageSold = await linkedStockSourceAttributedSold(admin, {
+      packageId,
+      groupId,
+      duration,
+    })
+  } else {
+    let sfWonSold = 0
+    const { data: pkgSf } = await admin
       .from("packages")
-      .select("id")
-      .eq("inventory_group_id", groupId!)
-      .neq("id", packageId)
-      .is("shell_parent_package_id", null)
-    for (const sib of siblings ?? []) {
-      const sibId = String((sib as { id: string }).id)
-      linkedSiblingSold += await readLocalSoldForPackage(admin, sibId).catch(() => 0)
+      .select("salesforce_product_id")
+      .eq("id", packageId)
+      .maybeSingle()
+    const product2IdForSold = (pkgSf as { salesforce_product_id?: string | null } | null)
+      ?.salesforce_product_id?.trim()
+    if (product2IdForSold) {
+      const config = getSalesforceConfig()
+      if (config) {
+        sfWonSold = await computeProductQuantitySoldFromWonLines(
+          product2IdForSold,
+          config.opportunityStageWon,
+        ).catch(() => 0)
+      }
     }
+
+    let sellable = 0
+    const { data: inv } = await admin
+      .from("package_inventory")
+      .select("qty_available, qty_held")
+      .eq("package_id", packageId)
+      .maybeSingle()
+    if (inv) {
+      const available = Math.max(0, Math.floor(Number(inv.qty_available) || 0))
+      const held = Math.max(0, Math.floor(Number(inv.qty_held) || 0))
+      sellable = Math.max(0, available - held)
+    }
+    const totalPurchased = layers.reduce((sum, l) => sum + l.quantity, 0)
+    const impliedSoldFromInventory = Math.max(0, totalPurchased - sellable)
+    const booked = Math.max(totalPackageSold, sfWonSold)
+    const impliedSold =
+      sellable === 0 && booked > 0 && booked < totalPurchased ? booked : impliedSoldFromInventory
+    totalPackageSold = Math.max(totalPackageSold, impliedSold, booked)
   }
-
-  // When portal sellable is 0 but booked/won sold < purchased, implied sold
-  // (= purchased) overstates closed-won. Cap so Stock Source Quantity Sold stays
-  // at real sales (e.g. 140) not full stock (200).
-  const bookedWithSiblings = Math.max(
-    totalPackageSoldBooked + linkedSiblingSold,
-    sfWonSold,
-  )
-  const impliedSold =
-    sellable === 0 && bookedWithSiblings > 0 && bookedWithSiblings < totalPurchased
-      ? bookedWithSiblings
-      : impliedSoldFromInventory
-
-  const totalPackageSold = Math.max(totalPackageSoldBooked, impliedSold, bookedWithSiblings)
 
   return {
     layers,

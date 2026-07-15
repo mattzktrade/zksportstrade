@@ -42,6 +42,49 @@ function inventoryRow(raw: GroupMember["package_inventory"]) {
   return Array.isArray(raw) ? raw[0] : raw
 }
 
+/** Bulk portal + offline sold for linked-group members (avoids per-row catch → 0 drops). */
+async function loadPortalSoldByPackageIds(
+  admin: SupabaseClient,
+  packageIds: readonly string[],
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>()
+  const ids = [...new Set(packageIds.map((id) => id.trim()).filter(Boolean))]
+  if (ids.length === 0) return result
+
+  const { data: orders, error: orderErr } = await admin
+    .from("orders")
+    .select("package_id, guests")
+    .in("package_id", ids)
+    .neq("status", "cancelled")
+  if (orderErr) {
+    console.warn("[linked-inventory] portal sold orders query failed:", orderErr.message)
+  } else {
+    for (const row of orders ?? []) {
+      const id = String((row as { package_id: string }).package_id ?? "").trim()
+      if (!id) continue
+      const guests = Math.max(0, Math.floor(Number((row as { guests: number | null }).guests) || 0))
+      result.set(id, (result.get(id) ?? 0) + guests)
+    }
+  }
+
+  const { data: offline, error: offlineErr } = await admin
+    .from("salesforce_offline_sale_applications")
+    .select("package_id, quantity")
+    .in("package_id", ids)
+  if (offlineErr) {
+    console.warn("[linked-inventory] portal sold offline query failed:", offlineErr.message)
+  } else {
+    for (const row of offline ?? []) {
+      const id = String((row as { package_id: string }).package_id ?? "").trim()
+      if (!id) continue
+      const qty = Math.max(0, Math.floor(Number((row as { quantity: number | null }).quantity) || 0))
+      result.set(id, (result.get(id) ?? 0) + qty)
+    }
+  }
+
+  return result
+}
+
 export type LinkedGroupSyncRow = {
   id: string
   name: string
@@ -309,18 +352,27 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
   const costLayerPool = threeDayMember?.id
     ? await readCostLayerPoolQuantity(admin, threeDayMember.id)
     : null
+
+  // Portal bookings decrement inventory immediately; Salesforce opportunity lines can lag.
+  // Bulk-load sold so a single failed readLocalSold call cannot silently drop Sunday sales.
+  const portalSoldByPackage = await loadPortalSoldByPackageIds(
+    admin,
+    members.map((m) => m.id),
+  )
+
   const threeDayWon = threeDayProduct2Id ? wonByProduct.get(threeDayProduct2Id) ?? 0 : 0
   const threeDayOpen = threeDayProduct2Id ? openByProduct.get(threeDayProduct2Id) ?? 0 : 0
-  const threeDayCommitted = threeDayWon + threeDayOpen
+  const threeDayPortalSold = threeDayMember?.id ? portalSoldByPackage.get(threeDayMember.id) ?? 0 : 0
+  const threeDayCommitted = Math.max(threeDayWon + threeDayOpen, threeDayPortalSold)
   const poolStock = resolveLinkedPoolStock({
     sfPoolStock,
     costLayerPool,
-    closedWonSold: threeDayWon,
+    closedWonSold: Math.max(threeDayWon, threeDayPortalSold),
   })
 
   if (process.env.ZK_LINKED_TRACE === "1") {
     console.log(
-      `[linked-sync] group=${groupId} sfPool=${sfPoolStock} costPool=${costLayerPool} effPool=${poolStock} won3day=${threeDayWon} open3day=${threeDayOpen}`,
+      `[linked-sync] group=${groupId} sfPool=${sfPoolStock} costPool=${costLayerPool} effPool=${poolStock} won3day=${threeDayWon} open3day=${threeDayOpen} portal3day=${threeDayPortalSold} portalSold=${JSON.stringify(Object.fromEntries(portalSoldByPackage))}`,
     )
   }
 
@@ -331,16 +383,54 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
 
   for (const member of dayMembers) {
     const product2Id = member.salesforce_product_id?.trim() ?? ""
-    if (!product2Id) continue
-
-    const snapshot = snapshots.get(product2Id)
-    if (!snapshot) continue
+    const snapshot = product2Id ? snapshots.get(product2Id) : undefined
 
     const held = Math.max(0, Math.floor(Number(inventoryRow(member.package_inventory)?.qty_held) || 0))
     const currentAvail = Math.max(0, Math.floor(Number(inventoryRow(member.package_inventory)?.qty_available) || 0))
     const currentSellable = Math.max(0, currentAvail - held)
 
-    if (isUninitializedSfInventorySnapshot(snapshot) && currentSellable > 0) {
+    const dayWon = product2Id ? wonByProduct.get(product2Id) ?? 0 : 0
+    const dayOpen = product2Id ? openByProduct.get(product2Id) ?? 0 : 0
+    const dayPortalSold = portalSoldByPackage.get(member.id) ?? 0
+    // Do not use SF Closed Won on day Product2 for pool math. Salesforce often mirrors
+    // the 3-day Quantity Sold onto Fri/Sat/Sun (or OLI rollups), which would wrongly
+    // cut sellable (e.g. Fri → 15−6−6=3 instead of 9). Portal local sold + SF open
+    // pipeline on this day are authoritative for day consumption.
+    const dayCommitted = dayPortalSold + dayOpen
+
+    // When cost-layer pool is known, portal sold is enough — do not skip the day just
+    // because the Product2 snapshot failed (that left Sunday stuck at 9 while Fri/Sat
+    // healed, and SF Available still looked right via Stock Source formulas).
+    if (poolStock != null && poolStock > 0) {
+      let sellable = Math.max(0, poolStock - threeDayCommitted - dayCommitted)
+      // Never raise above portal-implied remaining (ignores SF day Closed Won mirrors).
+      const portalImplied = Math.max(0, poolStock - threeDayPortalSold - dayPortalSold)
+      sellable = Math.min(sellable, portalImplied)
+      if (process.env.ZK_LINKED_TRACE === "1") {
+        console.log(
+          `[linked-sync]   day ${member.id.padEnd(50)} sellable=${sellable} (held=${held}, dayWon=${dayWon}, dayOpen=${dayOpen}, dayPortal=${dayPortalSold}, pool=${poolStock}, threeDayCommitted=${threeDayCommitted}, portalImplied=${portalImplied})`,
+        )
+      }
+      daySellables.set(member.id, sellable)
+      targets.push({
+        package_id: member.id,
+        qty_available: sellable + held,
+        sellable,
+        name: member.name,
+        duration: member.duration,
+      })
+      updated.push({
+        id: member.id,
+        name: member.name,
+        duration: member.duration,
+        sellable,
+      })
+      continue
+    }
+
+    if (!product2Id || !snapshot) continue
+
+    if (isUninitializedSfInventorySnapshot(snapshot) && currentSellable > 0 && dayPortalSold <= 0) {
       updated.push({
         id: member.id,
         name: member.name,
@@ -351,19 +441,17 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
       continue
     }
 
-    const dayWon = wonByProduct.get(product2Id) ?? 0
-    const dayOpen = openByProduct.get(product2Id) ?? 0
     const sellable = resolveLinkedDaySellable({
       poolStock,
       threeDayCommitted,
-      dayCommitted: dayWon + dayOpen,
+      dayCommitted,
       snapshot,
     })
     if (sellable == null) continue
 
     if (process.env.ZK_LINKED_TRACE === "1") {
       console.log(
-        `[linked-sync]   day ${member.id.padEnd(50)} sellable=${sellable} (held=${held}, dayWon=${dayWon}, dayOpen=${dayOpen})`,
+        `[linked-sync]   day ${member.id.padEnd(50)} sellable=${sellable} (held=${held}, dayWon=${dayWon}, dayOpen=${dayOpen}, dayPortal=${dayPortalSold})`,
       )
     }
 
@@ -458,15 +546,42 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
 
   let threeDaySellable: number | null = null
   if (threeDay) {
+    // Prefer min(day sellables) we just computed — do not trust a stale DB row if reconcile lagged.
+    const computedDayVals = [...daySellables.entries()]
+      .filter(([id]) => dayMembers.some((m) => m.id === id))
+      .map(([, v]) => v)
+    const expectedThreeDay =
+      computedDayVals.length > 0 ? Math.min(...computedDayVals) : null
+
     const { data: inv } = await admin
       .from("package_inventory")
       .select("qty_available, qty_held")
       .eq("package_id", threeDay.id)
       .maybeSingle()
-    if (inv) {
-      const avail = Math.max(0, Math.floor(Number(inv.qty_available ?? 0)))
-      const held = Math.max(0, Math.floor(Number(inv.qty_held ?? 0)))
-      threeDaySellable = Math.max(0, avail - held)
+    const held = inv ? Math.max(0, Math.floor(Number(inv.qty_held ?? 0))) : 0
+    const dbSellable = inv
+      ? Math.max(0, Math.max(0, Math.floor(Number(inv.qty_available ?? 0))) - held)
+      : null
+
+    threeDaySellable = expectedThreeDay != null ? expectedThreeDay : dbSellable
+
+    if (
+      threeDaySellable != null &&
+      expectedThreeDay != null &&
+      (dbSellable == null || dbSellable !== expectedThreeDay)
+    ) {
+      await applyLinkedGroupInventoryTargets(admin, groupId, [
+        {
+          package_id: threeDay.id,
+          qty_available: threeDaySellable + held,
+          sellable: threeDaySellable,
+          name: threeDay.name,
+          duration: threeDay.duration,
+        },
+      ])
+    }
+
+    if (threeDaySellable != null) {
       daySellables.set(threeDay.id, threeDaySellable)
       updated.push({
         id: threeDay.id,
@@ -506,18 +621,91 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
       members.map((m) => m.id),
     )
 
-  if (daySellables.size > 0) {
+  // Re-assert portal qty from local orders BEFORE any Salesforce writes. SF Available is a
+  // writable field whose companion Quantity_Sold__c is a formula (Stock − Available). Stock
+  // Source child upserts can fire PackageInventoryManager and snap Available back to
+  // Stock − open-pipeline (9). Portal must not follow that — portal sold is authoritative.
+  try {
+    await reconcileLinkedGroupFromPortalSales(admin, groupId)
+  } catch (e) {
+    console.warn(
+      "[linked-inventory] portal reassert before SF push failed:",
+      e instanceof Error ? e.message : e,
+    )
+  }
+
+  // Refresh sellables from DB after reassert (daySellables map may predate reconcile).
+  const pushSellables = new Map<string, number>(daySellables)
+  {
+    const { data: invRows } = await admin
+      .from("packages")
+      .select("id, duration, shell_parent_package_id, package_inventory ( qty_available, qty_held )")
+      .eq("inventory_group_id", groupId)
+    for (const raw of invRows ?? []) {
+      const row = raw as GroupMember
+      if (row.shell_parent_package_id) continue
+      const inv = inventoryRow(row.package_inventory)
+      pushSellables.set(row.id, portalSellable(inv?.qty_available, inv?.qty_held))
+    }
+  }
+
+  if (pushSellables.size > 0) {
+    // 1) Stock Sources first — their triggers may clobber Product2 Available.
     try {
-      await pushLinkedGroupAvailabilityToSalesforce(
+      const { syncStockSourcesForProduct } = await import(
+        "@/lib/integrations/salesforce/stock-sources"
+      )
+      for (const member of members) {
+        const product2Id = member.salesforce_product_id?.trim() ?? ""
+        if (!product2Id) continue
+        const result = await syncStockSourcesForProduct({
+          admin,
+          packageId: member.id,
+          product2Id,
+        })
+        if (result.errors.length > 0) {
+          console.warn(
+            `[linked-inventory] Stock source sync warnings for ${member.id}:`,
+            result.errors.slice(0, 3).join("; "),
+          )
+        }
+      }
+    } catch (e) {
+      console.warn(
+        "[linked-inventory] Stock source sync failed:",
+        e instanceof Error ? e.message : e,
+      )
+    }
+
+    // 2) Available LAST so it wins over Stock Source / PackageInventoryManager side effects.
+    // Quantity_Sold__c is a formula (Stock − Available) — do not PATCH it.
+    try {
+      const pushResult = await pushLinkedGroupAvailabilityToSalesforce(
         admin,
         groupId,
         config,
-        daySellables,
+        pushSellables,
         poolStock,
       )
+      if (pushResult.skipped.length > 0) {
+        console.warn(
+          "[linked-inventory] Salesforce availability push skipped:",
+          pushResult.skipped.slice(0, 5).join("; "),
+        )
+      }
     } catch (e) {
       console.warn(
         "[linked-inventory] Salesforce availability push failed:",
+        e instanceof Error ? e.message : e,
+      )
+    }
+
+    // 3) Portal again after SF I/O in case a concurrent cron applied stale SF Available.
+    try {
+      await reconcileLinkedGroupFromPortalSales(admin, groupId)
+    } catch (e) {
+      console.warn(
+        "[linked-inventory] portal reassert after SF push failed:",
         e instanceof Error ? e.message : e,
       )
     }
@@ -626,17 +814,21 @@ async function linkedGroupNeedsSfSync(
   const costLayerPool = threeDayMember?.id
     ? await readCostLayerPoolQuantity(admin, threeDayMember.id)
     : null
+  const portalSoldByPackage = await loadPortalSoldByPackageIds(
+    admin,
+    members.map((m) => m.id),
+  )
   const threeDayWonForPool = threeDayProduct2Id ? wonByProduct.get(threeDayProduct2Id) ?? 0 : 0
+  const threeDayPortalSold = threeDayMember?.id ? portalSoldByPackage.get(threeDayMember.id) ?? 0 : 0
   const poolStock = resolveLinkedPoolStock({
     sfPoolStock,
     costLayerPool,
-    closedWonSold: threeDayWonForPool,
+    closedWonSold: Math.max(threeDayWonForPool, threeDayPortalSold),
   })
-  const threeDayCommitted = threeDayProduct2Id
-    ? committedByProduct.get(threeDayProduct2Id) ??
-      wonByProduct.get(threeDayProduct2Id) ??
-      0
+  const threeDaySfCommitted = threeDayProduct2Id
+    ? committedByProduct.get(threeDayProduct2Id) ?? wonByProduct.get(threeDayProduct2Id) ?? 0
     : 0
+  const threeDayCommitted = Math.max(threeDaySfCommitted, threeDayPortalSold)
 
   let mappedDays = 0
   let allSellableZero = true
@@ -644,9 +836,7 @@ async function linkedGroupNeedsSfSync(
 
   for (const member of dayMembers) {
     const product2Id = member.salesforce_product_id?.trim() ?? ""
-    if (!product2Id) continue
-    const snapshot = snapshots.get(product2Id)
-    if (!snapshot) continue
+    const snapshot = product2Id ? snapshots.get(product2Id) : undefined
     mappedDays++
 
     const inv = inventoryRow(member.package_inventory)
@@ -654,10 +844,32 @@ async function linkedGroupNeedsSfSync(
     daySellables.push(currentSellable)
     if (currentSellable > 0) allSellableZero = false
 
+    const dayWon = product2Id ? wonByProduct.get(product2Id) ?? 0 : 0
+    const daySfCommitted = product2Id
+      ? committedByProduct.get(product2Id) ?? dayWon
+      : 0
+    const dayOpen = Math.max(0, daySfCommitted - dayWon)
+    const dayPortalSold = portalSoldByPackage.get(member.id) ?? 0
+    const dayCommitted = dayPortalSold + dayOpen
+
+    // Portal cost-layer pool is enough to detect drift — don't require an SF snapshot.
+    if (poolStock != null && poolStock > 0) {
+      const expected = Math.max(0, poolStock - threeDayCommitted - dayCommitted)
+      if (currentSellable !== expected) return true
+      // Portal already correct but Salesforce Available still shows stale pool−3day only (9).
+      if (
+        snapshot?.available != null &&
+        Number.isFinite(snapshot.available) &&
+        Math.floor(snapshot.available) !== expected
+      ) {
+        return true
+      }
+      continue
+    }
+
+    if (!product2Id || !snapshot) continue
     if (isUninitializedSfInventorySnapshot(snapshot) && currentSellable > 0) continue
 
-    const dayCommitted =
-      committedByProduct.get(product2Id) ?? wonByProduct.get(product2Id) ?? 0
     const sfSellable = resolveLinkedDaySellable({
       poolStock,
       threeDayCommitted,
@@ -813,26 +1025,136 @@ export async function repairAllDriftedLinkedGroupsFromSalesforce(
  */
 export async function healLinkedGroupInBackground(groupId: string): Promise<boolean> {
   const gid = groupId.trim()
-  if (!gid || !isSalesforceConfigured()) return false
-  const connection = await getSalesforceConnectionStatus()
-  if (!connection.connected) return false
+  if (!gid) return false
 
   const admin = createAdminClient()
   if (!admin) return false
+
+  // Always correct portal qty from local orders first — does not need Salesforce.
+  // Fixes catalog stuck at pool−3daySold while SF Available already looks right from
+  // Stock Source formulas.
+  let portalFixed = false
+  try {
+    portalFixed = await reconcileLinkedGroupFromPortalSales(admin, gid)
+  } catch (e) {
+    console.warn(
+      "[admin] portal linked-group reconcile failed:",
+      e instanceof Error ? e.message : e,
+    )
+  }
+
+  if (!isSalesforceConfigured()) return portalFixed
+  const connection = await getSalesforceConnectionStatus()
+  if (!connection.connected) return portalFixed
+
   const instanceUrl =
     (await getStoredInstanceUrl()) ?? process.env.SALESFORCE_INSTANCE_URL?.trim() ?? ""
   const config = getSalesforceConfig(instanceUrl || undefined)
-  if (!config) return false
+  if (!config) return portalFixed
 
   try {
-    return await healLinkedGroupIfStale(admin, gid, config)
+    // Push SF when portal changed, or when SF Available drifted from portal math.
+    const sfHealed = await healLinkedGroupIfStale(admin, gid, config)
+    if (portalFixed && !sfHealed) {
+      // Portal qty already matched expected but Salesforce Available still stale (e.g. all 9).
+      await syncLinkedGroupInventoryFromSalesforce(admin, gid, config)
+      return true
+    }
+    return portalFixed || sfHealed
   } catch (e) {
     console.warn(
       "[admin] background linked group heal failed:",
       e instanceof Error ? e.message : e,
     )
-    return false
+    return portalFixed
   }
+}
+
+/**
+ * Set linked-group sellables from cost-layer pool − portal/offline sold only.
+ * Ignores Salesforce (open pipeline is applied later by the SF heal).
+ * Returns true when any package_inventory row changed.
+ */
+export async function reconcileLinkedGroupFromPortalSales(
+  admin: SupabaseClient,
+  inventoryGroupId: string,
+): Promise<boolean> {
+  const groupId = inventoryGroupId.trim()
+  if (!groupId) return false
+
+  const { data: rows, error } = await admin
+    .from("packages")
+    .select(
+      "id, name, duration, shell_parent_package_id, package_inventory ( qty_available, qty_held )",
+    )
+    .eq("inventory_group_id", groupId)
+  if (error) throw new Error(error.message)
+
+  const members = (rows ?? []).filter(
+    (r) => !(r as GroupMember).shell_parent_package_id,
+  ) as GroupMember[]
+  if (members.length === 0) return false
+
+  const threeDay = members.find((m) => m.duration === "3_day")
+  const dayMembers = members.filter((m) => DAY_DURATIONS.has(m.duration ?? ""))
+  if (!threeDay?.id || dayMembers.length === 0) return false
+
+  const costLayerPool = await readCostLayerPoolQuantity(admin, threeDay.id)
+  if (costLayerPool == null || costLayerPool <= 0) return false
+
+  const portalSold = await loadPortalSoldByPackageIds(
+    admin,
+    members.map((m) => m.id),
+  )
+  const threeSold = portalSold.get(threeDay.id) ?? 0
+
+  const targets: InventoryTarget[] = []
+  const daySellables = new Map<string, number>()
+  let changed = false
+
+  for (const member of dayMembers) {
+    const daySold = portalSold.get(member.id) ?? 0
+    const sellable = Math.max(0, costLayerPool - threeSold - daySold)
+    const held = Math.max(0, Math.floor(Number(inventoryRow(member.package_inventory)?.qty_held) || 0))
+    const current = portalSellable(
+      inventoryRow(member.package_inventory)?.qty_available,
+      inventoryRow(member.package_inventory)?.qty_held,
+    )
+    daySellables.set(member.id, sellable)
+    if (current !== sellable) changed = true
+    targets.push({
+      package_id: member.id,
+      qty_available: sellable + held,
+      sellable,
+      name: member.name,
+      duration: member.duration,
+    })
+  }
+
+  const threeSellable = Math.min(...[...daySellables.values()])
+  const threeHeld = Math.max(
+    0,
+    Math.floor(Number(inventoryRow(threeDay.package_inventory)?.qty_held) || 0),
+  )
+  const threeCurrent = portalSellable(
+    inventoryRow(threeDay.package_inventory)?.qty_available,
+    inventoryRow(threeDay.package_inventory)?.qty_held,
+  )
+  if (threeCurrent !== threeSellable) changed = true
+  targets.push({
+    package_id: threeDay.id,
+    qty_available: threeSellable + threeHeld,
+    sellable: threeSellable,
+    name: threeDay.name,
+    duration: threeDay.duration,
+  })
+  daySellables.set(threeDay.id, threeSellable)
+
+  if (!changed) return false
+
+  await applyLinkedGroupInventoryTargets(admin, groupId, targets)
+  await mirrorShellPortalInventory(admin, threeDay.id, daySellables)
+  return true
 }
 
 /**

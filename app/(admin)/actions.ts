@@ -3093,6 +3093,65 @@ export async function deleteFulfilmentBlock(input: {
 export async function fetchAdminCatalogList(): Promise<import("@/lib/admin/queries").AdminPackageRow[]> {
   const gate = await requireAdminAction()
   if (!gate.ok) return []
+  // Correct linked-group qty from portal orders before listing — SF heal alone can leave
+  // catalog stuck (e.g. all days at 9) while Salesforce Available already looks right.
+  try {
+    const { createAdminClient } = await import("@/lib/supabase/admin")
+    const admin = createAdminClient()
+    if (admin) {
+      const { data: ordered } = await admin
+        .from("orders")
+        .select("package_id")
+        .neq("status", "cancelled")
+      const orderedIds = [
+        ...new Set(
+          (ordered ?? [])
+            .map((r) => String((r as { package_id?: string }).package_id ?? "").trim())
+            .filter(Boolean),
+        ),
+      ]
+      if (orderedIds.length > 0) {
+        const { data: pkgs } = await admin
+          .from("packages")
+          .select("inventory_group_id")
+          .in("id", orderedIds)
+          .not("inventory_group_id", "is", null)
+        const groupIds = [
+          ...new Set(
+            (pkgs ?? [])
+              .map((r) =>
+                typeof (r as { inventory_group_id?: string | null }).inventory_group_id === "string"
+                  ? (r as { inventory_group_id: string }).inventory_group_id.trim()
+                  : "",
+              )
+              .filter(Boolean),
+          ),
+        ]
+        const { reconcileLinkedGroupFromPortalSales, healLinkedGroupInBackground } = await import(
+          "@/lib/inventory/linked-group-inventory"
+        )
+        // Portal qty first (fast). Then SF push only for groups that actually changed —
+        // opening a package detail also heals SF Available drift.
+        const changed: string[] = []
+        await Promise.all(
+          groupIds.map(async (gid) => {
+            const fixed = await reconcileLinkedGroupFromPortalSales(admin, gid).catch(() => false)
+            if (fixed) changed.push(gid)
+          }),
+        )
+        if (changed.length > 0) {
+          await Promise.all(
+            changed.map((gid) => healLinkedGroupInBackground(gid).catch(() => false)),
+          )
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(
+      "[admin] catalog portal linked reconcile skipped:",
+      e instanceof Error ? e.message : e,
+    )
+  }
   const { getAdminCatalogListRows } = await import("@/lib/admin/queries")
   return getAdminCatalogListRows()
 }

@@ -482,7 +482,7 @@ function PackageRow({
                             </p>
                           ) : null}
                           {suiteHint ? (
-                            <p className="text-[10px] sm:text-xs text-muted-foreground text-center leading-snug px-1">
+                            <p className="text-[10px] sm:text-xs text-amber-800 dark:text-amber-200 text-center leading-snug px-2 py-1.5 rounded-md border border-amber-300/60 bg-amber-50/80 dark:bg-amber-950/30">
                               {suiteHint}
                             </p>
                           ) : null}
