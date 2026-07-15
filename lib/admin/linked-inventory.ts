@@ -1,5 +1,6 @@
 /** Client-safe — no server Supabase imports. */
 
+import type { CostLayerRow } from "@/lib/admin/cost-layers"
 import type { PackageSalesBreakdown } from "@/lib/admin/package-sales-breakdown"
 import { emptyPackageSalesBreakdown } from "@/lib/admin/package-sales-breakdown"
 
@@ -11,6 +12,8 @@ export type LinkedInventoryPackage = {
   qty_held: number | null
   salesforce_product_id: string | null
   sales_breakdown: PackageSalesBreakdown
+  /** Purchase ledger for this package (empty on linked days — stock lives on the 3-day). */
+  cost_layers?: CostLayerRow[]
 }
 
 /** Hidden Single Ticket shell — shown in linked inventory table only (not sellable). */

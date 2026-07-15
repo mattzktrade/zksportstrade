@@ -9,6 +9,9 @@ import { readLocalSoldForPackage } from "@/lib/inventory/local-sold"
  * Sync portal cost-layer groupings (per supplier + fulfilment block) to
  * Salesforce as `Stock_Source__c` child records under Product2.
  *
+ * Linked Friday/Saturday/Sunday packages inherit the 3-day parent's cost ledger
+ * (same as portal allocation) so Stock Sources appear on those Product2s too.
+ *
  * The custom child object lives in the Salesforce org (set up by the admin) with
  * these fields (see docs/PHASE3_LISTING_SYNC.md):
  *   * Product__c            (Lookup Product2, required)
@@ -307,6 +310,52 @@ async function readExistingPortalStockSources(product2Id: string): Promise<Exist
   return rows
 }
 
+/**
+ * Linked day packages keep purchases on the 3-day parent. Mirror
+ * `resolve_cost_ledger_package_id` so Stock Sources sync that shared ledger
+ * onto Friday/Saturday/Sunday Product2s (not empty day-local layers).
+ */
+async function resolveCostLedgerPackageId(
+  admin: SupabaseClient,
+  packageId: string,
+): Promise<{ ledgerPackageId: string; usedParentLedger: boolean }> {
+  const { data: pkg } = await admin
+    .from("packages")
+    .select("inventory_group_id, duration, shell_parent_package_id")
+    .eq("id", packageId)
+    .maybeSingle()
+
+  const groupId = (pkg as { inventory_group_id?: string | null } | null)?.inventory_group_id?.trim() || null
+  const isShell = !!(pkg as { shell_parent_package_id?: string | null } | null)?.shell_parent_package_id?.trim()
+
+  const { data: ownRemaining } = await admin
+    .from("package_cost_layers")
+    .select("id")
+    .eq("package_id", packageId)
+    .gt("quantity_remaining", 0)
+    .limit(1)
+
+  if ((ownRemaining?.length ?? 0) > 0 || !groupId || isShell) {
+    return { ledgerPackageId: packageId, usedParentLedger: false }
+  }
+
+  const { data: parent } = await admin
+    .from("packages")
+    .select("id")
+    .eq("inventory_group_id", groupId)
+    .eq("duration", "3_day")
+    .is("shell_parent_package_id", null)
+    .order("id")
+    .limit(1)
+    .maybeSingle()
+
+  const parentId = (parent as { id?: string } | null)?.id?.trim()
+  if (parentId && parentId !== packageId) {
+    return { ledgerPackageId: parentId, usedParentLedger: true }
+  }
+  return { ledgerPackageId: packageId, usedParentLedger: false }
+}
+
 async function loadStockSourceInputsForPackage(
   admin: SupabaseClient,
   packageId: string,
@@ -318,12 +367,14 @@ async function loadStockSourceInputsForPackage(
   consumptionsByLayer: Map<string, number>
   totalPackageSold: number
 }> {
+  const { ledgerPackageId, usedParentLedger } = await resolveCostLedgerPackageId(admin, packageId)
+
   const { data: layerData, error: layerErr } = await admin
     .from("package_cost_layers")
     .select(
       "id, package_id, quantity, quantity_remaining, source, purchase_order_id, fulfilment_block_id, received_at",
     )
-    .eq("package_id", packageId)
+    .eq("package_id", ledgerPackageId)
   if (layerErr) throw new Error(layerErr.message)
 
   const layers = (layerData ?? []).map((r) => ({
@@ -439,9 +490,8 @@ async function loadStockSourceInputsForPackage(
   const totalPurchased = layers.reduce((sum, l) => sum + l.quantity, 0)
   const impliedSoldFromInventory = Math.max(0, totalPurchased - sellable)
 
-  // Linked groups: day-only offline sales may be recorded on sibling packages while
-  // cost layers live on the 3-day parent. Include sibling sold so supplier stock
-  // still reflects pool consumption when syncing the parent product.
+  // Linked groups: day-only / 3-day sales all consume the shared ledger. Include sibling
+  // sold when syncing the parent OR a day product that inherits the parent ledger.
   let linkedSiblingSold = 0
   const { data: pkgMeta } = await admin
     .from("packages")
@@ -451,11 +501,15 @@ async function loadStockSourceInputsForPackage(
   const groupId = (pkgMeta as { inventory_group_id?: string | null } | null)?.inventory_group_id?.trim()
   const duration = (pkgMeta as { duration?: string | null } | null)?.duration?.trim() ?? ""
   const isShell = !!(pkgMeta as { shell_parent_package_id?: string | null } | null)?.shell_parent_package_id?.trim()
-  if (groupId && !isShell && (duration === "3_day" || duration === "2_day")) {
+  const includeLinkedPoolSold =
+    !!groupId &&
+    !isShell &&
+    (usedParentLedger || duration === "3_day" || duration === "2_day")
+  if (includeLinkedPoolSold) {
     const { data: siblings } = await admin
       .from("packages")
       .select("id")
-      .eq("inventory_group_id", groupId)
+      .eq("inventory_group_id", groupId!)
       .neq("id", packageId)
       .is("shell_parent_package_id", null)
     for (const sib of siblings ?? []) {

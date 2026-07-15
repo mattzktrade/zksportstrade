@@ -62,6 +62,7 @@ export async function getLinkedInventoryPackages(
 
   const ids = rows.map((p) => p.id)
   const salesByPkg = await getPackageSalesBreakdownByPackage(ids)
+  const layersByPkg = await getCostLayersByPackage(ids)
 
   const [invBy] = await Promise.all([
     (async () => {
@@ -84,6 +85,7 @@ export async function getLinkedInventoryPackages(
       qty_held: row?.qty_held ?? null,
       salesforce_product_id: typed.salesforce_product_id ?? null,
       sales_breakdown: salesByPkg.get(p.id) ?? emptyPackageSalesBreakdown(p.id),
+      cost_layers: layersByPkg.get(p.id) ?? [],
     }
   })
 }

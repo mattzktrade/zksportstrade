@@ -169,14 +169,15 @@ export async function syncPackageToSalesforce(
   // Linked-group Stock/Available are owned by syncLinkedGroupInventoryFromSalesforce —
   // never push naive per-product Available (that reset Velocity 3-day/Sat&Sun to 200).
   const deferInventoryToLinkedHeal = isLinkedPoolMember
-  // Only block auto-create for sellable linked day packages (not shells). Shells still
-  // search thoroughly for an existing SF day product first; if none exists they are created.
-  const blockSfAutoCreate = isLinkedSellableDayPackage(row)
+  // New Sunday/Friday packages may auto-create Product2. Blank INSERT + pull used to zero
+  // the group; we now seed Stock/Available on create and skip uninitialized SF snapshots.
   const productCode = row.product_code?.trim() || null
   const preferredId = row.salesforce_product_id?.trim() || null
+  const linkedSellableDay = isLinkedSellableDayPackage(row)
 
   // Single Ticket shells have no independent stock — Available mirrors the matching day
   // sibling (or 3-day parent when there is no sellable day package); Stock mirrors the pool.
+  // Linked sellable day packages also use the 3-day parent's cost layers for Stock total.
   let qtyPackageId = packageId
   let costLayerPackageId = packageId
   let inventorySourceNote: string | null = null
@@ -186,6 +187,19 @@ export async function syncPackageToSalesforce(
       qtyPackageId = source.qtyAvailablePackageId
       costLayerPackageId = source.costLayerPackageId
       inventorySourceNote = source.description
+    }
+  } else if (linkedSellableDay && linkedGroupId) {
+    const { data: threeDay } = await admin
+      .from("packages")
+      .select("id")
+      .eq("inventory_group_id", linkedGroupId)
+      .eq("duration", "3_day")
+      .is("shell_parent_package_id", null)
+      .limit(1)
+      .maybeSingle()
+    if (threeDay?.id) {
+      costLayerPackageId = String(threeDay.id)
+      inventorySourceNote = "from 3-day parent cost layers (linked day package)"
     }
   }
 
@@ -332,7 +346,6 @@ export async function syncPackageToSalesforce(
     stockTotal,
     sellable,
     skipInventoryPush: deferInventoryToLinkedHeal,
-    blockSfAutoCreate,
     parentPackageName,
     shellParentPackageId: row.shell_parent_package_id?.trim() || null,
     isShellSingleTicket,
@@ -683,36 +696,54 @@ export async function syncPackageToSalesforce(
 
   // When a shell Single Ticket gets its Salesforce Id (often on a retry after the parent
   // sync), re-link Package Items on the 3-day parent so SF Package Items is not left empty.
-  if (isShellSingleTicket && row.shell_parent_package_id?.trim()) {
-    const parentId = row.shell_parent_package_id.trim()
-    try {
-      const { data: parentPkg } = await admin
-        .from("packages")
-        .select("salesforce_product_id")
-        .eq("id", parentId)
-        .maybeSingle()
-      const parentProduct2Id =
-        (parentPkg as { salesforce_product_id?: string | null } | null)?.salesforce_product_id?.trim() ||
-        null
-      if (parentProduct2Id) {
-        const parentItemNotes: string[] = []
-        const parentItemSkipped: string[] = []
-        await syncSalesforcePackageItems({
-          parentPackageId: parentId,
-          parentProduct2Id,
-          config,
-          fieldsUpdated: parentItemNotes,
-          fieldsSkipped: parentItemSkipped,
-        })
-        if (parentItemNotes.length > 0) {
-          fieldsUpdated.push(`Parent package items: ${parentItemNotes.join(", ")}`)
+  // Same for new sellable day packages joining the group — parent Package Items still own
+  // the shell Single Ticket children; refreshing keeps the graph consistent after create.
+  if (
+    (isShellSingleTicket && row.shell_parent_package_id?.trim()) ||
+    (linkedSellableDay && linkedGroupId)
+  ) {
+    const parentId = isShellSingleTicket
+      ? row.shell_parent_package_id!.trim()
+      : (
+          await admin
+            .from("packages")
+            .select("id")
+            .eq("inventory_group_id", linkedGroupId!)
+            .eq("duration", "3_day")
+            .is("shell_parent_package_id", null)
+            .limit(1)
+            .maybeSingle()
+        ).data?.id
+    if (parentId) {
+      try {
+        const { data: parentPkg } = await admin
+          .from("packages")
+          .select("salesforce_product_id")
+          .eq("id", parentId)
+          .maybeSingle()
+        const parentProduct2Id =
+          (parentPkg as { salesforce_product_id?: string | null } | null)?.salesforce_product_id?.trim() ||
+          null
+        if (parentProduct2Id) {
+          const parentItemNotes: string[] = []
+          const parentItemSkipped: string[] = []
+          await syncSalesforcePackageItems({
+            parentPackageId: String(parentId),
+            parentProduct2Id,
+            config,
+            fieldsUpdated: parentItemNotes,
+            fieldsSkipped: parentItemSkipped,
+          })
+          if (parentItemNotes.length > 0) {
+            fieldsUpdated.push(`Parent package items: ${parentItemNotes.join(", ")}`)
+          }
+          for (const note of parentItemSkipped) fieldsSkipped.push(`Parent package items: ${note}`)
         }
-        for (const note of parentItemSkipped) fieldsSkipped.push(`Parent package items: ${note}`)
+      } catch (e) {
+        fieldsSkipped.push(
+          `Parent package items refresh: ${e instanceof Error ? e.message : String(e)}`,
+        )
       }
-    } catch (e) {
-      fieldsSkipped.push(
-        `Parent package items refresh: ${e instanceof Error ? e.message : String(e)}`,
-      )
     }
   }
 
@@ -928,15 +959,6 @@ async function productMatchesRaceEvent(args: {
   }
 }
 
-function linkedSellableDayAutoCreateError(productName: string): Error {
-  return new Error(
-    `Cannot auto-create a Salesforce product for linked day package "${productName}". ` +
-      `Paste the existing Product2 Id for this day on this event (Relink / Salesforce Product Id), ` +
-      `or restore the product in Salesforce if it was deleted with the portal package. ` +
-      `Auto-creating a blank duplicate shows 0 stock and breaks the whole linked group within a minute.`,
-  )
-}
-
 async function resolveProduct2IdForSync(ctx: {
   productCode: string | null
   preferredId: string | null
@@ -956,7 +978,6 @@ async function resolveProduct2IdForSync(ctx: {
   stockTotal: number
   sellable: number
   skipInventoryPush?: boolean
-  blockSfAutoCreate?: boolean
   parentPackageName?: string | null
   shellParentPackageId?: string | null
   isShellSingleTicket?: boolean
@@ -975,12 +996,10 @@ async function resolveProduct2IdForSync(ctx: {
     const hit = rows[0]
     if (!hit?.Id) {
       if (isMultiDay) {
-        if (ctx.blockSfAutoCreate) throw linkedSellableDayAutoCreateError(ctx.productName)
         return createProduct2({ ...ctx, productCode: null })
       }
       const existing = await findExistingProduct2ForCreate(ctx)
       if (existing) return existing
-      if (ctx.blockSfAutoCreate) throw linkedSellableDayAutoCreateError(ctx.productName)
       return createProduct2({ ...ctx, productCode: null })
     }
 
@@ -991,7 +1010,6 @@ async function resolveProduct2IdForSync(ctx: {
       hit.Name &&
       isPreSeasonSameNameLeftover(ctx.productName, hit.Name, hit.CreatedDate, ctx.raceSeason)
     ) {
-      if (ctx.blockSfAutoCreate) throw linkedSellableDayAutoCreateError(ctx.productName)
       return createProduct2({ ...ctx, productCode: null })
     }
 
@@ -1008,7 +1026,6 @@ async function resolveProduct2IdForSync(ctx: {
         dateRange: ctx.raceDateRange,
       })
       if (eventCheck?.matches === false) {
-        if (ctx.blockSfAutoCreate) throw linkedSellableDayAutoCreateError(ctx.productName)
         return createProduct2({ ...ctx, productCode: null })
       }
     }
@@ -1034,7 +1051,6 @@ async function resolveProduct2IdForSync(ctx: {
         codeHit.Name &&
         isPreSeasonSameNameLeftover(ctx.productName, codeHit.Name, codeHit.CreatedDate, ctx.raceSeason)
       ) {
-        if (ctx.blockSfAutoCreate) throw linkedSellableDayAutoCreateError(ctx.productName)
         return createProduct2({ ...ctx, productCode: null })
       }
     }
@@ -1046,7 +1062,6 @@ async function resolveProduct2IdForSync(ctx: {
   // cannot reattach, while Brazil "F1 Experiences" still links to "Paddock Club F1E Suite".
   const existing = await findExistingProduct2ForCreate(ctx)
   if (existing) return existing
-  if (ctx.blockSfAutoCreate) throw linkedSellableDayAutoCreateError(ctx.productName)
   return createProduct2(ctx)
 }
 
@@ -1919,7 +1934,6 @@ async function createProduct2(ctx: {
   tradePrice: number | null
   stockTotal: number
   sellable: number
-  skipInventoryPush?: boolean
 }): Promise<string> {
   const { productName, productFamily, config, tradePrice, stockTotal, sellable } = ctx
   const label = productName.trim() || "package"
@@ -1960,14 +1974,11 @@ async function createProduct2(ctx: {
     [config.fieldUnitPrice]: effectiveTradePrice,
   }
   if (productFamily) body.Family = productFamily
-  // Single Ticket shells must get Stock/Available on INSERT — Salesforce ProductTrigger
-  // PackageInventoryManager NPEs when Available is PATCHed while Package Item junctions exist.
-  // Insert happens before junctions are created, so inventory fields write cleanly here.
-  const writeInventoryOnCreate = !ctx.skipInventoryPush || isZeroValueSingleTicket
-  if (writeInventoryOnCreate) {
-    if (config.fieldStockQty) body[config.fieldStockQty] = stockTotal
-    if (config.fieldAvailableQty) body[config.fieldAvailableQty] = sellable
-  }
+  // Always seed Stock/Available on INSERT. Linked-group PATCH is deferred (SF trigger NPE
+  // when Package Item junctions exist), but INSERT happens before junctions are created.
+  // Writing inventory here stops blank 0/0 products from wiping the linked pool on heal.
+  if (config.fieldStockQty) body[config.fieldStockQty] = stockTotal
+  if (config.fieldAvailableQty) body[config.fieldAvailableQty] = sellable
 
   try {
     const created = await salesforceRequest<{ id: string }>("POST", "/sobjects/Product2", { body })

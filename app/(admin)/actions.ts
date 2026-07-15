@@ -2731,7 +2731,7 @@ export async function relinkPackageToSalesforceProduct(input: {
     ok: true,
     message: nextId
       ? `Package linked to Salesforce Product2 ${nextId}. Inventory pulled from Salesforce for the linked group.`
-      : "Salesforce Product Id cleared. For linked day packages you must paste the correct Product2 Id — auto-create is disabled.",
+      : "Salesforce Product Id cleared. Next sync will match an existing product on the event if one exists, otherwise auto-create.",
   }
 }
 

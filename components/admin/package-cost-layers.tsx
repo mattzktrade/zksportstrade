@@ -81,6 +81,14 @@ function soldCount(n: number): string {
   return String(Math.floor(n))
 }
 
+const LINKED_DAY_DURATIONS = new Set([
+  "thursday_only",
+  "friday_only",
+  "saturday_only",
+  "sunday_only",
+  "2_day",
+])
+
 export function PackageCostLayers({
   packageId,
   packageCurrency,
@@ -140,18 +148,41 @@ export function PackageCostLayers({
   const [orphanPoIssuedAt, setOrphanPoIssuedAt] = useState("")
   const [orphanBlockId, setOrphanBlockId] = useState("")
 
-  const hasOrphanStock = layers.length === 0 && qtyAvailable > 0
+  const duration = packageDuration?.trim() || null
+  const inheritsSharedLedger =
+    layers.length === 0 &&
+    !!duration &&
+    LINKED_DAY_DURATIONS.has(duration) &&
+    linkedPackages.length > 1
+
+  const sharedLedgerParent = useMemo(() => {
+    if (!inheritsSharedLedger) return null
+    const withLayers = linkedPackages.filter((p) => (p.cost_layers?.length ?? 0) > 0)
+    return (
+      withLayers.find((p) => p.duration === "3_day") ??
+      withLayers.find((p) => p.id !== packageId) ??
+      null
+    )
+  }, [inheritsSharedLedger, linkedPackages, packageId])
+
+  const displayLayers = sharedLedgerParent?.cost_layers?.length
+    ? sharedLedgerParent.cost_layers
+    : layers
+  const isSharedLedgerView = !!sharedLedgerParent && displayLayers.length > 0 && layers.length === 0
+
+  // Seeded linked-day qty is shared pool capacity — not orphan stock missing a purchase row.
+  const hasOrphanStock = layers.length === 0 && qtyAvailable > 0 && !isSharedLedgerView
 
   const resolvedStockTotal = useMemo(() => {
     if (stockTotal != null && Number.isFinite(stockTotal) && stockTotal > 0) {
       return Math.max(0, Math.floor(stockTotal))
     }
-    const fromLayers = layers.reduce(
+    const fromLayers = displayLayers.reduce(
       (sum, l) => sum + Math.max(0, Math.floor(Number(l.quantity) || 0)),
       0,
     )
     return fromLayers > 0 ? fromLayers : Math.max(0, Math.floor(qtyAvailable))
-  }, [stockTotal, layers, qtyAvailable])
+  }, [stockTotal, displayLayers, qtyAvailable])
 
   /** Closed-won places sold attributed to this package's stock pool (excl. open pipeline). */
   const poolSoldTotal = useMemo(() => {
@@ -178,10 +209,10 @@ export function PackageCostLayers({
   const soldByLayerId = useMemo(
     () =>
       resolveSoldByCostLayer({
-        layers,
+        layers: displayLayers,
         totalPackageSold: poolSoldTotal,
       }),
-    [layers, poolSoldTotal],
+    [displayLayers, poolSoldTotal],
   )
 
   const purchaseOrderById = useMemo(
@@ -198,17 +229,17 @@ export function PackageCostLayers({
       const s = po.supplier.trim()
       if (s) names.add(s)
     }
-    for (const layer of layers) {
+    for (const layer of displayLayers) {
       const s = layer.source?.trim()
       if (s) names.add(s)
     }
     return [...names].sort((a, b) => a.localeCompare(b))
-  }, [purchaseOrders, layers])
+  }, [purchaseOrders, displayLayers])
 
   const { totalRemaining, totalCostBasis, weightedCost } = useMemo(() => {
     let units = 0
     let cost = 0
-    for (const l of layers) {
+    for (const l of displayLayers) {
       if (l.quantity_remaining > 0) {
         units += l.quantity_remaining
         cost += l.unit_cost * l.quantity_remaining
@@ -219,7 +250,7 @@ export function PackageCostLayers({
       totalCostBasis: cost,
       weightedCost: units > 0 ? cost / units : null,
     }
-  }, [layers])
+  }, [displayLayers])
 
   const grossUnit = useMemo(() => {
     if (salePrice == null || weightedCost == null) return null
@@ -308,13 +339,13 @@ export function PackageCostLayers({
     resolvedStockTotal,
   ])
   const sortedLayers = useMemo(
-    () => [...layers].sort((a, b) => {
+    () => [...displayLayers].sort((a, b) => {
       const da = new Date(a.received_at).getTime()
       const db = new Date(b.received_at).getTime()
       if (da === db) return a.id.localeCompare(b.id)
       return da - db
     }),
-    [layers],
+    [displayLayers],
   )
 
   function resetAddForm() {
@@ -680,9 +711,25 @@ export function PackageCostLayers({
 
       <div className="space-y-2">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Stock purchased</p>
-        <p className="text-[10px] text-muted-foreground">
-          Sold / Left count closed-won and portal bookings only — open SF pipeline holds Remaining but does not consume purchase layers until Closed Won.
-        </p>
+        {isSharedLedgerView && sharedLedgerParent ? (
+          <p className="text-[11px] text-muted-foreground leading-relaxed rounded-md border border-border bg-muted/30 px-3 py-2">
+            Purchases live on the linked{" "}
+            <Link
+              href={`/admin/catalog/${encodeURIComponent(sharedLedgerParent.id)}?tab=inventory`}
+              className="font-medium text-primary hover:underline"
+            >
+              {sharedLedgerParent.name}
+            </Link>{" "}
+            (3-day package). This day package shares that stock pool — sales here consume the same
+            supplier layers (same as Salesforce Stock Sources). Edit purchases on the 3-day package.
+          </p>
+        ) : (
+          <p className="text-[10px] text-muted-foreground">
+            Sold / Left count closed-won and portal bookings only — open SF pipeline holds Remaining but does
+            not consume purchase layers until Closed Won. Portal/Wix orders synced to Salesforce appear under
+            Portal or Wix only (not again under SF pipeline).
+          </p>
+        )}
         <datalist id="supplier-suggestions">
           {uniqueSuppliers.map((name) => (
             <option key={name} value={name} />
@@ -1052,6 +1099,16 @@ export function PackageCostLayers({
                             </button>
                           </div>
                         </div>
+                      ) : isSharedLedgerView && sharedLedgerParent ? (
+                        <div className="text-right text-[10px] text-muted-foreground leading-snug">
+                          Shared ledger — edit on{" "}
+                          <Link
+                            href={`/admin/catalog/${encodeURIComponent(sharedLedgerParent.id)}?tab=inventory`}
+                            className="text-primary hover:underline"
+                          >
+                            3-day package
+                          </Link>
+                        </div>
                       ) : (
                         <div className="flex gap-3 justify-end">
                           <button
@@ -1091,39 +1148,54 @@ export function PackageCostLayers({
             purchase, or stock will be counted twice.
           </p>
         ) : null}
-        {layers.length === 0 && hasSalesforceProduct ? (
-          <div className="flex flex-wrap items-center gap-3">
+        {isSharedLedgerView && sharedLedgerParent ? (
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            To add or change stock purchases, open the{" "}
+            <Link
+              href={`/admin/catalog/${encodeURIComponent(sharedLedgerParent.id)}?tab=inventory`}
+              className="font-medium text-primary hover:underline"
+            >
+              {sharedLedgerParent.name}
+            </Link>{" "}
+            inventory tab. Do not add purchases here — that would double-count the linked pool.
+          </p>
+        ) : (
+          <>
+            {layers.length === 0 && hasSalesforceProduct ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => {
+                    start(async () => {
+                      const res = await importPackageStockSourcesFromSalesforce(packageId)
+                      if (!res.ok) {
+                        toast.error(res.message)
+                        return
+                      }
+                      toast.success(res.message ?? "Stock sources imported.")
+                      await refreshInventoryUi()
+                    })
+                  }}
+                  className="text-sm font-medium text-primary hover:underline disabled:opacity-50"
+                >
+                  Import stock purchases from Salesforce
+                </button>
+                <span className="text-[11px] text-muted-foreground">
+                  Records supplier / qty from SF Stock Sources without adding extra sellable stock.
+                </span>
+              </div>
+            ) : null}
             <button
               type="button"
-              disabled={pending}
-              onClick={() => {
-                start(async () => {
-                  const res = await importPackageStockSourcesFromSalesforce(packageId)
-                  if (!res.ok) {
-                    toast.error(res.message)
-                    return
-                  }
-                  toast.success(res.message ?? "Stock sources imported.")
-                  await refreshInventoryUi()
-                })
-              }}
-              className="text-sm font-medium text-primary hover:underline disabled:opacity-50"
+              onClick={() => setAddOpen((o) => !o)}
+              className="text-sm font-medium text-primary hover:underline"
             >
-              Import stock purchases from Salesforce
+              {addOpen ? "Cancel adding stock" : "Add stock purchase"}
             </button>
-            <span className="text-[11px] text-muted-foreground">
-              Records supplier / qty from SF Stock Sources without adding extra sellable stock.
-            </span>
-          </div>
-        ) : null}
-        <button
-          type="button"
-          onClick={() => setAddOpen((o) => !o)}
-          className="text-sm font-medium text-primary hover:underline"
-        >
-          {addOpen ? "Cancel adding stock" : "Add stock purchase"}
-        </button>
-        {addOpen && (
+          </>
+        )}
+        {addOpen && !isSharedLedgerView && (
           <div className="space-y-4">
             <datalist id="supplier-suggestions">
               {uniqueSuppliers.map((name) => (

@@ -129,13 +129,7 @@ function QuickAddDialog({
 
     const sfIdRaw = salesforceProductId.trim()
     const sfId = sfIdRaw.length === 0 ? null : sfIdRaw
-    if (!sfId) {
-      toast.error(
-        "Paste the existing Salesforce Product2 Id for this day (01t…). Auto-create is disabled for linked day packages.",
-      )
-      return
-    }
-    if (!SF_PRODUCT2_ID_RE.test(sfId)) {
+    if (sfId && !SF_PRODUCT2_ID_RE.test(sfId)) {
       toast.error("Salesforce Product Id must be 15–18 alphanumeric characters (starts with 01t...).")
       return
     }
@@ -177,7 +171,12 @@ function QuickAddDialog({
         toast.error(res.message)
         return
       }
-      toast.success(res.message ?? `${DAY_LABEL[duration]} package created and linked.`)
+      toast.success(
+        res.message ??
+          (sfId
+            ? `${DAY_LABEL[duration]} package created and linked to Salesforce.`
+            : `${DAY_LABEL[duration]} package created — Salesforce product will be auto-created on sync.`),
+      )
       onClose()
       router.refresh()
     })
@@ -193,8 +192,8 @@ function QuickAddDialog({
             </h3>
             <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
               Race, dates, description, includes, image, and the Linked inventory key are copied from the
-              3-day parent. Stock is shared, so no initial stock is added — the new sibling seeds from
-              any existing day sibling (or the 3-day parent) so the group&apos;s min stays consistent.
+              3-day parent. Stock is shared. Salesforce gets a new product on sync (leave Product Id
+              blank) — you do not need to create the package in Salesforce first.
             </p>
           </div>
           <button
@@ -254,19 +253,19 @@ function QuickAddDialog({
           </div>
 
           <label className="block text-xs text-muted-foreground">
-            Salesforce Product2 Id (required)
+            Salesforce Product2 Id (optional)
             <input
               value={salesforceProductId}
               onChange={(e) => setSalesforceProductId(e.target.value)}
-              placeholder="01t... — the Saturday product on this event in Salesforce"
+              placeholder="Leave blank to auto-create — or paste 01t… to link an existing product"
               className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
               autoComplete="off"
               spellCheck={false}
             />
             <span className="mt-1 block text-[10px] text-muted-foreground/80 leading-snug">
-              Required for linked day packages. Find the product in Salesforce (same event as Friday /
-              Sunday), paste its 18-character Id here. The portal will not auto-create a blank duplicate —
-              that was wiping inventory across the group.
+              Leave blank for a new Sunday/Friday package — sync creates the Salesforce product and
+              shares stock with this 3-day group. Only paste an Id if the product already exists in
+              Salesforce and you want to link it instead of creating a duplicate.
             </span>
           </label>
 
