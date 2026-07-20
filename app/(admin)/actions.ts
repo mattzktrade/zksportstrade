@@ -3127,23 +3127,14 @@ export async function fetchAdminCatalogList(): Promise<import("@/lib/admin/queri
               .filter(Boolean),
           ),
         ]
-        const { reconcileLinkedGroupFromPortalSales, healLinkedGroupInBackground } = await import(
+        const { reconcileLinkedGroupFromPortalSales } = await import(
           "@/lib/inventory/linked-group-inventory"
         )
-        // Portal qty first (fast). Then SF push only for groups that actually changed —
-        // opening a package detail also heals SF Available drift.
-        const changed: string[] = []
+        // Portal-only on catalog list — full SF heal runs on package detail / cron.
+        // Healing every drifted group here burned Salesforce TotalRequests while browsing.
         await Promise.all(
-          groupIds.map(async (gid) => {
-            const fixed = await reconcileLinkedGroupFromPortalSales(admin, gid).catch(() => false)
-            if (fixed) changed.push(gid)
-          }),
+          groupIds.map((gid) => reconcileLinkedGroupFromPortalSales(admin, gid).catch(() => false)),
         )
-        if (changed.length > 0) {
-          await Promise.all(
-            changed.map((gid) => healLinkedGroupInBackground(gid).catch(() => false)),
-          )
-        }
       }
     }
   } catch (e) {

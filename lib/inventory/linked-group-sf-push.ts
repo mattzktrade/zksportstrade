@@ -88,11 +88,13 @@ async function patchShellInventoryWithJunctionBypass(args: {
  * Push Stock + Available Quantity to Salesforce day products, 3-day parent, and shells.
  *
  * Stock = portal cost-layer pool.
- * Available = portal sellable (must be written AFTER Stock Source syncs — those child
- * upserts can fire PackageInventoryManager and snap Available back to Stock − pipeline).
+ * Available = portal sellable.
  *
  * Quantity_Sold__c is a Salesforce formula (Stock − Available) — never PATCH it. Writing
  * Available updates Quantity Sold automatically.
+ *
+ * When `sfSnapshots` is provided (from the linked heal that already queried Product2),
+ * skip PATCHes where Stock + Available already match — saves TotalRequests on cron.
  */
 export async function pushLinkedGroupAvailabilityToSalesforce(
   admin: SupabaseClient,
@@ -100,6 +102,7 @@ export async function pushLinkedGroupAvailabilityToSalesforce(
   config: SalesforceConfig,
   daySellables: Map<string, number>,
   poolStock: number | null,
+  sfSnapshots?: Map<string, { stock: number | null; available: number | null }>,
 ): Promise<{ updated: number; skipped: string[] }> {
   const groupId = inventoryGroupId.trim()
   if (!groupId || !config.fieldAvailableQty) {
@@ -131,7 +134,22 @@ export async function pushLinkedGroupAvailabilityToSalesforce(
     updateable.has(config.fieldStockQty) &&
     !PROTECTED_SALESFORCE_PRODUCT_FIELDS.has(config.fieldStockQty)
 
+  function alreadyMatches(product2Id: string, sellable: number): boolean {
+    if (!sfSnapshots) return false
+    const snap = sfSnapshots.get(product2Id)
+    if (!snap) return false
+    const availOk =
+      snap.available != null && Math.floor(snap.available) === Math.max(0, Math.floor(sellable))
+    if (!availOk) return false
+    if (canPushStock && stockToPush != null) {
+      return snap.stock != null && Math.floor(snap.stock) === stockToPush
+    }
+    return true
+  }
+
   async function patchProduct(product2Id: string, sellable: number, label: string): Promise<void> {
+    if (alreadyMatches(product2Id, sellable)) return
+
     const body: Record<string, number> = {
       [config.fieldAvailableQty!]: Math.max(0, Math.floor(sellable)),
     }

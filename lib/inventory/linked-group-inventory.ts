@@ -650,35 +650,10 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
   }
 
   if (pushSellables.size > 0) {
-    // 1) Stock Sources first — their triggers may clobber Product2 Available.
-    try {
-      const { syncStockSourcesForProduct } = await import(
-        "@/lib/integrations/salesforce/stock-sources"
-      )
-      for (const member of members) {
-        const product2Id = member.salesforce_product_id?.trim() ?? ""
-        if (!product2Id) continue
-        const result = await syncStockSourcesForProduct({
-          admin,
-          packageId: member.id,
-          product2Id,
-        })
-        if (result.errors.length > 0) {
-          console.warn(
-            `[linked-inventory] Stock source sync warnings for ${member.id}:`,
-            result.errors.slice(0, 3).join("; "),
-          )
-        }
-      }
-    } catch (e) {
-      console.warn(
-        "[linked-inventory] Stock source sync failed:",
-        e instanceof Error ? e.message : e,
-      )
-    }
-
-    // 2) Available LAST so it wins over Stock Source / PackageInventoryManager side effects.
-    // Quantity_Sold__c is a formula (Stock − Available) — do not PATCH it.
+    // Available only on inventory heals. Stock Sources are rewritten on product.upsert /
+    // cost-layer sync (and after order channel sync) — not on every cron heal. Rewriting
+    // Stock Sources for every linked member each minute burned Salesforce TotalRequests
+    // and their triggers also clobbered Available back to stale values.
     try {
       const pushResult = await pushLinkedGroupAvailabilityToSalesforce(
         admin,
@@ -686,6 +661,7 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
         config,
         pushSellables,
         poolStock,
+        snapshots,
       )
       if (pushResult.skipped.length > 0) {
         console.warn(
@@ -700,7 +676,7 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
       )
     }
 
-    // 3) Portal again after SF I/O in case a concurrent cron applied stale SF Available.
+    // Portal again after SF I/O in case a concurrent cron applied stale SF Available.
     try {
       await reconcileLinkedGroupFromPortalSales(admin, groupId)
     } catch (e) {
@@ -711,7 +687,7 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
     }
   }
 
-  // SF Stock/Available already pushed above. Do NOT enqueue product.upsert for the whole
+  // SF Available already pushed above. Do NOT enqueue product.upsert for the whole
   // linked group — that re-runs full Product2 syncs (parent + days + shells) and burns
   // Salesforce TotalRequests. Only push Wix inventory for packages that changed.
   const changedIds = [...new Set(targets.map((t) => t.package_id))]

@@ -421,8 +421,9 @@ export async function pullInventoryFromSalesforce(options?: {
 
   let stockSourcesImported: SalesforceInventoryPullResult["stockSourcesImported"] = null
   try {
-    // Only scan packages that still have no cost layers — and cap work per pull.
-    const imported = await importMissingStockSourcesFromSalesforce(admin, { limit: 40 })
+    // Only scan packages that still have no cost layers — keep this small so cron
+    // does not burn TotalRequests importing ledgers for dozens of packages every tick.
+    const imported = await importMissingStockSourcesFromSalesforce(admin, { limit: 8 })
     stockSourcesImported = {
       packagesChecked: imported.packagesChecked,
       imported: imported.imported,
