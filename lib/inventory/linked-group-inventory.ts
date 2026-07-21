@@ -621,39 +621,47 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
       members.map((m) => m.id),
     )
 
-  // Re-assert portal qty from local orders BEFORE any Salesforce writes. SF Available is a
-  // writable field whose companion Quantity_Sold__c is a formula (Stock − Available). Stock
-  // Source child upserts can fire PackageInventoryManager and snap Available back to
-  // Stock − open-pipeline (9). Portal must not follow that — portal sold is authoritative.
-  try {
-    await reconcileLinkedGroupFromPortalSales(admin, groupId)
-  } catch (e) {
-    console.warn(
-      "[linked-inventory] portal reassert before SF push failed:",
-      e instanceof Error ? e.message : e,
-    )
-  }
-
-  // Refresh sellables from DB after reassert (daySellables map may predate reconcile).
+  // Push pipeline-aware sellables from this heal — do NOT run portal-only
+  // reconcileLinkedGroupFromPortalSales here. That helper ignores open SF pipeline and was
+  // overwriting 433 → 438 (won-only) right before the Available PATCH, so Salesforce never
+  // reserved open opportunities.
   const pushSellables = new Map<string, number>(daySellables)
-  {
-    const { data: invRows } = await admin
-      .from("packages")
-      .select("id, duration, shell_parent_package_id, package_inventory ( qty_available, qty_held )")
-      .eq("inventory_group_id", groupId)
-    for (const raw of invRows ?? []) {
-      const row = raw as GroupMember
-      if (row.shell_parent_package_id) continue
-      const inv = inventoryRow(row.package_inventory)
-      pushSellables.set(row.id, portalSellable(inv?.qty_available, inv?.qty_held))
-    }
+  if (threeDay?.id && threeDaySellable != null) {
+    pushSellables.set(threeDay.id, threeDaySellable)
   }
 
   if (pushSellables.size > 0) {
-    // Available only on inventory heals. Stock Sources are rewritten on product.upsert /
-    // cost-layer sync (and after order channel sync) — not on every cron heal. Rewriting
-    // Stock Sources for every linked member each minute burned Salesforce TotalRequests
-    // and their triggers also clobbered Available back to stale values.
+    // Stock Sources first (may fire PackageInventoryManager), then Available last so the
+    // pipeline-reduced Remaining sticks. Only sync sources when this heal changed inventory
+    // — not a no-op cron tick — to limit TotalRequests.
+    if (targets.length > 0) {
+      try {
+        const { syncStockSourcesForProduct } = await import(
+          "@/lib/integrations/salesforce/stock-sources"
+        )
+        for (const member of members) {
+          const product2Id = member.salesforce_product_id?.trim() ?? ""
+          if (!product2Id) continue
+          const ss = await syncStockSourcesForProduct({
+            admin,
+            packageId: member.id,
+            product2Id,
+          })
+          if (ss.errors.length > 0) {
+            console.warn(
+              `[linked-inventory] Stock Source sync ${member.id}:`,
+              ss.errors.slice(0, 2).join("; "),
+            )
+          }
+        }
+      } catch (e) {
+        console.warn(
+          "[linked-inventory] Stock Source sync failed:",
+          e instanceof Error ? e.message : e,
+        )
+      }
+    }
+
     try {
       const pushResult = await pushLinkedGroupAvailabilityToSalesforce(
         admin,
@@ -661,7 +669,8 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
         config,
         pushSellables,
         poolStock,
-        snapshots,
+        // Snapshots were taken before Stock Source writes; do not skip PATCHes on stale reads.
+        undefined,
       )
       if (pushResult.skipped.length > 0) {
         console.warn(
@@ -676,14 +685,34 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
       )
     }
 
-    // Portal again after SF I/O in case a concurrent cron applied stale SF Available.
-    try {
-      await reconcileLinkedGroupFromPortalSales(admin, groupId)
-    } catch (e) {
-      console.warn(
-        "[linked-inventory] portal reassert after SF push failed:",
-        e instanceof Error ? e.message : e,
-      )
+    // Re-apply pipeline targets after SF I/O — never portal-only reconcile (strips pipeline).
+    if (targets.length > 0) {
+      try {
+        await applyLinkedGroupInventoryTargets(admin, groupId, targets)
+        if (threeDay?.id && threeDaySellable != null) {
+          const threeHeld = Math.max(
+            0,
+            Math.floor(Number(inventoryRow(threeDay.package_inventory)?.qty_held) || 0),
+          )
+          await applyLinkedGroupInventoryTargets(admin, groupId, [
+            {
+              package_id: threeDay.id,
+              qty_available: threeDaySellable + threeHeld,
+              sellable: threeDaySellable,
+              name: threeDay.name,
+              duration: threeDay.duration,
+            },
+          ])
+        }
+        if (threeDay?.id) {
+          await mirrorShellPortalInventory(admin, threeDay.id, pushSellables)
+        }
+      } catch (e) {
+        console.warn(
+          "[linked-inventory] portal reassert after SF push failed:",
+          e instanceof Error ? e.message : e,
+        )
+      }
     }
   }
 
@@ -1006,43 +1035,53 @@ export async function healLinkedGroupInBackground(groupId: string): Promise<bool
   const admin = createAdminClient()
   if (!admin) return false
 
-  // Always correct portal qty from local orders first — does not need Salesforce.
-  // Fixes catalog stuck at pool−3daySold while SF Available already looks right from
-  // Stock Source formulas.
-  let portalFixed = false
-  try {
-    portalFixed = await reconcileLinkedGroupFromPortalSales(admin, gid)
-  } catch (e) {
-    console.warn(
-      "[admin] portal linked-group reconcile failed:",
-      e instanceof Error ? e.message : e,
-    )
+  if (!isSalesforceConfigured()) {
+    // Offline: portal/Wix/offline-application sold only (no open-pipeline read).
+    try {
+      return await reconcileLinkedGroupFromPortalSales(admin, gid)
+    } catch (e) {
+      console.warn(
+        "[admin] portal linked-group reconcile failed:",
+        e instanceof Error ? e.message : e,
+      )
+      return false
+    }
   }
 
-  if (!isSalesforceConfigured()) return portalFixed
   const connection = await getSalesforceConnectionStatus()
-  if (!connection.connected) return portalFixed
+  if (!connection.connected) {
+    try {
+      return await reconcileLinkedGroupFromPortalSales(admin, gid)
+    } catch (e) {
+      console.warn(
+        "[admin] portal linked-group reconcile failed:",
+        e instanceof Error ? e.message : e,
+      )
+      return false
+    }
+  }
 
   const instanceUrl =
     (await getStoredInstanceUrl()) ?? process.env.SALESFORCE_INSTANCE_URL?.trim() ?? ""
   const config = getSalesforceConfig(instanceUrl || undefined)
-  if (!config) return portalFixed
+  if (!config) {
+    try {
+      return await reconcileLinkedGroupFromPortalSales(admin, gid)
+    } catch {
+      return false
+    }
+  }
 
   try {
-    // Push SF when portal changed, or when SF Available drifted from portal math.
-    const sfHealed = await healLinkedGroupIfStale(admin, gid, config)
-    if (portalFixed && !sfHealed) {
-      // Portal qty already matched expected but Salesforce Available still stale (e.g. all 9).
-      await syncLinkedGroupInventoryFromSalesforce(admin, gid, config)
-      return true
-    }
-    return portalFixed || sfHealed
+    // Full SF heal includes closed-won + open pipeline. Do not portal-reconcile first —
+    // that strips pipeline holds (433 → 438) and can make healIfStale think nothing drifted.
+    return await healLinkedGroupIfStale(admin, gid, config)
   } catch (e) {
     console.warn(
       "[admin] background linked group heal failed:",
       e instanceof Error ? e.message : e,
     )
-    return portalFixed
+    return false
   }
 }
 

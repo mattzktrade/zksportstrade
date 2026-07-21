@@ -222,6 +222,33 @@ export function PackageCostLayers({
     return ownSold
   }, [salesBreakdown, linkedPackages, packageId, packageDuration])
 
+  /** Open SF pipeline attributed like Sold — holds Remaining but is not Quantity Sold. */
+  const attributedLedgerPipeline = useMemo(() => {
+    const openOf = (b: PackageSalesBreakdown) =>
+      Math.max(0, Math.floor(b.salesforceOpenPipeline))
+
+    const ownOpen = openOf(salesBreakdown)
+    if (linkedPackages.length <= 1) return ownOpen
+
+    const dur = (packageDuration ?? "").trim()
+    const threeDay = linkedPackages.find((p) => (p.duration ?? "").trim() === "3_day")
+    const threeDayOpen = threeDay
+      ? openOf(threeDay.id === packageId ? salesBreakdown : threeDay.sales_breakdown)
+      : 0
+
+    if (dur === "3_day") {
+      let total = 0
+      for (const p of linkedPackages) {
+        total += openOf(p.id === packageId ? salesBreakdown : p.sales_breakdown)
+      }
+      return total
+    }
+    if (LINKED_DAY_DURATIONS.has(dur) || dur === "2_day") {
+      return threeDayOpen + ownOpen
+    }
+    return ownOpen
+  }, [salesBreakdown, linkedPackages, packageId, packageDuration])
+
   const soldByLayerId = useMemo(() => {
     // FIFO-allocate attributed sold; ignore shared quantity_remaining so Fri/Sat
     // don't inherit Sunday's supplier split from the 3-day ledger.
@@ -239,6 +266,26 @@ export function PackageCostLayers({
       totalPackageSold: attributedLedgerSold,
     })
   }, [displayLayers, attributedLedgerSold, linkedPackages.length, packageDuration])
+
+  /** Remaining after closed-won Sold and open SF pipeline (matches Sellable). */
+  const leftByLayerId = useMemo(() => {
+    const fifo = [...displayLayers].sort((a, b) => {
+      const ta = a.received_at ? Date.parse(a.received_at) : 0
+      const tb = b.received_at ? Date.parse(b.received_at) : 0
+      if (ta !== tb) return ta - tb
+      return a.id.localeCompare(b.id)
+    })
+    const left = new Map<string, number>()
+    let pipelineLeft = Math.max(0, Math.floor(attributedLedgerPipeline))
+    for (const layer of fifo) {
+      const sold = Math.max(0, Math.floor(soldByLayerId.get(layer.id) ?? 0))
+      const afterSold = Math.max(0, layer.quantity - sold)
+      const hold = Math.min(afterSold, pipelineLeft)
+      pipelineLeft -= hold
+      left.set(layer.id, Math.max(0, afterSold - hold))
+    }
+    return left
+  }, [displayLayers, soldByLayerId, attributedLedgerPipeline])
 
   const purchaseOrderById = useMemo(
     () => new Map(purchaseOrders.map((po) => [po.id, po])),
@@ -750,9 +797,8 @@ export function PackageCostLayers({
           </p>
         ) : (
           <p className="text-[10px] text-muted-foreground">
-            Sold / Left count closed-won and portal bookings only — open SF pipeline holds Remaining but does
-            not consume purchase layers until Closed Won. Portal/Wix orders synced to Salesforce appear under
-            Portal or Wix only (not again under SF pipeline).
+            Sold is closed-won / portal / Wix only (matches Salesforce Stock Source Quantity Sold). Left also
+            reserves open SF pipeline so it matches Sellable. Pipeline does not increase Sold until Closed Won.
           </p>
         )}
         <datalist id="supplier-suggestions">
@@ -957,7 +1003,10 @@ export function PackageCostLayers({
                 const editing = editingId === layer.id
                 const consumed = layer.quantity - layer.quantity_remaining
                 const attributedSold = Math.max(0, Math.floor(soldByLayerId.get(layer.id) ?? consumed))
-                const left = Math.max(0, layer.quantity - attributedSold)
+                const left = Math.max(
+                  0,
+                  Math.floor(leftByLayerId.get(layer.id) ?? layer.quantity - attributedSold),
+                )
                 const linkedPo = layer.purchase_order_id ? purchaseOrderById.get(layer.purchase_order_id) : null
                 const linkedBlock = layer.fulfilment_block_id ? blockById.get(layer.fulfilment_block_id) : null
                 return (

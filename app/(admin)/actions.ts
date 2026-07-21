@@ -3093,56 +3093,9 @@ export async function deleteFulfilmentBlock(input: {
 export async function fetchAdminCatalogList(): Promise<import("@/lib/admin/queries").AdminPackageRow[]> {
   const gate = await requireAdminAction()
   if (!gate.ok) return []
-  // Correct linked-group qty from portal orders before listing — SF heal alone can leave
-  // catalog stuck (e.g. all days at 9) while Salesforce Available already looks right.
-  try {
-    const { createAdminClient } = await import("@/lib/supabase/admin")
-    const admin = createAdminClient()
-    if (admin) {
-      const { data: ordered } = await admin
-        .from("orders")
-        .select("package_id")
-        .neq("status", "cancelled")
-      const orderedIds = [
-        ...new Set(
-          (ordered ?? [])
-            .map((r) => String((r as { package_id?: string }).package_id ?? "").trim())
-            .filter(Boolean),
-        ),
-      ]
-      if (orderedIds.length > 0) {
-        const { data: pkgs } = await admin
-          .from("packages")
-          .select("inventory_group_id")
-          .in("id", orderedIds)
-          .not("inventory_group_id", "is", null)
-        const groupIds = [
-          ...new Set(
-            (pkgs ?? [])
-              .map((r) =>
-                typeof (r as { inventory_group_id?: string | null }).inventory_group_id === "string"
-                  ? (r as { inventory_group_id: string }).inventory_group_id.trim()
-                  : "",
-              )
-              .filter(Boolean),
-          ),
-        ]
-        const { reconcileLinkedGroupFromPortalSales } = await import(
-          "@/lib/inventory/linked-group-inventory"
-        )
-        // Portal-only on catalog list — full SF heal runs on package detail / cron.
-        // Healing every drifted group here burned Salesforce TotalRequests while browsing.
-        await Promise.all(
-          groupIds.map((gid) => reconcileLinkedGroupFromPortalSales(admin, gid).catch(() => false)),
-        )
-      }
-    }
-  } catch (e) {
-    console.warn(
-      "[admin] catalog portal linked reconcile skipped:",
-      e instanceof Error ? e.message : e,
-    )
-  }
+  // Linked inventory is healed by cron + package detail — not on every catalog list load
+  // (portal-only reconcile ignored open SF pipeline and burned no SF API but still
+  // corrupted sellable; full SF heal here burned TotalRequests).
   const { getAdminCatalogListRows } = await import("@/lib/admin/queries")
   return getAdminCatalogListRows()
 }
