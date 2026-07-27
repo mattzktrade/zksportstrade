@@ -66,6 +66,7 @@ export function SalesforceIntegrationClient({
       const { pull } = res
       const applied = pull.closedWon?.lineItemsApplied ?? 0
       const unmapped = pull.closedWon?.skippedUnmappedProduct ?? 0
+      const healed = pull.linkedGroupHeal?.packagesFixed ?? 0
       const limitHit = pull.errors.some((e) =>
         /TotalRequests|REQUEST_LIMIT_EXCEEDED|api.?limit/i.test(e),
       )
@@ -74,12 +75,14 @@ export function SalesforceIntegrationClient({
           `Salesforce API daily limit exceeded. Offline pull paused — try again after the limit resets (usually overnight). ${pull.errors[0]}`,
           { duration: 14000 },
         )
-      } else if (pull.errors.length > 0 && applied === 0) {
+      } else if (pull.errors.length > 0 && applied === 0 && healed === 0) {
         toast.error(`Pull had errors: ${pull.errors[0]}`, { duration: 12000 })
-      } else if (applied > 0) {
+      } else if (applied > 0 || healed > 0) {
         toast.success(
-          `Recorded ${applied} offline sale(s) and updated inventory / Stock Sources for affected packages.`,
-          { duration: 10000 },
+          applied > 0
+            ? `Recorded ${applied} Closed Won offline sale(s) and refreshed inventory for open + won opportunities on affected packages.`
+            : `Refreshed inventory from recent Salesforce opportunities (open pipeline holds + Closed Won) on ${healed} package(s).`,
+          { duration: 11000 },
         )
         if (pull.errors.length > 0) {
           toast.message(`Some follow-up warnings: ${pull.errors[0]}`, { duration: 8000 })
@@ -92,9 +95,9 @@ export function SalesforceIntegrationClient({
       } else {
         const scanned = pull.closedWon?.opportunitiesScanned ?? 0
         toast.message(
-          scanned > 0
-            ? `Checked ${scanned} Closed Won opportunities — portal already up to date.`
-            : "No new offline Closed Won sales found.",
+          scanned > 0 || (pull.checked ?? 0) > 0
+            ? `Checked recent Salesforce opportunities (all stages) — portal inventory already up to date.`
+            : "No recent Salesforce opportunity changes found for mapped packages.",
         )
       }
       router.refresh()
@@ -232,14 +235,15 @@ export function SalesforceIntegrationClient({
           <li>Save a package or click “Queue sync again” — then Process sync queue.</li>
           <li>Place a test order — Salesforce sync runs automatically in the background (no button needed).</li>
           <li>
-            Offline deals in Salesforce sync automatically (production: every minute via cron; local: use{" "}
-            <span className="font-mono">npm run dev:local</span>). You can still click{" "}
-            <strong>Pull offline sales</strong> for an immediate run.
+            Offline Salesforce opportunities sync automatically — <strong>Closed Won</strong> counts as sold,{" "}
+            <strong>open</strong> stages hold Remaining (SF Pipeline), <strong>Closed Lost</strong> releases stock
+            (production: every minute via cron; local: use <span className="font-mono">npm run dev:local</span>).
+            Click <strong>Pull offline sales</strong> for an immediate refresh of recent opportunities (all stages).
           </li>
         </ol>
         <p>
           <strong>Production:</strong> Vercel cron runs every minute on{" "}
-          <span className="font-mono">/api/cron/integration-outbox</span> (offline SF sales, holds, sync queue).
+          <span className="font-mono">/api/cron/integration-outbox</span> (offline SF opportunities, holds, sync queue).
           Set <span className="font-mono">CRON_SECRET</span> in Vercel env.
         </p>
         <p>

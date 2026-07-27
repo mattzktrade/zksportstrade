@@ -74,18 +74,21 @@ export type SalesforceInventoryPullResult = {
 }
 
 /**
- * After new Closed Won offline rows land, heal each affected linked group (or sync
- * Stock Sources for standalone packages) so Places Sold / Remaining / SF Available
- * update without waiting for a manual pull or the Available throttle.
+ * After offline opportunity activity (Closed Won ledger and/or any recent opp on a
+ * Product2), heal affected linked groups / standalone packages so sellable reflects
+ * Closed Won + open pipeline − Closed Lost releases.
  */
-async function applyClosedWonInventoryFollowUp(
+async function applyOpportunityInventoryFollowUp(
   admin: NonNullable<ReturnType<typeof createAdminClient>>,
   config: NonNullable<ReturnType<typeof getSalesforceConfig>>,
   packageIds: readonly string[],
+  options?: { forcePackageIds?: ReadonlySet<string> },
 ): Promise<{ groups: number; packagesFixed: number; errors: string[] }> {
   const ids = [...new Set(packageIds.map((id) => id.trim()).filter(Boolean))]
   const out = { groups: 0, packagesFixed: 0, errors: [] as string[] }
   if (ids.length === 0) return out
+
+  const forceIds = options?.forcePackageIds ?? new Set<string>()
 
   const { data: rows, error } = await admin
     .from("packages")
@@ -96,7 +99,7 @@ async function applyClosedWonInventoryFollowUp(
     return out
   }
 
-  const { syncLinkedGroupInventoryFromSalesforce } = await import(
+  const { healLinkedGroupIfStale, syncLinkedGroupInventoryFromSalesforce } = await import(
     "@/lib/inventory/linked-group-inventory"
   )
   const { syncStockSourcesForProduct } = await import(
@@ -120,9 +123,21 @@ async function applyClosedWonInventoryFollowUp(
       if (groupId) {
         if (healedGroups.has(groupId)) continue
         healedGroups.add(groupId)
-        const synced = await syncLinkedGroupInventoryFromSalesforce(admin, groupId, config)
-        out.groups += 1
-        out.packagesFixed += synced.updated.length
+        const forceGroup = [...(rows ?? [])].some((r) => {
+          const gid =
+            typeof r.inventory_group_id === "string" ? r.inventory_group_id.trim() : ""
+          const pid = typeof r.id === "string" ? r.id.trim() : ""
+          return gid === groupId && forceIds.has(pid)
+        })
+        const healed = await healLinkedGroupIfStale(admin, groupId, config)
+        if (healed) {
+          out.groups += 1
+          out.packagesFixed += 1
+        } else if (forceGroup) {
+          await syncLinkedGroupInventoryFromSalesforce(admin, groupId, config)
+          out.groups += 1
+          out.packagesFixed += 1
+        }
       } else if (product2Id && !isShell) {
         const ss = await syncStockSourcesForProduct({ admin, packageId, product2Id })
         if (ss.errors.length > 0) {
@@ -136,7 +151,7 @@ async function applyClosedWonInventoryFollowUp(
       }
     } catch (e) {
       out.errors.push(
-        `${packageId}: ${e instanceof Error ? e.message : "Closed Won follow-up failed."}`,
+        `${packageId}: ${e instanceof Error ? e.message : "Opportunity inventory follow-up failed."}`,
       )
     }
   }
@@ -492,20 +507,40 @@ export async function pullInventoryFromSalesforce(options?: {
     await markApiLimitCooldown()
   }
 
-  // New offline ledger rows must update sellable + Stock Sources immediately — do not wait
-  // for the Available-pull throttle (which previously could starve heals forever because
-  // throttled ticks still refreshed LAST_PULL_KEY).
+  // Closed Won ledger + any recently touched opportunity (open / won / lost) so pipeline
+  // holds and releases update without waiting for a full Available scan.
   let linkedGroupHeal: SalesforceInventoryPullResult["linkedGroupHeal"] = null
-  if (closedWon && closedWon.affectedPackageIds.length > 0) {
+  const followUpPackageIds = new Set<string>(closedWon?.affectedPackageIds ?? [])
+  const forceFollowUpIds = new Set<string>(closedWon?.affectedPackageIds ?? [])
+
+  try {
+    const { resolvePackagesTouchedByRecentOpportunities } = await import(
+      "@/lib/integrations/salesforce/recent-opportunity-packages"
+    )
+    const recent = await resolvePackagesTouchedByRecentOpportunities(admin, config, {
+      lookbackMs: offlineSalesOnly || force ? 7 * 24 * 60 * 60 * 1000 : 2 * 60 * 60 * 1000,
+      limit: offlineSalesOnly || force ? 100 : 50,
+    })
+    errors.push(...recent.errors)
+    for (const id of recent.packageIds) followUpPackageIds.add(id)
+  } catch (e) {
+    errors.push(
+      e instanceof Error ? e.message : "Recent opportunity package resolution failed.",
+    )
+  }
+
+  if (followUpPackageIds.size > 0) {
     try {
-      const applied = await applyClosedWonInventoryFollowUp(admin, config, closedWon.affectedPackageIds)
+      const applied = await applyOpportunityInventoryFollowUp(admin, config, [...followUpPackageIds], {
+        forcePackageIds: forceFollowUpIds,
+      })
       linkedGroupHeal = {
         groups: applied.groups,
         packagesFixed: applied.packagesFixed,
       }
       errors.push(...applied.errors)
     } catch (e) {
-      errors.push(e instanceof Error ? e.message : "Closed Won inventory follow-up failed.")
+      errors.push(e instanceof Error ? e.message : "Opportunity inventory follow-up failed.")
     }
   }
 
@@ -513,12 +548,12 @@ export async function pullInventoryFromSalesforce(options?: {
     await markApiLimitCooldown()
   }
 
-  // Light admin / catch-up path: stop after Closed Won + affected-package heal.
+  // Light admin path: Closed Won ledger + heal packages touched by any recent opportunity.
   if (offlineSalesOnly) {
     return {
       skipped: false,
       closedWon,
-      checked: 0,
+      checked: followUpPackageIds.size,
       adjusted: linkedGroupHeal?.packagesFixed ?? 0,
       skippedPackages: 0,
       adjustments: [],
