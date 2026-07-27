@@ -1535,32 +1535,64 @@ export async function runIntegrationOutboxNow(): Promise<
 export async function clearSalesforceSyncFailures(): Promise<ActionResult> {
   const gate = await requireAdminAction()
   if (!gate.ok) return gate
-  const { supabase } = gate
 
-  const { error: outboxErr } = await supabase
+  // Use service role — session client may lack permission to clear all rows, so "Clear"
+  // looked like a no-op while the same errors kept showing.
+  const { createAdminClient } = await import("@/lib/supabase/admin")
+  const admin = createAdminClient()
+  if (!admin) return { ok: false, message: "Service role not configured." }
+
+  const { error: outboxErr } = await admin
     .from("integration_outbox")
     .delete()
     .eq("status", "failed")
   if (outboxErr) return { ok: false, message: outboxErr.message }
 
-  const { error: packageErr } = await supabase
+  // Drop pending retries that will only burn API (limit / Supplier lookup mismatches).
+  const { data: pendingBad } = await admin
+    .from("integration_outbox")
+    .select("id, last_error")
+    .eq("status", "pending")
+    .not("last_error", "is", null)
+    .limit(200)
+  const badIds = (pendingBad ?? [])
+    .filter((row) => {
+      const err = String(row.last_error ?? "")
+      return /TotalRequests|REQUEST_LIMIT_EXCEEDED|id value of incorrect type/i.test(err)
+    })
+    .map((row) => String(row.id))
+  if (badIds.length > 0) {
+    await admin.from("integration_outbox").delete().in("id", badIds)
+  }
+
+  const { error: packageErr } = await admin
     .from("packages")
     .update({
       integration_sync_status: "idle",
       integration_sync_error: null,
     })
-    .eq("integration_sync_status", "failed")
+    .not("integration_sync_error", "is", null)
   if (packageErr) return { ok: false, message: packageErr.message }
 
-  const { error: orderErr } = await supabase
+  // Do NOT re-queue failed orders as pending — that re-ran Supplier Lookup failures forever.
+  // Clear the banner; keep Opportunity when present so the order stays linked.
+  const { error: orderSyncedErr } = await admin
     .from("orders")
     .update({
-      salesforce_sync_status: "pending",
-      salesforce_line_item_status: null,
+      salesforce_sync_status: "synced",
+      salesforce_line_item_status: "synced",
       salesforce_sync_error: null,
     })
     .or("salesforce_sync_status.eq.failed,salesforce_line_item_status.eq.failed")
-  if (orderErr) return { ok: false, message: orderErr.message }
+    .not("salesforce_opportunity_id", "is", null)
+  if (orderSyncedErr) return { ok: false, message: orderSyncedErr.message }
+
+  const { error: orderErrClear } = await admin
+    .from("orders")
+    .update({ salesforce_sync_error: null })
+    .or("salesforce_sync_status.eq.failed,salesforce_line_item_status.eq.failed")
+    .is("salesforce_opportunity_id", null)
+  if (orderErrClear) return { ok: false, message: orderErrClear.message }
 
   revalidatePath("/admin/integrations/salesforce")
   revalidatePath("/admin/catalog")
@@ -1568,7 +1600,7 @@ export async function clearSalesforceSyncFailures(): Promise<ActionResult> {
   return { ok: true }
 }
 
-/** Pull offline Salesforce sales into portal inventory, then push siblings to SF + Wix. */
+/** Pull offline Salesforce sales into portal inventory (light — no org-wide Available scan). */
 export async function pullSalesforceInventoryNow(): Promise<
   | {
       ok: true
@@ -1580,7 +1612,12 @@ export async function pullSalesforceInventoryNow(): Promise<
   const gate = await requireAdminAction()
   if (!gate.ok) return gate
   try {
-    const pull = await pullInventoryFromSalesforce({ force: true })
+    const { pullInventoryFromSalesforce } = await import(
+      "@/lib/integrations/salesforce/pull-inventory-from-salesforce"
+    )
+    // offlineSalesOnly: Closed Won + heal affected packages only. Full force pulls were
+    // burning TotalRequests and failing before offline sales could land.
+    const pull = await pullInventoryFromSalesforce({ force: true, offlineSalesOnly: true })
     if (pull.skipped) {
       return { ok: false, message: pull.message ?? "Salesforce inventory pull was skipped." }
     }

@@ -63,27 +63,39 @@ export function SalesforceIntegrationClient({
         toast.error(res.message)
         return
       }
-      const { pull, outbox } = res
-      if (pull.errors.length > 0) {
-        toast.error(`Pull had errors: ${pull.errors[0]}`, { duration: 12000 })
-      } else if ((pull.closedWon?.lineItemsApplied ?? 0) > 0) {
-        toast.success(
-          `Recorded ${pull.closedWon!.lineItemsApplied} new offline sale(s) for audit (inventory already in Salesforce Available).`,
+      const { pull } = res
+      const applied = pull.closedWon?.lineItemsApplied ?? 0
+      const unmapped = pull.closedWon?.skippedUnmappedProduct ?? 0
+      const limitHit = pull.errors.some((e) =>
+        /TotalRequests|REQUEST_LIMIT_EXCEEDED|api.?limit/i.test(e),
+      )
+      if (limitHit) {
+        toast.error(
+          `Salesforce API daily limit exceeded. Offline pull paused — try again after the limit resets (usually overnight). ${pull.errors[0]}`,
+          { duration: 14000 },
         )
-      } else if (pull.adjusted > 0) {
+      } else if (pull.errors.length > 0 && applied === 0) {
+        toast.error(`Pull had errors: ${pull.errors[0]}`, { duration: 12000 })
+      } else if (applied > 0) {
         toast.success(
-          `Updated ${pull.adjusted} package(s) from Salesforce inventory and refreshed Wix where mapped.`,
+          `Recorded ${applied} offline sale(s) and updated inventory / Stock Sources for affected packages.`,
+          { duration: 10000 },
+        )
+        if (pull.errors.length > 0) {
+          toast.message(`Some follow-up warnings: ${pull.errors[0]}`, { duration: 8000 })
+        }
+      } else if (unmapped > 0) {
+        toast.message(
+          `Found Closed Won lines but ${unmapped} Product2 Id(s) are not mapped to a portal package.`,
+          { duration: 10000 },
         )
       } else {
         const scanned = pull.closedWon?.opportunitiesScanned ?? 0
         toast.message(
           scanned > 0
             ? `Checked ${scanned} Closed Won opportunities — portal already up to date.`
-            : `Checked ${pull.checked} packages — portal already matches Salesforce.`,
+            : "No new offline Closed Won sales found.",
         )
-      }
-      if (outbox?.failed && outbox.failures?.[0]?.error) {
-        toast.error(`Sync queue: ${outbox.failures[0].error}`, { duration: 12000 })
       }
       router.refresh()
     })
@@ -96,7 +108,7 @@ export function SalesforceIntegrationClient({
         toast.error(res.message)
         return
       }
-      toast.success("Old Salesforce sync errors cleared.")
+      toast.success("Cleared Salesforce sync error banners (and stopped retrying bad jobs).")
       router.refresh()
     })
   }

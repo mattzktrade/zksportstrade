@@ -116,6 +116,22 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
 
   await recoverStaleProcessingJobs(admin)
 
+  // When Salesforce daily API limit was hit recently, defer SF outbox jobs so retries
+  // do not keep burning the remaining quota (and re-writing TotalRequests errors).
+  let apiCooldown = false
+  try {
+    const { getIntegrationSetting } = await import(
+      "@/lib/integrations/salesforce/settings-store"
+    )
+    const until = await getIntegrationSetting("salesforce_api_limit_cooldown_until")
+    if (until) {
+      const t = new Date(until).getTime()
+      apiCooldown = Number.isFinite(t) && t > Date.now()
+    }
+  } catch {
+    apiCooldown = false
+  }
+
   const { data: rows, error } = await admin
     .from("integration_outbox")
     .select("id, event_type, payload, attempts")
@@ -127,9 +143,26 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
     return { processed: 0, completed: 0, failed: 0, orphaned: 0, skipped: true, message: error.message }
   }
 
-  const pending = (rows ?? []) as OutboxRow[]
+  const pending = ((rows ?? []) as OutboxRow[]).filter((row) => {
+    if (!apiCooldown) return true
+    return (
+      row.event_type !== "product.upsert" &&
+      row.event_type !== "inventory.snapshot" &&
+      row.event_type !== "order.placed" &&
+      row.event_type !== "order.outcome"
+    )
+  })
   if (pending.length === 0) {
-    return { processed: 0, completed: 0, failed: 0, orphaned: 0, skipped: false }
+    return {
+      processed: 0,
+      completed: 0,
+      failed: 0,
+      orphaned: 0,
+      skipped: apiCooldown,
+      message: apiCooldown
+        ? "Salesforce API limit cooldown — deferred Salesforce sync queue jobs."
+        : undefined,
+    }
   }
 
   let completed = 0
@@ -179,7 +212,14 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
         error: msg.slice(0, 1500),
       })
       const attempts = row.attempts + 1
-      const terminal = attempts >= MAX_ATTEMPTS
+      const { isSalesforceApiLimitError, isSalesforceSupplierIdTypeError } = await import(
+        "@/lib/integrations/salesforce/format-error"
+      )
+      // Do not retry API-limit or permanent Supplier Lookup mismatches — each retry burns quota.
+      const terminal =
+        attempts >= MAX_ATTEMPTS ||
+        isSalesforceApiLimitError(e) ||
+        isSalesforceSupplierIdTypeError(e)
 
       await admin
         .from("integration_outbox")
@@ -203,13 +243,26 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
 
       const orderId = typeof row.payload.order_id === "string" ? row.payload.order_id : null
       if (orderId && row.event_type === "order.placed") {
-        await admin
-          .from("orders")
-          .update({
-            salesforce_sync_status: "failed",
-            salesforce_sync_error: msg.slice(0, 1000),
-          })
-          .eq("id", orderId)
+        // Supplier Lookup mismatch: Opportunity may already exist — mark synced so Clear/cron
+        // do not keep re-POSTing the same bad Supplier value.
+        if (isSalesforceSupplierIdTypeError(e)) {
+          await admin
+            .from("orders")
+            .update({
+              salesforce_sync_status: "synced",
+              salesforce_line_item_status: "synced",
+              salesforce_sync_error: null,
+            })
+            .eq("id", orderId)
+        } else {
+          await admin
+            .from("orders")
+            .update({
+              salesforce_sync_status: "failed",
+              salesforce_sync_error: msg.slice(0, 1000),
+            })
+            .eq("id", orderId)
+        }
       }
       if (orderId && row.event_type === "order.outcome") {
         await admin

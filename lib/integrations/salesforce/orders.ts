@@ -153,6 +153,30 @@ async function buildOpportunityLineItemBody(input: {
   return body
 }
 
+/** PATCH/POST OLI; if Supplier is a Lookup, retry once without the supplier field. */
+async function writeOpportunityLineItem(input: {
+  method: "POST" | "PATCH"
+  path: string
+  body: Record<string, unknown>
+}): Promise<void> {
+  try {
+    await salesforceRequest(input.method, input.path, { body: input.body })
+  } catch (e) {
+    const { isSalesforceSupplierIdTypeError } = await import(
+      "@/lib/integrations/salesforce/format-error"
+    )
+    if (!isSalesforceSupplierIdTypeError(e)) throw e
+    const retryBody = { ...input.body }
+    for (const key of Object.keys(retryBody)) {
+      if (/supplier/i.test(key)) delete retryBody[key]
+    }
+    console.warn(
+      "[salesforce] Opportunity line Supplier field rejected (Lookup/Id) — retrying without Supplier",
+    )
+    await salesforceRequest(input.method, input.path, { body: retryBody })
+  }
+}
+
 export async function syncOrderToSalesforce(orderId: string): Promise<{
   opportunityId: string
   quoteId: string | null
@@ -197,7 +221,9 @@ export async function syncOrderToSalesforce(orderId: string): Promise<{
             unitPrice: Number(order.unit_price),
             includeIds: false,
           })
-          await salesforceRequest("PATCH", `/sobjects/OpportunityLineItem/${lineId}`, {
+          await writeOpportunityLineItem({
+            method: "PATCH",
+            path: `/sobjects/OpportunityLineItem/${lineId}`,
             body: patchBody,
           })
         }
@@ -398,7 +424,9 @@ export async function syncOrderToSalesforce(orderId: string): Promise<{
           includeIds: false,
         })
         // Refresh qty/price and fill Supplier / Buy Price on lines created before we synced them.
-        await salesforceRequest("PATCH", `/sobjects/OpportunityLineItem/${existing[0].Id}`, {
+        await writeOpportunityLineItem({
+          method: "PATCH",
+          path: `/sobjects/OpportunityLineItem/${existing[0].Id}`,
           body: patchBody,
         })
         lineItemStatus = "synced"
@@ -412,7 +440,9 @@ export async function syncOrderToSalesforce(orderId: string): Promise<{
           unitPrice: Number(order.unit_price),
           includeIds: true,
         })
-        await salesforceRequest("POST", "/sobjects/OpportunityLineItem", {
+        await writeOpportunityLineItem({
+          method: "POST",
+          path: "/sobjects/OpportunityLineItem",
           body: createBody,
         })
         lineItemStatus = "synced"

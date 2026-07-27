@@ -23,9 +23,30 @@ import { readOpenPipelineQuantityByProductBulk } from "@/lib/integrations/salesf
 import { createAdminClient } from "@/lib/supabase/admin"
 
 const LAST_PULL_KEY = "salesforce_inventory_pull_last_run"
+const API_LIMIT_COOLDOWN_KEY = "salesforce_api_limit_cooldown_until"
 /** Full Available/linked-heal/stock-import cadence. Closed Won always runs every cron tick;
  * when new offline rows apply we still heal those groups even while this throttle is active. */
 const PULL_THROTTLE_MS = 5 * 60 * 1000
+/** After TotalRequests, skip heavy SF work until this cooldown elapses. */
+const API_LIMIT_COOLDOWN_MS = 30 * 60 * 1000
+
+async function readApiLimitCooldownActive(): Promise<boolean> {
+  const until = await getIntegrationSetting(API_LIMIT_COOLDOWN_KEY)
+  if (!until) return false
+  const t = new Date(until).getTime()
+  return Number.isFinite(t) && t > Date.now()
+}
+
+async function markApiLimitCooldown(): Promise<void> {
+  await setIntegrationSetting(
+    API_LIMIT_COOLDOWN_KEY,
+    new Date(Date.now() + API_LIMIT_COOLDOWN_MS).toISOString(),
+  )
+}
+
+function errorsIncludeApiLimit(errors: readonly string[]): boolean {
+  return errors.some((e) => /TotalRequests|REQUEST_LIMIT_EXCEEDED|api.?limit/i.test(e))
+}
 
 export type SalesforceInventoryPullAdjustment = {
   packageId: string
@@ -409,6 +430,12 @@ async function pullAvailableQuantityFromSalesforce(
  */
 export async function pullInventoryFromSalesforce(options?: {
   force?: boolean
+  /**
+   * Admin "Pull offline sales" mode: Closed Won + heal only packages that got new
+   * offline rows. Skips org-wide Available pull / stale-group heal / stock-source import
+   * so we do not burn TotalRequests when the daily limit is nearly exhausted.
+   */
+  offlineSalesOnly?: boolean
 }): Promise<SalesforceInventoryPullResult> {
   const empty: SalesforceInventoryPullResult = {
     skipped: true,
@@ -446,15 +473,23 @@ export async function pullInventoryFromSalesforce(options?: {
 
   const errors: string[] = []
   let closedWon: PullClosedWonOpportunitySalesResult | null = null
+  const offlineSalesOnly = Boolean(options?.offlineSalesOnly)
+  const force = Boolean(options?.force)
+  const apiCooldownActive = !force && (await readApiLimitCooldownActive())
 
   try {
+    // Closed Won is cheap (1–2 SOQL) and must keep running even during API-limit cooldown.
     closedWon = await pullClosedWonOpportunitySales(admin, config, {
-      force: Boolean(options?.force),
+      force: force || offlineSalesOnly,
     })
     errors.push(...closedWon.errors)
   } catch (e) {
     const message = e instanceof Error ? e.message : "Closed Won opportunity pull failed."
     errors.push(message)
+  }
+
+  if (errorsIncludeApiLimit(errors)) {
+    await markApiLimitCooldown()
   }
 
   // New offline ledger rows must update sellable + Stock Sources immediately — do not wait
@@ -474,8 +509,28 @@ export async function pullInventoryFromSalesforce(options?: {
     }
   }
 
-  const throttled = await shouldThrottleAvailablePull(Boolean(options?.force))
-  if (throttled) {
+  if (errorsIncludeApiLimit(errors)) {
+    await markApiLimitCooldown()
+  }
+
+  // Light admin / catch-up path: stop after Closed Won + affected-package heal.
+  if (offlineSalesOnly) {
+    return {
+      skipped: false,
+      closedWon,
+      checked: 0,
+      adjusted: linkedGroupHeal?.packagesFixed ?? 0,
+      skippedPackages: 0,
+      adjustments: [],
+      channelSyncQueued: 0,
+      linkedGroupHeal,
+      stockSourcesImported: null,
+      errors,
+    }
+  }
+
+  const throttled = await shouldThrottleAvailablePull(force)
+  if (throttled || apiCooldownActive || (await readApiLimitCooldownActive())) {
     // Do NOT bump LAST_PULL_KEY here — that made every cron tick look "fresh" and skipped
     // Available/linked heal indefinitely while still recording Closed Won rows.
     return {
@@ -489,7 +544,9 @@ export async function pullInventoryFromSalesforce(options?: {
       channelSyncQueued: 0,
       linkedGroupHeal,
       stockSourcesImported: null,
-      errors,
+      errors: apiCooldownActive
+        ? [...errors, "Salesforce API limit cooldown — deferred Available/linked heal."]
+        : errors,
     }
   }
 
@@ -523,6 +580,10 @@ export async function pullInventoryFromSalesforce(options?: {
   } catch (e) {
     const message = e instanceof Error ? e.message : "Stock source import failed."
     errors.push(message)
+  }
+
+  if (errorsIncludeApiLimit(errors)) {
+    await markApiLimitCooldown()
   }
 
   await setIntegrationSetting(LAST_PULL_KEY, new Date().toISOString())
