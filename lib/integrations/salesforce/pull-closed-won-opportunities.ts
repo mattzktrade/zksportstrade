@@ -12,7 +12,11 @@ const CURSOR_KEY = "salesforce_closed_won_inventory_cursor"
 /** Force pull lookback — long enough to catch missed offline sales without scanning years. */
 const FORCE_LOOKBACK_MS = 120 * 24 * 60 * 60 * 1000
 const FIRST_RUN_OVERLAP_MS = 5 * 60 * 1000
+/** Every cron tick also re-scans this recent window newest-first so new Closed Won
+ * deals are not stuck behind an ASC cursor backlog of older opportunities. */
+const RECENT_CATCHUP_MS = 2 * 60 * 60 * 1000
 const CLOSED_WON_QUERY_LIMIT = 200
+const RECENT_CATCHUP_LIMIT = 50
 
 export type ClosedWonOpportunityAdjustment = {
   opportunityId: string
@@ -29,6 +33,8 @@ export type PullClosedWonOpportunitySalesResult = {
   skippedPortalOrders: number
   skippedAlreadyApplied: number
   skippedUnmappedProduct: number
+  /** Packages that received a new offline-sale ledger row this run. */
+  affectedPackageIds: string[]
   adjustments: ClosedWonOpportunityAdjustment[]
   errors: string[]
 }
@@ -111,6 +117,42 @@ async function loadAppliedLineItemKeys(admin: SupabaseClient): Promise<Set<strin
   return keys
 }
 
+function buildClosedWonSoql(input: {
+  stageClause: string
+  since: Date
+  orderDir: "ASC" | "DESC"
+  limit: number
+}): string {
+  return (
+    `SELECT Id, Name, LastModifiedDate, ` +
+    `(SELECT Id, Product2Id, Quantity FROM OpportunityLineItems WHERE Product2Id != null) ` +
+    `FROM Opportunity WHERE ${input.stageClause} AND LastModifiedDate >= ${soqlDateTime(input.since)} ` +
+    `ORDER BY LastModifiedDate ${input.orderDir} LIMIT ${input.limit}`
+  )
+}
+
+/** Merge opportunity rows by Id (prefer newer LastModifiedDate). */
+function mergeOpportunityRows(batches: OpportunityRow[][]): OpportunityRow[] {
+  const byId = new Map<string, OpportunityRow>()
+  for (const batch of batches) {
+    for (const row of batch) {
+      const id = typeof row.Id === "string" ? row.Id.trim() : ""
+      if (!id) continue
+      const existing = byId.get(id)
+      if (!existing) {
+        byId.set(id, row)
+        continue
+      }
+      const prev = new Date(existing.LastModifiedDate).getTime()
+      const next = new Date(row.LastModifiedDate).getTime()
+      if (!Number.isNaN(next) && (Number.isNaN(prev) || next >= prev)) {
+        byId.set(id, row)
+      }
+    }
+  }
+  return [...byId.values()]
+}
+
 /**
  * Apply inventory for Closed Won Salesforce opportunities that were not created by the portal.
  *
@@ -121,16 +163,9 @@ async function loadAppliedLineItemKeys(admin: SupabaseClient): Promise<Set<strin
  * recomputed each day-package's qty_available as `base − consumed`, where `base` was the
  * day's own cost layers (0 for linked days, whose stock lives on the 3-day parent) or a
  * fallback of `qty_available + own_sold`, and `consumed` cascaded the 3-day sold count into
- * every day sibling. That double-subtracted the 3-day committed quantity on every cron tick:
- *
- *   Fri = 22 − 8 = 14  Sat = 22 − 8 = 14  Sun = 18 − 8 = 10  → 3-day = min = 10
- *   Next tick: 14 − 8 = 6, 6, 2  → next: 0, 0, 0  → next pull restores 22, 22, 18
- *
- * That is exactly the “stock keeps flipping between 0, 2, 18…” corruption observed on live
- * after Hungary's Paddock Club Suite (F1) group + Single Ticket shells were added. The
- * reconcile helper is removed — Salesforce Available Quantity (pulled by
- * `pullAvailableQuantityFromSalesforce`) is already the authoritative sellable value for
- * linked and standalone products, so no post-hoc reconciliation is needed here.
+ * every day sibling. That double-subtracted the 3-day committed quantity on every cron tick.
+ * The reconcile helper stays removed — after new offline rows are recorded, the caller
+ * heals affected linked groups (and Stock Sources) explicitly.
  */
 export async function pullClosedWonOpportunitySales(
   admin: SupabaseClient,
@@ -143,6 +178,7 @@ export async function pullClosedWonOpportunitySales(
     skippedPortalOrders: 0,
     skippedAlreadyApplied: 0,
     skippedUnmappedProduct: 0,
+    affectedPackageIds: [],
     adjustments: [],
     errors: [],
   }
@@ -169,21 +205,69 @@ export async function pullClosedWonOpportunitySales(
     ? `(IsWon = true OR StageName = '${escapeSoqlString(wonStage)}')`
     : `IsWon = true`
 
-  // Force pulls prefer newest first so recent offline sales apply immediately.
-  // Incremental cron keeps ASC so the cursor advances through history safely.
-  const orderDir = options?.force ? "DESC" : "ASC"
-  const soql = `SELECT Id, Name, LastModifiedDate, (SELECT Id, Product2Id, Quantity FROM OpportunityLineItems WHERE Product2Id != null) FROM Opportunity WHERE ${stageClause} AND LastModifiedDate >= ${soqlDateTime(since)} ORDER BY LastModifiedDate ${orderDir} LIMIT ${CLOSED_WON_QUERY_LIMIT}`
+  const batches: OpportunityRow[][] = []
 
-  let rows: OpportunityRow[]
-  try {
-    rows = await salesforceQuery<OpportunityRow>(soql)
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "Closed Won opportunity query failed."
-    result.errors.push(message)
-    return result
+  /** ASC cursor batch only — used to advance the incremental cursor safely. */
+  let cursorBatch: OpportunityRow[] = []
+
+  if (options?.force) {
+    // Force: newest-first across the long lookback so recent offline sales apply immediately.
+    try {
+      batches.push(
+        await salesforceQuery<OpportunityRow>(
+          buildClosedWonSoql({
+            stageClause,
+            since,
+            orderDir: "DESC",
+            limit: CLOSED_WON_QUERY_LIMIT,
+          }),
+        ),
+      )
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Closed Won opportunity query failed."
+      result.errors.push(message)
+      return result
+    }
+  } else {
+    // Incremental: ASC cursor drain + recent DESC catch-up (new deals within 2h).
+    const recentSince = new Date(Date.now() - RECENT_CATCHUP_MS)
+    try {
+      const [cursorRows, recentRows] = await Promise.all([
+        salesforceQuery<OpportunityRow>(
+          buildClosedWonSoql({
+            stageClause,
+            since,
+            orderDir: "ASC",
+            limit: CLOSED_WON_QUERY_LIMIT,
+          }),
+        ),
+        salesforceQuery<OpportunityRow>(
+          buildClosedWonSoql({
+            stageClause,
+            since: recentSince,
+            orderDir: "DESC",
+            limit: RECENT_CATCHUP_LIMIT,
+          }),
+        ),
+      ])
+      cursorBatch = cursorRows
+      batches.push(cursorRows, recentRows)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Closed Won opportunity query failed."
+      result.errors.push(message)
+      return result
+    }
   }
 
+  const rows = mergeOpportunityRows(batches)
+  // Advance cursor only from the ASC drain — never from recent catch-up (that would skip backlog).
   let maxModified = since
+  for (const opp of cursorBatch) {
+    const modified = new Date(opp.LastModifiedDate)
+    if (!Number.isNaN(modified.getTime()) && modified > maxModified) {
+      maxModified = modified
+    }
+  }
 
   const { data: packageRows, error: pkgErr } = await admin
     .from("packages")
@@ -253,16 +337,12 @@ export async function pullClosedWonOpportunitySales(
   }
 
   const sfSnapshots = await readSfInventorySnapshotsBulk(product2Ids, config)
+  const affectedPackages = new Set<string>()
 
   for (const opp of rows) {
     result.opportunitiesScanned++
     const oppId = typeof opp.Id === "string" ? opp.Id.trim() : ""
     if (!oppId) continue
-
-    const modified = new Date(opp.LastModifiedDate)
-    if (!Number.isNaN(modified.getTime()) && modified > maxModified) {
-      maxModified = modified
-    }
 
     if (portalOppIds.has(oppId)) {
       result.skippedPortalOrders++
@@ -331,6 +411,7 @@ export async function pullClosedWonOpportunitySales(
       }
 
       appliedKeys.add(appliedKey)
+      affectedPackages.add(packageId)
       result.lineItemsApplied++
       result.adjustments.push({
         opportunityId: oppId,
@@ -343,9 +424,11 @@ export async function pullClosedWonOpportunitySales(
     }
   }
 
-  // Force pulls scan newest-first and must not advance the incremental cursor —
-  // otherwise older unapplied Closed Won rows in the lookback window are skipped forever.
-  if (rows.length > 0 && !options?.force) {
+  result.affectedPackageIds = [...affectedPackages]
+
+  // Force pulls must not advance the incremental cursor.
+  // Incremental: only advance from the ASC cursor batch (not recent catch-up).
+  if (cursorBatch.length > 0 && !options?.force) {
     await setIntegrationSetting(CURSOR_KEY, maxModified.toISOString())
   }
 

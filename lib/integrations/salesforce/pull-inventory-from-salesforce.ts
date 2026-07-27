@@ -23,7 +23,9 @@ import { readOpenPipelineQuantityByProductBulk } from "@/lib/integrations/salesf
 import { createAdminClient } from "@/lib/supabase/admin"
 
 const LAST_PULL_KEY = "salesforce_inventory_pull_last_run"
-const PULL_THROTTLE_MS = 60_000
+/** Full Available/linked-heal/stock-import cadence. Closed Won always runs every cron tick;
+ * when new offline rows apply we still heal those groups even while this throttle is active. */
+const PULL_THROTTLE_MS = 5 * 60 * 1000
 
 export type SalesforceInventoryPullAdjustment = {
   packageId: string
@@ -48,6 +50,77 @@ export type SalesforceInventoryPullResult = {
   /** Ledger-only import of SF Stock Sources into portal cost layers (no qty bump). */
   stockSourcesImported: { packagesChecked: number; imported: number; claimed: number } | null
   errors: string[]
+}
+
+/**
+ * After new Closed Won offline rows land, heal each affected linked group (or sync
+ * Stock Sources for standalone packages) so Places Sold / Remaining / SF Available
+ * update without waiting for a manual pull or the Available throttle.
+ */
+async function applyClosedWonInventoryFollowUp(
+  admin: NonNullable<ReturnType<typeof createAdminClient>>,
+  config: NonNullable<ReturnType<typeof getSalesforceConfig>>,
+  packageIds: readonly string[],
+): Promise<{ groups: number; packagesFixed: number; errors: string[] }> {
+  const ids = [...new Set(packageIds.map((id) => id.trim()).filter(Boolean))]
+  const out = { groups: 0, packagesFixed: 0, errors: [] as string[] }
+  if (ids.length === 0) return out
+
+  const { data: rows, error } = await admin
+    .from("packages")
+    .select("id, inventory_group_id, salesforce_product_id, shell_parent_package_id")
+    .in("id", ids)
+  if (error) {
+    out.errors.push(error.message)
+    return out
+  }
+
+  const { syncLinkedGroupInventoryFromSalesforce } = await import(
+    "@/lib/inventory/linked-group-inventory"
+  )
+  const { syncStockSourcesForProduct } = await import(
+    "@/lib/integrations/salesforce/stock-sources"
+  )
+  const { syncPackageCatalogToWix } = await import("@/lib/integrations/wix/catalog-sync")
+
+  const healedGroups = new Set<string>()
+  for (const raw of rows ?? []) {
+    const packageId = typeof raw.id === "string" ? raw.id.trim() : ""
+    if (!packageId) continue
+    const groupId =
+      typeof raw.inventory_group_id === "string" ? raw.inventory_group_id.trim() : ""
+    const product2Id =
+      typeof raw.salesforce_product_id === "string" ? raw.salesforce_product_id.trim() : ""
+    const isShell = Boolean(
+      typeof raw.shell_parent_package_id === "string" && raw.shell_parent_package_id.trim(),
+    )
+
+    try {
+      if (groupId) {
+        if (healedGroups.has(groupId)) continue
+        healedGroups.add(groupId)
+        const synced = await syncLinkedGroupInventoryFromSalesforce(admin, groupId, config)
+        out.groups += 1
+        out.packagesFixed += synced.updated.length
+      } else if (product2Id && !isShell) {
+        const ss = await syncStockSourcesForProduct({ admin, packageId, product2Id })
+        if (ss.errors.length > 0) {
+          out.errors.push(...ss.errors.slice(0, 3))
+        }
+        out.packagesFixed += 1
+        const wix = await syncPackageCatalogToWix(packageId)
+        if (!wix.ok) {
+          out.errors.push(`Wix sync ${packageId}: ${[...wix.errors, ...wix.skipped].join("; ")}`)
+        }
+      }
+    } catch (e) {
+      out.errors.push(
+        `${packageId}: ${e instanceof Error ? e.message : "Closed Won follow-up failed."}`,
+      )
+    }
+  }
+
+  return out
 }
 
 type PackagePullRow = {
@@ -384,9 +457,27 @@ export async function pullInventoryFromSalesforce(options?: {
     errors.push(message)
   }
 
+  // New offline ledger rows must update sellable + Stock Sources immediately — do not wait
+  // for the Available-pull throttle (which previously could starve heals forever because
+  // throttled ticks still refreshed LAST_PULL_KEY).
+  let linkedGroupHeal: SalesforceInventoryPullResult["linkedGroupHeal"] = null
+  if (closedWon && closedWon.affectedPackageIds.length > 0) {
+    try {
+      const applied = await applyClosedWonInventoryFollowUp(admin, config, closedWon.affectedPackageIds)
+      linkedGroupHeal = {
+        groups: applied.groups,
+        packagesFixed: applied.packagesFixed,
+      }
+      errors.push(...applied.errors)
+    } catch (e) {
+      errors.push(e instanceof Error ? e.message : "Closed Won inventory follow-up failed.")
+    }
+  }
+
   const throttled = await shouldThrottleAvailablePull(Boolean(options?.force))
   if (throttled) {
-    await setIntegrationSetting(LAST_PULL_KEY, new Date().toISOString())
+    // Do NOT bump LAST_PULL_KEY here — that made every cron tick look "fresh" and skipped
+    // Available/linked heal indefinitely while still recording Closed Won rows.
     return {
       skipped: false,
       throttled: true,
@@ -396,7 +487,7 @@ export async function pullInventoryFromSalesforce(options?: {
       skippedPackages: 0,
       adjustments: [],
       channelSyncQueued: 0,
-      linkedGroupHeal: null,
+      linkedGroupHeal,
       stockSourcesImported: null,
       errors,
     }
@@ -405,14 +496,13 @@ export async function pullInventoryFromSalesforce(options?: {
   const available = await pullAvailableQuantityFromSalesforce(admin, config)
   errors.push(...available.errors)
 
-  let linkedGroupHeal: SalesforceInventoryPullResult["linkedGroupHeal"] = null
   try {
     // syncStaleLinkedGroupsFromSalesforce already runs an internal drift-repair pass —
     // do not call repairAllDriftedLinkedGroupsFromSalesforce again (that doubled SF work).
     const stale = await syncStaleLinkedGroupsFromSalesforce(admin, config)
     linkedGroupHeal = {
-      groups: stale.groups,
-      packagesFixed: stale.packagesFixed,
+      groups: (linkedGroupHeal?.groups ?? 0) + stale.groups,
+      packagesFixed: (linkedGroupHeal?.packagesFixed ?? 0) + stale.packagesFixed,
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : "Linked group inventory heal failed."

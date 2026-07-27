@@ -392,19 +392,22 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
     const dayWon = product2Id ? wonByProduct.get(product2Id) ?? 0 : 0
     const dayOpen = product2Id ? openByProduct.get(product2Id) ?? 0 : 0
     const dayPortalSold = portalSoldByPackage.get(member.id) ?? 0
-    // Do not use SF Closed Won on day Product2 for pool math. Salesforce often mirrors
-    // the 3-day Quantity Sold onto Fri/Sat/Sun (or OLI rollups), which would wrongly
-    // cut sellable (e.g. Fri → 15−6−6=3 instead of 9). Portal local sold + SF open
-    // pipeline on this day are authoritative for day consumption.
-    const dayCommitted = dayPortalSold + dayOpen
+    // Prefer max(portal/offline ledger, Closed Won OLI). Do NOT use Product2 Quantity_Sold —
+    // Salesforce often mirrors the 3-day sold figure onto day products (e.g. Sat Qty Sold=6
+    // while Won Opportunities only sum to 2). OLI bulk reads are authoritative for day won.
+    const dayCommitted = Math.max(dayPortalSold, dayWon) + dayOpen
 
     // When cost-layer pool is known, portal sold is enough — do not skip the day just
     // because the Product2 snapshot failed (that left Sunday stuck at 9 while Fri/Sat
     // healed, and SF Available still looked right via Stock Source formulas).
     if (poolStock != null && poolStock > 0) {
       let sellable = Math.max(0, poolStock - threeDayCommitted - dayCommitted)
-      // Never raise above portal-implied remaining (ignores SF day Closed Won mirrors).
-      const portalImplied = Math.max(0, poolStock - threeDayPortalSold - dayPortalSold)
+      // Cap by portal+offline ledger so a transient OLI over-read cannot wipe the pool.
+      // Still allows dayWon to reduce sellable when offline applications have not landed yet.
+      const portalImplied = Math.max(
+        0,
+        poolStock - threeDayPortalSold - Math.max(dayPortalSold, dayWon),
+      )
       sellable = Math.min(sellable, portalImplied)
       if (process.env.ZK_LINKED_TRACE === "1") {
         console.log(
@@ -855,7 +858,7 @@ async function linkedGroupNeedsSfSync(
       : 0
     const dayOpen = Math.max(0, daySfCommitted - dayWon)
     const dayPortalSold = portalSoldByPackage.get(member.id) ?? 0
-    const dayCommitted = dayPortalSold + dayOpen
+    const dayCommitted = Math.max(dayPortalSold, dayWon) + dayOpen
 
     // Portal cost-layer pool is enough to detect drift — don't require an SF snapshot.
     if (poolStock != null && poolStock > 0) {
