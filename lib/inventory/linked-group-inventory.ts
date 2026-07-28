@@ -42,8 +42,8 @@ function inventoryRow(raw: GroupMember["package_inventory"]) {
   return Array.isArray(raw) ? raw[0] : raw
 }
 
-/** Bulk portal + offline sold for linked-group members (avoids per-row catch → 0 drops). */
-async function loadPortalSoldByPackageIds(
+/** Bulk portal trade-order sold (excludes Salesforce offline applications). */
+async function loadPortalOrderSoldByPackageIds(
   admin: SupabaseClient,
   packageIds: readonly string[],
 ): Promise<Map<string, number>> {
@@ -67,22 +67,12 @@ async function loadPortalSoldByPackageIds(
     }
   }
 
-  const { data: offline, error: offlineErr } = await admin
-    .from("salesforce_offline_sale_applications")
-    .select("package_id, quantity")
-    .in("package_id", ids)
-  if (offlineErr) {
-    console.warn("[linked-inventory] portal sold offline query failed:", offlineErr.message)
-  } else {
-    for (const row of offline ?? []) {
-      const id = String((row as { package_id: string }).package_id ?? "").trim()
-      if (!id) continue
-      const qty = Math.max(0, Math.floor(Number((row as { quantity: number | null }).quantity) || 0))
-      result.set(id, (result.get(id) ?? 0) + qty)
-    }
-  }
-
   return result
+}
+
+/** Sold for commitment: live Closed Won wins over stale offline apps; portal orders still count. */
+function commitmentSoldUnits(sfWon: number, portalOrderSold: number): number {
+  return Math.max(0, Math.floor(sfWon), Math.floor(portalOrderSold))
 }
 
 export type LinkedGroupSyncRow = {
@@ -354,25 +344,29 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
     : null
 
   // Portal bookings decrement inventory immediately; Salesforce opportunity lines can lag.
-  // Bulk-load sold so a single failed readLocalSold call cannot silently drop Sunday sales.
-  const portalSoldByPackage = await loadPortalSoldByPackageIds(
+  // Use trade-portal orders (not offline apps) for commitment — offline apps go stale after
+  // Closed Lost and would zero sellable / Stock Sources even when live Closed Won is correct.
+  const portalOrderSoldByPackage = await loadPortalOrderSoldByPackageIds(
     admin,
     members.map((m) => m.id),
   )
 
   const threeDayWon = threeDayProduct2Id ? wonByProduct.get(threeDayProduct2Id) ?? 0 : 0
   const threeDayOpen = threeDayProduct2Id ? openByProduct.get(threeDayProduct2Id) ?? 0 : 0
-  const threeDayPortalSold = threeDayMember?.id ? portalSoldByPackage.get(threeDayMember.id) ?? 0 : 0
-  const threeDayCommitted = Math.max(threeDayWon + threeDayOpen, threeDayPortalSold)
+  const threeDayPortalOrders = threeDayMember?.id
+    ? portalOrderSoldByPackage.get(threeDayMember.id) ?? 0
+    : 0
+  const threeDaySold = commitmentSoldUnits(threeDayWon, threeDayPortalOrders)
+  const threeDayCommitted = threeDaySold + threeDayOpen
   const poolStock = resolveLinkedPoolStock({
     sfPoolStock,
     costLayerPool,
-    closedWonSold: Math.max(threeDayWon, threeDayPortalSold),
+    closedWonSold: threeDaySold,
   })
 
   if (process.env.ZK_LINKED_TRACE === "1") {
     console.log(
-      `[linked-sync] group=${groupId} sfPool=${sfPoolStock} costPool=${costLayerPool} effPool=${poolStock} won3day=${threeDayWon} open3day=${threeDayOpen} portal3day=${threeDayPortalSold} portalSold=${JSON.stringify(Object.fromEntries(portalSoldByPackage))}`,
+      `[linked-sync] group=${groupId} sfPool=${sfPoolStock} costPool=${costLayerPool} effPool=${poolStock} won3day=${threeDayWon} open3day=${threeDayOpen} portal3day=${threeDayPortalOrders} portalOrders=${JSON.stringify(Object.fromEntries(portalOrderSoldByPackage))}`,
     )
   }
 
@@ -391,27 +385,28 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
 
     const dayWon = product2Id ? wonByProduct.get(product2Id) ?? 0 : 0
     const dayOpen = product2Id ? openByProduct.get(product2Id) ?? 0 : 0
-    const dayPortalSold = portalSoldByPackage.get(member.id) ?? 0
-    // Prefer max(portal/offline ledger, Closed Won OLI). Do NOT use Product2 Quantity_Sold —
+    const dayPortalOrders = portalOrderSoldByPackage.get(member.id) ?? 0
+    const daySold = commitmentSoldUnits(dayWon, dayPortalOrders)
+    // Prefer max(portal orders, Closed Won OLI). Do NOT use Product2 Quantity_Sold —
     // Salesforce often mirrors the 3-day sold figure onto day products (e.g. Sat Qty Sold=6
     // while Won Opportunities only sum to 2). OLI bulk reads are authoritative for day won.
-    const dayCommitted = Math.max(dayPortalSold, dayWon) + dayOpen
+    // Do NOT max with offline applications — those go stale after Closed Lost.
+    const dayCommitted = daySold + dayOpen
 
     // When cost-layer pool is known, portal sold is enough — do not skip the day just
     // because the Product2 snapshot failed (that left Sunday stuck at 9 while Fri/Sat
     // healed, and SF Available still looked right via Stock Source formulas).
     if (poolStock != null && poolStock > 0) {
       let sellable = Math.max(0, poolStock - threeDayCommitted - dayCommitted)
-      // Cap by portal+offline ledger so a transient OLI over-read cannot wipe the pool.
-      // Still allows dayWon to reduce sellable when offline applications have not landed yet.
+      // Cap by portal orders + live won so a transient OLI over-read cannot wipe the pool.
       const portalImplied = Math.max(
         0,
-        poolStock - threeDayPortalSold - Math.max(dayPortalSold, dayWon),
+        poolStock - threeDaySold - daySold,
       )
       sellable = Math.min(sellable, portalImplied)
       if (process.env.ZK_LINKED_TRACE === "1") {
         console.log(
-          `[linked-sync]   day ${member.id.padEnd(50)} sellable=${sellable} (held=${held}, dayWon=${dayWon}, dayOpen=${dayOpen}, dayPortal=${dayPortalSold}, pool=${poolStock}, threeDayCommitted=${threeDayCommitted}, portalImplied=${portalImplied})`,
+          `[linked-sync]   day ${member.id.padEnd(50)} sellable=${sellable} (held=${held}, dayWon=${dayWon}, dayOpen=${dayOpen}, dayPortal=${dayPortalOrders}, pool=${poolStock}, threeDayCommitted=${threeDayCommitted}, portalImplied=${portalImplied})`,
         )
       }
       daySellables.set(member.id, sellable)
@@ -433,7 +428,7 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
 
     if (!product2Id || !snapshot) continue
 
-    if (isUninitializedSfInventorySnapshot(snapshot) && currentSellable > 0 && dayPortalSold <= 0) {
+    if (isUninitializedSfInventorySnapshot(snapshot) && currentSellable > 0 && dayPortalOrders <= 0) {
       updated.push({
         id: member.id,
         name: member.name,
@@ -454,7 +449,7 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
 
     if (process.env.ZK_LINKED_TRACE === "1") {
       console.log(
-        `[linked-sync]   day ${member.id.padEnd(50)} sellable=${sellable} (held=${held}, dayWon=${dayWon}, dayOpen=${dayOpen}, dayPortal=${dayPortalSold})`,
+        `[linked-sync]   day ${member.id.padEnd(50)} sellable=${sellable} (held=${held}, dayWon=${dayWon}, dayOpen=${dayOpen}, dayPortal=${dayPortalOrders})`,
       )
     }
 
@@ -822,21 +817,25 @@ async function linkedGroupNeedsSfSync(
   const costLayerPool = threeDayMember?.id
     ? await readCostLayerPoolQuantity(admin, threeDayMember.id)
     : null
-  const portalSoldByPackage = await loadPortalSoldByPackageIds(
+  const portalOrderSoldByPackage = await loadPortalOrderSoldByPackageIds(
     admin,
     members.map((m) => m.id),
   )
   const threeDayWonForPool = threeDayProduct2Id ? wonByProduct.get(threeDayProduct2Id) ?? 0 : 0
-  const threeDayPortalSold = threeDayMember?.id ? portalSoldByPackage.get(threeDayMember.id) ?? 0 : 0
+  const threeDayPortalOrders = threeDayMember?.id
+    ? portalOrderSoldByPackage.get(threeDayMember.id) ?? 0
+    : 0
+  const threeDaySold = commitmentSoldUnits(threeDayWonForPool, threeDayPortalOrders)
   const poolStock = resolveLinkedPoolStock({
     sfPoolStock,
     costLayerPool,
-    closedWonSold: Math.max(threeDayWonForPool, threeDayPortalSold),
+    closedWonSold: threeDaySold,
   })
   const threeDaySfCommitted = threeDayProduct2Id
     ? committedByProduct.get(threeDayProduct2Id) ?? wonByProduct.get(threeDayProduct2Id) ?? 0
     : 0
-  const threeDayCommitted = Math.max(threeDaySfCommitted, threeDayPortalSold)
+  const threeDayOpen = Math.max(0, threeDaySfCommitted - threeDayWonForPool)
+  const threeDayCommitted = threeDaySold + threeDayOpen
 
   let mappedDays = 0
   let allSellableZero = true
@@ -857,8 +856,8 @@ async function linkedGroupNeedsSfSync(
       ? committedByProduct.get(product2Id) ?? dayWon
       : 0
     const dayOpen = Math.max(0, daySfCommitted - dayWon)
-    const dayPortalSold = portalSoldByPackage.get(member.id) ?? 0
-    const dayCommitted = Math.max(dayPortalSold, dayWon) + dayOpen
+    const dayPortalOrders = portalOrderSoldByPackage.get(member.id) ?? 0
+    const dayCommitted = commitmentSoldUnits(dayWon, dayPortalOrders) + dayOpen
 
     // Portal cost-layer pool is enough to detect drift — don't require an SF snapshot.
     if (poolStock != null && poolStock > 0) {
@@ -1120,7 +1119,7 @@ export async function reconcileLinkedGroupFromPortalSales(
   const costLayerPool = await readCostLayerPoolQuantity(admin, threeDay.id)
   if (costLayerPool == null || costLayerPool <= 0) return false
 
-  const portalSold = await loadPortalSoldByPackageIds(
+  const portalSold = await loadPortalOrderSoldByPackageIds(
     admin,
     members.map((m) => m.id),
   )

@@ -513,6 +513,34 @@ export async function pullInventoryFromSalesforce(options?: {
   const followUpPackageIds = new Set<string>(closedWon?.affectedPackageIds ?? [])
   const forceFollowUpIds = new Set<string>(closedWon?.affectedPackageIds ?? [])
 
+  // Drop offline ledger rows for deals that are no longer Closed Won (Closed Lost / cancelled).
+  // Without this, heal + Stock Sources keep treating Lost units as sold forever.
+  try {
+    const {
+      revokeStaleOfflineSaleApplications,
+      readRecentlyModifiedOpportunityIds,
+    } = await import("@/lib/integrations/salesforce/revoke-stale-offline-sales")
+    const lookbackMs = offlineSalesOnly || force ? 7 * 24 * 60 * 60 * 1000 : 2 * 60 * 60 * 1000
+    let revokeOpts: { checkAllApplied?: boolean; opportunityIds?: string[] } = {
+      checkAllApplied: offlineSalesOnly || force,
+    }
+    if (!revokeOpts.checkAllApplied) {
+      const recentOpps = await readRecentlyModifiedOpportunityIds(lookbackMs, 100)
+      errors.push(...recentOpps.errors)
+      revokeOpts = { opportunityIds: recentOpps.opportunityIds }
+    }
+    const revoked = await revokeStaleOfflineSaleApplications(admin, config, revokeOpts)
+    errors.push(...revoked.errors)
+    for (const id of revoked.affectedPackageIds) {
+      followUpPackageIds.add(id)
+      forceFollowUpIds.add(id)
+    }
+  } catch (e) {
+    errors.push(
+      e instanceof Error ? e.message : "Failed to revoke stale offline Closed Won applications.",
+    )
+  }
+
   try {
     const { resolvePackagesTouchedByRecentOpportunities } = await import(
       "@/lib/integrations/salesforce/recent-opportunity-packages"

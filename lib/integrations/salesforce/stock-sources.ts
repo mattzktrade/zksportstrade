@@ -2,8 +2,11 @@ import { createHash } from "node:crypto"
 import { SupabaseClient } from "@supabase/supabase-js"
 import { salesforceRequest, salesforceQuery, SalesforceApiError } from "@/lib/integrations/salesforce/client"
 import { getSalesforceConfig } from "@/lib/integrations/salesforce/config"
-import { computeProductQuantitySoldFromWonLines } from "@/lib/integrations/salesforce/sold-metrics"
-import { readLocalSoldForPackage } from "@/lib/inventory/local-sold"
+import {
+  computeProductQuantitySoldFromWonLines,
+  readWonQuantityByProductBulk,
+} from "@/lib/integrations/salesforce/sold-metrics"
+import { readPortalOrderSoldForPackage } from "@/lib/inventory/local-sold"
 
 /**
  * Sync portal cost-layer groupings (per supplier + fulfilment block) to
@@ -411,17 +414,41 @@ async function linkedStockSourceAttributedSold(
 ): Promise<number> {
   const { data: siblings } = await admin
     .from("packages")
-    .select("id, duration")
+    .select("id, duration, salesforce_product_id")
     .eq("inventory_group_id", input.groupId)
     .is("shell_parent_package_id", null)
 
-  const rows = (siblings ?? []) as Array<{ id: string; duration: string | null }>
+  const rows = (siblings ?? []) as Array<{
+    id: string
+    duration: string | null
+    salesforce_product_id: string | null
+  }>
+
+  const product2Ids = rows
+    .map((r) => r.salesforce_product_id?.trim() ?? "")
+    .filter(Boolean)
+  const config = getSalesforceConfig()
+  const wonByProduct =
+    config && product2Ids.length > 0
+      ? await readWonQuantityByProductBulk(product2Ids, config.opportunityStageWon).catch(
+          () => new Map<string, number>(),
+        )
+      : new Map<string, number>()
+
   const withSold = await Promise.all(
-    rows.map(async (row) => ({
-      id: row.id,
-      duration: row.duration,
-      sold: await readLocalSoldForPackage(admin, row.id).catch(() => 0),
-    })),
+    rows.map(async (row) => {
+      const portalOrders = await readPortalOrderSoldForPackage(admin, row.id).catch(() => 0)
+      const product2Id = row.salesforce_product_id?.trim() ?? ""
+      const sfWon = product2Id ? wonByProduct.get(product2Id) ?? 0 : 0
+      // Live Closed Won + portal orders. Do not use offline applications — they go stale
+      // after Closed Lost and would push Stock Source Quantity Sold back to full stock.
+      const sold = Math.max(portalOrders, sfWon)
+      return {
+        id: row.id,
+        duration: row.duration,
+        sold,
+      }
+    }),
   )
 
   return computeLinkedStockSourceAttributedSold({
@@ -535,7 +562,7 @@ async function loadStockSourceInputsForPackage(
     }
   }
 
-  let totalPackageSold = await readLocalSoldForPackage(admin, packageId).catch(() => 0)
+  let totalPackageSold = await readPortalOrderSoldForPackage(admin, packageId).catch(() => 0)
 
   if (linkedSharedLedger && groupId) {
     totalPackageSold = await linkedStockSourceAttributedSold(admin, {
@@ -562,23 +589,29 @@ async function loadStockSourceInputsForPackage(
       }
     }
 
-    let sellable = 0
-    const { data: inv } = await admin
-      .from("package_inventory")
-      .select("qty_available, qty_held")
-      .eq("package_id", packageId)
-      .maybeSingle()
-    if (inv) {
-      const available = Math.max(0, Math.floor(Number(inv.qty_available) || 0))
-      const held = Math.max(0, Math.floor(Number(inv.qty_held) || 0))
-      sellable = Math.max(0, available - held)
-    }
-    const totalPurchased = layers.reduce((sum, l) => sum + l.quantity, 0)
-    const impliedSoldFromInventory = Math.max(0, totalPurchased - sellable)
+    // Booked = portal orders + live Closed Won. Prefer this over (purchased − sellable),
+    // which rewrites Stock Sources to Quantity Sold = Stock whenever package_inventory is
+    // stuck at 0 after a Closed Lost (stale offline apps / heal lag).
     const booked = Math.max(totalPackageSold, sfWonSold)
-    const impliedSold =
-      sellable === 0 && booked > 0 && booked < totalPurchased ? booked : impliedSoldFromInventory
-    totalPackageSold = Math.max(totalPackageSold, impliedSold, booked)
+    if (booked > 0) {
+      totalPackageSold = booked
+    } else {
+      let sellable = 0
+      const { data: inv } = await admin
+        .from("package_inventory")
+        .select("qty_available, qty_held")
+        .eq("package_id", packageId)
+        .maybeSingle()
+      if (inv) {
+        const available = Math.max(0, Math.floor(Number(inv.qty_available) || 0))
+        const held = Math.max(0, Math.floor(Number(inv.qty_held) || 0))
+        sellable = Math.max(0, available - held)
+      }
+      const totalPurchased = layers.reduce((sum, l) => sum + l.quantity, 0)
+      const impliedSoldFromInventory = Math.max(0, totalPurchased - sellable)
+      // Only imply from inventory when we have no booking signal at all.
+      totalPackageSold = Math.max(totalPackageSold, impliedSoldFromInventory)
+    }
   }
 
   return {
