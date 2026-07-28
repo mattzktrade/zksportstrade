@@ -33,6 +33,8 @@ export function CatalogNewPackage({
   const [templateId, setTemplateId] = useState("")
   const [raceId, setRaceId] = useState(races[0]?.id ?? "")
   const [sellOnWix, setSellOnWix] = useState(false)
+  const [wixMultiplier, setWixMultiplier] = useState("")
+  const [wixManualPrice, setWixManualPrice] = useState("")
   const [name, setName] = useState("")
   const [circuit, setCircuit] = useState("")
   const [location, setLocation] = useState("")
@@ -72,6 +74,8 @@ export function CatalogNewPackage({
     setTemplateId("")
     setRaceId(firstRace?.id ?? "")
     setSellOnWix(false)
+    setWixMultiplier("")
+    setWixManualPrice("")
     setName("")
     setDescription("")
     setImage("")
@@ -115,7 +119,11 @@ export function CatalogNewPackage({
   }
 
   useEffect(() => {
-    if (isEnquiry) setSellOnWix(false)
+    if (isEnquiry) {
+      setSellOnWix(false)
+      setWixMultiplier("")
+      setWixManualPrice("")
+    }
   }, [isEnquiry])
 
   useEffect(() => {
@@ -133,6 +141,19 @@ export function CatalogNewPackage({
     const n = Number(t)
     return Number.isFinite(n) ? n : null
   }
+
+  const tradePriceNumber = parsePrice()
+  const wixPreviewPrice = (() => {
+    if (!sellOnWix) return null
+    const manual = wixManualPrice.trim() === "" ? null : Number(wixManualPrice)
+    if (manual != null && Number.isFinite(manual) && manual >= 0) {
+      return Math.round(manual * 100) / 100
+    }
+    if (tradePriceNumber == null) return null
+    const multRaw = wixMultiplier.trim() === "" ? 1.1 : Number(wixMultiplier)
+    const mult = Number.isFinite(multRaw) && multRaw > 0 ? multRaw : 1.1
+    return Math.round(tradePriceNumber * mult * 100) / 100
+  })()
 
   function submit() {
     start(async () => {
@@ -173,6 +194,29 @@ export function CatalogNewPackage({
         initialCost = c
       }
 
+      let mult: number | null = null
+      if (sellOnWix && wixMultiplier.trim() !== "") {
+        const n = Number(wixMultiplier)
+        if (!Number.isFinite(n) || n <= 0) {
+          toast.error("Wix price multiplier must be a positive number (e.g. 1.1).")
+          return
+        }
+        mult = n
+      }
+      let manualWix: number | null = null
+      if (sellOnWix && wixManualPrice.trim() !== "") {
+        const n = Number(wixManualPrice)
+        if (!Number.isFinite(n) || n < 0) {
+          toast.error("Manual Wix price must be zero or a positive number.")
+          return
+        }
+        manualWix = n
+      }
+      if (sellOnWix && !isEnquiry && price == null && manualWix == null) {
+        toast.error("Sell on Wix needs a trade price or a manual Wix price.")
+        return
+      }
+
       const res = await createPackage({
         race_id: raceId,
         name: name.trim(),
@@ -197,6 +241,8 @@ export function CatalogNewPackage({
         sort_order: 100,
         brochure_url: brochureUrl.trim() || null,
         sell_on_wix: sellOnWix,
+        retail_price_multiplier: mult,
+        wix_retail_price: manualWix,
         initial_qty_available: qty,
         initial_unit_cost: initialCost,
         initial_cost_note: null,
@@ -206,7 +252,12 @@ export function CatalogNewPackage({
         toast.error(res.message)
         return
       }
-      toast.success(res.message ?? "Package created.")
+      const msg = res.message ?? "Package created."
+      if (/Wix product was not created|Wix API is not configured/i.test(msg)) {
+        toast.message(msg, { duration: 12000 })
+      } else {
+        toast.success(msg, { duration: 8000 })
+      }
       resetForm()
       onCreated?.()
       onOpenChange(false)
@@ -449,6 +500,52 @@ export function CatalogNewPackage({
           />
           Sell on Wix website
         </label>
+        {sellOnWix && !isEnquiry ? (
+          <div className="sm:col-span-2 rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Wix website pricing
+            </p>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              Creating this package will also create the product on Wix Stores using the price below.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block text-xs text-muted-foreground">
+                Wix price multiplier
+                <input
+                  value={wixMultiplier}
+                  onChange={(e) => setWixMultiplier(e.target.value)}
+                  placeholder="Default 1.10 (+10%)"
+                  className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                />
+              </label>
+              <label className="block text-xs text-muted-foreground">
+                Manual Wix price (USD)
+                <input
+                  value={wixManualPrice}
+                  onChange={(e) => setWixManualPrice(e.target.value)}
+                  placeholder="Leave blank to use multiplier"
+                  className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                />
+              </label>
+            </div>
+            {wixPreviewPrice != null ? (
+              <p className="text-[11px] text-muted-foreground">
+                Wix listing price ≈{" "}
+                <span className="font-medium text-foreground">
+                  {wixPreviewPrice.toLocaleString(undefined, {
+                    style: "currency",
+                    currency: "USD",
+                  })}
+                </span>
+                {wixManualPrice.trim() ? " (manual)" : " (trade × multiplier)"}
+              </p>
+            ) : (
+              <p className="text-[11px] text-amber-800">
+                Enter a trade price or a manual Wix price to create the Wix product.
+              </p>
+            )}
+          </div>
+        ) : null}
         <label className="block text-xs text-muted-foreground sm:col-span-2">
           Primary image URL
           <input

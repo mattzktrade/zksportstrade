@@ -1035,6 +1035,10 @@ export async function createPackage(input: {
    */
   salesforce_product_id?: string | null
   sell_on_wix?: boolean
+  /** Per-package Wix markup over trade (e.g. 1.1). Null = env default. */
+  retail_price_multiplier?: number | null
+  /** Absolute Wix unit price; overrides multiplier when set. */
+  wix_retail_price?: number | null
   initial_qty_available: number
   initial_unit_cost: number | null
   initial_cost_note: string | null
@@ -1095,6 +1099,28 @@ export async function createPackage(input: {
   const gallery = normalizeCatalogImageUrlList(sanitizeHttpsUrlList(input.gallery_images))
   const cc = input.country_code.trim().toUpperCase().slice(0, 8)
 
+  let retailMultiplier: number | null = input.retail_price_multiplier ?? null
+  if (retailMultiplier != null && (!Number.isFinite(retailMultiplier) || retailMultiplier <= 0)) {
+    return { ok: false, message: "Wix price multiplier must be a positive number (e.g. 1.1)." }
+  }
+  let wixRetailPrice: number | null = input.wix_retail_price ?? null
+  if (wixRetailPrice != null && (!Number.isFinite(wixRetailPrice) || wixRetailPrice < 0)) {
+    return { ok: false, message: "Manual Wix price must be zero or a positive number." }
+  }
+
+  const sellOnWix = input.sell_on_wix === true && !input.is_enquiry
+  if (sellOnWix) {
+    const { retailPriceFromTrade } = await import("@/lib/integrations/retail-price")
+    const retail = retailPriceFromTrade(input.trade_price, retailMultiplier, wixRetailPrice)
+    if (retail == null) {
+      return {
+        ok: false,
+        message:
+          "Sell on Wix requires a trade price and/or a manual Wix price so the website product can be created.",
+      }
+    }
+  }
+
   const manualInventoryGroupId = input.inventory_group_id?.trim() || null
   const inventoryGroupId = duration
     ? manualInventoryGroupId ?? deriveInventoryGroupId(id, duration || null, raceId)
@@ -1144,8 +1170,10 @@ export async function createPackage(input: {
     product_code: productCode,
     salesforce_product_id: salesforceProductId,
     sell_on_trade_portal: true,
-    sell_on_wix: input.sell_on_wix ?? false,
+    sell_on_wix: sellOnWix,
     sell_on_partners: false,
+    retail_price_multiplier: retailMultiplier,
+    wix_retail_price: wixRetailPrice,
     integration_sync_status: "pending",
   })
 
@@ -1263,24 +1291,21 @@ export async function createPackage(input: {
   }
 
   let wixNote: string | undefined
-  const sellOnWix = input.sell_on_wix === true
-  const canAutoCreateWix =
-    sellOnWix &&
-    !input.is_enquiry &&
-    input.trade_price != null &&
-    input.trade_price > 0
+  const canAutoCreateWix = sellOnWix
 
   if (canAutoCreateWix) {
     if (!isWixConfigured()) {
-      console.warn(
-        "[createPackage] Wix API is not configured — package saved without a Wix Stores product.",
-      )
+      wixNote =
+        "Wix website was enabled, but Wix API is not configured (WIX_API_KEY / WIX_SITE_ID) — create the Wix product from Integrations after env is set."
+      console.warn(`[createPackage] ${wixNote}`)
     } else {
       try {
-        await createWixProductForPackageApi(id)
+        const created = await createWixProductForPackageApi(id)
+        wixNote = `Wix product created (${created.productName}).`
         revalidatePath("/admin/integrations/wix")
       } catch (e) {
         const detail = e instanceof Error ? e.message : String(e)
+        wixNote = `Package saved, but Wix product was not created: ${detail}`
         console.warn("[createPackage] Wix product was not created:", detail)
       }
     }
@@ -1326,7 +1351,10 @@ export async function createPackage(input: {
   revalidatePath("/admin/catalog")
   revalidatePath(`/admin/catalog/${encodeURIComponent(id)}`)
 
-  return { ok: true, message: "Package created." }
+  return {
+    ok: true,
+    message: wixNote ? `Package created. ${wixNote}` : "Package created.",
+  }
 }
 
 export async function updateInventoryRow(input: {

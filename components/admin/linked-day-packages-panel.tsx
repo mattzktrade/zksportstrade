@@ -103,6 +103,8 @@ function QuickAddDialog({
   const [tradePrice, setTradePrice] = useState("")
   const [isEnquiry, setIsEnquiry] = useState(false)
   const [sellOnWix, setSellOnWix] = useState(false)
+  const [wixMultiplier, setWixMultiplier] = useState("")
+  const [wixManualPrice, setWixManualPrice] = useState("")
   const [salesforceProductId, setSalesforceProductId] = useState("")
 
   function submit() {
@@ -134,6 +136,29 @@ function QuickAddDialog({
       return
     }
 
+    let mult: number | null = null
+    if (sellOnWix && wixMultiplier.trim() !== "") {
+      const n = Number(wixMultiplier)
+      if (!Number.isFinite(n) || n <= 0) {
+        toast.error("Wix price multiplier must be a positive number (e.g. 1.1).")
+        return
+      }
+      mult = n
+    }
+    let manualWix: number | null = null
+    if (sellOnWix && wixManualPrice.trim() !== "") {
+      const n = Number(wixManualPrice)
+      if (!Number.isFinite(n) || n < 0) {
+        toast.error("Manual Wix price must be zero or a positive number.")
+        return
+      }
+      manualWix = n
+    }
+    if (sellOnWix && !isEnquiry && price == null && manualWix == null) {
+      toast.error("Sell on Wix needs a trade price or a manual Wix price.")
+      return
+    }
+
     start(async () => {
       const res = await createPackage({
         race_id: preset.race_id,
@@ -159,6 +184,8 @@ function QuickAddDialog({
         sort_order: 100,
         brochure_url: preset.brochure_url,
         sell_on_wix: sellOnWix,
+        retail_price_multiplier: mult,
+        wix_retail_price: manualWix,
         salesforce_product_id: sfId,
         // Linked inventory: stock lives on the 3-day parent and is seeded from siblings in
         // createPackage — do NOT set an initial qty here.
@@ -171,12 +198,16 @@ function QuickAddDialog({
         toast.error(res.message)
         return
       }
-      toast.success(
+      const msg =
         res.message ??
-          (sfId
-            ? `${DAY_LABEL[duration]} package created and linked to Salesforce.`
-            : `${DAY_LABEL[duration]} package created — Salesforce product will be auto-created on sync.`),
-      )
+        (sfId
+          ? `${DAY_LABEL[duration]} package created and linked to Salesforce.`
+          : `${DAY_LABEL[duration]} package created — Salesforce product will be auto-created on sync.`)
+      if (/Wix product was not created|Wix API is not configured/i.test(msg)) {
+        toast.message(msg, { duration: 12000 })
+      } else {
+        toast.success(msg)
+      }
       onClose()
       router.refresh()
     })
@@ -235,7 +266,11 @@ function QuickAddDialog({
                   checked={isEnquiry}
                   onChange={(e) => {
                     setIsEnquiry(e.target.checked)
-                    if (e.target.checked) setSellOnWix(false)
+                    if (e.target.checked) {
+                      setSellOnWix(false)
+                      setWixMultiplier("")
+                      setWixManualPrice("")
+                    }
                   }}
                 />
                 Enquiry package
@@ -251,6 +286,34 @@ function QuickAddDialog({
               </label>
             </div>
           </div>
+
+          {sellOnWix && !isEnquiry ? (
+            <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-3">
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Creates the Wix Stores product on save. Set a multiplier and/or a manual Wix price.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-xs text-muted-foreground">
+                  Wix multiplier
+                  <input
+                    value={wixMultiplier}
+                    onChange={(e) => setWixMultiplier(e.target.value)}
+                    placeholder="Default 1.10"
+                    className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                  />
+                </label>
+                <label className="block text-xs text-muted-foreground">
+                  Manual Wix price
+                  <input
+                    value={wixManualPrice}
+                    onChange={(e) => setWixManualPrice(e.target.value)}
+                    placeholder="Optional"
+                    className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                  />
+                </label>
+              </div>
+            </div>
+          ) : null}
 
           <label className="block text-xs text-muted-foreground">
             Salesforce Product2 Id (optional)
