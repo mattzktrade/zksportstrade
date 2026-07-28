@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import type { createClient } from "@/lib/supabase/server"
 import { sendOrderPlacedEmail } from "@/lib/email/send-order-placed"
 import { enqueueOrderIntegrationsServer } from "@/lib/integrations/enqueue-server"
+import { isSalesforceConfigured } from "@/lib/integrations/salesforce/config"
 import { mapPlaceOrderError } from "@/lib/orders/place-order-errors"
 
 const UUID_RE =
@@ -20,7 +21,11 @@ type AdminSupabase = Awaited<ReturnType<typeof createClient>>
 
 export async function executeBookingApproval(
   requestId: string,
-  options?: { adminSupabase?: AdminSupabase },
+  options?: {
+    adminSupabase?: AdminSupabase
+    /** When set, fulfil the whole party from this cost layer after the order is created. */
+    preferredCostLayerId?: string | null
+  },
 ): Promise<ExecuteBookingApprovalResult> {
   const trimmedId = requestId.trim()
   if (!UUID_RE.test(trimmedId)) {
@@ -30,6 +35,11 @@ export async function executeBookingApproval(
   const admin = createAdminClient()
   if (!admin) {
     return { ok: false, message: "Server configuration error." }
+  }
+
+  const preferredCostLayerId = options?.preferredCostLayerId?.trim() || null
+  if (preferredCostLayerId && !UUID_RE.test(preferredCostLayerId)) {
+    return { ok: false, message: "Invalid supplier stock selection." }
   }
 
   const { data: req, error: reqErr } = await admin
@@ -89,6 +99,89 @@ export async function executeBookingApproval(
   }
 
   const approvedOrderId = typeof row?.order_id === "string" ? row.order_id : ""
+  const packageId = String(req.package_id ?? "")
+
+  if (approvedOrderId && preferredCostLayerId) {
+    const guests = Math.max(0, Math.floor(Number(req.guests) || 0))
+    const { error: allocErr } = await (options?.adminSupabase ?? admin).rpc(
+      "admin_set_order_cost_allocations",
+      {
+        p_order_id: approvedOrderId,
+        p_allocations: [{ cost_layer_id: preferredCostLayerId, quantity: guests }],
+      },
+    )
+    if (allocErr) {
+      const msg = allocErr.message.toLowerCase()
+      if (msg.includes("insufficient_layer_remaining")) {
+        return {
+          ok: false,
+          message:
+            `Booking ${orderReference} was created, but the chosen supplier does not have enough remaining stock. ` +
+            `Open the order and set supplier allocation manually.`,
+        }
+      }
+      return {
+        ok: false,
+        message:
+          `Booking ${orderReference} was created, but supplier allocation failed: ${allocErr.message}`,
+      }
+    }
+
+    // Push Stock Sources so Salesforce Remaining matches the chosen supplier layer.
+    if (packageId && isSalesforceConfigured()) {
+      try {
+        const { data: pkg } = await admin
+          .from("packages")
+          .select("id, salesforce_product_id, inventory_group_id")
+          .eq("id", packageId)
+          .maybeSingle()
+        let ledgerPackageId = packageId
+        try {
+          const { data: resolved } = await admin.rpc("resolve_cost_ledger_package_id", {
+            p_package_id: packageId,
+          })
+          if (typeof resolved === "string" && resolved.trim()) ledgerPackageId = resolved.trim()
+        } catch {
+          /* ignore */
+        }
+        const { data: ledgerPkg } = await admin
+          .from("packages")
+          .select("id, salesforce_product_id")
+          .eq("id", ledgerPackageId)
+          .maybeSingle()
+        const product2Id =
+          (ledgerPkg as { salesforce_product_id?: string | null } | null)?.salesforce_product_id?.trim() ||
+          (pkg as { salesforce_product_id?: string | null } | null)?.salesforce_product_id?.trim() ||
+          ""
+        if (product2Id) {
+          const { syncStockSourcesForProduct } = await import(
+            "@/lib/integrations/salesforce/stock-sources"
+          )
+          await syncStockSourcesForProduct({
+            admin,
+            packageId: ledgerPackageId,
+            product2Id,
+          })
+        }
+        const groupId =
+          typeof (pkg as { inventory_group_id?: string | null } | null)?.inventory_group_id === "string"
+            ? (pkg as { inventory_group_id: string }).inventory_group_id.trim()
+            : ""
+        if (groupId) {
+          const { healLinkedGroupInBackground } = await import(
+            "@/lib/inventory/linked-group-inventory"
+          )
+          await healLinkedGroupInBackground(groupId).catch(() => false)
+        }
+      } catch (e) {
+        console.warn(
+          "[approve booking] Stock Source sync after supplier choice failed:",
+          e instanceof Error ? e.message : e,
+        )
+      }
+    }
+  }
+
   if (approvedOrderId) {
     const enq = await enqueueOrderIntegrationsServer(approvedOrderId, "trade_portal")
     if (!enq.ok) console.warn("[approve booking] Salesforce sync not queued:", enq.message)

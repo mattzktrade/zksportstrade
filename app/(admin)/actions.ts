@@ -2519,11 +2519,15 @@ export async function deletePackage(packageId: string): Promise<ActionResult> {
 
 export async function approveBookingRequest(
   requestId: string,
+  preferredCostLayerId?: string | null,
 ): Promise<ActionResult & { orderReference?: string }> {
   const gate = await requireAdminAction()
   if (!gate.ok) return gate
 
-  const result = await executeBookingApproval(requestId, { adminSupabase: gate.supabase })
+  const result = await executeBookingApproval(requestId, {
+    adminSupabase: gate.supabase,
+    preferredCostLayerId,
+  })
   if (!result.ok) return { ok: false, message: result.message }
 
   revalidatePath("/admin/booking-requests")

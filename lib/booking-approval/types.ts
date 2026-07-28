@@ -1,3 +1,5 @@
+import type { BookingFulfillmentSupplierOption } from "@/lib/booking-approval/fulfillment-suppliers"
+
 export type BookingApprovalRequestStatus = "pending" | "approved" | "rejected"
 
 export type BookingApprovalRequestRow = {
@@ -38,4 +40,6 @@ export type BookingApprovalRequestRow = {
 export type AdminBookingApprovalRow = BookingApprovalRequestRow & {
   packages: { name: string; circuit: string; event_date: string } | null
   agent: { full_name: string | null; company_name: string | null; email: string } | null
+  /** Cost-layer options for choosing which supplier fulfils this booking. */
+  fulfillmentSuppliers: BookingFulfillmentSupplierOption[]
 }

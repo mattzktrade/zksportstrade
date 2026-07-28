@@ -9,7 +9,6 @@ import type { Package, Race } from "@/lib/types/catalog"
 import {
   clampToAllowedGuestCount,
   lowStockGuestHint,
-  suiteSplitGuestHint,
   stepAllowedGuestCount,
 } from "@/lib/catalog/booking-guests"
 import { nameIncludesDurationLabel, packageDurationLabel } from "@/lib/catalog/package-duration"
@@ -178,9 +177,6 @@ function PackageRow({
   const totalPrice = pkg.price ? pkg.price * guestCount : 0
   const canBook = !isAvailabilityString && pkg.price !== null && sellable > 0
   const stockHint = !isAvailabilityString ? lowStockGuestHint(sellable) : null
-  const suiteHint = !isAvailabilityString
-    ? suiteSplitGuestHint(guestCount, sellable, pkg.largestSameSuiteRemaining)
-    : null
   const includeItems = pkg.includes.map((item) => item.trim()).filter(Boolean)
   const description = pkg.description?.trim() ? pkg.description.trim() : DEFAULT_PACKAGE_DESCRIPTION
   const shouldCollapseDetails =
@@ -479,11 +475,6 @@ function PackageRow({
                           {stockHint ? (
                             <p className="text-[10px] sm:text-xs text-muted-foreground text-center leading-snug px-1">
                               Limited stock: only allowed quantities can be selected.
-                            </p>
-                          ) : null}
-                          {suiteHint ? (
-                            <p className="text-[10px] sm:text-xs text-amber-800 dark:text-amber-200 text-center leading-snug px-2 py-1.5 rounded-md border border-amber-300/60 bg-amber-50/80 dark:bg-amber-950/30">
-                              {suiteHint}
                             </p>
                           ) : null}
                         </div>

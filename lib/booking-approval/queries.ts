@@ -1,6 +1,8 @@
 import { unstable_noStore as noStore } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import type { AdminBookingApprovalRow, BookingApprovalRequestRow } from "@/lib/booking-approval/types"
+import { getBookingFulfillmentSupplierOptions } from "@/lib/booking-approval/fulfillment-suppliers"
 
 function one<T>(value: T | T[] | null | undefined): T | null {
   if (value == null) return null
@@ -70,16 +72,36 @@ export async function getPendingBookingApprovalRequestsForAdmin(): Promise<Admin
 
   if (error || !data) return []
 
-  return (data as Array<
+  const admin = createAdminClient() ?? supabase
+  const rows = data as Array<
     BookingApprovalRequestRow & {
       packages?: AdminBookingApprovalRow["packages"] | AdminBookingApprovalRow["packages"][]
       agent?: AdminBookingApprovalRow["agent"] | AdminBookingApprovalRow["agent"][]
     }
-  >).map((row) => ({
-    ...row,
-    packages: one(row.packages),
-    agent: one(row.agent),
-  }))
+  >
+
+  return Promise.all(
+    rows.map(async (row) => {
+      const fulfillmentSuppliers = await getBookingFulfillmentSupplierOptions(
+        admin,
+        row.package_id,
+        row.guests,
+      ).catch(() => [
+        {
+          costLayerId: "",
+          label: "Automatic (prefer single supplier / suite)",
+          remaining: 0,
+          canCover: true,
+        },
+      ])
+      return {
+        ...row,
+        packages: one(row.packages),
+        agent: one(row.agent),
+        fulfillmentSuppliers,
+      }
+    }),
+  )
 }
 
 export async function countPendingBookingApprovalRequests(): Promise<number> {
