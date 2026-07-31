@@ -74,6 +74,9 @@ const EVENT_KEYWORDS: Array<{ keyword: string; circuits: string[] }> = [
   { keyword: "monaco", circuits: ["Monaco Grand Prix", "Monaco"] },
   { keyword: "qatar", circuits: ["Qatar Grand Prix"] },
   { keyword: "singapore", circuits: ["Singapore Grand Prix"] },
+  { keyword: "malaysia", circuits: ["Bahrain Grand Prix in Malaysia", "Malaysia"] },
+  { keyword: "sepang", circuits: ["Bahrain Grand Prix in Malaysia", "Malaysia"] },
+  { keyword: "bahrain malaysia", circuits: ["Bahrain Grand Prix in Malaysia"] },
   { keyword: "usa", circuits: ["United States Grand Prix"] },
 ]
 

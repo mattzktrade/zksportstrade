@@ -31,6 +31,12 @@ const EVENT_NAME_BASE_ALIASES: Record<string, string[]> = {
     "São Paulo Grand Prix",
     "Sao Paulo Grand Prix",
   ],
+  "Bahrain Grand Prix in Malaysia": [
+    "Bahrain Grand Prix in Malaysia",
+    "Malaysian Grand Prix",
+    "Malaysia Grand Prix",
+    "Sepang Grand Prix",
+  ],
 }
 
 export type EventLookup = {
