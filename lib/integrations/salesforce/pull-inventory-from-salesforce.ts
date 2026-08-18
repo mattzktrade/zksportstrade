@@ -75,8 +75,9 @@ export type SalesforceInventoryPullResult = {
 
 /**
  * After offline opportunity activity (Closed Won ledger and/or any recent opp on a
- * Product2), heal affected linked groups / standalone packages so sellable reflects
- * Closed Won + open pipeline − Closed Lost releases.
+ * Product2), heal affected linked groups / standalone packages so portal sellable
+ * reflects Closed Won + open pipeline − Closed Lost, while Salesforce Quantity Sold
+ * stays closed-won only.
  */
 async function applyOpportunityInventoryFollowUp(
   admin: NonNullable<ReturnType<typeof createAdminClient>>,

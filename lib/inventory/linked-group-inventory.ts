@@ -111,7 +111,8 @@ function resolveLinkedDaySellable(input: {
   // would otherwise produce sellable = 22 − 8 = 14 for Hungary Fri/Sat).
   //
   // Committed = Closed Won + open pipeline on the 3-day and this day. Open pipeline
-  // holds stock until Closed Lost; result is floored at 0 for DB / storefronts.
+  // holds portal/Wix remaining until Closed Lost; result is floored at 0 for DB /
+  // storefronts. Salesforce Available does not use this — Quantity Sold is closed-won only.
   if (input.poolStock != null && input.poolStock > 0) {
     return Math.max(0, input.poolStock - input.threeDayCommitted - input.dayCommitted)
   }
@@ -324,9 +325,9 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
     ),
   ]
   const snapshots = await readSfInventorySnapshotsBulk(productIds, config)
-  // Committed = Closed Won + open (non-lost) pipeline. Pipeline holds Remaining until
-  // Closed Lost. Portal sellable and Salesforce Available both use this math so live
-  // stock matches across portal / Wix / Salesforce. Quantity_Sold is not written by us.
+  // Committed = Closed Won + open (non-lost) pipeline. Pipeline holds portal/Wix Remaining
+  // until Closed Lost. Salesforce Available is Stock − closed-won only so Quantity Sold
+  // (Stock − Available) does not count unwon deals.
   const [wonByProduct, committedByProduct] = await Promise.all([
     readWonQuantityByProductBulk(productIds, config.opportunityStageWon),
     readCommittedQuantityByProductBulk(productIds, config.opportunityStageLost),
@@ -372,8 +373,10 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
 
   const updated: LinkedGroupSyncRow[] = []
   const targets: InventoryTarget[] = []
-  /** Portal + Salesforce Remaining: stock − (3-day committed + day committed). */
+  /** Portal remaining: stock − (3-day committed + day committed), including open pipeline. */
   const daySellables = new Map<string, number>()
+  /** Salesforce Available: stock − closed-won sold only (Quantity Sold formula). */
+  const sfPushSellables = new Map<string, number>()
 
   for (const member of dayMembers) {
     const product2Id = member.salesforce_product_id?.trim() ?? ""
@@ -410,6 +413,7 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
         )
       }
       daySellables.set(member.id, sellable)
+      sfPushSellables.set(member.id, portalImplied)
       targets.push({
         package_id: member.id,
         qty_available: sellable + held,
@@ -436,6 +440,7 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
         sellable: currentSellable,
       })
       daySellables.set(member.id, currentSellable)
+      sfPushSellables.set(member.id, currentSellable)
       continue
     }
 
@@ -446,6 +451,12 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
       snapshot,
     })
     if (sellable == null) continue
+    const sfAvail = resolveLinkedDaySellable({
+      poolStock,
+      threeDayCommitted: threeDaySold,
+      dayCommitted: daySold,
+      snapshot,
+    })
 
     if (process.env.ZK_LINKED_TRACE === "1") {
       console.log(
@@ -454,6 +465,7 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
     }
 
     daySellables.set(member.id, sellable)
+    if (sfAvail != null) sfPushSellables.set(member.id, sfAvail)
     targets.push({
       package_id: member.id,
       qty_available: sellable + held,
@@ -480,20 +492,30 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
     const currentSellable = Math.max(0, currentAvail - held)
 
     let sellable: number | null = null
+    let sfAvail: number | null = null
     if (isUninitializedSfInventorySnapshot(parentSnapshot) && currentSellable > 0) {
       sellable = currentSellable
+      sfAvail = currentSellable
     } else if (poolStock != null && poolStock > 0) {
-      // Prefer commitment math over Product2 Available — Available may lag or be formula-corrupt.
+      // Portal remaining holds open pipeline. Salesforce Available is closed-won only
+      // so Quantity Sold (Stock − Available) matches Won Opportunities.
       sellable = Math.max(0, poolStock - threeDayCommitted)
+      sfAvail = Math.max(0, poolStock - threeDaySold)
     } else {
       sellable = salesforceTargetSellable(parentSnapshot)
       if (sellable == null && parentSnapshot.stock != null && parentSnapshot.stock > 0) {
         sellable = Math.max(0, Math.floor(parentSnapshot.stock) - threeDayCommitted)
       }
+      if (parentSnapshot.stock != null && parentSnapshot.stock > 0) {
+        sfAvail = Math.max(0, Math.floor(parentSnapshot.stock) - threeDaySold)
+      } else {
+        sfAvail = sellable
+      }
     }
 
     if (sellable != null) {
       daySellables.set(threeDayMember.id, sellable)
+      if (sfAvail != null) sfPushSellables.set(threeDayMember.id, sfAvail)
       updated.push({
         id: threeDayMember.id,
         name: threeDayMember.name,
@@ -588,6 +610,13 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
         sellable: threeDaySellable,
       })
     }
+
+    const computedSfDayVals = [...sfPushSellables.entries()]
+      .filter(([id]) => dayMembers.some((m) => m.id === id))
+      .map(([, v]) => v)
+    if (computedSfDayVals.length > 0) {
+      sfPushSellables.set(threeDay.id, Math.min(...computedSfDayVals))
+    }
   }
 
   const twoDay = members.find((m) => m.duration === "2_day")
@@ -609,6 +638,17 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
         sellable: twoDaySellable,
       })
     }
+    const satId = members.find((m) => m.duration === "saturday_only")?.id
+    const sunId = members.find((m) => m.duration === "sunday_only")?.id
+    const satSf = satId != null ? sfPushSellables.get(satId) : undefined
+    const sunSf = sunId != null ? sfPushSellables.get(sunId) : undefined
+    if (satSf != null && sunSf != null) {
+      sfPushSellables.set(twoDay.id, Math.min(satSf, sunSf))
+    } else if (satSf != null) {
+      sfPushSellables.set(twoDay.id, satSf)
+    } else if (sunSf != null) {
+      sfPushSellables.set(twoDay.id, sunSf)
+    }
   }
 
   await admin
@@ -619,18 +659,16 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
       members.map((m) => m.id),
     )
 
-  // Push pipeline-aware sellables from this heal — do NOT run portal-only
-  // reconcileLinkedGroupFromPortalSales here. That helper ignores open SF pipeline and was
-  // overwriting 433 → 438 (won-only) right before the Available PATCH, so Salesforce never
-  // reserved open opportunities.
-  const pushSellables = new Map<string, number>(daySellables)
-  if (threeDay?.id && threeDaySellable != null) {
+  // Portal remaining still holds open pipeline. Salesforce Available is closed-won only
+  // so Quantity Sold (Stock − Available) matches Won Opportunities, not Pipeline.
+  const pushSellables = new Map<string, number>(sfPushSellables)
+  if (threeDay?.id && !pushSellables.has(threeDay.id) && threeDaySellable != null) {
     pushSellables.set(threeDay.id, threeDaySellable)
   }
 
-  if (pushSellables.size > 0) {
-    // Stock Sources first (may fire PackageInventoryManager), then Available last so the
-    // pipeline-reduced Remaining sticks. Only sync sources when this heal changed inventory
+  if (daySellables.size > 0 || pushSellables.size > 0) {
+    // Stock Sources first (may fire PackageInventoryManager), then Available last so
+    // closed-won Quantity Sold sticks. Only sync sources when this heal changed inventory
     // — not a no-op cron tick — to limit TotalRequests.
     if (targets.length > 0) {
       try {
@@ -703,7 +741,7 @@ async function syncLinkedGroupInventoryFromSalesforceInner(
           ])
         }
         if (threeDay?.id) {
-          await mirrorShellPortalInventory(admin, threeDay.id, pushSellables)
+          await mirrorShellPortalInventory(admin, threeDay.id, daySellables)
         }
       } catch (e) {
         console.warn(
@@ -778,18 +816,25 @@ async function linkedGroupNeedsSfSync(
       readWonQuantityByProductBulk([product2Id], config.opportunityStageWon),
       readCommittedQuantityByProductBulk([product2Id], config.opportunityStageLost),
     ])
-    const committed =
-      committedByProduct.get(product2Id) ?? wonByProduct.get(product2Id) ?? 0
+    const won = wonByProduct.get(product2Id) ?? 0
+    const committed = committedByProduct.get(product2Id) ?? won
     const stock =
       snapshot.stock != null && snapshot.stock > 0
         ? Math.max(0, Math.floor(snapshot.stock))
         : null
-    const sfSellable =
-      stock != null
-        ? Math.max(0, stock - committed)
-        : salesforceTargetSellable(snapshot)
-    if (sfSellable == null) return false
-    return currentSellable !== sfSellable
+    const expectedPortal =
+      stock != null ? Math.max(0, stock - committed) : salesforceTargetSellable(snapshot)
+    const expectedSfAvailable = stock != null ? Math.max(0, stock - won) : expectedPortal
+    if (expectedPortal != null && currentSellable !== expectedPortal) return true
+    if (
+      expectedSfAvailable != null &&
+      snapshot.available != null &&
+      Number.isFinite(snapshot.available) &&
+      Math.floor(snapshot.available) !== expectedSfAvailable
+    ) {
+      return true
+    }
+    return false
   }
 
   const productIds = dayMembers
@@ -857,17 +902,20 @@ async function linkedGroupNeedsSfSync(
       : 0
     const dayOpen = Math.max(0, daySfCommitted - dayWon)
     const dayPortalOrders = portalOrderSoldByPackage.get(member.id) ?? 0
-    const dayCommitted = commitmentSoldUnits(dayWon, dayPortalOrders) + dayOpen
+    const daySold = commitmentSoldUnits(dayWon, dayPortalOrders)
+    const dayCommitted = daySold + dayOpen
 
     // Portal cost-layer pool is enough to detect drift — don't require an SF snapshot.
     if (poolStock != null && poolStock > 0) {
-      const expected = Math.max(0, poolStock - threeDayCommitted - dayCommitted)
-      if (currentSellable !== expected) return true
-      // Portal already correct but Salesforce Available still shows stale pool−3day only (9).
+      const expectedPortal = Math.max(0, poolStock - threeDayCommitted - dayCommitted)
+      const expectedSfAvailable = Math.max(0, poolStock - threeDaySold - daySold)
+      if (currentSellable !== expectedPortal) return true
+      // Portal remaining may already hold pipeline while Salesforce Available still
+      // includes those units in Quantity Sold (Stock − Available). Heal to closed-won only.
       if (
         snapshot?.available != null &&
         Number.isFinite(snapshot.available) &&
-        Math.floor(snapshot.available) !== expected
+        Math.floor(snapshot.available) !== expectedSfAvailable
       ) {
         return true
       }
@@ -885,6 +933,20 @@ async function linkedGroupNeedsSfSync(
     })
     if (sfSellable == null) continue
     if (currentSellable !== sfSellable) return true
+    const expectedSfAvailable = resolveLinkedDaySellable({
+      poolStock,
+      threeDayCommitted: threeDaySold,
+      dayCommitted: daySold,
+      snapshot,
+    })
+    if (
+      expectedSfAvailable != null &&
+      snapshot.available != null &&
+      Number.isFinite(snapshot.available) &&
+      Math.floor(snapshot.available) !== expectedSfAvailable
+    ) {
+      return true
+    }
   }
 
   if (mappedDays === 0) return false
@@ -1075,8 +1137,9 @@ export async function healLinkedGroupInBackground(groupId: string): Promise<bool
   }
 
   try {
-    // Full SF heal includes closed-won + open pipeline. Do not portal-reconcile first —
-    // that strips pipeline holds (433 → 438) and can make healIfStale think nothing drifted.
+    // Heal writes portal remaining (closed-won + open pipeline) and Salesforce Available
+    // (closed-won only). Do not portal-reconcile first — that strips pipeline holds from
+    // storefront remaining and can make healIfStale think nothing drifted.
     return await healLinkedGroupIfStale(admin, gid, config)
   } catch (e) {
     console.warn(

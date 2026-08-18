@@ -15,7 +15,6 @@ import { getStoredInstanceUrl } from "@/lib/integrations/salesforce/settings-sto
 import { productCodeLookupVariants } from "@/lib/integrations/salesforce/product-code"
 import { findEventId, linkProductToEvent, resolveEventLookup, ensureEventId } from "@/lib/integrations/salesforce/events"
 import {
-  computeProductCommittedQuantityFromLines,
   computeProductQuantitySoldFromWonLines,
   syncProductValueSold,
 } from "@/lib/integrations/salesforce/sold-metrics"
@@ -366,7 +365,7 @@ export async function syncPackageToSalesforce(
   const productFamily = inferSalesforceProductFamily(row, config.productFamily)
   const fieldsUpdated: string[] = []
   const fieldsSkipped: string[] = [...preSyncNotes]
-  const [sfSnapshot, wonLineQty, committedLineQtyRaw] = await Promise.all([
+  const [sfSnapshot, wonLineQty] = await Promise.all([
     readSfInventorySnapshot(product2Id, config).catch((e) => {
       fieldsSkipped.push(`Salesforce inventory snapshot: ${e instanceof Error ? e.message : String(e)}`)
       return null
@@ -375,18 +374,11 @@ export async function syncPackageToSalesforce(
       fieldsSkipped.push(`Closed Won line quantity: ${e instanceof Error ? e.message : String(e)}`)
       return 0
     }),
-    computeProductCommittedQuantityFromLines(product2Id, config.opportunityStageLost).catch((e) => {
-      fieldsSkipped.push(`Non-lost line quantity: ${e instanceof Error ? e.message : String(e)}`)
-      return -1
-    }),
   ])
-  const committedLineQty = committedLineQtyRaw === -1 ? wonLineQty : committedLineQtyRaw
-  const openPipelineQty = Math.max(0, committedLineQty - wonLineQty)
   const sfStockTotal = sfSnapshot?.stock == null ? 0 : Math.max(0, Math.floor(sfSnapshot.stock))
-  // Held units = closed-won (portal + SF) + open pipeline. Open opps hold Remaining until
-  // Closed Lost; that Remaining is what we push as Salesforce Available so portal/Wix/SF match.
+  // Quantity Sold on Product2 is Stock − Available. Only closed-won (portal + SF won lines)
+  // reduce Available — open pipeline must not inflate Quantity Sold.
   const closedWonSold = Math.max(localRecordedSold, wonLineQty)
-  const unitsHeldForRemaining = closedWonSold + openPipelineQty
   stockTotal = resolveSalesforceStockTotal({
     totalReceived,
     sellable,
@@ -397,22 +389,17 @@ export async function syncPackageToSalesforce(
   if (!isShellSingleTicket && sfStockTotal > stockTotal && totalReceived < closedWonSold) {
     stockTotal = sfStockTotal
   }
-  let availableForSalesforce = Math.max(0, stockTotal - unitsHeldForRemaining)
+  let availableForSalesforce = Math.max(0, stockTotal - closedWonSold)
   // Linked groups: never PATCH Stock/Available here — group heal owns the pool math
   // (Sat-only sales must reduce 3-day + Sat&Sun, not Fri, etc.).
   const skipLinkedInventory = deferInventoryToLinkedHeal
   if (skipLinkedInventory) {
     fieldsSkipped.push(
-      "Stock/Available deferred to linked inventory group sync (pool + open-pipeline holds).",
+      "Stock/Available deferred to linked inventory group sync (Quantity Sold = closed-won only).",
     )
   } else if (availableForSalesforce !== sellable) {
     fieldsSkipped.push(
-      `Available Quantity set to ${availableForSalesforce} (Stock ${stockTotal} − ${unitsHeldForRemaining} held: ${closedWonSold} closed-won + ${openPipelineQty} open pipeline). Portal sellable was ${sellable}.`,
-    )
-  }
-  if (openPipelineQty > 0 && !skipLinkedInventory) {
-    fieldsSkipped.push(
-      `Salesforce has ${openPipelineQty} open pipeline unit(s) — reserved in Available so Remaining matches across channels.`,
+      `Available Quantity set to ${availableForSalesforce} (Stock ${stockTotal} − ${closedWonSold} closed-won). Open pipeline is not counted as sold. Portal sellable was ${sellable}.`,
     )
   }
 
@@ -755,8 +742,8 @@ export async function syncPackageToSalesforce(
     }
   }
 
-  // After metadata sync, refresh the whole linked pool so Remaining matches on every
-  // day / 3-day / 2-day / shell product (open pipeline holds included).
+  // After metadata sync, refresh the whole linked pool so portal Remaining and
+  // Salesforce Available (closed-won Quantity Sold) are both up to date.
   if (linkedGroupId && !options?.skipLinkedInventoryHeal) {
     try {
       const healed = await syncLinkedGroupInventoryFromSalesforce(admin, linkedGroupId, config)
