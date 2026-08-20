@@ -16,7 +16,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 
-type Result<T = Record<string, never>> =
+type Result<T extends object = object> =
   | ({ ok: true; message: string } & T)
   | { ok: false; message: string }
 
@@ -107,7 +107,7 @@ function mapHistory(
   names: Map<string, string>,
 ): OperationsEmailHistoryRow[] {
   return rows
-    .filter((row) => isOperationsEmailKind(row.kind))
+    .filter((row): row is typeof row & { kind: OperationsEmailKind } => isOperationsEmailKind(row.kind))
     .map((row) => ({
       id: String(row.id),
       dealId: row.deal_id ? String(row.deal_id) : null,

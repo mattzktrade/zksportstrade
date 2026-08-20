@@ -60,9 +60,9 @@ export function DealFinancePanel({
     )
   }
 
+  const eligibleAt = deal.cancellation_eligible_at
   const cancellationReady =
-    Boolean(deal.cancellation_eligible_at) &&
-    deal.cancellation_eligible_at.slice(0, 10) <= new Date().toISOString().slice(0, 10)
+    eligibleAt != null && eligibleAt.slice(0, 10) <= new Date().toISOString().slice(0, 10)
   const canCreateOrder = ["signed", "awaiting_invoice"].includes(deal.stage)
   const activeInvoice = deal.invoice_status && deal.invoice_status !== "cancelled"
 

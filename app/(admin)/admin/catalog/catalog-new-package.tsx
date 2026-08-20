@@ -27,8 +27,8 @@ const NAME_PLACEHOLDERS: Record<EventCategory, string> = {
 }
 
 function raceCategory(race: Pick<AdminRaceOption, "category"> | undefined): EventCategory {
-  const value = race?.category
-  return isEventCategory(String(value ?? "")) ? value : "formula_1"
+  const value = String(race?.category ?? "")
+  return isEventCategory(value) ? value : "formula_1"
 }
 
 function linesToList(s: string): string[] {
@@ -333,7 +333,7 @@ export function CatalogNewPackage({
         includes: linesToList(includesText),
         trade_price: price,
         is_enquiry: isEnquiry,
-        requiresBookingApproval: requiresBookingApproval,
+        requires_booking_approval: requiresBookingApproval,
         featured,
         sort_order: 100,
         brochure_url: brochureUrl.trim() || null,

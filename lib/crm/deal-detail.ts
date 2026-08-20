@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server"
 import { getCostLayersByPackage } from "@/lib/admin/cost-layers"
 import { getDealListRows, type DealListRow } from "@/lib/crm/deals"
 import type { OperationsGuest } from "@/lib/admin/workflow-views"
-import type { OperationsEmailHistoryRow } from "@/lib/operations/emails"
+import type { OperationsEmailHistoryRow, OperationsEmailKind } from "@/lib/operations/emails"
 import { isOperationsEmailKind } from "@/lib/operations/emails"
 import { getBookingFormsForDeal } from "@/lib/booking-forms/queries"
 import type { BookingFormAdminRow, BookingFormEventRow } from "@/lib/booking-forms/types"
@@ -413,7 +413,7 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
     sent_at: string
     sent_by: string | null
   }>)
-    .filter((row) => isOperationsEmailKind(row.kind))
+    .filter((row): row is typeof row & { kind: OperationsEmailKind } => isOperationsEmailKind(row.kind))
     .map((row) => ({
       id: String(row.id),
       dealId: row.deal_id ? String(row.deal_id) : null,
