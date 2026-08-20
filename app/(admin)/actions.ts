@@ -25,6 +25,7 @@ import {
   ensureSupplierForAccount,
   linkPurchaseOrderToAccount,
 } from "@/lib/inventory/suppliers"
+import { packageIdsOnSharedThreeDayLedger, resolveLinkedStockLedger } from "@/lib/inventory/linked-stock-ledger"
 import { getCrmCompanyOptions } from "@/lib/crm/deals"
 import {
   generatePurchaseOrderNumber,
@@ -104,6 +105,50 @@ async function validateUniqueProductCode(
   if (error) return error.message
   if (data) return "Another package already uses this Product Code."
   return null
+}
+
+async function remapToLinkedStockLedger(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  packageId: string,
+  fulfilmentBlockId: string | null = null,
+): Promise<{ packageId: string; fulfilmentBlockId: string | null }> {
+  const ledger = await resolveLinkedStockLedger(supabase, packageId)
+  if (!ledger.usedParentLedger) {
+    return { packageId, fulfilmentBlockId }
+  }
+  return { packageId: ledger.ledgerPackageId, fulfilmentBlockId: null }
+}
+
+async function removeUnusedSharedLedgerDuplicateLayers(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  layers: Array<{ id: string; package_id: string; quantity: number; quantity_remaining: number }>,
+): Promise<string[]> {
+  const unused = layers.filter((layer) => layer.quantity_remaining === layer.quantity)
+  if (unused.length === 0) return []
+  const splitIds = await packageIdsOnSharedThreeDayLedger(
+    supabase,
+    unused.map((layer) => layer.package_id),
+  )
+  const candidates = unused.filter((layer) => splitIds.has(layer.package_id))
+  if (candidates.length === 0) return []
+
+  const { data: consumed } = await supabase
+    .from("order_cost_consumptions")
+    .select("cost_layer_id")
+    .in(
+      "cost_layer_id",
+      candidates.map((layer) => layer.id),
+    )
+  const consumedIds = new Set(
+    (consumed ?? []).map((row) => String((row as { cost_layer_id?: string | null }).cost_layer_id ?? "")),
+  )
+  const ids = candidates.filter((layer) => !consumedIds.has(layer.id)).map((layer) => layer.id)
+  if (ids.length === 0) return []
+
+  const admin = createAdminClient() ?? supabase
+  const { error } = await admin.from("package_cost_layers").delete().in("id", ids)
+  if (error) throw new Error(error.message)
+  return ids
 }
 
 async function getInventorySyncPackageIds(
@@ -1886,6 +1931,8 @@ export async function addStockPurchaseLayer(formData: FormData): Promise<ActionR
   }
 
   const { supabase } = gate
+  const target = await remapToLinkedStockLedger(supabase, packageId, fulfilmentBlockId)
+
   const resolved = await resolveOrCreatePurchaseOrderId(supabase, {
     supplierAccountId,
     poNumber: poNumberRaw || null,
@@ -1895,7 +1942,7 @@ export async function addStockPurchaseLayer(formData: FormData): Promise<ActionR
   if (!resolved.ok) return resolved
 
   const { error } = await supabase.rpc("admin_add_cost_layer", {
-    p_package_id: packageId,
+    p_package_id: target.packageId,
     p_quantity: q,
     p_unit_cost: c,
     p_currency: null,
@@ -1903,7 +1950,7 @@ export async function addStockPurchaseLayer(formData: FormData): Promise<ActionR
     p_received_at: received,
     p_source: null,
     p_purchase_order_id: resolved.id,
-    p_fulfilment_block_id: fulfilmentBlockId,
+    p_fulfilment_block_id: target.fulfilmentBlockId,
   })
   if (error) {
     const m = error.message.toLowerCase()
@@ -1923,7 +1970,7 @@ export async function addStockPurchaseLayer(formData: FormData): Promise<ActionR
     if (!upload.ok) return upload
   }
 
-  revalidateAdminProfitPaths(packageId)
+  revalidateAdminProfitPaths(target.packageId)
   revalidatePath("/admin/inventory")
   revalidatePath("/admin/purchase-orders")
   revalidatePath("/admin/catalog")
@@ -1931,10 +1978,10 @@ export async function addStockPurchaseLayer(formData: FormData): Promise<ActionR
   revalidatePath("/")
 
   const { error: bfErr } = await supabase.rpc("admin_backfill_package_order_costs", {
-    p_package_id: packageId,
+    p_package_id: target.packageId,
   })
   if (bfErr) return { ok: false, message: bfErr.message }
-  await reconcileInventoryAfterCostLayerChange(supabase, packageId)
+  await reconcileInventoryAfterCostLayerChange(supabase, target.packageId)
 
   try {
     const { data: po } = await supabase
@@ -2000,8 +2047,9 @@ export async function addCostLayer(input: {
     return { ok: false, message: "Invalid fulfilment block id." }
   }
   const { supabase } = gate
+  const target = await remapToLinkedStockLedger(supabase, input.packageId, fulfilmentBlockId)
   const { error } = await supabase.rpc("admin_add_cost_layer", {
-    p_package_id: input.packageId,
+    p_package_id: target.packageId,
     p_quantity: q,
     p_unit_cost: c,
     p_currency: input.currency?.trim() || null,
@@ -2009,7 +2057,7 @@ export async function addCostLayer(input: {
     p_received_at: received,
     p_source: input.source?.trim() || null,
     p_purchase_order_id: purchaseOrderId,
-    p_fulfilment_block_id: fulfilmentBlockId,
+    p_fulfilment_block_id: target.fulfilmentBlockId,
   })
   if (error) {
     const m = error.message.toLowerCase()
@@ -2026,7 +2074,7 @@ export async function addCostLayer(input: {
   }
 
   try {
-    await recordPurchaseLedgerForLatestLayer(supabase, input.packageId, q, {
+    await recordPurchaseLedgerForLatestLayer(supabase, target.packageId, q, {
       purchaseOrderId,
       reason: "Stock purchase cost layer",
     })
@@ -2034,16 +2082,16 @@ export async function addCostLayer(input: {
     console.warn("[addCostLayer] ledger append skipped:", e instanceof Error ? e.message : e)
   }
 
-  revalidateAdminProfitPaths(input.packageId)
+  revalidateAdminProfitPaths(target.packageId)
   revalidatePath("/admin/inventory")
   revalidatePath("/admin/purchase-orders")
   revalidatePath("/packages")
   revalidatePath("/")
   const { error: bfErr } = await supabase.rpc("admin_backfill_package_order_costs", {
-    p_package_id: input.packageId,
+    p_package_id: target.packageId,
   })
   if (bfErr) return { ok: false, message: bfErr.message }
-  await enqueueLinkedInventoryChannelSync(supabase, input.packageId)
+  await enqueueLinkedInventoryChannelSync(supabase, target.packageId)
   return { ok: true }
 }
 
@@ -2262,9 +2310,34 @@ export async function deleteCostLayer(layerId: string): Promise<ActionResult> {
   const { supabase } = gate
   const { data: layer } = await supabase
     .from("package_cost_layers")
-    .select("package_id")
+    .select("package_id, quantity, quantity_remaining")
     .eq("id", layerId.trim())
     .maybeSingle()
+  if (layer) {
+    const removed = await removeUnusedSharedLedgerDuplicateLayers(supabase, [
+      {
+        id: layerId.trim(),
+        package_id: String((layer as { package_id?: string }).package_id ?? ""),
+        quantity: Math.max(0, Math.floor(Number((layer as { quantity?: number }).quantity) || 0)),
+        quantity_remaining: Math.max(
+          0,
+          Math.floor(Number((layer as { quantity_remaining?: number }).quantity_remaining) || 0),
+        ),
+      },
+    ])
+    if (removed.length > 0) {
+      revalidatePath("/admin/catalog")
+      revalidatePath("/admin/inventory")
+      revalidatePath("/admin/purchase-orders")
+      revalidatePath("/admin")
+      revalidatePath("/packages")
+      revalidatePath("/")
+      if (layer.package_id) {
+        await reconcileInventoryAfterCostLayerChange(supabase, String(layer.package_id))
+      }
+      return { ok: true }
+    }
+  }
   const { error } = await supabase.rpc("admin_delete_cost_layer", { p_layer_id: layerId.trim() })
   if (error) return { ok: false, message: error.message }
   revalidatePath("/admin/catalog")
@@ -2858,7 +2931,27 @@ export async function createPurchaseOrder(input: {
   )
   if (!referenced.ok) return referenced
 
+  const stockLines = new Map<string, { packageId: string; quantity: number; unitCost: number }>()
   for (const line of lines.lines) {
+    const target = await remapToLinkedStockLedger(gate.supabase, line.packageId)
+    const existing = stockLines.get(target.packageId)
+    if (existing) {
+      const totalQty = existing.quantity + line.quantity
+      existing.unitCost =
+        totalQty > 0
+          ? (existing.unitCost * existing.quantity + line.unitCost * line.quantity) / totalQty
+          : line.unitCost
+      existing.quantity = totalQty
+      continue
+    }
+    stockLines.set(target.packageId, {
+      packageId: target.packageId,
+      quantity: line.quantity,
+      unitCost: line.unitCost,
+    })
+  }
+
+  for (const line of stockLines.values()) {
     const { error: layerErr } = await gate.supabase.rpc("admin_add_cost_layer", {
       p_package_id: line.packageId,
       p_quantity: line.quantity,
@@ -2955,6 +3048,28 @@ export async function deletePurchaseOrder(purchaseOrderId: string): Promise<Acti
   const id = purchaseOrderId.trim()
   if (!UUID_RE.test(id)) return { ok: false, message: "Invalid purchase order id." }
 
+  const { data: layers } = await gate.supabase
+    .from("package_cost_layers")
+    .select("id, package_id, quantity, quantity_remaining")
+    .eq("purchase_order_id", id)
+
+  try {
+    await removeUnusedSharedLedgerDuplicateLayers(
+      gate.supabase,
+      (layers ?? []).map((row) => ({
+        id: String((row as { id: string }).id),
+        package_id: String((row as { package_id?: string }).package_id ?? ""),
+        quantity: Math.max(0, Math.floor(Number((row as { quantity?: number }).quantity) || 0)),
+        quantity_remaining: Math.max(
+          0,
+          Math.floor(Number((row as { quantity_remaining?: number }).quantity_remaining) || 0),
+        ),
+      })),
+    )
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Could not remove duplicate split-product stock." }
+  }
+
   // Best-effort: also delete stored attachment files.
   const { data: docs } = await gate.supabase
     .from("purchase_order_documents")
@@ -2964,8 +3079,20 @@ export async function deletePurchaseOrder(purchaseOrderId: string): Promise<Acti
   const { error } = await gate.supabase.rpc("admin_delete_purchase_order", { p_id: id })
   if (error) {
     const m = error.message.toLowerCase()
+    if (m.includes("purchase_order_stock_sold") || m.includes("layer_already_consumed")) {
+      return {
+        ok: false,
+        message: "Cannot delete this purchase order because some of its stock has already been sold.",
+      }
+    }
+    if (m.includes("qty_held_would_exceed_capacity") || m.includes("would_drop_below_holds")) {
+      return {
+        ok: false,
+        message: "Cannot delete this purchase order while units from it are on hold.",
+      }
+    }
     if (m.includes("purchase_order_in_use")) {
-      return { ok: false, message: "Cannot delete: this PO is linked to one or more cost layers. Unlink them first." }
+      return { ok: false, message: "Cannot delete: this PO is still linked to stock that cannot be removed." }
     }
     if (m.includes("purchase_order_not_found")) {
       return { ok: false, message: "Purchase order not found." }
@@ -2983,7 +3110,22 @@ export async function deletePurchaseOrder(purchaseOrderId: string): Promise<Acti
     }
   }
 
+  const packageIds = [
+    ...new Set(
+      (layers ?? [])
+        .map((row) => String((row as { package_id?: string }).package_id ?? "").trim())
+        .filter(Boolean),
+    ),
+  ]
+  for (const packageId of packageIds) {
+    await reconcileInventoryAfterCostLayerChange(gate.supabase, packageId)
+  }
+
   revalidatePath("/admin/purchase-orders")
+  revalidatePath("/admin/catalog")
+  revalidatePath("/admin/inventory")
+  revalidatePath("/packages")
+  revalidatePath("/")
   return { ok: true }
 }
 

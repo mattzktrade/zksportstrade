@@ -22,7 +22,7 @@ import {
   salesforceClosedWonSold,
   type LinkedSellableMember,
 } from "@/lib/admin/package-sales-breakdown"
-import { resolveSoldByCostLayer } from "@/lib/integrations/salesforce/stock-sources"
+import { resolveSoldByCostLayer } from "@/lib/inventory/sold-by-cost-layer"
 import { packageDurationLabel } from "@/lib/catalog/package-duration"
 import { SupplierNameLink } from "@/components/admin/profile-name-link"
 import { CompanySupplierSelect } from "@/components/admin/company-supplier-select"

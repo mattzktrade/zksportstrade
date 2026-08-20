@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto"
+import { createHash, randomBytes } from "crypto"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { BookingFormSnapshot } from "@/lib/booking-forms/types"
 import {
@@ -11,6 +11,9 @@ import {
   BOOKING_TERMS,
 } from "@/lib/booking-forms/template"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
+import { bookingLineTax } from "@/lib/booking-forms/line-tax"
+
+export { bookingLineTax }
 
 type DealRow = {
   id: string
@@ -49,17 +52,6 @@ export function generateSigningToken(): { token: string; tokenHash: string } {
 export function generateDocumentRef(now = new Date()): string {
   const date = now.toISOString().slice(0, 10).replaceAll("-", "")
   return `ZK-${date}-${randomBytes(4).toString("hex").toUpperCase()}`
-}
-
-export function bookingLineTax(
-  eventName: string,
-  lineTotal: number,
-): { taxRate: number; taxAmountIncluded: number } {
-  const taxRate = /abu\s*dhabi/i.test(eventName) ? 0.05 : 0
-  return {
-    taxRate,
-    taxAmountIncluded: taxRate > 0 ? lineTotal - lineTotal / (1 + taxRate) : 0,
-  }
 }
 
 export async function buildBookingFormSnapshot(

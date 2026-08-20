@@ -31,6 +31,9 @@ function revalidateCompany(accountId: string, contactId?: string | null, supplie
   revalidatePath("/admin/leads")
   revalidatePath("/admin/deals", "layout")
   revalidatePath("/admin/suppliers")
+  revalidatePath("/admin/purchase-orders")
+  revalidatePath("/admin/catalog")
+  revalidatePath("/admin/inventory")
   if (contactId) revalidatePath(adminContactPath(accountId, contactId))
   if (supplierId) revalidatePath(adminSupplierPath(supplierId))
 }

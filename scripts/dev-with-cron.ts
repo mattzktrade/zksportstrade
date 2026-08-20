@@ -22,7 +22,7 @@ function spawnChild(command: string, args: string[], extraEnv?: Record<string, s
 }
 
 // Next dev without in-process cron (see instrumentation.ts).
-const nextDev = spawnChild("npx", ["next", "dev"], {
+const nextDev = spawnChild("npx", ["next", "dev", "--webpack"], {
   ENABLE_LOCAL_INTEGRATION_CRON: "false",
 })
 

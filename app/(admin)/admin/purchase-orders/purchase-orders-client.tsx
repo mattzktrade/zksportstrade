@@ -144,16 +144,16 @@ export function PurchaseOrdersClient({
     const q = filters.search.trim().toLowerCase()
     const matched = orders.filter((o) => {
       if (filters.supplier && o.supplier !== filters.supplier) return false
-      if (filters.event && !o.usage.lines.some((line) => line.eventName === filters.event)) return false
-      if (filters.product && !o.usage.lines.some((line) => line.packageName === filters.product)) return false
+      const previewLines = matchingStockLines(o.usage.lines, filters)
+      if ((filters.event || filters.product) && previewLines.length === 0) return false
       if (!q) return true
       const hay = [
         o.po_number,
         o.supplier_reference ?? "",
         o.supplier,
         o.note ?? "",
-        ...o.usage.lines.map((line) => line.packageName),
-        ...o.usage.lines.map((line) => line.eventName),
+        ...previewLines.map((line) => line.packageName),
+        ...previewLines.map((line) => line.eventName),
       ]
         .join(" ")
         .toLowerCase()
@@ -285,20 +285,26 @@ export function PurchaseOrdersClient({
   }
 
   function confirmDelete(po: PurchaseOrderWithMeta) {
-    if (po.usage.layer_count > 0) {
+    const sold = po.usage.quantity_purchased - po.usage.quantity_remaining
+    if (sold > 0) {
       toast.error(
-        `Cannot delete: this PO is linked to ${po.usage.layer_count} cost layer${po.usage.layer_count === 1 ? "" : "s"}. Unlink them first.`,
+        `Cannot delete this purchase order because ${sold} unit${sold === 1 ? "" : "s"} from it ${sold === 1 ? "has" : "have"} already been sold.`,
       )
       return
     }
-    if (!window.confirm(`Delete PO "${po.po_number}"? Attachments will be removed as well.`)) return
+    const units = po.usage.quantity_purchased
+    const stockNote =
+      units > 0
+        ? ` This will also remove its stock (${units} unit${units === 1 ? "" : "s"}).`
+        : ""
+    if (!window.confirm(`Delete PO "${po.po_number}"?${stockNote} Attachments will be removed as well.`)) return
     start(async () => {
       const res = await deletePurchaseOrder(po.id)
       if (!res.ok) {
         toast.error(res.message)
         return
       }
-      toast.success("Purchase order deleted.")
+      toast.success(units > 0 ? "Purchase order and stock removed." : "Purchase order deleted.")
       router.refresh()
     })
   }
@@ -572,6 +578,7 @@ export function PurchaseOrdersClient({
                 <PurchaseOrderRow
                   key={po.id}
                   po={po}
+                  previewLines={matchingStockLines(po.usage.lines, filters)}
                   expanded={expandedId === po.id}
                   onToggle={() => setExpandedId((cur) => (cur === po.id ? null : po.id))}
                   editing={editingId === po.id}
@@ -611,7 +618,10 @@ export function PurchaseOrdersClient({
               : "No matching purchase orders."}
           </p>
         ) : (
-          filteredOrders.map((po) => (
+          filteredOrders.map((po) => {
+            const previewLines = matchingStockLines(po.usage.lines, filters)
+            const groupedPreview = groupedStockLines(previewLines)
+            return (
             <div key={`mobile-${po.id}`} className="space-y-2 px-4 py-3">
               <button type="button" onClick={() => setExpandedId((cur) => (cur === po.id ? null : po.id))} className="flex w-full items-start justify-between gap-3 text-left">
                 <div className="min-w-0">
@@ -622,11 +632,11 @@ export function PurchaseOrdersClient({
                     {formatDate(po.issued_at)}
                   </p>
                 </div>
-                <p className="shrink-0 text-[10px] font-semibold">{po.usage.quantity_remaining} remaining</p>
+                <p className="shrink-0 text-[10px] font-semibold">{stockQuantityTotals(previewLines).remaining} remaining</p>
               </button>
               <p className="text-[10px] text-slate-600">
-                {groupedStockLines(po.usage.lines).slice(0, 2).map((line) => line.packageName).join(", ") || "Not linked"}
-                {groupedStockLines(po.usage.lines).length > 2 ? ` +${groupedStockLines(po.usage.lines).length - 2} more` : ""}
+                {groupedPreview.slice(0, 2).map((line) => line.packageName).join(", ") || "Not linked"}
+                {groupedPreview.length > 2 ? ` +${groupedPreview.length - 2} more` : ""}
               </p>
               <div className="flex flex-wrap gap-3">
                 <button type="button" onClick={() => startEdit(po)} disabled={pending} className="text-[11px] font-medium text-primary disabled:opacity-50">Edit</button>
@@ -648,7 +658,8 @@ export function PurchaseOrdersClient({
                 </div>
               ) : null}
             </div>
-          ))
+            )
+          })
         )}
       </AdminMobileList>
       {showBulkUpload ? (
@@ -675,6 +686,28 @@ type EditState = {
   setSupplierReference: (v: string) => void
   setIssuedAt: (v: string) => void
   setNote: (v: string) => void
+}
+
+function matchingStockLines(
+  lines: PurchaseOrderStockLine[],
+  filters: Pick<PoFilters, "event" | "product">,
+): PurchaseOrderStockLine[] {
+  if (!filters.event && !filters.product) return lines
+  return lines.filter((line) => {
+    if (filters.event && line.eventName !== filters.event) return false
+    if (filters.product && line.packageName !== filters.product) return false
+    return true
+  })
+}
+
+function stockQuantityTotals(lines: PurchaseOrderStockLine[]): { purchased: number; remaining: number } {
+  let purchased = 0
+  let remaining = 0
+  for (const line of lines) {
+    purchased += line.quantityPurchased
+    remaining += line.quantityRemaining
+  }
+  return { purchased, remaining }
 }
 
 function groupedStockLines(lines: PurchaseOrderStockLine[]): PurchaseOrderStockLine[] {
@@ -757,6 +790,7 @@ function PurchaseOrderStockCells({
 
 function PurchaseOrderRow({
   po,
+  previewLines,
   expanded,
   onToggle,
   editing,
@@ -773,6 +807,7 @@ function PurchaseOrderRow({
   onRefresh,
 }: {
   po: PurchaseOrderWithMeta
+  previewLines: PurchaseOrderStockLine[]
   expanded: boolean
   onToggle: () => void
   editing: boolean
@@ -790,6 +825,7 @@ function PurchaseOrderRow({
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [uploading, setUploading] = useState(false)
+  const previewTotals = stockQuantityTotals(previewLines)
 
   async function handleFileChosen(file: File) {
     setUploading(true)
@@ -832,10 +868,10 @@ function PurchaseOrderRow({
         </td>
         <td className="px-3 py-2 text-muted-foreground">{po.supplier_reference || "—"}</td>
         <td className="px-3 py-2 text-muted-foreground">{formatDate(po.issued_at)}</td>
-        <PurchaseOrderStockCells lines={po.usage.lines} preview />
-        <td className="px-3 py-2 text-right tabular-nums">{po.usage.quantity_purchased}</td>
+        <PurchaseOrderStockCells lines={previewLines} preview />
+        <td className="px-3 py-2 text-right tabular-nums">{previewTotals.purchased}</td>
         <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-          {po.usage.quantity_remaining}
+          {previewTotals.remaining}
         </td>
         <td className="px-3 py-2 text-right whitespace-nowrap">
           <button

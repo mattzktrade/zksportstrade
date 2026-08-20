@@ -1,6 +1,67 @@
+function pushWebpackExternal(config, external) {
+  if (!config.externals) {
+    config.externals = [external]
+    return
+  }
+  if (Array.isArray(config.externals)) {
+    config.externals.push(external)
+    return
+  }
+  config.externals = [config.externals, external]
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   serverExternalPackages: ["exceljs"],
+  webpack: (config, { isServer, webpack, nextRuntime }) => {
+    if (isServer && nextRuntime !== "edge") {
+      // Instrumentation / Node compiles fail on the `node:` URI scheme and also
+      // cannot resolve the rewritten bare `crypto` builtin unless it is external.
+      pushWebpackExternal(config, ({ request }, callback) => {
+        if (typeof request !== "string") return callback()
+        if (request.startsWith("node:")) {
+          return callback(null, `commonjs ${request.slice("node:".length)}`)
+        }
+        if (request === "crypto") {
+          return callback(null, "commonjs crypto")
+        }
+        callback()
+      })
+      config.plugins.push(
+        new webpack.NormalModuleReplacementPlugin(/^node:/, (resource) => {
+          resource.request = resource.request.replace(/^node:/, "")
+        }),
+      )
+    } else if (!isServer) {
+      config.plugins.push(
+        new webpack.NormalModuleReplacementPlugin(/^node:/, (resource) => {
+          resource.request = resource.request.replace(/^node:/, "")
+        }),
+      )
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        crypto: false,
+        stream: false,
+        buffer: false,
+        fs: false,
+        path: false,
+        os: false,
+        zlib: false,
+        util: false,
+        http: false,
+        https: false,
+        net: false,
+        tls: false,
+        child_process: false,
+        worker_threads: false,
+        constants: false,
+        assert: false,
+        url: false,
+        querystring: false,
+      }
+    }
+    return config
+  },
   images: {
     formats: ["image/avif", "image/webp"],
     minimumCacheTTL: 60 * 60 * 24 * 30,

@@ -215,7 +215,7 @@ export default async function AdminDashboardPage() {
         description="Overview of approvals, sales, operations and finance across ZK Sports."
       />
 
-      <AdminStats className="sm:grid-cols-2 xl:grid-cols-6">
+      <AdminStats className="grid-cols-2 lg:grid-cols-3">
         <AdminStatCard icon={UsersRound} value={pending ?? 0} label="Pending user approvals" hint="Requires admin review" />
         <AdminStatCard
           icon={FileSignature}

@@ -9,6 +9,16 @@ export async function register() {
     return
   }
 
-  const { startLocalIntegrationCron } = await import("./lib/integrations/local-integration-cron")
-  startLocalIntegrationCron()
+  // Webpack also compiles this file for Edge (middleware/proxy). A normal
+  // `import()` of the cron graph pulls Node `crypto` into that compile and
+  // breaks `next dev --webpack`. Keep the specifier inside Function so Edge
+  // does not trace it; Node still starts the existing tsx cron loop.
+  const { spawn } = (await new Function("return import('node:child_process')")()) as typeof import("node:child_process")
+  spawn("npx", ["tsx", "scripts/run-local-cron-loop.ts"], {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: "inherit",
+    shell: true,
+    windowsHide: true,
+  })
 }

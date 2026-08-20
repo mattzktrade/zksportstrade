@@ -195,12 +195,8 @@ export function resolveLinkedPoolStock(input: {
     input.costLayerPool != null && Number.isFinite(input.costLayerPool)
       ? Math.max(0, Math.floor(input.costLayerPool))
       : null
-  const won = Math.max(0, Math.floor(input.closedWonSold ?? 0))
 
-  if (layers != null && layers > 0) {
-    if (sf != null && sf > layers && layers < won) return sf
-    return layers
-  }
+  if (layers != null && layers > 0) return layers
   return sf
 }
 

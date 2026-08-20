@@ -32,7 +32,7 @@ export function AdminStats({
   className?: string
 }) {
   return (
-    <section className={cn("admin-stats hidden md:grid gap-2", className)}>
+    <section className={cn("admin-stats hidden min-w-0 md:grid gap-2", className)}>
       {children}
     </section>
   )
@@ -85,19 +85,24 @@ export function AdminStatCard({
 }) {
   const content = (
     <>
-      <div className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-full", toneClass[tone])}>
+      <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-full", toneClass[tone])}>
         <Icon className="h-5 w-5" />
       </div>
-      <div className="min-w-0">
-        <p className="text-[18px] font-semibold leading-none tabular-nums text-[#202124]">{value}</p>
-        <p className="mt-1 text-[10px] font-medium text-[#555961]">{label}</p>
-        {hint ? <p className="mt-1 text-[9px] text-[#a0a3a9]">{hint}</p> : null}
+      <div className="min-w-0 flex-1">
+        <p
+          title={String(value)}
+          className="font-semibold leading-tight tracking-tight break-words tabular-nums text-[#202124] [font-size:clamp(13px,6.4cqi,18px)]"
+        >
+          {value}
+        </p>
+        <p className="mt-1 text-[10px] font-medium leading-snug text-[#555961]">{label}</p>
+        {hint ? <p className="mt-1 text-[9px] leading-snug text-[#a0a3a9]">{hint}</p> : null}
       </div>
     </>
   )
 
   const classes =
-    "flex min-h-[78px] items-center gap-4 rounded-lg border border-[#eceef1] bg-white px-5 py-4"
+    "@container flex min-h-[78px] min-w-0 items-center gap-3 overflow-visible rounded-lg border border-[#eceef1] bg-white px-4 py-4"
 
   return href ? (
     <Link href={href} className={cn(classes, "transition-colors hover:border-primary/30")}>

@@ -44,7 +44,9 @@ This file must be updated throughout the rebuild:
 - `[x]` Phase 2C native order, Xero, payment, reminder, and cancellation automation implemented (confirm live Xero after deploy)
 - `[x]` Phase 2D first-build sales, finance, and operations queues are usable end to end, including imported deals without a native order
 - `[~]` Phase 3 data cutover: imports exist; Matt is finishing imported deal and contact review. The Cutover admin tab is retired from the nav.
-- `[ ]` Production deploy of this first build with `ZK_PLATFORM_MODE=native`
+- `[ ]` Phase 4 later modules skipped for now (sourcing comparisons, marketing, help, Slack/Outlook, partner API)
+- `[x]` Phase 5 Salesforce runtime retirement: live Salesforce is off, hidden from Settings, and cron/outbox no longer call it. Historical IDs and import CSVs remain. Salesforce library files and database columns are kept.
+- `[ ]` Production deploy of this first build
 
 ---
 
@@ -583,17 +585,9 @@ Deal created
 
 ## 9. Salesforce disconnection strategy
 
-### Prototype approach
+Phase 5 runtime retirement is done. Native mode is always on. Salesforce OAuth, inventory pull, product/order sync, and Settings UI are gone from the live product.
 
-Do not delete integration files or database fields. Introduce a native-mode configuration that:
-
-- Prevents Salesforce OAuth/API calls
-- Stops Salesforce inventory pull and reconciliation jobs
-- Stops Salesforce product, order, lifecycle, stock-source, and package-item pushes
-- Prevents new Salesforce outbox work from being enqueued
-- Leaves Xero and Wix processing active
-- Keeps historical Salesforce IDs visible for reference
-- Makes inventory screens read only from native Supabase data
+Historical Salesforce IDs, CRM CSV imports, and the Salesforce TypeScript library remain in the repo so we do not drop data or break leftover imports. Physical deletion of those files and unused columns is still later work.
 
 ### Legacy data treatment
 
@@ -1067,17 +1061,36 @@ These follow the immediate inventory and offline-sales priorities:
 
 ## Phase 5 — Approved legacy retirement
 
-**Goal:** Remove Salesforce implementation only after successful production cutover.
+**Goal:** Take Salesforce out of the live product after the native first build is in use. Phase 4 modules are skipped.
 
-- `[ ]` Archive required Salesforce data
-- `[ ]` Remove Salesforce cron and outbox event types
-- `[ ]` Remove Salesforce admin integration pages
-- `[ ]` Remove shell creation and package-item sync code
-- `[ ]` Deprecate legacy database columns/tables
-- `[ ]` Remove Salesforce modules and environment variables
-- `[ ]` Update all operating documentation
+**Status:** Runtime retirement done 20 August 2026. Schema and library deletion remain later, on purpose.
 
-This phase is explicitly out of scope for the local prototype and requires separate approval.
+- `[x]` Archive required Salesforce data in place (historical Account / Contact / Opportunity / Product IDs stay on imported rows)
+- `[x]` Stop Salesforce cron pull, stale-opportunity expiry, and linked-group heal from Salesforce
+- `[x]` Skip Salesforce outbox work (`order.placed`, `order.outcome`, Product2 upsert). Wix catalog and Xero invoice jobs still run
+- `[x]` Remove Salesforce from Settings → Integrations. Old `/admin/integrations/salesforce` and OAuth URLs redirect to Settings
+- `[x]` Stop shell creation and package-item sync (native mode already did this; runtime is now always native)
+- `[x]` Keep legacy database columns/tables (`salesforce_product_id`, `salesforce_opportunity_id`, import batches, offline applications). Do not drop them
+- `[x]` Salesforce modules remain in the repo but cannot run (`isSalesforceRuntimeEnabled()` is always false)
+- `[x]` CRM Imports stay for historical CSV loads; they do not reconnect to Salesforce
+- `[ ]` Optional later: delete `SALESFORCE_*` environment variables from Vercel
+- `[ ]` Optional later: delete Salesforce TypeScript modules and unused outbox event types after a stable period
+- `[ ]` Optional later: deprecate unused Salesforce columns once reporting no longer needs the IDs
+
+**What must not break**
+
+- Xero invoice create, payment webhook, and reminders
+- Wix listing/stock sync and paid website orders
+- Portal and admin inventory, holds, deals, booking forms, operations
+- Historical Salesforce IDs on imported accounts, contacts, deals, and packages
+- CRM import CSVs that still use Salesforce report headers
+
+**What staff will notice**
+
+- Settings → Integrations shows Xero and Wix only
+- Cron no longer pulls Salesforce stock or open pipeline
+- Catalog remaining / sold uses native portal, website, and imported-deal figures only
+- Product create no longer asks for a Salesforce Product Id
 
 ---
 
@@ -1290,6 +1303,8 @@ The first release is successful when:
 - **Decided:** Remove Cutover from the admin nav. Keep `/admin/cutover` for admin recovery only.
 - **Decided:** Production must set `ZK_PLATFORM_MODE=native`. Salesforce environment variables stay in Vercel for rollback, but native mode makes them inert (no connect, pull, or opportunity sync). Do not delete them until Phase 5.
 - **Decided:** Imported deals without a native order map supplier on the deal line and do not consume `quantity_remaining` until an order exists. Operations leftover still counts those deals as sold so the number matches catalog.
+- **Decided:** Skip Phase 4 for now. Proceed with Phase 5 Salesforce retirement because Salesforce is fully replaced.
+- **Decided:** Phase 5 retires Salesforce at runtime without dropping historical columns or deleting the integration library yet. Native mode is now always on; leftover `SALESFORCE_*` credentials cannot reconnect the live product. Settings no longer shows Salesforce.
 
 ---
 
@@ -1302,6 +1317,16 @@ The native CMS/CRM first build is now the intended production product. Salesforc
 - Operations first-build: delivery queue, guest management for native and imported deals, intro and guest-request emails, stock-based supplier assignment, leftover counts aligned with catalog sold stock, multi-product Event and Supplier layout.
 - Cutover removed from the admin sidebar. The workspace is not deleted.
 - Go-live checklist and Vercel environment notes added below.
+
+### 20 August 2026 — Phase 5 Salesforce runtime retirement
+
+Salesforce is fully retired from the live product. Phase 4 is skipped.
+
+- Native mode is hardcoded. `ZK_PLATFORM_MODE` can no longer turn Salesforce back on.
+- Settings → Integrations shows Xero and Wix only. Salesforce admin and OAuth routes redirect there.
+- Cron no longer pulls Salesforce inventory, expires Salesforce opportunities, or heals linked groups from Salesforce.
+- Outbox still processes Wix catalog and Xero invoices. Salesforce opportunity/product jobs are skipped.
+- Historical Salesforce IDs, CRM CSV imports, and Salesforce library files remain. Database columns are not dropped.
 
 ### 14 August 2026 — Deals as the commercial record; finance and operations usable
 
@@ -1391,12 +1416,13 @@ Apply these on the **same Supabase project Vercel uses**, if they are not alread
 ### Still to do (Vercel)
 
 1. Deploy this branch.
-2. Set **`ZK_PLATFORM_MODE=native`** on Production (and Preview if used). Without this, production stays on the legacy Salesforce runtime and can still pull/write Salesforce inventory.
+2. `ZK_PLATFORM_MODE=native` is no longer required. Native mode is now always on, even if that env var is missing.
 3. Confirm `NEXT_PUBLIC_SITE_URL` is the live origin (booking-form and approval links). Example: `https://zk-sports.trade` with no trailing slash.
 4. Confirm Xero redirect URI in the Xero app matches production: `{NEXT_PUBLIC_SITE_URL}/api/integrations/xero/callback`.
 5. Confirm Wix webhook URL points at production `/api/...` (existing Wix setup).
-6. Confirm `CRON_SECRET` is set. `vercel.json` already runs `/api/cron/integration-outbox` every minute; that job still releases holds, expires unsigned booking forms, sends invoice reminders, and syncs Wix. In native mode it does **not** pull or push Salesforce.
-7. After deploy: Settings → Integrations. Xero and Wix should show connected. Salesforce should show **Disabled in native mode**.
+6. Confirm `CRON_SECRET` is set. `vercel.json` already runs `/api/cron/integration-outbox` every minute; that job still releases holds, expires unsigned booking forms, sends invoice reminders, and syncs Wix. It does **not** pull or push Salesforce.
+7. After deploy: Settings → Integrations. Xero and Wix should show. Salesforce must not appear.
+8. Optional: delete leftover `SALESFORCE_*` values from Vercel. They are inert, but removing them avoids confusion.
 
 ### Vercel environment variables
 
@@ -1429,15 +1455,13 @@ Xero refresh token and tenant id normally live in `integration_settings`, not en
 
 #### Must add
 
-| Variable | Value | Why |
-|---|---|---|
-| `ZK_PLATFORM_MODE` | `native` | Turns off Salesforce connect, inventory pull, opportunity sync, and shell generation. Wix and Xero stay on. |
+None required for Salesforce retirement. Native mode is hardcoded.
 
-This is the one new required production variable for first-build go-live.
+`ZK_PLATFORM_MODE=native` may still be present from the first-build go-live. It is unused and can stay or be deleted.
 
-#### Keep, but they become inert in native mode (do not delete yet)
+#### Salesforce variables are inert (safe to delete when convenient)
 
-Leave existing `SALESFORCE_*` values in Vercel so an emergency rollback is `ZK_PLATFORM_MODE` removed/unset, not a scavenger hunt for credentials.
+Leftover `SALESFORCE_*` values in Vercel can no longer reconnect Salesforce. Deleting them is optional cleanup, not a rollback switch.
 
 Typical names already in use:
 
@@ -1452,9 +1476,9 @@ Typical names already in use:
 - `SALESFORCE_EXPIRE_STALE_OPEN_OPPORTUNITIES`
 - `SALESFORCE_ORDER_SKIP_LINE_ITEMS`
 
-With `ZK_PLATFORM_MODE=native`, `isSalesforceConfigured()` is false. Cron will not pull Salesforce stock. Outbox will not create Opportunities. Settings shows Salesforce as disabled.
+`isSalesforceConfigured()` is always false. Cron will not pull Salesforce stock. Outbox will not create Opportunities. Settings does not show Salesforce.
 
-**Do not delete these until Phase 5** (approved Salesforce retirement). Deleting them now is optional extra safety after a stable week, so a missing native-mode flag cannot re-enable Salesforce. Until then, keeping them is the safer rollback path.
+Do **not** drop `salesforce_*` columns or import tables. Historical IDs stay readable.
 
 #### Do not add / do not copy from local
 
@@ -1467,12 +1491,12 @@ With `ZK_PLATFORM_MODE=native`, `isSalesforceConfigured()` is false. Cron will n
 
 ### Rollback
 
-1. Unset or remove `ZK_PLATFORM_MODE` on Vercel and redeploy. Salesforce runtime returns if the `SALESFORCE_*` vars are still present.
+1. Salesforce cannot be turned back on with an env flag. Restoring live Salesforce would require reverting this Phase 5 code change.
 2. Do **not** use the Cutover tab as the production rollback. Scoped cutover rollback only releases reservations created by a cutover run.
 
 ### Out of scope for this go-live
 
-Phase 4 modules remain later work: sourcing comparisons, marketing campaigns, help centre, Slack/Outlook, partner API, Salesforce code removal.
+Phase 4 modules remain later work: sourcing comparisons, marketing campaigns, help centre, Slack/Outlook, partner API. Physical deletion of Salesforce TypeScript modules and unused columns is also later work.
 
 ---
 

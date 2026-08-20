@@ -313,6 +313,18 @@ async function pullAvailableQuantityFromSalesforce(
   const uniqueStandalone = [...byProduct2Id.values()]
   checked += uniqueStandalone.length
 
+  const standaloneWithLedger = new Set<string>()
+  if (uniqueStandalone.length > 0) {
+    const { data: standaloneLayers } = await admin
+      .from("package_cost_layers")
+      .select("package_id")
+      .in(
+        "package_id",
+        uniqueStandalone.map((pkg) => pkg.id),
+      )
+    for (const row of standaloneLayers ?? []) standaloneWithLedger.add(String(row.package_id))
+  }
+
   if (uniqueStandalone.length > 0) {
     let snapshots: Map<string, SfInventorySnapshot>
     let closedWonQtyByProduct: Map<string, number>
@@ -337,6 +349,10 @@ async function pullAvailableQuantityFromSalesforce(
     }
 
     for (const pkg of uniqueStandalone) {
+      if (standaloneWithLedger.has(pkg.id)) {
+        skippedPackages++
+        continue
+      }
       const currentSellable = portalSellable(pkg.qty_available, pkg.qty_held)
       if (pkg.integration_sync_status === "pending" || pkg.integration_sync_status === "failed") {
         // After relink the package is queued for sync — still pull SF stock when portal is empty.

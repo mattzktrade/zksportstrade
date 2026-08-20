@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { createClient } from "@/lib/supabase/server"
 import { linkPurchaseOrderSupplier } from "@/lib/inventory/suppliers"
+import { resolveLinkedStockLedger } from "@/lib/inventory/linked-stock-ledger"
 
 export type PurchaseOrderRow = {
   id: string
@@ -90,9 +91,11 @@ function issuedDateFromReceivedAt(receivedAt: string | null | undefined): string
 }
 
 const PO_COLUMNS =
-  "id, po_number, supplier, supplier_id, supplier_reference, issued_at, note, created_at, updated_at, suppliers(crm_account_id)" as const
+  "id, po_number, supplier, supplier_id, supplier_reference, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name, crm_accounts(name))" as const
 const PO_COLUMNS_NO_REF =
-  "id, po_number, supplier, supplier_id, issued_at, note, created_at, updated_at, suppliers(crm_account_id)" as const
+  "id, po_number, supplier, supplier_id, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name, crm_accounts(name))" as const
+const PO_COLUMNS_NO_ACCOUNT =
+  "id, po_number, supplier, supplier_id, supplier_reference, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name)" as const
 const PO_COLUMNS_BARE =
   "id, po_number, supplier, supplier_id, issued_at, note, created_at, updated_at" as const
 
@@ -111,15 +114,29 @@ function mapPurchaseOrderRow(row: {
   note: string | null
   created_at: string
   updated_at: string
-  suppliers?: { crm_account_id: string | null } | { crm_account_id: string | null }[] | null
+  suppliers?:
+    | {
+        crm_account_id: string | null
+        name?: string | null
+        crm_accounts?: { name: string | null } | { name: string | null }[] | null
+      }
+    | {
+        crm_account_id: string | null
+        name?: string | null
+        crm_accounts?: { name: string | null } | { name: string | null }[] | null
+      }[]
+    | null
 }): PurchaseOrderRow {
+  const linked = one(row.suppliers)
+  const accountName = String(one(linked?.crm_accounts)?.name ?? "").trim()
+  const supplierName = String(linked?.name ?? "").trim()
   const supplierReference = String(row.supplier_reference ?? "").trim()
   return {
     id: row.id,
     po_number: row.po_number,
-    supplier: row.supplier,
+    supplier: accountName || supplierName || row.supplier,
     supplier_id: row.supplier_id,
-    supplier_account_id: one(row.suppliers)?.crm_account_id ?? null,
+    supplier_account_id: linked?.crm_account_id ?? null,
     supplier_reference: supplierReference || null,
     issued_at: normaliseIssuedAt(row.issued_at),
     note: row.note,
@@ -172,6 +189,15 @@ export async function getPurchaseOrders(): Promise<PurchaseOrderRow[]> {
     .order("created_at", { ascending: false })
   if (!withoutRef.error && withoutRef.data) {
     return withoutRef.data.map((row) => mapPurchaseOrderRow({ ...row, supplier_reference: null }))
+  }
+
+  const withoutAccount = await supabase
+    .from("purchase_orders")
+    .select(PO_COLUMNS_NO_ACCOUNT)
+    .order("issued_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+  if (!withoutAccount.error && withoutAccount.data) {
+    return withoutAccount.data.map((row) => mapPurchaseOrderRow(row))
   }
 
   const fallback = await supabase
@@ -401,6 +427,8 @@ export async function ensurePurchaseOrdersForPackageLayers(packageId: string): P
   const id = packageId.trim()
   if (!id) return 0
   const supabase = await createClient()
+  const ledger = await resolveLinkedStockLedger(supabase, id)
+  if (ledger.usedParentLedger) return 0
   const { data: layers, error } = await supabase
     .from("package_cost_layers")
     .select("id, source, note, received_at, purchase_order_id")

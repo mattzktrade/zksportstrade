@@ -1,4 +1,4 @@
-import { bookingLineTax } from "@/lib/booking-forms/snapshot"
+import { bookingLineTax } from "@/lib/booking-forms/line-tax"
 import { BOOKING_TERMS } from "@/lib/booking-forms/template"
 import type { BookingFormSnapshot } from "@/lib/booking-forms/types"
 

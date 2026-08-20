@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { createHash } from "crypto"
 import { SupabaseClient } from "@supabase/supabase-js"
 import { salesforceRequest, salesforceQuery, SalesforceApiError } from "@/lib/integrations/salesforce/client"
 import { getSalesforceConfig } from "@/lib/integrations/salesforce/config"
@@ -7,6 +7,13 @@ import {
   readWonQuantityByProductBulk,
 } from "@/lib/integrations/salesforce/sold-metrics"
 import { readPortalOrderSoldForPackage } from "@/lib/inventory/local-sold"
+import {
+  allocateUnattributedSoldAcrossLayers,
+  resolveSoldByCostLayer,
+} from "@/lib/inventory/sold-by-cost-layer"
+import { resolveLinkedStockLedger } from "@/lib/inventory/linked-stock-ledger"
+
+export { allocateUnattributedSoldAcrossLayers, resolveSoldByCostLayer }
 
 /**
  * Sync portal cost-layer groupings (per supplier + fulfilment block) to
@@ -111,128 +118,6 @@ function buildPortalRef(packageId: string, supplier: string, blockId: string | n
   return `${SOURCE_REF_PREFIX}${hash.slice(0, 32)}`
 }
 
-function layerBookedSold(
-  layer: LayerRow,
-  consumptionsByLayer: ReadonlyMap<string, number>,
-): number {
-  const qty = Math.max(0, Math.floor(Number(layer.quantity) || 0))
-  const remaining = Math.max(0, Math.floor(Number(layer.quantity_remaining) || 0))
-  // Prefer the authoritative consumption-row sum (only counts non-cancelled orders),
-  // fall back to `quantity - quantity_remaining` if there are no consumption rows yet
-  // (e.g. legacy pre-FIFO layer that hasn't been backfilled).
-  const consumed = consumptionsByLayer.get(layer.id)
-  return consumed != null ? Math.max(0, consumed) : Math.max(0, qty - remaining)
-}
-
-/**
- * Allocate package sold units that are not yet attributed to a cost layer
- * (typically Salesforce offline Closed Won pulls) across layers FIFO by
- * received_at — matching how portal bookings consume supplier stock.
- *
- * `totalPackageSold` must be closed-won / portal bookings only — never open
- * pipeline (pipeline holds sellable but is not "sold" on the purchase ledger).
- */
-export function allocateUnattributedSoldAcrossLayers(input: {
-  layers: readonly LayerRow[]
-  bookedSoldByLayer: ReadonlyMap<string, number>
-  totalPackageSold: number
-}): Map<string, number> {
-  const soldByLayer = new Map<string, number>()
-  let bookedTotal = 0
-  for (const layer of input.layers) {
-    const booked = Math.max(0, Math.floor(input.bookedSoldByLayer.get(layer.id) ?? 0))
-    soldByLayer.set(layer.id, booked)
-    bookedTotal += booked
-  }
-
-  const totalPackageSold = Math.max(0, Math.floor(input.totalPackageSold))
-
-  // quantity_remaining can be stale (e.g. after Available was wiped to 0 and layers
-  // were marked fully consumed). Prefer the authoritative package sold total.
-  if (bookedTotal > totalPackageSold) {
-    for (const layer of input.layers) soldByLayer.set(layer.id, 0)
-    bookedTotal = 0
-  }
-
-  let remainingToAllocate = Math.max(0, totalPackageSold - bookedTotal)
-  if (remainingToAllocate <= 0) return soldByLayer
-
-  const ordered = [...input.layers].sort((a, b) => {
-    const aTime = a.received_at ? new Date(a.received_at).getTime() : 0
-    const bTime = b.received_at ? new Date(b.received_at).getTime() : 0
-    if (aTime !== bTime) return aTime - bTime
-    return a.id.localeCompare(b.id)
-  })
-
-  for (const layer of ordered) {
-    if (remainingToAllocate <= 0) break
-    const purchased = Math.max(0, Math.floor(Number(layer.quantity) || 0))
-    const already = soldByLayer.get(layer.id) ?? 0
-    const capacity = Math.max(0, purchased - already)
-    if (capacity <= 0) continue
-    const take = Math.min(capacity, remainingToAllocate)
-    soldByLayer.set(layer.id, already + take)
-    remainingToAllocate -= take
-  }
-
-  // If sold exceeds total layer capacity (data desync), attribute the leftover
-  // to the newest layer so Quantity Sold still tracks the product total.
-  if (remainingToAllocate > 0 && ordered.length > 0) {
-    const newest = ordered[ordered.length - 1]
-    soldByLayer.set(newest.id, (soldByLayer.get(newest.id) ?? 0) + remainingToAllocate)
-  }
-
-  return soldByLayer
-}
-
-/**
- * Resolve sold units per cost layer for UI / sync: booked consumptions first,
- * then FIFO-allocate any remaining package sold (offline SF, etc.).
- */
-export function resolveSoldByCostLayer(input: {
-  layers: readonly {
-    id: string
-    quantity: number
-    quantity_remaining: number
-    received_at: string | null
-  }[]
-  /** Optional order_cost_consumptions sums; when omitted, uses quantity − remaining. */
-  consumptionsByLayer?: ReadonlyMap<string, number>
-  totalPackageSold: number
-}): Map<string, number> {
-  const bookedSoldByLayer = new Map<string, number>()
-  for (const layer of input.layers) {
-    const asLayer: LayerRow = {
-      id: layer.id,
-      package_id: "",
-      quantity: layer.quantity,
-      quantity_remaining: layer.quantity_remaining,
-      source: null,
-      purchase_order_id: null,
-      fulfilment_block_id: null,
-      received_at: layer.received_at,
-    }
-    bookedSoldByLayer.set(
-      layer.id,
-      layerBookedSold(asLayer, input.consumptionsByLayer ?? new Map()),
-    )
-  }
-  return allocateUnattributedSoldAcrossLayers({
-    layers: input.layers.map((l) => ({
-      id: l.id,
-      package_id: "",
-      quantity: l.quantity,
-      quantity_remaining: l.quantity_remaining,
-      source: null,
-      purchase_order_id: null,
-      fulfilment_block_id: null,
-      received_at: l.received_at,
-    })),
-    bookedSoldByLayer,
-    totalPackageSold: input.totalPackageSold,
-  })
-}
-
 export function groupLayersIntoStockSources(input: {
   packageId: string
   layers: readonly LayerRow[]
@@ -329,54 +214,6 @@ const LINKED_DAY_DURATIONS = new Set([
 ])
 
 /**
- * Linked day packages keep purchases on the 3-day parent. Always use that ledger for
- * Stock Sources — even when the day package has imported duplicate SF stock-source rows.
- */
-async function resolveCostLedgerPackageId(
-  admin: SupabaseClient,
-  packageId: string,
-): Promise<{
-  ledgerPackageId: string
-  usedParentLedger: boolean
-  duration: string
-  groupId: string | null
-  isShell: boolean
-}> {
-  const { data: pkg } = await admin
-    .from("packages")
-    .select("inventory_group_id, duration, shell_parent_package_id")
-    .eq("id", packageId)
-    .maybeSingle()
-
-  const groupId = (pkg as { inventory_group_id?: string | null } | null)?.inventory_group_id?.trim() || null
-  const duration = (pkg as { duration?: string | null } | null)?.duration?.trim() ?? ""
-  const isShell = !!(pkg as { shell_parent_package_id?: string | null } | null)?.shell_parent_package_id?.trim()
-
-  if (!groupId || isShell) {
-    return { ledgerPackageId: packageId, usedParentLedger: false, duration, groupId, isShell }
-  }
-
-  if (LINKED_DAY_DURATIONS.has(duration) || duration === "2_day") {
-    const { data: parent } = await admin
-      .from("packages")
-      .select("id")
-      .eq("inventory_group_id", groupId)
-      .eq("duration", "3_day")
-      .is("shell_parent_package_id", null)
-      .order("id")
-      .limit(1)
-      .maybeSingle()
-
-    const parentId = (parent as { id?: string } | null)?.id?.trim()
-    if (parentId && parentId !== packageId) {
-      return { ledgerPackageId: parentId, usedParentLedger: true, duration, groupId, isShell }
-    }
-  }
-
-  return { ledgerPackageId: packageId, usedParentLedger: false, duration, groupId, isShell }
-}
-
-/**
  * How many shared-ledger units this Product2 should show as sold on Stock Sources:
  * - 3-day: every linked sale (pool total)
  * - day package: 3-day sales + that day's own sales only (Fri ignores Sunday sales)
@@ -470,7 +307,7 @@ async function loadStockSourceInputsForPackage(
   totalPackageSold: number
 }> {
   const { ledgerPackageId, usedParentLedger, duration, groupId, isShell } =
-    await resolveCostLedgerPackageId(admin, packageId)
+    await resolveLinkedStockLedger(admin, packageId)
 
   const { data: layerData, error: layerErr } = await admin
     .from("package_cost_layers")
@@ -742,6 +579,11 @@ export async function importStockSourcesFromSalesforce(input: {
 }): Promise<ImportStockSourcesResult> {
   const { admin, packageId, product2Id } = input
   const result: ImportStockSourcesResult = { imported: 0, skipped: 0, claimed: 0, errors: [] }
+
+  const ledger = await resolveLinkedStockLedger(admin, packageId)
+  if (ledger.isShell || ledger.usedParentLedger) {
+    return result
+  }
 
   let sfRows: SfStockSourceRow[] = []
   try {
