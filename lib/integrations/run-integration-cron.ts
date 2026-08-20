@@ -1,5 +1,8 @@
 import { drainIntegrationOutbox } from "@/lib/integrations/drain-outbox"
 import { releaseExpiredInventoryHoldsAndSync } from "@/lib/integrations/release-expired-holds"
+import { releaseExpiredDealReservations } from "@/lib/integrations/release-expired-deal-reservations"
+import { processNativeBookingForms } from "@/lib/integrations/process-native-booking-forms"
+import { processNativeInvoiceReminders } from "@/lib/integrations/process-native-invoice-reminders"
 import { expireStaleOpenOpportunities } from "@/lib/integrations/salesforce/expire-stale-open-opportunities"
 import { pullInventoryFromSalesforce } from "@/lib/integrations/salesforce/pull-inventory-from-salesforce"
 import { isSalesforceConfigured, getSalesforceConfig } from "@/lib/integrations/salesforce/config"
@@ -9,6 +12,9 @@ import { createAdminClient } from "@/lib/supabase/admin"
 
 export type IntegrationCronResult = {
   holds: Awaited<ReturnType<typeof releaseExpiredInventoryHoldsAndSync>>
+  dealReservations: Awaited<ReturnType<typeof releaseExpiredDealReservations>>
+  bookingForms: Awaited<ReturnType<typeof processNativeBookingForms>>
+  invoiceReminders: Awaited<ReturnType<typeof processNativeInvoiceReminders>>
   salesforceInventory: Awaited<ReturnType<typeof pullInventoryFromSalesforce>>
   staleOpenOpportunities: Awaited<ReturnType<typeof expireStaleOpenOpportunities>> | null
   linkedInventoryHeal: { groups: number; packagesFixed: number } | null
@@ -20,6 +26,9 @@ export type IntegrationCronResult = {
  */
 export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {
   const holds = await releaseExpiredInventoryHoldsAndSync()
+  const bookingForms = await processNativeBookingForms()
+  const invoiceReminders = await processNativeInvoiceReminders()
+  const dealReservations = await releaseExpiredDealReservations()
 
   const salesforceInventory = await pullInventoryFromSalesforce()
 
@@ -67,6 +76,9 @@ export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {
 
   return {
     holds,
+    bookingForms,
+    invoiceReminders,
+    dealReservations,
     salesforceInventory,
     staleOpenOpportunities,
     linkedInventoryHeal: salesforceInventory.linkedGroupHeal,

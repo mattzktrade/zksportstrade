@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import type { createClient } from "@/lib/supabase/server"
 import { sendOrderPlacedEmail } from "@/lib/email/send-order-placed"
 import { enqueueOrderIntegrationsServer } from "@/lib/integrations/enqueue-server"
+import { attachDealForCommittedOrder } from "@/lib/crm/attach-portal-deal"
 import { isSalesforceConfigured } from "@/lib/integrations/salesforce/config"
 import { mapPlaceOrderError } from "@/lib/orders/place-order-errors"
 
@@ -183,6 +184,8 @@ export async function executeBookingApproval(
   }
 
   if (approvedOrderId) {
+    const attached = await attachDealForCommittedOrder(approvedOrderId)
+    if (!attached.ok) console.warn("[approve booking] Deal was not linked:", attached.message)
     const enq = await enqueueOrderIntegrationsServer(approvedOrderId, "trade_portal")
     if (!enq.ok) console.warn("[approve booking] Salesforce sync not queued:", enq.message)
   }

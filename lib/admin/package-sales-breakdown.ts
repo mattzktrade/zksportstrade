@@ -52,13 +52,13 @@ export function commitmentSellable(input: {
 export function formatPackageSalesBreakdown(b: PackageSalesBreakdown): string {
   if (b.total <= 0 && b.salesforceOpenPipeline <= 0) return "No sales recorded yet"
   const parts: string[] = []
-  if (b.wix > 0) parts.push(`${b.wix} on Wix`)
+  if (b.wix > 0) parts.push(`${b.wix} on website`)
   const closedWon = salesforceClosedWonSold(b)
-  if (closedWon > 0) parts.push(`${closedWon} in Salesforce`)
+  if (closedWon > 0) parts.push(`${closedWon} offline deals`)
   if (b.salesforceOpenPipeline > 0) {
-    parts.push(`${Math.floor(b.salesforceOpenPipeline)} open SF pipeline`)
+    parts.push(`${Math.floor(b.salesforceOpenPipeline)} in pipeline`)
   }
-  if (b.tradePortal > 0) parts.push(`${b.tradePortal} on trade portal`)
+  if (b.tradePortal > 0) parts.push(`${b.tradePortal} on portal`)
   return parts.join(" · ")
 }
 

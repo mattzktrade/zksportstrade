@@ -8,6 +8,7 @@ import type { LinkedInventoryPackage, LinkedInventoryShellPackage } from "@/lib/
 import type { AdminPackageRow, AdminRaceOption } from "@/lib/admin/queries"
 import type { LinkedDayPackageOverview } from "@/lib/admin/linked-day-package-overview"
 import { adminCatalogProductTitleFromPackage } from "@/lib/admin/catalog-product-title"
+import type { PackageDealSaleRow } from "@/lib/crm/deal-types"
 import type { AdminOrderListRow } from "@/lib/orders/queries"
 import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
 import type { FulfilmentBlockWithUsage } from "@/lib/admin/fulfilment-blocks"
@@ -20,7 +21,7 @@ import { PackageOrdersTable } from "@/components/admin/package-orders-table"
 const TABS: { id: AdminPackageTab; label: string }[] = [
   { id: "details", label: "Details" },
   { id: "inventory", label: "Inventory & cost" },
-  { id: "integrations", label: "Integrations" },
+  { id: "visibility", label: "Visibility" },
   { id: "orders", label: "Orders" },
 ]
 
@@ -33,6 +34,7 @@ export function PackageDetailClient({
   pkg,
   races,
   orders,
+  deals = [],
   wixListings = [],
   linkedPackages = [],
   linkedShellPackages = [],
@@ -44,6 +46,7 @@ export function PackageDetailClient({
   pkg: AdminPackageRow
   races: AdminRaceOption[]
   orders: AdminOrderListRow[]
+  deals?: PackageDealSaleRow[]
   wixListings?: WixChannelListingRow[]
   linkedPackages?: LinkedInventoryPackage[]
   linkedShellPackages?: LinkedInventoryShellPackage[]
@@ -89,6 +92,7 @@ export function PackageDetailClient({
   const raceMatch = races.find((r) => r.id === livePkg.race_id)
   const displayTitle = adminCatalogProductTitleFromPackage(livePkg, raceMatch)
   const sellable = sellableQty(livePkg)
+  const saleCount = orders.length + deals.length
 
   return (
     <div className="space-y-6 min-w-0">
@@ -104,7 +108,7 @@ export function PackageDetailClient({
         </div>
         <div className="flex flex-col items-end gap-1 text-sm shrink-0 text-right">
           <span className="text-muted-foreground">
-            {orders.length} order{orders.length === 1 ? "" : "s"}
+            {saleCount} order{saleCount === 1 ? "" : "s"}
           </span>
           {sellable != null ? (
             <span className="text-xs font-medium text-foreground">{sellable} sellable</span>
@@ -128,8 +132,8 @@ export function PackageDetailClient({
             )}
           >
             {t.label}
-            {t.id === "orders" && orders.length > 0 ? (
-              <span className="ml-1.5 text-xs tabular-nums text-muted-foreground">({orders.length})</span>
+            {t.id === "orders" && saleCount > 0 ? (
+              <span className="ml-1.5 text-xs tabular-nums text-muted-foreground">({saleCount})</span>
             ) : null}
             {t.id === "inventory" && sellable != null ? (
               <span className="ml-1.5 text-xs tabular-nums text-muted-foreground">({sellable})</span>
@@ -165,17 +169,19 @@ export function PackageDetailClient({
             fulfilmentBlocks={fulfilmentBlocks}
             onInventoryChanged={refreshInventory}
           />
-        ) : activeTab === "integrations" ? (
+        ) : activeTab === "visibility" ? (
           <PackageAdminPanel
             initial={livePkg}
             races={races}
             wixListings={liveWixListings}
             linkedPackages={liveLinkedPackages}
-            section="integrations"
+            section="visibility"
           />
         ) : (
           <PackageOrdersTable
             orders={orders}
+            deals={deals}
+            purchaseOrders={purchaseOrders}
             costLayers={(() => {
               const duration = livePkg.duration?.trim() ?? ""
               const isLinkedDay =

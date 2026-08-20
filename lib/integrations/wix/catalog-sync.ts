@@ -60,6 +60,7 @@ async function syncWixListingRow(input: {
   sellable: number
   retailUnitPrice: number | null
   currency: string
+  visible: boolean
 }): Promise<void> {
   const productId = input.listing.external_id.trim()
   if (!productId) throw new Error("Wix product id is missing on channel_listings row.")
@@ -69,19 +70,22 @@ async function syncWixListingRow(input: {
 
   await syncWixProductContent(productId, input.payload)
 
-  if (input.retailUnitPrice != null) {
-    const currency = input.currency.trim() || "USD"
-    await wixRequest("PATCH", `/stores/v1/products/${encodeURIComponent(productId)}`, {
-      body: {
-        product: {
+  const currency = input.currency.trim() || "USD"
+  await wixRequest("PATCH", `/stores/v1/products/${encodeURIComponent(productId)}`, {
+    body: {
+      product: {
+        visible: input.visible,
+        ...(input.retailUnitPrice != null
+          ? {
           priceData: {
             price: input.retailUnitPrice,
             currency,
           },
-        },
+            }
+          : {}),
       },
-    })
-  }
+    },
+  })
 
   const qty = Math.max(0, Math.floor(input.sellable))
 
@@ -117,13 +121,9 @@ export async function syncPackageCatalogToWix(packageId: string): Promise<WixCat
 
   const { data: pkg } = await admin
     .from("packages")
-    .select("sell_on_wix")
+    .select("sell_on_wix, is_hidden")
     .eq("id", packageId)
     .maybeSingle()
-
-  if (!pkg?.sell_on_wix) {
-    return { ok: true, updated: 0, skipped: ["sell_on_wix is false"], errors: [] }
-  }
 
   const listings = await getWixListings(packageId)
   if (listings.length === 0) {
@@ -162,6 +162,7 @@ export async function syncPackageCatalogToWix(packageId: string): Promise<WixCat
         sellable,
         retailUnitPrice: retailUnit,
         currency: payload.pricing.currency,
+        visible: Boolean(pkg?.sell_on_wix) && !pkg?.is_hidden,
       })
       await markListingSync(listing.id, null)
       updated++

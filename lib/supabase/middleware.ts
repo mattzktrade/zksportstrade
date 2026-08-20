@@ -38,7 +38,9 @@ export async function updateSession(request: NextRequest) {
   const isPublicApi =
     path.startsWith("/api/webhooks/") ||
     path.startsWith("/api/cron/") ||
-    path.startsWith("/api/integrations/")
+    path.startsWith("/api/integrations/") ||
+    path.startsWith("/api/booking-forms/")
+  const isPublicBookingSigner = path.startsWith("/sign/booking/")
 
   if (!user) {
     const isPublic =
@@ -46,6 +48,7 @@ export async function updateSession(request: NextRequest) {
       path === "/signup" ||
       path.startsWith("/auth/") ||
       isResetPasswordPage ||
+      isPublicBookingSigner ||
       isPublicApi
     if (isPublic) {
       return supabaseResponse
@@ -74,12 +77,14 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  const isApproved = profile?.approval_status === "approved" || profile?.role === "admin"
+  const isCmsStaff =
+    profile?.role === "admin" || profile?.role === "finance" || profile?.role === "sales"
+  const isApproved = profile?.approval_status === "approved" || isCmsStaff
   const isPending = profile?.approval_status === "pending"
   const isRejected = profile?.approval_status === "rejected"
   const isAdminRoute = path.startsWith("/admin")
 
-  if (isAdminRoute && profile?.role !== "admin") {
+  if (isAdminRoute && !isCmsStaff) {
     const url = request.nextUrl.clone()
     url.pathname = "/"
     return NextResponse.redirect(url)

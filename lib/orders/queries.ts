@@ -202,72 +202,95 @@ type RawAdminOrder = OrderRow & {
 }
 
 export async function getOrdersForPackage(packageId: string): Promise<AdminOrderListRow[]> {
-  const all = await getAllOrdersForAdmin()
-  return all.filter((o) => o.package_id === packageId)
+  return getOrdersForPackages([packageId])
 }
 
-export async function getAllOrdersForAdmin(): Promise<AdminOrderListRow[]> {
+export async function getOrdersForPackages(packageIds: readonly string[]): Promise<AdminOrderListRow[]> {
   noStore()
+  const ids = [...new Set(packageIds.map((id) => id.trim()).filter(Boolean))]
+  if (!ids.length) return []
   const supabase = await createClient()
-  const { data, error } = await supabase
-    .from("orders")
-    .select(
-      `
-      id,
-      reference,
-      agent_profile_id,
-      package_id,
-      status,
-      guests,
-      unit_price,
-      total_amount,
-      currency,
-      client_name,
-      client_email,
-      client_phone,
-      client_nationality,
-      dietary_requirements,
-      special_requests,
-      po_number,
-      shipping_address_line1,
-      shipping_address_line2,
-      shipping_city,
-      shipping_postcode,
-      shipping_country,
-      billing_address_line1,
-      billing_address_line2,
-      billing_city,
-      billing_postcode,
-      billing_country,
-      created_at,
-      packages (
-        name,
-        circuit,
-        event_date,
-        tier,
-        duration,
-        total_capacity
-      ),
-      profiles (
-        full_name,
-        company_name,
-        email
-      ),
-      invoices (
-        id,
-        reference,
-        status,
-        xero_invoice_number
-      )
-    `,
-    )
-    .neq("channel", "wix")
-    .order("created_at", { ascending: false })
-    .limit(5000)
+  const [{ data: headerRows }, { data: lineRows }] = await Promise.all([
+    supabase.from("orders").select("id").in("package_id", ids),
+    supabase.from("order_line_items").select("order_id").in("package_id", ids),
+  ])
+  const orderIds = [
+    ...new Set(
+      [
+        ...(headerRows ?? []).map((row) => String(row.id)),
+        ...(lineRows ?? []).map((row) => String(row.order_id ?? "")),
+      ].filter(Boolean),
+    ),
+  ]
+  if (orderIds.length === 0) return []
+  return hydrateAdminOrders(await fetchAdminOrderRows(orderIds))
+}
 
+const ADMIN_ORDER_SELECT = `
+  id,
+  reference,
+  agent_profile_id,
+  package_id,
+  status,
+  guests,
+  unit_price,
+  total_amount,
+  currency,
+  client_name,
+  client_email,
+  client_phone,
+  client_nationality,
+  dietary_requirements,
+  special_requests,
+  po_number,
+  shipping_address_line1,
+  shipping_address_line2,
+  shipping_city,
+  shipping_postcode,
+  shipping_country,
+  billing_address_line1,
+  billing_address_line2,
+  billing_city,
+  billing_postcode,
+  billing_country,
+  created_at,
+  packages (
+    name,
+    circuit,
+    event_date,
+    tier,
+    duration,
+    total_capacity
+  ),
+  profiles (
+    full_name,
+    company_name,
+    email
+  ),
+  invoices (
+    id,
+    reference,
+    status,
+    xero_invoice_number
+  )
+` as const
+
+async function fetchAdminOrderRows(orderIds?: string[]): Promise<RawAdminOrder[]> {
+  const supabase = await createClient()
+  let query = supabase.from("orders").select(ADMIN_ORDER_SELECT).order("created_at", { ascending: false })
+  if (orderIds) {
+    if (orderIds.length === 0) return []
+    query = query.in("id", orderIds)
+  } else {
+    query = query.neq("channel", "wix").limit(5000)
+  }
+  const { data, error } = await query
   if (error || !data) return []
+  return data as RawAdminOrder[]
+}
 
-  const rows = data as RawAdminOrder[]
+async function hydrateAdminOrders(rows: RawAdminOrder[]): Promise<AdminOrderListRow[]> {
+  const supabase = await createClient()
   const orderIds = rows.map((r) => r.id)
   const consumptionsByOrder = await getConsumptionsForOrders(orderIds)
   const { data: deliveryProofRows } =
@@ -324,4 +347,9 @@ export async function getAllOrdersForAdmin(): Promise<AdminOrderListRow[]> {
       profit,
     }
   })
+}
+
+export async function getAllOrdersForAdmin(): Promise<AdminOrderListRow[]> {
+  noStore()
+  return hydrateAdminOrders(await fetchAdminOrderRows())
 }

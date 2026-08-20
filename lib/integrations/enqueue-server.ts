@@ -3,6 +3,8 @@ import { packageIdsForInventoryChannelSync } from "@/lib/integrations/inventory-
 import { drainOutboxNow, scheduleOutboxDrain } from "@/lib/integrations/schedule-drain"
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { OrderChannel } from "@/lib/integrations/types"
+import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
+import { attachDealForCommittedOrder } from "@/lib/crm/attach-portal-deal"
 
 type OutboxRowInput = {
   event_type: string
@@ -169,6 +171,18 @@ export async function enqueueOrderPlacedServer(
     return { ok: false, message: "SUPABASE_SERVICE_ROLE_KEY is not configured; order sync was not queued." }
   }
 
+  if (isNativePlatformMode()) {
+    const { error } = await admin
+      .from("orders")
+      .update({
+        channel,
+        salesforce_sync_status: "skipped",
+        salesforce_sync_error: null,
+      })
+      .eq("id", id)
+    return error ? { ok: false, message: error.message } : { ok: true }
+  }
+
   await admin
     .from("orders")
     .update({ channel, salesforce_sync_status: "pending", salesforce_sync_error: null })
@@ -208,6 +222,38 @@ export async function enqueueInvoiceCreateServer(
   return { ok: true }
 }
 
+export async function enqueueInvoiceReplaceServer(
+  orderId: string,
+  replaceKey: string,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const id = orderId.trim()
+  const key = replaceKey.trim()
+  if (!id) return { ok: false, message: "Order id is missing." }
+  if (!key) return { ok: false, message: "Replace key is missing." }
+
+  const admin = createAdminClient()
+  if (!admin) {
+    return { ok: false, message: "SUPABASE_SERVICE_ROLE_KEY is not configured; Xero sync was not queued." }
+  }
+
+  await admin
+    .from("invoices")
+    .update({ xero_sync_status: "pending", xero_sync_error: null })
+    .eq("order_id", id)
+
+  const enq = await enqueueOutboxOnce({
+    event_type: "invoice.create",
+    idempotency_key: `invoice.replace:${id}:${key}`,
+    payload: {
+      order_id: id,
+      replace_key: key,
+      triggered_at: new Date().toISOString(),
+    },
+  })
+  if (!enq.ok) return enq
+  return { ok: true }
+}
+
 export async function enqueueOpportunityOutcomeServer(
   orderId: string,
   outcome: "won" | "lost",
@@ -217,6 +263,21 @@ export async function enqueueOpportunityOutcomeServer(
 
   const admin = createAdminClient()
   if (!admin) return { ok: false, message: "Service role not configured." }
+
+  if (isNativePlatformMode()) {
+    const { error } = await admin
+      .from("orders")
+      .update({
+        salesforce_sync_status: "skipped",
+        salesforce_sync_error: null,
+      })
+      .eq("id", id)
+    if (error) return { ok: false, message: error.message }
+
+    const packageId = await enqueuePackageInventorySyncForOrder(id)
+    scheduleOutboxDrain({ orderId: id, packageId: packageId ?? undefined, maxRounds: 15 })
+    return { ok: true }
+  }
 
   const { error } = await admin.from("integration_outbox").upsert(
     {
@@ -246,6 +307,10 @@ export async function enqueueOrderIntegrationsServer(
   options?: { background?: boolean },
 ): Promise<{ ok: true; warnings: string[] } | { ok: false; message: string }> {
   const warnings: string[] = []
+  if (channel !== "wix") {
+    const attached = await attachDealForCommittedOrder(orderId)
+    if (!attached.ok) warnings.push(`Deal link: ${attached.message}`)
+  }
   const sf = await enqueueOrderPlacedServer(orderId, channel)
   if (!sf.ok) warnings.push(`Salesforce: ${sf.message}`)
 

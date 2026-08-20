@@ -1,10 +1,15 @@
 import { unstable_noStore as noStore } from "next/cache"
+import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { createClient } from "@/lib/supabase/server"
+import { linkPurchaseOrderSupplier } from "@/lib/inventory/suppliers"
 
 export type PurchaseOrderRow = {
   id: string
   po_number: string
   supplier: string
+  supplier_id: string | null
+  /** CRM company linked through suppliers.crm_account_id. Null until an admin picks a company. */
+  supplier_account_id: string | null
   issued_at: string | null
   note: string | null
   created_at: string
@@ -22,12 +27,33 @@ export type PurchaseOrderDocumentRow = {
   uploaded_at: string
 }
 
+export type PurchaseOrderStockLine = {
+  packageId: string
+  packageName: string
+  raceId: string | null
+  eventName: string
+  quantityPurchased: number
+  quantityRemaining: number
+}
+
 export type PurchaseOrderUsage = {
   purchase_order_id: string
   layer_count: number
   quantity_purchased: number
   quantity_remaining: number
   package_ids: string[]
+  lines: PurchaseOrderStockLine[]
+}
+
+function emptyUsage(purchaseOrderId: string): PurchaseOrderUsage {
+  return {
+    purchase_order_id: purchaseOrderId,
+    layer_count: 0,
+    quantity_purchased: 0,
+    quantity_remaining: 0,
+    package_ids: [],
+    lines: [],
+  }
 }
 
 export type PurchaseOrderWithMeta = PurchaseOrderRow & {
@@ -35,8 +61,53 @@ export type PurchaseOrderWithMeta = PurchaseOrderRow & {
   usage: PurchaseOrderUsage
 }
 
+export function generatePurchaseOrderNumber(): string {
+  const d = new Date().toISOString().slice(0, 10).replace(/-/g, "")
+  return `PO-${d}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`
+}
+
+export { purchaseOrderAdminHref } from "@/lib/admin/purchase-order-link"
+
+function issuedDateFromReceivedAt(receivedAt: string | null | undefined): string | null {
+  if (!receivedAt) return null
+  const s = String(receivedAt).trim()
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toISOString().slice(0, 10)
+}
+
 const PO_COLUMNS =
-  "id, po_number, supplier, issued_at, note, created_at, updated_at" as const
+  "id, po_number, supplier, supplier_id, issued_at, note, created_at, updated_at, suppliers(crm_account_id)" as const
+
+function one<T>(value: T | T[] | null | undefined): T | null {
+  if (value == null) return null
+  return Array.isArray(value) ? (value[0] ?? null) : value
+}
+
+function mapPurchaseOrderRow(row: {
+  id: string
+  po_number: string
+  supplier: string
+  supplier_id: string | null
+  issued_at: string | null
+  note: string | null
+  created_at: string
+  updated_at: string
+  suppliers?: { crm_account_id: string | null } | { crm_account_id: string | null }[] | null
+}): PurchaseOrderRow {
+  return {
+    id: row.id,
+    po_number: row.po_number,
+    supplier: row.supplier,
+    supplier_id: row.supplier_id,
+    supplier_account_id: one(row.suppliers)?.crm_account_id ?? null,
+    issued_at: normaliseIssuedAt(row.issued_at),
+    note: row.note,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  }
+}
 
 const PO_DOC_COLUMNS =
   "id, purchase_order_id, file_bucket, file_path, file_name, file_content_type, file_size, uploaded_at" as const
@@ -55,11 +126,15 @@ export async function getPurchaseOrders(): Promise<PurchaseOrderRow[]> {
     .select(PO_COLUMNS)
     .order("issued_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
-  if (error || !data) return []
-  return data.map((row) => ({
-    ...(row as PurchaseOrderRow),
-    issued_at: normaliseIssuedAt((row as PurchaseOrderRow).issued_at),
-  }))
+  if (!error && data) return data.map((row) => mapPurchaseOrderRow(row))
+
+  const fallback = await supabase
+    .from("purchase_orders")
+    .select("id, po_number, supplier, supplier_id, issued_at, note, created_at, updated_at")
+    .order("issued_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+  if (fallback.error || !fallback.data) return []
+  return fallback.data.map((row) => mapPurchaseOrderRow({ ...row, suppliers: null }))
 }
 
 export async function getPurchaseOrderById(id: string): Promise<PurchaseOrderRow | null> {
@@ -71,7 +146,7 @@ export async function getPurchaseOrderById(id: string): Promise<PurchaseOrderRow
     .eq("id", id)
     .maybeSingle()
   if (error || !data) return null
-  return { ...(data as PurchaseOrderRow), issued_at: normaliseIssuedAt((data as PurchaseOrderRow).issued_at) }
+  return mapPurchaseOrderRow(data)
 }
 
 export async function getPurchaseOrderDocuments(
@@ -106,6 +181,8 @@ export async function getPurchaseOrderUsage(
     .select("id, package_id, purchase_order_id, quantity, quantity_remaining")
     .in("purchase_order_id", purchaseOrderIds)
   if (error || !data) return out
+
+  const qtyByPoPackage = new Map<string, Map<string, { purchased: number; remaining: number }>>()
   for (const raw of data) {
     const row = raw as {
       id: string
@@ -115,22 +192,74 @@ export async function getPurchaseOrderUsage(
       quantity_remaining: number | string
     }
     const poId = row.purchase_order_id
-    const entry =
-      out.get(poId) ?? {
-        purchase_order_id: poId,
-        layer_count: 0,
-        quantity_purchased: 0,
-        quantity_remaining: 0,
-        package_ids: [],
-      }
+    const entry = out.get(poId) ?? emptyUsage(poId)
+    const purchased = Math.max(0, Math.floor(Number(row.quantity) || 0))
+    const remaining = Math.max(0, Math.floor(Number(row.quantity_remaining) || 0))
     entry.layer_count += 1
-    entry.quantity_purchased += Math.max(0, Math.floor(Number(row.quantity) || 0))
-    entry.quantity_remaining += Math.max(0, Math.floor(Number(row.quantity_remaining) || 0))
+    entry.quantity_purchased += purchased
+    entry.quantity_remaining += remaining
     if (!entry.package_ids.includes(row.package_id)) {
       entry.package_ids.push(row.package_id)
     }
     out.set(poId, entry)
+
+    const byPackage = qtyByPoPackage.get(poId) ?? new Map()
+    const pkg = byPackage.get(row.package_id) ?? { purchased: 0, remaining: 0 }
+    pkg.purchased += purchased
+    pkg.remaining += remaining
+    byPackage.set(row.package_id, pkg)
+    qtyByPoPackage.set(poId, byPackage)
   }
+
+  const packageIds = [...new Set(data.map((row) => String((row as { package_id: string }).package_id)))]
+  if (packageIds.length === 0) return out
+
+  const { data: packages } = await supabase.from("packages").select("id, name, race_id").in("id", packageIds)
+  const packageById = new Map(
+    (packages ?? []).map((pkg) => [
+      String((pkg as { id: string }).id),
+      pkg as { id: string; name: string; race_id: string | null },
+    ]),
+  )
+  const raceIds = [
+    ...new Set(
+      [...packageById.values()]
+        .map((pkg) => pkg.race_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ]
+  const raceNameById = new Map<string, string>()
+  if (raceIds.length > 0) {
+    const { data: races } = await supabase.from("races").select("id, name, season").in("id", raceIds)
+    for (const race of races ?? []) {
+      const row = race as { id: string; name: string; season: number | null }
+      raceNameById.set(row.id, eventSeasonLabel(row.name, row.season))
+    }
+  }
+
+  for (const [poId, byPackage] of qtyByPoPackage) {
+    const entry = out.get(poId)
+    if (!entry) continue
+    entry.lines = [...byPackage.entries()]
+      .map(([packageId, qty]) => {
+        const pkg = packageById.get(packageId)
+        const eventName = pkg?.race_id ? (raceNameById.get(pkg.race_id) ?? "Unknown event") : "Unknown event"
+        return {
+          packageId,
+          packageName: pkg?.name?.trim() || "Unknown product",
+          raceId: pkg?.race_id ?? null,
+          eventName,
+          quantityPurchased: qty.purchased,
+          quantityRemaining: qty.remaining,
+        }
+      })
+      .sort((a, b) => {
+        const eventCmp = a.eventName.localeCompare(b.eventName, undefined, { sensitivity: "base" })
+        if (eventCmp !== 0) return eventCmp
+        return a.packageName.localeCompare(b.packageName, undefined, { sensitivity: "base" })
+      })
+  }
+
   return out
 }
 
@@ -145,13 +274,55 @@ export async function getPurchaseOrdersWithMeta(): Promise<PurchaseOrderWithMeta
   return orders.map((o) => ({
     ...o,
     documents: docs.get(o.id) ?? [],
-    usage:
-      usage.get(o.id) ?? {
-        purchase_order_id: o.id,
-        layer_count: 0,
-        quantity_purchased: 0,
-        quantity_remaining: 0,
-        package_ids: [],
-      },
+    usage: usage.get(o.id) ?? emptyUsage(o.id),
   }))
+}
+
+/** Create and link a purchase order for every cost layer on this package that is missing one. */
+export async function ensurePurchaseOrdersForPackageLayers(packageId: string): Promise<number> {
+  const id = packageId.trim()
+  if (!id) return 0
+  const supabase = await createClient()
+  const { data: layers, error } = await supabase
+    .from("package_cost_layers")
+    .select("id, source, note, received_at, purchase_order_id")
+    .eq("package_id", id)
+    .is("purchase_order_id", null)
+  if (error || !layers || layers.length === 0) return 0
+
+  let created = 0
+  for (const layer of layers) {
+    const supplier = (String(layer.source ?? "").trim() || "Unknown supplier").slice(0, 200)
+    const poNumber = generatePurchaseOrderNumber()
+    const note = String(layer.note ?? "").trim().slice(0, 5000) || "Auto-created from stock purchase"
+    const { data: poId, error: createErr } = await supabase.rpc("admin_create_purchase_order", {
+      p_po_number: poNumber,
+      p_supplier: supplier,
+      p_issued_at: issuedDateFromReceivedAt(layer.received_at as string | null),
+      p_note: note,
+    })
+    if (createErr || !poId) {
+      console.warn(
+        "[purchase-order] auto-create for layer failed:",
+        createErr?.message ?? "missing id",
+      )
+      continue
+    }
+    const resolvedId = String(poId)
+    const { error: linkErr } = await supabase.rpc("admin_set_cost_layer_purchase_order", {
+      p_layer_id: layer.id,
+      p_purchase_order_id: resolvedId,
+      p_clear: false,
+    })
+    if (linkErr) {
+      console.warn("[purchase-order] link layer failed:", linkErr.message)
+      continue
+    }
+    const linked = await linkPurchaseOrderSupplier(supabase, resolvedId, supplier)
+    if (!linked.ok) {
+      console.warn("[purchase-order] supplier link failed:", linked.message)
+    }
+    created += 1
+  }
+  return created
 }

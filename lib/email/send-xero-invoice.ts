@@ -58,7 +58,6 @@ function buildHtml(p: XeroInvoiceEmailPayload): string {
     `<p>Hi ${escapeHtml(p.agentName)},</p>`,
     `<p>Please find your invoice <strong>${invLabel}</strong> attached for booking <strong>${escapeHtml(p.orderReference)}</strong>.</p>`,
     `<p><strong>${escapeHtml(p.packageName)}</strong><br/>`,
-    `Client: ${escapeHtml(p.clientName)}<br/>`,
     `Guests: ${p.guests}<br/>`,
     `Amount due: ${escapeHtml(formatMoney(p.totalAmount, p.currency))}<br/>`,
     `Due date: ${escapeHtml(p.dueDate)}</p>`,

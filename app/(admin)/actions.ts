@@ -11,13 +11,23 @@ import { ensureShellSingleTicketsForParent } from "@/lib/catalog/ensure-shell-si
 import { generatePackageIdFromRaceAndName } from "@/lib/catalog/generate-package-id"
 import { isPaddockClubPackageName } from "@/lib/catalog/paddock-club"
 import { inferPackageDurationFromName, isValidPackageDuration } from "@/lib/catalog/package-duration"
+import { isEventCategory, type EventCategory } from "@/lib/catalog/event-categories"
 import { sendBookingApprovalRejectedEmail } from "@/lib/email/send-booking-approval-rejected"
 import { executeBookingApproval } from "@/lib/booking-approval/execute-approval"
 import { mapPlaceOrderError } from "@/lib/orders/place-order-errors"
 import { getPortalProfile } from "@/lib/supabase/profile"
+import { hasCmsPermission, isCmsStaff, type CmsPermission } from "@/lib/auth/permissions"
 import { isInvoiceWorkflowStatus, normalizeInvoiceStatus, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
 import { enqueuePackageInventoryChannelSync, enqueueProductUpsert } from "@/lib/integrations/enqueue"
 import { repairLinkedGroupInventory } from "@/lib/inventory/repair-linked-group"
+import { recordPurchaseLedgerForLatestLayer } from "@/lib/inventory/ledger"
+import {
+  ensureSupplierForAccount,
+  linkPurchaseOrderToAccount,
+} from "@/lib/inventory/suppliers"
+import { getCrmCompanyOptions } from "@/lib/crm/deals"
+import { generatePurchaseOrderNumber } from "@/lib/admin/purchase-orders"
+import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
 import { enqueueOpportunityOutcomeServer, enqueueOrderIntegrationsServer } from "@/lib/integrations/enqueue-server"
 import { drainOutboxNow } from "@/lib/integrations/schedule-drain"
 import { processIntegrationOutbox } from "@/lib/integrations/process-outbox"
@@ -179,13 +189,18 @@ async function reconcileInventoryAfterCostLayerChange(
   }
 }
 
-export async function requireAdminAction(): Promise<
+export async function requireAdminAction(
+  permission: CmsPermission = "cms.access",
+): Promise<
   | { ok: true; supabase: Awaited<ReturnType<typeof createClient>>; profile: NonNullable<Awaited<ReturnType<typeof getPortalProfile>>> }
   | { ok: false; message: string }
 > {
   const profile = await getPortalProfile()
   if (!profile) return { ok: false, message: "Not signed in." }
-  if (profile.role !== "admin") return { ok: false, message: "Admin access required." }
+  if (!isCmsStaff(profile)) return { ok: false, message: "CMS access required." }
+  if (!hasCmsPermission(profile, permission)) {
+    return { ok: false, message: "You do not have permission for this action." }
+  }
   const supabase = await createClient()
   return { ok: true, supabase, profile }
 }
@@ -569,6 +584,7 @@ export async function updatePackageIntegration(input: {
   sell_on_trade_portal: boolean
   sell_on_wix: boolean
   sell_on_partners: boolean
+  is_hidden?: boolean
   enqueue_sync?: boolean
 }): Promise<ActionResult> {
   const gate = await requireAdminAction()
@@ -616,6 +632,7 @@ export async function updatePackageIntegration(input: {
       sell_on_trade_portal: input.sell_on_trade_portal,
       sell_on_wix: input.sell_on_wix,
       sell_on_partners: input.sell_on_partners,
+      ...(input.is_hidden == null ? {} : { is_hidden: input.is_hidden }),
       ...(identityChanged
         ? {
             integration_sync_status: input.enqueue_sync === false ? "idle" : "pending",
@@ -972,7 +989,7 @@ export async function syncWixPackageNow(packageId: string): Promise<ActionResult
 }
 
 export async function setPackageHidden(packageId: string, isHidden: boolean): Promise<ActionResult> {
-  const gate = await requireAdminAction()
+  const gate = await requireAdminAction("inventory.archive")
   if (!gate.ok) return gate
   const { supabase } = gate
 
@@ -993,6 +1010,7 @@ export async function setPackageHidden(packageId: string, isHidden: boolean): Pr
 function revalidatePackagePaths(...raceIds: string[]) {
   revalidatePath("/admin/catalog")
   revalidatePath("/admin/inventory")
+  revalidatePath("/admin/inventory/sales-list")
   revalidatePath("/packages")
   revalidatePath("/")
   for (const rid of raceIds) {
@@ -1043,15 +1061,21 @@ export async function createPackage(input: {
   initial_unit_cost: number | null
   initial_cost_note: string | null
   initial_source?: string | null
+  /** CRM account to record as the stock source / supplier (creates a PO when initial qty > 0). */
+  initial_supplier_account_id?: string | null
 }): Promise<ActionResult> {
-  const gate = await requireAdminAction()
+  const gate = await requireAdminAction("inventory.manage")
   if (!gate.ok) return gate
   const { supabase } = gate
 
   const raceId = input.race_id.trim()
-  const { data: race, error: rErr } = await supabase.from("races").select("id").eq("id", raceId).maybeSingle()
+  const { data: race, error: rErr } = await supabase
+    .from("races")
+    .select("id, category")
+    .eq("id", raceId)
+    .maybeSingle()
   if (rErr) return { ok: false, message: rErr.message }
-  if (!race) return { ok: false, message: "Race not found." }
+  if (!race) return { ok: false, message: "Event not found." }
 
   const manualId = input.id?.trim().toLowerCase().replace(/\s+/g, "-") ?? ""
   let id = manualId || generatePackageIdFromRaceAndName(raceId, input.name.trim())
@@ -1073,10 +1097,11 @@ export async function createPackage(input: {
 
   const durationInput = (input.duration ?? "").trim()
   const duration = durationInput || inferPackageDurationFromName(input.name.trim()) || ""
-  if (!duration) {
+  const isFormula1 = String((race as { category?: string }).category ?? "formula_1") === "formula_1"
+  if (isFormula1 && !duration) {
     return { ok: false, message: "Duration is required. Choose 3 day, 2 day, or a single-day option." }
   }
-  if (!isValidPackageDuration(duration)) {
+  if (duration && !isValidPackageDuration(duration)) {
     return { ok: false, message: "Invalid package duration." }
   }
   const cap = Math.floor(Number(input.total_capacity))
@@ -1256,6 +1281,21 @@ export async function createPackage(input: {
     const note = unitCost != null
       ? (input.initial_cost_note?.trim() || "Initial stock")
       : "Initial stock — buy price not yet recorded"
+    const supplierAccountId = input.initial_supplier_account_id?.trim() || ""
+    if (!supplierAccountId) {
+      await supabase.from("package_inventory").delete().eq("package_id", id)
+      await supabase.from("packages").delete().eq("id", id)
+      return { ok: false, message: "Select a company as the source." }
+    }
+    const resolved = await resolveOrCreatePurchaseOrderId(supabase, {
+      supplierAccountId,
+      note,
+    })
+    if (!resolved.ok) {
+      await supabase.from("package_inventory").delete().eq("package_id", id)
+      await supabase.from("packages").delete().eq("id", id)
+      return resolved
+    }
     const { error: layerErr } = await supabase.rpc("admin_add_cost_layer", {
       p_package_id: id,
       p_quantity: qty,
@@ -1263,22 +1303,52 @@ export async function createPackage(input: {
       p_currency: input.currency.trim() || "USD",
       p_note: note,
       p_received_at: null,
-      p_source: input.initial_source?.trim() || null,
+      p_source: null,
+      p_purchase_order_id: resolved.id,
     })
     if (layerErr) {
       await supabase.from("package_inventory").delete().eq("package_id", id)
       await supabase.from("packages").delete().eq("id", id)
       return { ok: false, message: layerErr.message }
     }
+    try {
+      const { data: po } = await supabase
+        .from("purchase_orders")
+        .select("supplier_id")
+        .eq("id", resolved.id)
+        .maybeSingle()
+      await recordPurchaseLedgerForLatestLayer(supabase, id, qty, {
+        purchaseOrderId: resolved.id,
+        supplierId: (po as { supplier_id?: string | null } | null)?.supplier_id ?? null,
+        reason: "Initial stock with purchase order",
+      })
+    } catch (e) {
+      console.warn(
+        "[createPackage] ledger append skipped:",
+        e instanceof Error ? e.message : e,
+      )
+    }
+    revalidatePath("/admin/purchase-orders")
   }
 
-  // 3-day parents need three Single Ticket children in Salesforce so opportunity lines
-  // break out each race day. We provision those children as hidden portal shells now; the
-  // parent's own sync (below) is responsible for syncing them to Salesforce and linking them
-  // as Package Item children — see `syncPackageToSalesforce` for the recursive step.
-  // Use the service-role client so shell inserts always persist trade_price = 0 (and related
-  // fields) even if the admin session client omits defaults under RLS.
-  if (duration === "3_day") {
+  // Native mode: shared physical pool + day consumption instead of Salesforce shells.
+  if (isNativePlatformMode() && inventoryGroupId) {
+    try {
+      await supabase.rpc("admin_ensure_inventory_pool_for_group", {
+        p_inventory_group_id: inventoryGroupId,
+      })
+      await supabase.rpc("seed_package_day_consumption", { p_package_id: id })
+    } catch (e) {
+      console.warn(
+        "[createPackage] Native inventory pool was not ensured:",
+        e instanceof Error ? e.message : e,
+      )
+    }
+  }
+
+  // Legacy mode only: 3-day parents need three Single Ticket children in Salesforce.
+  // Native mode leaves existing shells untouched and creates no new ones.
+  if (!isNativePlatformMode() && duration === "3_day") {
     try {
       const admin = createAdminClient()
       await ensureShellSingleTicketsForParent(admin ?? supabase, id)
@@ -1725,8 +1795,7 @@ export async function importPackageStockSourcesFromSalesforce(
 }
 
 function autoPurchaseOrderNumber(): string {
-  const d = new Date().toISOString().slice(0, 10).replace(/-/g, "")
-  return `PO-${d}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`
+  return generatePurchaseOrderNumber()
 }
 
 function cleanPurchaseOrderFileName(name: string): string {
@@ -1742,15 +1811,15 @@ function cleanPurchaseOrderFileName(name: string): string {
 async function resolveOrCreatePurchaseOrderId(
   supabase: Awaited<ReturnType<typeof createClient>>,
   input: {
-    supplier: string
+    supplierAccountId: string
     poNumber?: string | null
     issuedAt?: string | null
     note?: string | null
   },
 ): Promise<{ ok: true; id: string; linkedExisting: boolean } | { ok: false; message: string }> {
-  const supplier = input.supplier.trim()
-  if (!supplier) return { ok: false, message: "Supplier is required." }
-  if (supplier.length > 200) return { ok: false, message: "Supplier must be 200 characters or fewer." }
+  const ensured = await ensureSupplierForAccount(supabase, input.supplierAccountId)
+  if (!ensured.ok) return ensured
+  const supplier = ensured.name
 
   const poNumber = (input.poNumber?.trim() || autoPurchaseOrderNumber()).slice(0, 200)
 
@@ -1772,6 +1841,8 @@ async function resolveOrCreatePurchaseOrderId(
     .maybeSingle()
   if (findErr) return { ok: false, message: findErr.message }
   if (existing?.id) {
+    const linked = await linkPurchaseOrderToAccount(supabase, String(existing.id), input.supplierAccountId)
+    if (!linked.ok) return linked
     return { ok: true, id: String(existing.id), linkedExisting: true }
   }
 
@@ -1788,7 +1859,11 @@ async function resolveOrCreatePurchaseOrderId(
     }
     return { ok: false, message: error.message }
   }
-  return { ok: true, id: String(data), linkedExisting: false }
+
+  const poId = String(data)
+  const linked = await linkPurchaseOrderToAccount(supabase, poId, input.supplierAccountId)
+  if (!linked.ok) return linked
+  return { ok: true, id: poId, linkedExisting: false }
 }
 
 async function uploadPurchaseOrderDocumentFromFile(
@@ -1845,8 +1920,8 @@ export async function addStockPurchaseLayer(formData: FormData): Promise<ActionR
   const packageId = String(formData.get("packageId") ?? "").trim()
   if (!packageId) return { ok: false, message: "Package id is missing." }
 
-  const supplier = String(formData.get("supplier") ?? "").trim()
-  if (!supplier) return { ok: false, message: "Supplier is required." }
+  const supplierAccountId = String(formData.get("supplierAccountId") ?? "").trim()
+  if (!supplierAccountId) return { ok: false, message: "Select a company as the supplier." }
 
   const q = Math.floor(Number(formData.get("quantity")))
   if (!Number.isFinite(q) || q <= 0) {
@@ -1877,7 +1952,7 @@ export async function addStockPurchaseLayer(formData: FormData): Promise<ActionR
 
   const { supabase } = gate
   const resolved = await resolveOrCreatePurchaseOrderId(supabase, {
-    supplier,
+    supplierAccountId,
     poNumber: poNumberRaw || null,
     issuedAt: poIssuedAt,
     note,
@@ -1925,6 +2000,24 @@ export async function addStockPurchaseLayer(formData: FormData): Promise<ActionR
   })
   if (bfErr) return { ok: false, message: bfErr.message }
   await reconcileInventoryAfterCostLayerChange(supabase, packageId)
+
+  try {
+    const { data: po } = await supabase
+      .from("purchase_orders")
+      .select("supplier_id")
+      .eq("id", resolved.id)
+      .maybeSingle()
+    await recordPurchaseLedgerForLatestLayer(supabase, packageId, q, {
+      purchaseOrderId: resolved.id,
+      supplierId: (po as { supplier_id?: string | null } | null)?.supplier_id ?? null,
+      reason: "Stock purchase with purchase order",
+    })
+  } catch (e) {
+    console.warn(
+      "[addStockPurchaseLayer] ledger append skipped:",
+      e instanceof Error ? e.message : e,
+    )
+  }
 
   return {
     ok: true,
@@ -1996,6 +2089,16 @@ export async function addCostLayer(input: {
     }
     return { ok: false, message: error.message }
   }
+
+  try {
+    await recordPurchaseLedgerForLatestLayer(supabase, input.packageId, q, {
+      purchaseOrderId,
+      reason: "Stock purchase cost layer",
+    })
+  } catch (e) {
+    console.warn("[addCostLayer] ledger append skipped:", e instanceof Error ? e.message : e)
+  }
+
   revalidateAdminProfitPaths(input.packageId)
   revalidatePath("/admin/inventory")
   revalidatePath("/admin/purchase-orders")
@@ -2022,8 +2125,8 @@ export async function updateCostLayer(input: {
   purchaseOrderId?: string | null
   /** null = clear, undefined = leave unchanged, string = set. */
   fulfilmentBlockId?: string | null
-  /** Create or update the linked purchase order (supplier always required when set). */
-  purchaseOrderSupplier?: string | null
+  /** Create or update the linked purchase order (company always required when set). */
+  purchaseOrderSupplierAccountId?: string | null
   purchaseOrderNumber?: string | null
   purchaseOrderIssuedAt?: string | null
 }): Promise<ActionResult> {
@@ -2061,15 +2164,18 @@ export async function updateCostLayer(input: {
   if (error) return { ok: false, message: error.message }
 
   const purchaseFieldsProvided =
-    input.purchaseOrderSupplier !== undefined ||
+    input.purchaseOrderSupplierAccountId !== undefined ||
     input.purchaseOrderNumber !== undefined ||
     input.purchaseOrderIssuedAt !== undefined
 
   if (purchaseFieldsProvided) {
-    const supplier = input.purchaseOrderSupplier?.trim() ?? ""
-    if (!supplier) {
-      return { ok: false, message: "Supplier is required for the purchase order." }
+    const supplierAccountId = input.purchaseOrderSupplierAccountId?.trim() ?? ""
+    if (!supplierAccountId) {
+      return { ok: false, message: "Select a company as the supplier." }
     }
+
+    const ensured = await ensureSupplierForAccount(supabase, supplierAccountId)
+    if (!ensured.ok) return ensured
 
     const { data: layerRow, error: layerErr } = await supabase
       .from("package_cost_layers")
@@ -2084,15 +2190,17 @@ export async function updateCostLayer(input: {
       const { error: poUpdErr } = await supabase.rpc("admin_update_purchase_order", {
         p_id: existingPoId,
         p_po_number: input.purchaseOrderNumber?.trim() || null,
-        p_supplier: supplier,
+        p_supplier: ensured.name,
         p_issued_at: input.purchaseOrderIssuedAt?.trim() || null,
         p_note: null,
         p_clear_issued_at: !input.purchaseOrderIssuedAt?.trim(),
       })
       if (poUpdErr) return { ok: false, message: poUpdErr.message }
+      const linked = await linkPurchaseOrderToAccount(supabase, existingPoId, supplierAccountId)
+      if (!linked.ok) return linked
     } else {
       const resolved = await resolveOrCreatePurchaseOrderId(supabase, {
-        supplier,
+        supplierAccountId,
         poNumber: input.purchaseOrderNumber?.trim() || null,
         issuedAt: input.purchaseOrderIssuedAt?.trim() || null,
       })
@@ -2244,7 +2352,7 @@ export async function updateOrphanPackageStock(input: {
   quantity: number
   /** When set with unitCost, creates a cost layer for this stock (replacing the orphan). */
   convertToPurchase?: {
-    supplier: string
+    supplierAccountId: string
     unitCost: number
     note?: string | null
     poNumber?: string | null
@@ -2296,8 +2404,8 @@ export async function updateOrphanPackageStock(input: {
 
   const convert = input.convertToPurchase
   if (convert) {
-    const supplier = convert.supplier.trim()
-    if (!supplier) return { ok: false, message: "Supplier is required to record a stock purchase." }
+    const supplierAccountId = convert.supplierAccountId.trim()
+    if (!supplierAccountId) return { ok: false, message: "Select a company as the supplier." }
     const unitCost = Number(convert.unitCost)
     if (!Number.isFinite(unitCost) || unitCost < 0) {
       return { ok: false, message: "Buy price must be a non-negative number." }
@@ -2330,7 +2438,7 @@ export async function updateOrphanPackageStock(input: {
     }
 
     const resolved = await resolveOrCreatePurchaseOrderId(supabase, {
-      supplier,
+      supplierAccountId,
       poNumber: convert.poNumber?.trim() || null,
       issuedAt: convert.poIssuedAt?.trim() || null,
       note: convert.note?.trim() || null,
@@ -2629,6 +2737,15 @@ export async function backfillShellSingleTicketsForAllThreeDayPackages(): Promis
 > {
   const gate = await requireAdminAction()
   if (!gate.ok) return gate
+
+  if (isNativePlatformMode()) {
+    return {
+      ok: false,
+      message:
+        "Native platform mode does not create Salesforce shell single tickets. Existing shell rows are left untouched.",
+    }
+  }
+
   const { supabase } = gate
 
   const { data: parents, error } = await supabase
@@ -2812,7 +2929,7 @@ type PurchaseOrderIdResult = { ok: true; id: string } | { ok: false; message: st
 
 export async function createPurchaseOrder(input: {
   poNumber: string
-  supplier: string
+  supplierAccountId: string
   issuedAt?: string | null
   note?: string | null
 }): Promise<PurchaseOrderIdResult> {
@@ -2820,11 +2937,12 @@ export async function createPurchaseOrder(input: {
   if (!gate.ok) return gate
 
   const poNumber = input.poNumber.trim()
-  const supplier = input.supplier.trim()
   if (!poNumber) return { ok: false, message: "PO number is required." }
   if (poNumber.length > 200) return { ok: false, message: "PO number must be 200 characters or fewer." }
-  if (!supplier) return { ok: false, message: "Supplier is required." }
-  if (supplier.length > 200) return { ok: false, message: "Supplier must be 200 characters or fewer." }
+
+  const ensured = await ensureSupplierForAccount(gate.supabase, input.supplierAccountId)
+  if (!ensured.ok) return ensured
+  const supplier = ensured.name
 
   let issuedAt: string | null = null
   if (input.issuedAt && input.issuedAt.trim()) {
@@ -2849,6 +2967,8 @@ export async function createPurchaseOrder(input: {
     }
     return { ok: false, message: error.message }
   }
+  const linked = await linkPurchaseOrderToAccount(gate.supabase, String(data), input.supplierAccountId)
+  if (!linked.ok) return linked
   revalidatePath("/admin/purchase-orders")
   revalidatePath("/admin/catalog")
   return { ok: true, id: String(data) }
@@ -2857,7 +2977,7 @@ export async function createPurchaseOrder(input: {
 export async function updatePurchaseOrder(input: {
   id: string
   poNumber?: string | null
-  supplier?: string | null
+  supplierAccountId?: string | null
   issuedAt?: string | null
   clearIssuedAt?: boolean
   note?: string | null
@@ -2876,10 +2996,18 @@ export async function updatePurchaseOrder(input: {
     issuedAt = t
   }
 
+  const supplierAccountId = input.supplierAccountId?.trim() || null
+  let supplierName: string | null = null
+  if (supplierAccountId) {
+    const ensured = await ensureSupplierForAccount(gate.supabase, supplierAccountId)
+    if (!ensured.ok) return ensured
+    supplierName = ensured.name
+  }
+
   const { error } = await gate.supabase.rpc("admin_update_purchase_order", {
     p_id: id,
     p_po_number: input.poNumber?.trim() || null,
-    p_supplier: input.supplier?.trim() || null,
+    p_supplier: supplierName,
     p_issued_at: issuedAt,
     p_note: input.note ?? null,
     p_clear_issued_at: input.clearIssuedAt ?? false,
@@ -2893,6 +3021,10 @@ export async function updatePurchaseOrder(input: {
       return { ok: false, message: "A purchase order with that number already exists." }
     }
     return { ok: false, message: error.message }
+  }
+  if (supplierAccountId) {
+    const linked = await linkPurchaseOrderToAccount(gate.supabase, id, supplierAccountId)
+    if (!linked.ok) return linked
   }
   revalidatePath("/admin/purchase-orders")
   revalidatePath("/admin/catalog")
@@ -3159,6 +3291,12 @@ export async function deleteFulfilmentBlock(input: {
   return { ok: true }
 }
 
+export async function listCrmCompanyOptions(): Promise<import("@/lib/crm/deals").CrmCompanyOption[]> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return []
+  return getCrmCompanyOptions()
+}
+
 export async function fetchAdminCatalogList(): Promise<import("@/lib/admin/queries").AdminPackageRow[]> {
   const gate = await requireAdminAction()
   if (!gate.ok) return []
@@ -3166,7 +3304,7 @@ export async function fetchAdminCatalogList(): Promise<import("@/lib/admin/queri
   // (portal-only reconcile ignored open SF pipeline and burned no SF API but still
   // corrupted sellable; full SF heal here burned TotalRequests).
   const { getAdminCatalogListRows } = await import("@/lib/admin/queries")
-  return getAdminCatalogListRows()
+  return getAdminCatalogListRows({ includeSalesforceInventory: true })
 }
 
 export async function fetchAdminPackageForCatalogExpand(
@@ -3188,11 +3326,21 @@ export async function fetchAdminPackageForCatalogExpand(
   )
   const { getWixChannelListingsForPackage } = await import("@/lib/admin/wix-channel-listings")
 
-  const [pkg, wixListings] = await Promise.all([
+  const { ensurePurchaseOrdersForPackageLayers } = await import("@/lib/admin/purchase-orders")
+  const [initialPkg, wixListings] = await Promise.all([
     getAdminPackageById(id),
     getWixChannelListingsForPackage(id),
   ])
-  if (!pkg) return null
+  if (!initialPkg) return null
+
+  let pkg = initialPkg
+  if (pkg.cost_layers.some((layer) => !layer.purchase_order_id)) {
+    const created = await ensurePurchaseOrdersForPackageLayers(id)
+    if (created > 0) {
+      const refreshed = await getAdminPackageById(id)
+      if (refreshed) pkg = refreshed
+    }
+  }
 
   const groupId = pkg.inventory_group_id?.trim() || null
   const linkedPackages = groupId ? await getLinkedInventoryPackages(groupId) : []
@@ -3222,5 +3370,888 @@ export async function fetchInventoryCsvRows(): Promise<import("@/lib/admin/queri
   if (!gate.ok) return []
   const { getAdminPackageRows } = await import("@/lib/admin/queries")
   return getAdminPackageRows({ includeCostLayers: true, includeSalesforceInventory: true })
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1B — native inventory foundation actions
+// ---------------------------------------------------------------------------
+
+export async function setPackageOpeningBalance(input: {
+  packageId: string
+  verifiedQty: number
+  reason?: string
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction("inventory.adjust")
+  if (!gate.ok) return gate
+
+  const packageId = input.packageId.trim()
+  if (!packageId) return { ok: false, message: "Package id is missing." }
+
+  const qty = Math.floor(Number(input.verifiedQty))
+  if (!Number.isFinite(qty) || qty < 0) {
+    return { ok: false, message: "Verified quantity must be a non-negative whole number." }
+  }
+
+  const reason = input.reason?.trim() || "Opening balance reset"
+  const { error } = await gate.supabase.rpc("admin_set_opening_balance", {
+    p_package_id: packageId,
+    p_verified_qty: qty,
+    p_reason: reason,
+  })
+  if (error) {
+    const m = error.message.toLowerCase()
+    if (m.includes("opening_balance_below_held")) {
+      return {
+        ok: false,
+        message: "Verified quantity cannot be below units currently on hold.",
+      }
+    }
+    return { ok: false, message: error.message }
+  }
+
+  await enqueuePackageInventoryChannelSync(gate.supabase, packageId)
+  revalidateAdminProfitPaths(packageId)
+  revalidatePath("/admin/catalog")
+  revalidatePath(`/admin/catalog/${encodeURIComponent(packageId)}`)
+  revalidatePath("/admin/inventory")
+  revalidatePath("/packages")
+  return { ok: true, message: `Opening balance set to ${qty}.` }
+}
+
+export async function adjustPackageStockWithReason(input: {
+  packageId: string
+  delta: number
+  reason: string
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction("inventory.adjust")
+  if (!gate.ok) return gate
+
+  const packageId = input.packageId.trim()
+  if (!packageId) return { ok: false, message: "Package id is missing." }
+
+  const delta = Math.floor(Number(input.delta))
+  if (!Number.isFinite(delta) || delta === 0) {
+    return { ok: false, message: "Adjustment must be a non-zero whole number." }
+  }
+
+  const reason = input.reason.trim()
+  if (!reason) return { ok: false, message: "A reason is required for stock adjustments." }
+
+  const { error } = await gate.supabase.rpc("admin_adjust_stock_with_reason", {
+    p_package_id: packageId,
+    p_delta: delta,
+    p_reason: reason,
+  })
+  if (error) {
+    const m = error.message.toLowerCase()
+    if (m.includes("adjustment_below_held")) {
+      return { ok: false, message: "Adjustment would leave available stock below held units." }
+    }
+    if (m.includes("adjustment_below_zero")) {
+      return { ok: false, message: "Adjustment would make available stock negative." }
+    }
+    return { ok: false, message: error.message }
+  }
+
+  await enqueuePackageInventoryChannelSync(gate.supabase, packageId)
+  revalidateAdminProfitPaths(packageId)
+  revalidatePath("/admin/catalog")
+  revalidatePath(`/admin/catalog/${encodeURIComponent(packageId)}`)
+  revalidatePath("/admin/inventory")
+  return {
+    ok: true,
+    message: `Stock adjusted by ${delta > 0 ? "+" : ""}${delta}.`,
+  }
+}
+
+export async function ensureInventoryPoolForPackageGroup(input: {
+  inventoryGroupId: string
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+
+  const groupId = input.inventoryGroupId.trim()
+  if (!groupId) return { ok: false, message: "Inventory group id is missing." }
+
+  const { data, error } = await gate.supabase.rpc("admin_ensure_inventory_pool_for_group", {
+    p_inventory_group_id: groupId,
+  })
+  if (error) return { ok: false, message: error.message }
+
+  revalidatePath("/admin/catalog")
+  return {
+    ok: true,
+    message: `Inventory pool ready (${String(data)}).`,
+  }
+}
+
+export async function ensureSupplier(input: {
+  name: string
+  code?: string | null
+  contactName?: string | null
+  contactEmail?: string | null
+  contactPhone?: string | null
+  notes?: string | null
+}): Promise<ActionResult & { supplierId?: string }> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+
+  const name = input.name.trim()
+  if (!name) return { ok: false, message: "Supplier name is required." }
+
+  const { data, error } = await gate.supabase.rpc("admin_ensure_supplier", {
+    p_name: name,
+    p_code: input.code?.trim() || null,
+    p_contact_name: input.contactName?.trim() || null,
+    p_contact_email: input.contactEmail?.trim() || null,
+    p_contact_phone: input.contactPhone?.trim() || null,
+    p_notes: input.notes?.trim() || null,
+  })
+  if (error) return { ok: false, message: error.message }
+
+  revalidatePath("/admin/purchase-orders")
+  revalidatePath("/admin/catalog")
+  revalidatePath("/admin/suppliers")
+  revalidatePath("/admin/leads")
+  return { ok: true, message: "Supplier saved.", supplierId: String(data) }
+}
+
+export type NativeEventInput = {
+  category: EventCategory
+  name: string
+  shortName: string
+  location: string
+  country: string
+  countryCode: string
+  eventDate: string
+  dateRange: string
+  image: string
+  season: number
+}
+
+function nativeEventId(name: string, season: number): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 100)
+  return `${slug}-${season}`
+}
+
+function validateNativeEvent(input: NativeEventInput):
+  | { ok: true; value: NativeEventInput }
+  | { ok: false; message: string } {
+  const name = input.name.trim()
+  const category = input.category
+  const shortName = input.shortName.trim()
+  const location = input.location.trim()
+  const country = input.country.trim()
+  const countryCode = input.countryCode.trim().toUpperCase().slice(0, 8)
+  const eventDate = input.eventDate.trim()
+  const dateRange = input.dateRange.trim()
+  const image = sanitizeHttpsUrl(input.image) ?? "/placeholder.svg"
+  const season = Math.floor(Number(input.season))
+
+  if (!isEventCategory(category)) return { ok: false, message: "Select a valid event category." }
+  if (!name || !shortName) return { ok: false, message: "Event name and short name are required." }
+  if (!location || !country || !countryCode) {
+    return { ok: false, message: "Location, country and country code are required." }
+  }
+  if (!eventDate || Number.isNaN(new Date(`${eventDate}T00:00:00Z`).getTime())) {
+    return { ok: false, message: "A valid event date is required." }
+  }
+  if (!dateRange) return { ok: false, message: "Date range is required." }
+  if (!Number.isFinite(season) || season < 2020 || season > 2100) {
+    return { ok: false, message: "Season must be a valid four-digit year." }
+  }
+
+  return {
+    ok: true,
+    value: { category, name, shortName, location, country, countryCode, eventDate, dateRange, image, season },
+  }
+}
+
+function revalidateNativeEventPaths(): void {
+  revalidatePath("/admin/catalog/events")
+  revalidatePath("/admin/catalog")
+  revalidatePath("/admin/inventory/sales-list")
+  revalidatePath("/packages")
+  revalidatePath("/")
+}
+
+export async function createNativeEvent(
+  input: NativeEventInput,
+): Promise<ActionResult & { eventId?: string }> {
+  const gate = await requireAdminAction("inventory.manage")
+  if (!gate.ok) return gate
+
+  const checked = validateNativeEvent(input)
+  if (!checked.ok) return checked
+  const value = checked.value
+  const id = nativeEventId(value.name, value.season)
+  if (!id || id.length < 3) return { ok: false, message: "Could not generate a valid event ID." }
+
+  const { data: existing } = await gate.supabase.from("races").select("id").eq("id", id).maybeSingle()
+  if (existing) return { ok: false, message: "An event with this name and season already exists." }
+
+  const { error } = await gate.supabase.from("races").insert({
+    id,
+    category: value.category,
+    name: value.name,
+    short_name: value.shortName,
+    location: value.location,
+    country: value.country,
+    country_code: value.countryCode,
+    event_date: value.eventDate,
+    date_range: value.dateRange,
+    image: value.image,
+    season: value.season,
+    is_archived: false,
+    updated_at: new Date().toISOString(),
+  })
+  if (error) return { ok: false, message: error.message }
+
+  revalidateNativeEventPaths()
+  return { ok: true, message: "Event created.", eventId: id }
+}
+
+export async function updateNativeEvent(
+  raceId: string,
+  input: NativeEventInput,
+): Promise<ActionResult> {
+  const gate = await requireAdminAction("inventory.manage")
+  if (!gate.ok) return gate
+  const id = raceId.trim()
+  if (!id) return { ok: false, message: "Event ID is missing." }
+
+  const checked = validateNativeEvent(input)
+  if (!checked.ok) return checked
+  const value = checked.value
+  const { error } = await gate.supabase
+    .from("races")
+    .update({
+      category: value.category,
+      name: value.name,
+      short_name: value.shortName,
+      location: value.location,
+      country: value.country,
+      country_code: value.countryCode,
+      event_date: value.eventDate,
+      date_range: value.dateRange,
+      image: value.image,
+      season: value.season,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+  if (error) return { ok: false, message: error.message }
+
+  revalidateNativeEventPaths()
+  return { ok: true, message: "Event updated." }
+}
+
+export async function setNativeEventArchived(
+  raceId: string,
+  archived: boolean,
+): Promise<ActionResult> {
+  const gate = await requireAdminAction("inventory.archive")
+  if (!gate.ok) return gate
+  const id = raceId.trim()
+  if (!id) return { ok: false, message: "Event ID is missing." }
+
+  const { error } = await gate.supabase.rpc("admin_set_event_archived", {
+    p_race_id: id,
+    p_archived: archived,
+  })
+  if (error) return { ok: false, message: error.message }
+
+  revalidateNativeEventPaths()
+  return {
+    ok: true,
+    message: archived
+      ? "Event archived and its products hidden from sale."
+      : "Event restored. Products remain hidden until reviewed and republished.",
+  }
+}
+
+export async function createNativeDeal(input: {
+  accountId?: string | null
+  contactId?: string | null
+  accountName?: string
+  contactName?: string | null
+  contactEmail?: string | null
+  packageId?: string | null
+  quantity?: number
+  unitSalePrice?: number | null
+  source?: string | null
+  notes?: string | null
+  reserve?: boolean
+  lines?: Array<{
+    packageId: string
+    quantity: number
+    unitPrice: number
+    sourcingMode?: "owned" | "brokered"
+    supplierId?: string | null
+    expectedUnitCost?: number | null
+    supplierQuoteAt?: string | null
+  }>
+}): Promise<ActionResult & { dealId?: string }> {
+  const gate = await requireAdminAction("deals.manage")
+  if (!gate.ok) return gate
+
+  const accountId = input.accountId?.trim() || null
+  const contactId = input.contactId?.trim() || null
+  const accountName = input.accountName?.trim() || ""
+  if (!accountId && !accountName) {
+    return { ok: false, message: "Select an account / company." }
+  }
+  if (accountId && !UUID_RE.test(accountId)) {
+    return { ok: false, message: "Selected account is not valid." }
+  }
+  if (contactId && !UUID_RE.test(contactId)) {
+    return { ok: false, message: "Selected contact is not valid." }
+  }
+  if (contactId && !accountId) {
+    return { ok: false, message: "A contact must belong to the selected account." }
+  }
+
+  const quantity = Math.floor(Number(input.quantity ?? 1))
+  if (!Number.isFinite(quantity) || quantity < 1) {
+    return { ok: false, message: "Quantity must be at least 1." }
+  }
+
+  let unitSalePrice: number | null = null
+  if (input.unitSalePrice != null && String(input.unitSalePrice) !== "") {
+    const price = Number(input.unitSalePrice)
+    if (!Number.isFinite(price) || price < 0) {
+      return { ok: false, message: "Sale price must be a non-negative number." }
+    }
+    unitSalePrice = price
+  }
+
+  const normalizedLines = input.lines?.map((line) => {
+    const quoteAt = line.supplierQuoteAt?.trim()
+    const quoteTime = quoteAt ? Date.parse(quoteAt) : Number.NaN
+    return {
+      packageId: line.packageId.trim(),
+      quantity: Math.floor(Number(line.quantity)),
+      unitPrice: Number(line.unitPrice),
+      sourcingMode: line.sourcingMode ?? "owned",
+      supplierId: line.supplierId?.trim() || null,
+      expectedUnitCost:
+        line.expectedUnitCost == null || String(line.expectedUnitCost) === ""
+          ? null
+          : Number(line.expectedUnitCost),
+      supplierQuoteAt: quoteAt && Number.isFinite(quoteTime) ? new Date(quoteTime).toISOString() : null,
+      invalidQuoteAt: Boolean(quoteAt) && !Number.isFinite(quoteTime),
+    }
+  })
+  if (normalizedLines?.length) {
+    if (!accountId) return { ok: false, message: "Select or create the CRM company first." }
+    for (const line of normalizedLines) {
+      if (
+        !line.packageId ||
+        !Number.isFinite(line.quantity) ||
+        line.quantity < 1 ||
+        !Number.isFinite(line.unitPrice) ||
+        line.unitPrice < 0 ||
+        line.invalidQuoteAt ||
+        (line.expectedUnitCost != null &&
+          (!Number.isFinite(line.expectedUnitCost) || line.expectedUnitCost < 0))
+      ) {
+        return { ok: false, message: "One or more deal product lines are incomplete." }
+      }
+      if (
+        input.reserve &&
+        line.sourcingMode === "brokered" &&
+        (!line.supplierId || line.expectedUnitCost == null || !line.supplierQuoteAt)
+      ) {
+        return { ok: false, message: "Brokered products need a supplier, buy price and fresh quote time before holding stock." }
+      }
+    }
+  }
+
+  const sharedArgs = {
+    p_package_id: input.packageId?.trim() || null,
+    p_quantity: quantity,
+    p_unit_sale_price: unitSalePrice,
+    p_source: input.source?.trim() || "offline",
+    p_stage: input.reserve ? "proposal" : "draft",
+    p_notes: input.notes?.trim() || null,
+    p_reserve: Boolean(input.reserve),
+  }
+  const { data, error } = normalizedLines?.length
+    ? await gate.supabase.rpc("admin_create_deal_with_lines", {
+        p_account_id: accountId,
+        p_contact_id: contactId,
+        p_source: input.source?.trim() || "offline",
+        p_notes: input.notes?.trim() || null,
+        p_lines: normalizedLines,
+        p_reserve: Boolean(input.reserve),
+        p_hold_days: 7,
+      })
+    : accountId
+      ? await gate.supabase.rpc("admin_create_deal_with_existing_links", {
+        p_account_id: accountId,
+        p_contact_id: contactId,
+        ...sharedArgs,
+      })
+      : await gate.supabase.rpc("admin_create_deal_with_line", {
+        p_account_name: accountName,
+        p_contact_name: input.contactName?.trim() || null,
+        p_contact_email: input.contactEmail?.trim() || null,
+        ...sharedArgs,
+      })
+
+  if (error) {
+    const message = error.message.toLowerCase()
+    if (message.includes("insufficient_stock")) {
+      return { ok: false, message: "Not enough sellable stock to reserve for this deal." }
+    }
+    if (message.includes("package_not_found")) {
+      return { ok: false, message: "Selected package was not found." }
+    }
+    if (message.includes("account_not_found")) {
+      return { ok: false, message: "Selected account is no longer available." }
+    }
+    if (message.includes("contact_not_found_for_account")) {
+      return { ok: false, message: "Selected contact does not belong to this account." }
+    }
+    if (message.includes("brokered_quote_required") || message.includes("brokered_quote_expired")) {
+      return { ok: false, message: "Every brokered product needs a supplier quote received within the last 24 hours." }
+    }
+    if (message.includes("mixed_currency_deal")) {
+      return { ok: false, message: "All products in one deal must use the same currency." }
+    }
+    return { ok: false, message: error.message }
+  }
+
+  const dealId = String(data)
+  revalidatePath("/admin/deals")
+  revalidatePath("/admin/inventory/sales-list")
+  revalidatePath("/admin/catalog")
+  if (input.packageId?.trim()) {
+    revalidatePath(`/admin/catalog/${encodeURIComponent(input.packageId.trim())}`)
+  }
+  return {
+    ok: true,
+    message: input.reserve
+      ? "Deal created and stock reserved for 7 days."
+      : "Deal created as a draft.",
+    dealId,
+  }
+}
+
+const LEAD_SOURCES = new Set([
+  "manual",
+  "website",
+  "portal",
+  "referral",
+  "marketing",
+  "repeat_client",
+  "other",
+])
+
+export async function createNativeLead(input: {
+  accountId?: string | null
+  contactId?: string | null
+  companyName?: string | null
+  contactName?: string | null
+  email?: string | null
+  phone?: string | null
+  source?: string | null
+  interest?: string | null
+  raceId?: string | null
+  packageId?: string | null
+  quantity?: number
+  estimatedValue?: number | null
+  nextAction?: string | null
+  nextActionDueAt?: string | null
+  ownerProfileId?: string | null
+  notes?: string | null
+}): Promise<ActionResult & { leadId?: string }> {
+  const gate = await requireAdminAction("accounts.manage")
+  if (!gate.ok) return gate
+
+  const accountId = input.accountId?.trim() || null
+  const contactId = input.contactId?.trim() || null
+  const ownerProfileId = input.ownerProfileId?.trim() || null
+  if (accountId && !UUID_RE.test(accountId)) {
+    return { ok: false, message: "Selected account is not valid." }
+  }
+  if (contactId && !UUID_RE.test(contactId)) {
+    return { ok: false, message: "Selected contact is not valid." }
+  }
+  if (ownerProfileId && !UUID_RE.test(ownerProfileId)) {
+    return { ok: false, message: "Selected owner is not valid." }
+  }
+  if (!accountId && !input.companyName?.trim() && !input.contactName?.trim() && !input.email?.trim()) {
+    return { ok: false, message: "Enter a company, contact name, or email." }
+  }
+
+  const source = input.source?.trim() || "manual"
+  if (!LEAD_SOURCES.has(source)) {
+    return { ok: false, message: "Selected lead source is not valid." }
+  }
+
+  const quantity = Math.floor(Number(input.quantity ?? 1))
+  if (!Number.isFinite(quantity) || quantity < 1) {
+    return { ok: false, message: "Quantity must be at least 1." }
+  }
+
+  let estimatedValue: number | null = null
+  if (input.estimatedValue != null && String(input.estimatedValue) !== "") {
+    estimatedValue = Number(input.estimatedValue)
+    if (!Number.isFinite(estimatedValue) || estimatedValue < 0) {
+      return { ok: false, message: "Estimated value must be a non-negative number." }
+    }
+  }
+
+  let nextActionDueAt: string | null = null
+  if (input.nextActionDueAt?.trim()) {
+    const due = new Date(input.nextActionDueAt)
+    if (Number.isNaN(due.getTime())) {
+      return { ok: false, message: "Next-action date is not valid." }
+    }
+    nextActionDueAt = due.toISOString()
+  }
+
+  const { data, error } = await gate.supabase.rpc("admin_create_crm_lead", {
+    p_account_id: accountId,
+    p_contact_id: contactId,
+    p_company_name: input.companyName?.trim() || null,
+    p_contact_name: input.contactName?.trim() || null,
+    p_email: input.email?.trim() || null,
+    p_phone: input.phone?.trim() || null,
+    p_source: source,
+    p_interest: input.interest?.trim() || null,
+    p_race_id: input.raceId?.trim() || null,
+    p_package_id: input.packageId?.trim() || null,
+    p_quantity: quantity,
+    p_estimated_value: estimatedValue,
+    p_next_action: input.nextAction?.trim() || null,
+    p_next_action_due_at: nextActionDueAt,
+    p_owner_profile_id: ownerProfileId,
+    p_notes: input.notes?.trim() || null,
+  })
+
+  if (error) {
+    const message = error.message.toLowerCase()
+    if (message.includes("contact_not_found_for_account")) {
+      return { ok: false, message: "Selected contact does not belong to this account." }
+    }
+    if (message.includes("account_not_found")) {
+      return { ok: false, message: "Selected account is no longer available." }
+    }
+    if (message.includes("package_not_found")) {
+      return { ok: false, message: "Selected product is no longer available." }
+    }
+    return { ok: false, message: error.message }
+  }
+
+  revalidatePath("/admin/leads")
+  return { ok: true, message: "Lead created.", leadId: String(data) }
+}
+
+export async function convertNativeLeadToDeal(
+  leadId: string,
+): Promise<ActionResult & { dealId?: string }> {
+  const gate = await requireAdminAction("deals.manage")
+  if (!gate.ok) return gate
+  const id = leadId.trim()
+  if (!UUID_RE.test(id)) return { ok: false, message: "Lead id is not valid." }
+
+  const { data, error } = await gate.supabase.rpc("admin_convert_crm_lead_to_deal", {
+    p_lead_id: id,
+  })
+  if (error) {
+    const message = error.message.toLowerCase()
+    if (message.includes("lead_not_found")) {
+      return { ok: false, message: "Lead was not found." }
+    }
+    if (message.includes("lead_closed")) {
+      return { ok: false, message: "A closed or unqualified lead cannot be converted." }
+    }
+    return { ok: false, message: error.message }
+  }
+
+  revalidatePath("/admin/leads")
+  revalidatePath("/admin/deals")
+  return { ok: true, message: "Lead converted to a deal.", dealId: String(data) }
+}
+
+export async function updateNativeLeadWorkflow(input: {
+  leadId: string
+  status: string
+  nextAction?: string | null
+  nextActionDueAt?: string | null
+  ownerProfileId?: string | null
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction("accounts.manage")
+  if (!gate.ok) return gate
+  const leadId = input.leadId.trim()
+  if (!UUID_RE.test(leadId)) return { ok: false, message: "Lead id is not valid." }
+  const allowedStatuses = new Set(["new", "contacted", "price_sent", "unqualified", "closed"])
+  if (!allowedStatuses.has(input.status)) {
+    return { ok: false, message: "Selected lead status is not valid." }
+  }
+  const ownerProfileId = input.ownerProfileId?.trim() || null
+  if (ownerProfileId && !UUID_RE.test(ownerProfileId)) {
+    return { ok: false, message: "Selected owner is not valid." }
+  }
+  let nextActionDueAt: string | null = null
+  if (input.nextActionDueAt?.trim()) {
+    const due = new Date(input.nextActionDueAt)
+    if (Number.isNaN(due.getTime())) {
+      return { ok: false, message: "Next-action date is not valid." }
+    }
+    nextActionDueAt = due.toISOString()
+  }
+
+  const { error } = await gate.supabase.rpc("admin_update_crm_lead_workflow", {
+    p_lead_id: leadId,
+    p_status: input.status,
+    p_next_action: input.nextAction?.trim() || null,
+    p_next_action_due_at: nextActionDueAt,
+    p_owner_profile_id: ownerProfileId,
+  })
+  if (error) return { ok: false, message: error.message }
+
+  revalidatePath("/admin/leads")
+  return { ok: true, message: "Lead updated." }
+}
+
+export async function applyCrmImportBatch(
+  batchId: string,
+): Promise<ActionResult & { applied?: number; skipped?: number; failed?: number }> {
+  const gate = await requireAdminAction("settings.manage")
+  if (!gate.ok) return gate
+  const id = batchId.trim()
+  if (!UUID_RE.test(id)) return { ok: false, message: "Import batch id is not valid." }
+
+  const { data, error } = await gate.supabase.rpc("admin_apply_crm_import_batch", {
+    p_batch_id: id,
+  })
+  if (error) return { ok: false, message: error.message }
+
+  const result =
+    data && typeof data === "object"
+      ? (data as { applied?: number; skipped?: number; failed?: number })
+      : {}
+  revalidatePath("/admin/imports")
+  revalidatePath("/admin/leads")
+  revalidatePath("/admin/deals")
+  return {
+    ok: true,
+    message:
+      Number(result.failed ?? 0) > 0
+        ? `Import applied with ${result.failed} failed row(s).`
+        : `Import applied successfully. Stock was not changed.`,
+    applied: Number(result.applied ?? 0),
+    skipped: Number(result.skipped ?? 0),
+    failed: Number(result.failed ?? 0),
+  }
+}
+
+export async function deleteCrmImportBatch(batchId: string): Promise<ActionResult> {
+  const gate = await requireAdminAction("settings.manage")
+  if (!gate.ok) return gate
+  const id = batchId.trim()
+  if (!UUID_RE.test(id)) return { ok: false, message: "Import batch id is not valid." }
+
+  const { data: batch, error: readError } = await gate.supabase
+    .from("crm_import_batches")
+    .select("status")
+    .eq("id", id)
+    .maybeSingle()
+  if (readError) return { ok: false, message: readError.message }
+  if (!batch) return { ok: false, message: "Import batch was not found." }
+  if (batch.status !== "validated" && batch.status !== "failed") {
+    return { ok: false, message: "Applied import history cannot be deleted." }
+  }
+
+  const { error } = await gate.supabase.from("crm_import_batches").delete().eq("id", id)
+  if (error) return { ok: false, message: error.message }
+  revalidatePath("/admin/imports")
+  return { ok: true, message: "Import batch deleted." }
+}
+
+const NATIVE_DEAL_STAGES = new Set([
+  "draft",
+  "sourcing",
+  "proposal",
+  "booking_form_sent",
+  "awaiting_client_signature",
+  "awaiting_zk_signature",
+  "signed",
+  "awaiting_invoice",
+  "awaiting_payment",
+  "paid_confirmed",
+  "in_fulfilment",
+  "fulfilled",
+  "closed_lost",
+  "cancelled",
+])
+
+export async function updateNativeDealWorkflow(input: {
+  dealId: string
+  stage: string
+  ownerProfileId?: string | null
+  nextAction?: string | null
+  nextActionDueAt?: string | null
+  expectedCloseDate?: string | null
+  lossReason?: string | null
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction("deals.manage")
+  if (!gate.ok) return gate
+  const dealId = input.dealId.trim()
+  if (!UUID_RE.test(dealId)) return { ok: false, message: "Deal id is not valid." }
+  if (!NATIVE_DEAL_STAGES.has(input.stage)) {
+    return { ok: false, message: "Selected deal stage is not valid." }
+  }
+  const ownerProfileId = input.ownerProfileId?.trim() || null
+  if (ownerProfileId && !UUID_RE.test(ownerProfileId)) {
+    return { ok: false, message: "Selected owner is not valid." }
+  }
+
+  let nextActionDueAt: string | null = null
+  if (input.nextActionDueAt?.trim()) {
+    const due = new Date(input.nextActionDueAt)
+    if (Number.isNaN(due.getTime())) {
+      return { ok: false, message: "Next-action date is not valid." }
+    }
+    nextActionDueAt = due.toISOString()
+  }
+  const expectedCloseDate = input.expectedCloseDate?.trim() || null
+  if (expectedCloseDate && !/^\d{4}-\d{2}-\d{2}$/.test(expectedCloseDate)) {
+    return { ok: false, message: "Expected close date is not valid." }
+  }
+
+  const { error } = await gate.supabase.rpc("admin_update_deal_workflow", {
+    p_deal_id: dealId,
+    p_stage: input.stage,
+    p_owner_profile_id: ownerProfileId,
+    p_next_action: input.nextAction?.trim() || null,
+    p_next_action_due_at: nextActionDueAt,
+    p_expected_close_date: expectedCloseDate,
+    p_loss_reason: input.lossReason?.trim() || null,
+  })
+  if (error) {
+    const message = error.message.toLowerCase()
+    if (message.includes("invalid_stage")) {
+      return { ok: false, message: "That stage is not valid." }
+    }
+    if (message.includes("loss_reason_required")) {
+      return { ok: false, message: "Enter a reason before closing the deal as lost." }
+    }
+    return { ok: false, message: error.message }
+  }
+  revalidatePath("/admin/deals", "layout")
+  return { ok: true, message: "Deal workflow updated." }
+}
+
+export async function reserveNativeDealStock(
+  dealId: string,
+  holdDays = 7,
+): Promise<ActionResult> {
+  const gate = await requireAdminAction("deals.manage")
+  if (!gate.ok) return gate
+  const id = dealId.trim()
+  if (!UUID_RE.test(id)) return { ok: false, message: "Deal id is not valid." }
+  const days = Math.floor(Number(holdDays))
+  if (!Number.isFinite(days) || days < 1 || days > 90) {
+    return { ok: false, message: "Hold length must be between 1 and 90 days." }
+  }
+
+  const { data, error } = await gate.supabase.rpc("admin_reserve_deal_stock", {
+    p_deal_id: id,
+    p_hold_days: days,
+    p_reason: "Deal stock reserved manually",
+  })
+  if (error) {
+    const message = error.message.toLowerCase()
+    if (message.includes("insufficient_stock")) {
+      return { ok: false, message: "There is not enough available stock to reserve this deal." }
+    }
+    if (message.includes("no_unreserved_lines")) {
+      return { ok: false, message: "All deal lines are already reserved." }
+    }
+    if (message.includes("inventory_missing")) {
+      return { ok: false, message: "Inventory is not configured for one of the deal products." }
+    }
+    return { ok: false, message: error.message }
+  }
+  const { data: lines } = await gate.supabase
+    .from("deal_line_items")
+    .select("package_id")
+    .eq("deal_id", id)
+  for (const packageId of new Set((lines ?? []).map((line) => line.package_id))) {
+    await enqueueLinkedInventoryChannelSync(gate.supabase, packageId)
+  }
+  revalidatePath("/admin/deals")
+  revalidatePath("/admin/inventory/sales-list")
+  return { ok: true, message: `${Number(data ?? 0)} deal line(s) reserved.` }
+}
+
+export async function releaseNativeDealStock(dealId: string): Promise<ActionResult> {
+  const gate = await requireAdminAction("deals.manage")
+  if (!gate.ok) return gate
+  const id = dealId.trim()
+  if (!UUID_RE.test(id)) return { ok: false, message: "Deal id is not valid." }
+  const { data, error } = await gate.supabase.rpc("admin_release_deal_reservations", {
+    p_deal_id: id,
+    p_release_status: "released",
+    p_reason: "Deal stock released manually",
+  })
+  if (error) return { ok: false, message: error.message }
+  const { data: lines } = await gate.supabase
+    .from("deal_line_items")
+    .select("package_id")
+    .eq("deal_id", id)
+  for (const packageId of new Set((lines ?? []).map((line) => line.package_id))) {
+    await enqueueLinkedInventoryChannelSync(gate.supabase, packageId)
+  }
+  revalidatePath("/admin/deals")
+  revalidatePath("/admin/inventory/sales-list")
+  return {
+    ok: true,
+    message:
+      Number(data ?? 0) > 0
+        ? `${Number(data)} reservation(s) released.`
+        : "No active reservations required release.",
+  }
+}
+
+export async function setNativeDealHoldPolicy(input: {
+  dealId: string
+  doNotExpire: boolean
+  holdUntil?: string | null
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction("deals.manage")
+  if (!gate.ok) return gate
+  const dealId = input.dealId.trim()
+  if (!UUID_RE.test(dealId)) return { ok: false, message: "Deal id is not valid." }
+
+  let holdUntil: string | null = null
+  if (!input.doNotExpire && input.holdUntil?.trim()) {
+    const parsed = new Date(input.holdUntil)
+    if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now()) {
+      return { ok: false, message: "Hold expiry must be a future date." }
+    }
+    holdUntil = parsed.toISOString()
+  }
+  const { error } = await gate.supabase.rpc("admin_set_deal_hold_policy", {
+    p_deal_id: dealId,
+    p_do_not_expire: Boolean(input.doNotExpire),
+    p_hold_until: holdUntil,
+    p_reason: input.doNotExpire
+      ? "Deal hold set not to expire"
+      : "Deal hold expiry updated",
+  })
+  if (error) return { ok: false, message: error.message }
+  revalidatePath("/admin/deals")
+  return { ok: true, message: "Hold policy updated." }
 }
 

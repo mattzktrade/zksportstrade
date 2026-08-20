@@ -16,7 +16,7 @@ const InventoryAdminClient = dynamic(
 
 function toInventoryOptions(pkgRows: Awaited<ReturnType<typeof getAdminCatalogListRows>>): InventoryPackageOption[] {
   return pkgRows
-    .filter((p) => p.inventory != null)
+    .filter((p) => p.inventory != null && !p.is_hidden && !p.shell_parent_package_id)
     .map((p) => ({
       id: p.id,
       name: p.name,

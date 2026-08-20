@@ -13,6 +13,7 @@ type DbRace = {
   date_range: string
   image: string
   season: number
+  category?: string
 }
 
 type DbPackage = {

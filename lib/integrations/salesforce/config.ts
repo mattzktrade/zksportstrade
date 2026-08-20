@@ -1,3 +1,5 @@
+import { isSalesforceRuntimeEnabled } from "@/lib/platform/runtime-mode"
+
 export type SalesforceConfig = {
   clientId: string
   clientSecret: string
@@ -42,10 +44,15 @@ function trimEnv(name: string): string | undefined {
 }
 
 export function isSalesforceConfigured(): boolean {
-  return Boolean(trimEnv("SALESFORCE_CLIENT_ID") && trimEnv("SALESFORCE_CLIENT_SECRET"))
+  return (
+    isSalesforceRuntimeEnabled() &&
+    Boolean(trimEnv("SALESFORCE_CLIENT_ID") && trimEnv("SALESFORCE_CLIENT_SECRET"))
+  )
 }
 
 export function getSalesforceConfig(instanceUrlOverride?: string): SalesforceConfig | null {
+  if (!isSalesforceRuntimeEnabled()) return null
+
   const clientId = trimEnv("SALESFORCE_CLIENT_ID")
   const clientSecret = trimEnv("SALESFORCE_CLIENT_SECRET")
   if (!clientId || !clientSecret) return null

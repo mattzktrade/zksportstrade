@@ -673,7 +673,7 @@ export function CheckoutClient({
                         </Link>
                       </p>
                       <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-                        You confirm you have authority to place this booking and agree to our cancellation policy.
+                        This confirms the booking in place of a signed booking form. You confirm you have authority to place this order and agree to our cancellation policy.
                       </p>
                     </div>
                   </label>
@@ -777,6 +777,9 @@ export function CheckoutClient({
                         <Link href="/terms" className="text-primary underline underline-offset-2 hover:no-underline">
                           terms and conditions
                         </Link>
+                      </p>
+                      <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+                        If this request is approved, these terms confirm the booking in place of a signed booking form.
                       </p>
                     </div>
                   </label>

@@ -7,6 +7,9 @@ import { getSalesforceConnectionStatus } from "@/lib/integrations/salesforce/set
 import { createXeroInvoiceForOrder } from "@/lib/integrations/xero/invoices"
 import { isXeroConfigured } from "@/lib/integrations/xero/config"
 import { getXeroConnectionStatus } from "@/lib/integrations/xero/settings-store"
+import { syncPackageCatalogToWix } from "@/lib/integrations/wix/catalog-sync"
+import { createWixProductForPackage } from "@/lib/integrations/wix/create-product"
+import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
 
 const MAX_ATTEMPTS = 8
 const BATCH_SIZE = 20
@@ -119,17 +122,19 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
   // When Salesforce daily API limit was hit recently, defer SF outbox jobs so retries
   // do not keep burning the remaining quota (and re-writing TotalRequests errors).
   let apiCooldown = false
-  try {
-    const { getIntegrationSetting } = await import(
-      "@/lib/integrations/salesforce/settings-store"
-    )
-    const until = await getIntegrationSetting("salesforce_api_limit_cooldown_until")
-    if (until) {
-      const t = new Date(until).getTime()
-      apiCooldown = Number.isFinite(t) && t > Date.now()
+  if (!isNativePlatformMode()) {
+    try {
+      const { getIntegrationSetting } = await import(
+        "@/lib/integrations/salesforce/settings-store"
+      )
+      const until = await getIntegrationSetting("salesforce_api_limit_cooldown_until")
+      if (until) {
+        const t = new Date(until).getTime()
+        apiCooldown = Number.isFinite(t) && t > Date.now()
+      }
+    } catch {
+      apiCooldown = false
     }
-  } catch {
-    apiCooldown = false
   }
 
   const { data: rows, error } = await admin
@@ -289,45 +294,97 @@ async function handleOutboxEvent(row: OutboxRow): Promise<void> {
   switch (row.event_type) {
     case "product.upsert":
     case "inventory.snapshot": {
-      if (row.event_type === "product.upsert" && row.payload.trigger === "salesforce.closed_won") {
-        const packageId = String(row.payload.package_id ?? "")
-        if (packageId) {
-          const admin = createAdminClient()
-          await admin
+      const packageId = String(row.payload.package_id ?? "")
+      if (!packageId) throw new Error("Outbox payload missing package_id.")
+      await assertPackageExistsForOutbox(packageId)
+
+      if (isNativePlatformMode()) {
+        let wix = await syncPackageCatalogToWix(packageId)
+        const admin = createAdminClient()
+        if (wix.skipped.some((message) => message.includes("No Wix channel_listings"))) {
+          const { data: pkg } = await admin
             ?.from("packages")
-            .update({ integration_sync_status: "synced", integration_sync_error: null })
+            .select("sell_on_wix, is_hidden")
             .eq("id", packageId)
-            .eq("integration_sync_status", "pending")
+            .maybeSingle() ?? { data: null }
+          if (pkg?.sell_on_wix && !pkg.is_hidden) {
+            await createWixProductForPackage(packageId)
+            wix = { ok: true, updated: 1, skipped: [], errors: [] }
+          }
         }
+        if (wix.errors.length > 0) {
+          throw new Error(`Wix catalog sync failed: ${wix.errors.join("; ")}`)
+        }
+        await admin
+          ?.from("packages")
+          .update({
+            integration_sync_status: "synced",
+            integration_synced_at: new Date().toISOString(),
+            integration_sync_error: null,
+          })
+          .eq("id", packageId)
+        return
+      }
+
+      if (row.event_type === "product.upsert" && row.payload.trigger === "salesforce.closed_won") {
+        const admin = createAdminClient()
+        await admin
+          ?.from("packages")
+          .update({ integration_sync_status: "synced", integration_sync_error: null })
+          .eq("id", packageId)
+          .eq("integration_sync_status", "pending")
         return
       }
       if (!isSalesforceConfigured()) throw new Error("Salesforce env vars not set.")
       const sf = await getSalesforceConnectionStatus()
       if (!sf.connected) throw new Error("Salesforce not connected.")
-      const packageId = String(row.payload.package_id ?? "")
-      if (!packageId) throw new Error("Outbox payload missing package_id.")
-      await assertPackageExistsForOutbox(packageId)
       await syncPackageToSalesforce(packageId)
       return
     }
     case "order.placed": {
-      if (!isSalesforceConfigured()) throw new Error("Salesforce env vars not set.")
-      const sf = await getSalesforceConnectionStatus()
-      if (!sf.connected) throw new Error("Salesforce not connected.")
       const orderId = String(row.payload.order_id ?? "")
       if (!orderId) throw new Error("Outbox payload missing order_id.")
       await assertOrderExistsForOutbox(orderId)
+
+      if (isNativePlatformMode()) {
+        const admin = createAdminClient()
+        await admin
+          ?.from("orders")
+          .update({
+            salesforce_sync_status: "skipped",
+            salesforce_sync_error: null,
+          })
+          .eq("id", orderId)
+        return
+      }
+
+      if (!isSalesforceConfigured()) throw new Error("Salesforce env vars not set.")
+      const sf = await getSalesforceConnectionStatus()
+      if (!sf.connected) throw new Error("Salesforce not connected.")
       await syncOrderToSalesforce(orderId)
       return
     }
     case "order.outcome": {
+      const orderId = String(row.payload.order_id ?? "")
+      if (!orderId) throw new Error("Outbox payload missing order_id.")
+      await assertOrderExistsForOutbox(orderId)
+
+      if (isNativePlatformMode()) {
+        const admin = createAdminClient()
+        await admin
+          ?.from("orders")
+          .update({
+            salesforce_sync_status: "skipped",
+            salesforce_sync_error: null,
+          })
+          .eq("id", orderId)
+        return
+      }
+
       if (!isSalesforceConfigured()) throw new Error("Salesforce env vars not set.")
       const sf = await getSalesforceConnectionStatus()
       if (!sf.connected) throw new Error("Salesforce not connected.")
-      const orderId = String(row.payload.order_id ?? "")
       const outcome = row.payload.outcome === "lost" ? "lost" : "won"
-      if (!orderId) throw new Error("Outbox payload missing order_id.")
-      await assertOrderExistsForOutbox(orderId)
       const result = await syncOpportunityOutcomeForOrder(orderId, outcome)
       if (!result.ok) {
         if (result.message.includes("not found") || result.message.includes("no Salesforce Opportunity")) {
@@ -344,7 +401,11 @@ async function handleOutboxEvent(row: OutboxRow): Promise<void> {
       const orderId = String(row.payload.order_id ?? "")
       if (!orderId) throw new Error("Outbox payload missing order_id.")
       await assertOrderExistsForOutbox(orderId)
-      await createXeroInvoiceForOrder(orderId)
+      const replaceKey =
+        typeof row.payload.replace_key === "string" && row.payload.replace_key
+          ? row.payload.replace_key
+          : undefined
+      await createXeroInvoiceForOrder(orderId, replaceKey ? { replaceKey } : undefined)
       return
     }
     default:

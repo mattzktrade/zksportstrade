@@ -7,6 +7,7 @@ import { sendOrderPlacedEmail } from "@/lib/email/send-order-placed"
 import { isGuestCountAllowed, numericSellable } from "@/lib/catalog/booking-guests"
 import { packageRequiresBookingApproval } from "@/lib/catalog/paddock-club"
 import { enqueueOrderIntegrationsServer } from "@/lib/integrations/enqueue-server"
+import { attachDealForCommittedOrder } from "@/lib/crm/attach-portal-deal"
 import { mapBookingApprovalError, mapPlaceOrderError } from "@/lib/orders/place-order-errors"
 import { getPackageById } from "@/lib/catalog/queries"
 import {
@@ -281,6 +282,8 @@ export async function submitCheckoutOrder(
   const orderReference = row.order_reference as string
   const orderId = String(row.order_id ?? "")
   if (orderId) {
+    const attached = await attachDealForCommittedOrder(orderId)
+    if (!attached.ok) console.warn("[checkout] Deal was not linked:", attached.message)
     const enq = await enqueueOrderIntegrationsServer(orderId, "trade_portal", { background: true })
     if (!enq.ok) console.warn("[checkout] Integrations not queued:", enq.message)
     else if (enq.warnings.length) console.warn("[checkout] Integration warnings:", enq.warnings.join("; "))
@@ -313,6 +316,7 @@ export async function submitCheckoutOrder(
   revalidatePath("/packages")
   revalidatePath("/admin/inventory")
   revalidatePath("/admin/catalog")
+  revalidatePath("/admin/deals")
 
   const emailResult = await sendOrderPlacedEmail({
     agentEmail: profile.email,

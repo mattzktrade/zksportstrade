@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin"
+import { isSalesforceRuntimeEnabled } from "@/lib/platform/runtime-mode"
 
 const KEY_REFRESH = "salesforce_refresh_token"
 const KEY_INSTANCE = "salesforce_instance_url"
@@ -40,6 +41,14 @@ export async function getSalesforceConnectionStatus(): Promise<{
   connected: boolean
   instanceUrl: string | null
 }> {
+  if (!isSalesforceRuntimeEnabled()) {
+    return {
+      configured: false,
+      connected: false,
+      instanceUrl: null,
+    }
+  }
+
   const configured = Boolean(
     process.env.SALESFORCE_CLIENT_ID?.trim() && process.env.SALESFORCE_CLIENT_SECRET?.trim(),
   )

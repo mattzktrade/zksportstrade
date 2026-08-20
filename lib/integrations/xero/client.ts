@@ -15,7 +15,7 @@ export class XeroApiError extends Error {
 export async function xeroRequest<T = unknown>(
   method: string,
   path: string,
-  options?: { body?: unknown },
+  options?: { body?: unknown; idempotencyKey?: string },
 ): Promise<T> {
   const { accessToken, tenantId } = await getXeroAccessToken()
   const url = path.startsWith("http") ? path : `https://api.xero.com${path.startsWith("/") ? path : `/${path}`}`
@@ -27,6 +27,7 @@ export async function xeroRequest<T = unknown>(
       "xero-tenant-id": tenantId,
       Accept: "application/json",
       "Content-Type": "application/json",
+      ...(options?.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}),
     },
     body: options?.body ? JSON.stringify(options.body) : undefined,
   })

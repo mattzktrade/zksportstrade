@@ -6,6 +6,7 @@ import { isGuestCountAllowed, numericSellable } from "@/lib/catalog/booking-gues
 import { getPackageById } from "@/lib/catalog/queries"
 import { sendOrderPlacedEmail } from "@/lib/email/send-order-placed"
 import { enqueueOrderIntegrationsServer } from "@/lib/integrations/enqueue-server"
+import { attachDealForCommittedOrder } from "@/lib/crm/attach-portal-deal"
 import { mapPlaceOrderError } from "@/lib/orders/place-order-errors"
 import type { CheckoutAddressFields } from "@/lib/types/checkout-addresses"
 import type { Package } from "@/lib/types/catalog"
@@ -33,7 +34,7 @@ export async function getAdminOrderPackagePreview(
   const agentId = agentProfileId.trim()
   const pkgId = packageId.trim()
   if (!UUID_RE.test(agentId) || !pkgId) return null
-  return getPackageById(pkgId, agentId)
+  return getPackageById(pkgId, agentId, { includeUnlisted: true })
 }
 
 export async function submitAdminOrderForAgent(
@@ -75,7 +76,7 @@ export async function submitAdminOrderForAgent(
     return { ok: false, error: "This agent account is not approved to place orders yet." }
   }
 
-  const pkg = await getPackageById(input.packageId, agentId)
+  const pkg = await getPackageById(input.packageId, agentId, { includeUnlisted: true })
   if (!pkg || pkg.price === null) {
     return { ok: false, error: "This package is not available to book." }
   }
@@ -150,6 +151,8 @@ export async function submitAdminOrderForAgent(
   const orderReference = row.order_reference as string
   const orderId = String(row.order_id ?? "")
   if (orderId) {
+    const attached = await attachDealForCommittedOrder(orderId)
+    if (!attached.ok) console.warn("[admin place-order] Deal was not linked:", attached.message)
     const enq = await enqueueOrderIntegrationsServer(orderId, "admin", { background: true })
     if (!enq.ok) console.warn("[admin place-order] Integrations not queued:", enq.message)
     else if (enq.warnings.length) console.warn("[admin place-order] Integration warnings:", enq.warnings.join("; "))
@@ -158,6 +161,7 @@ export async function submitAdminOrderForAgent(
   revalidatePath("/bookings")
   revalidatePath("/packages")
   revalidatePath("/admin/orders")
+  revalidatePath("/admin/deals")
   revalidatePath("/admin/inventory")
   revalidatePath("/admin/catalog")
   revalidatePath("/admin/agents")

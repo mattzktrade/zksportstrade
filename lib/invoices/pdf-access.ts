@@ -1,5 +1,6 @@
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { hasCmsPermission } from "@/lib/auth/permissions"
 
 export type InvoicePdfAccess = {
   xeroInvoiceId: string
@@ -23,7 +24,12 @@ export async function assertInvoicePdfAccess(orderId: string): Promise<InvoicePd
   if (orderErr) throw new InvoicePdfAccessError(orderErr.message, 500)
   if (!order) throw new InvoicePdfAccessError("Order not found.", 404)
 
-  if (profile.role !== "admin" && order.agent_profile_id !== profile.id) {
+  if (
+    profile.role !== "admin" &&
+    !hasCmsPermission(profile, "finance.view") &&
+    !hasCmsPermission(profile, "orders.view") &&
+    order.agent_profile_id !== profile.id
+  ) {
     throw new InvoicePdfAccessError("You do not have access to this invoice.", 403)
   }
 

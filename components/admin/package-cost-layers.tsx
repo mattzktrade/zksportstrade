@@ -1,13 +1,13 @@
 "use client"
 
-import { useMemo, useRef, useState, useTransition } from "react"
+import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
   addStockPurchaseLayer,
   deleteCostLayer,
-  importPackageStockSourcesFromSalesforce,
+  listCrmCompanyOptions,
   updateCostLayer,
   updateCostLayerQuantity,
   updateOrphanPackageStock,
@@ -24,6 +24,9 @@ import {
 } from "@/lib/admin/package-sales-breakdown"
 import { resolveSoldByCostLayer } from "@/lib/integrations/salesforce/stock-sources"
 import { packageDurationLabel } from "@/lib/catalog/package-duration"
+import { SupplierNameLink } from "@/components/admin/profile-name-link"
+import { CompanySupplierSelect } from "@/components/admin/company-supplier-select"
+import type { CrmCompanyOption } from "@/lib/crm/deals"
 import { formatMoney } from "@/lib/format/money"
 
 type Props = {
@@ -114,7 +117,7 @@ export function PackageCostLayers({
   const [addQty, setAddQty] = useState("")
   const [addCost, setAddCost] = useState("")
   const [addNote, setAddNote] = useState("")
-  const [addSupplier, setAddSupplier] = useState("")
+  const [addSupplierAccountId, setAddSupplierAccountId] = useState("")
   const [addPoNumber, setAddPoNumber] = useState("")
   const [addPoIssuedAt, setAddPoIssuedAt] = useState("")
   const [addDate, setAddDate] = useState("")
@@ -130,7 +133,7 @@ export function PackageCostLayers({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editCost, setEditCost] = useState("")
   const [editNote, setEditNote] = useState("")
-  const [editSupplier, setEditSupplier] = useState("")
+  const [editSupplierAccountId, setEditSupplierAccountId] = useState("")
   const [editPoNumber, setEditPoNumber] = useState("")
   const [editPoIssuedAt, setEditPoIssuedAt] = useState("")
   const [editDate, setEditDate] = useState("")
@@ -140,7 +143,7 @@ export function PackageCostLayers({
   const [orphanEditing, setOrphanEditing] = useState(false)
   const [orphanQty, setOrphanQty] = useState("")
   const [orphanConvert, setOrphanConvert] = useState(false)
-  const [orphanSupplier, setOrphanSupplier] = useState("")
+  const [orphanSupplierAccountId, setOrphanSupplierAccountId] = useState("")
   const [orphanCost, setOrphanCost] = useState("0")
   const [orphanNote, setOrphanNote] = useState("")
   const [orphanDate, setOrphanDate] = useState("")
@@ -148,6 +151,17 @@ export function PackageCostLayers({
   const [orphanPoIssuedAt, setOrphanPoIssuedAt] = useState("")
   const [orphanBlockId, setOrphanBlockId] = useState("")
 
+  const [companies, setCompanies] = useState<CrmCompanyOption[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    void listCrmCompanyOptions().then((rows) => {
+      if (!cancelled) setCompanies(rows)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const duration = packageDuration?.trim() || null
   // Linked day packages always display the 3-day purchase ledger when the parent has layers
   // (even if this day imported its own SF Stock Source rows — those duplicates skew Sold/Left).
@@ -295,19 +309,6 @@ export function PackageCostLayers({
     () => new Map(fulfilmentBlocks.map((b) => [b.id, b])),
     [fulfilmentBlocks],
   )
-  const uniqueSuppliers = useMemo(() => {
-    const names = new Set<string>()
-    for (const po of purchaseOrders) {
-      const s = po.supplier.trim()
-      if (s) names.add(s)
-    }
-    for (const layer of displayLayers) {
-      const s = layer.source?.trim()
-      if (s) names.add(s)
-    }
-    return [...names].sort((a, b) => a.localeCompare(b))
-  }, [purchaseOrders, displayLayers])
-
   const { totalRemaining, totalCostBasis, weightedCost } = useMemo(() => {
     let units = 0
     let cost = 0
@@ -334,7 +335,7 @@ export function PackageCostLayers({
     return grossUnit / salePrice
   }, [grossUnit, salePrice])
 
-  const isLinkedGroup = linkedPackages.length > 1 || linkedShellPackages.length > 0
+  const isLinkedGroup = linkedPackages.length > 1
 
   const linkedMembers: LinkedSellableMember[] = useMemo(
     () =>
@@ -358,7 +359,7 @@ export function PackageCostLayers({
     }
 
     if (isLinkedGroup) {
-      const packageRows: Row[] = linkedPackages.map((p) => ({
+      return linkedPackages.map((p) => ({
         id: p.id,
         name: p.name,
         duration: p.duration,
@@ -371,22 +372,6 @@ export function PackageCostLayers({
         }),
         isCurrent: p.id === packageId,
       }))
-      const shellRows: Row[] = linkedShellPackages.map((sh) => ({
-        id: sh.id,
-        name: sh.name,
-        duration: sh.duration,
-        salesBreakdown: sh.sales_breakdown,
-        sellable: linkedPoolSellableForPackage({
-          stock: resolvedStockTotal,
-          targetId: sh.id,
-          targetDuration: sh.duration,
-          members: linkedMembers,
-          shellMirrorDuration: sh.duration,
-        }),
-        isCurrent: sh.id === packageId,
-        isShell: true,
-      }))
-      return [...packageRows, ...shellRows]
     }
     return [
       {
@@ -424,7 +409,7 @@ export function PackageCostLayers({
     setAddQty("")
     setAddCost("")
     setAddNote("")
-    setAddSupplier("")
+    setAddSupplierAccountId("")
     setAddPoNumber("")
     setAddPoIssuedAt("")
     setAddDate("")
@@ -443,8 +428,8 @@ export function PackageCostLayers({
       toast.error("Unit cost must be a non-negative number.")
       return
     }
-    if (!addSupplier.trim()) {
-      toast.error("Supplier is required — a purchase order is created automatically.")
+    if (!addSupplierAccountId) {
+      toast.error("Select a company as the supplier — a purchase order is created automatically.")
       return
     }
     start(async () => {
@@ -452,7 +437,7 @@ export function PackageCostLayers({
       fd.set("packageId", packageId)
       fd.set("quantity", String(q))
       fd.set("unitCost", String(c))
-      fd.set("supplier", addSupplier.trim())
+      fd.set("supplierAccountId", addSupplierAccountId)
       if (addPoNumber.trim()) fd.set("poNumber", addPoNumber.trim())
       if (addPoIssuedAt.trim()) fd.set("poIssuedAt", addPoIssuedAt.trim())
       if (addNote.trim()) fd.set("note", addNote.trim())
@@ -478,7 +463,7 @@ export function PackageCostLayers({
     setEditingId(layer.id)
     setEditCost(String(layer.unit_cost))
     setEditNote(layer.note ?? "")
-    setEditSupplier(linkedPo?.supplier ?? layer.source ?? "")
+    setEditSupplierAccountId(linkedPo?.supplier_account_id ?? "")
     setEditPoNumber(linkedPo?.po_number ?? "")
     setEditPoIssuedAt(linkedPo?.issued_at ?? "")
     setEditDate(formatDateInput(layer.received_at))
@@ -498,8 +483,8 @@ export function PackageCostLayers({
       toast.error("Quantity must be a non-negative whole number.")
       return
     }
-    if (!editSupplier.trim()) {
-      toast.error("Supplier is required.")
+    if (!editSupplierAccountId) {
+      toast.error("Select a company as the supplier.")
       return
     }
     const consumed = layer.quantity - layer.quantity_remaining
@@ -528,7 +513,7 @@ export function PackageCostLayers({
         note: editNote,
         receivedAt: editDate || null,
         cascadeToConsumptions: editCascade,
-        purchaseOrderSupplier: editSupplier.trim(),
+        purchaseOrderSupplierAccountId: editSupplierAccountId,
         purchaseOrderNumber: editPoNumber.trim() || null,
         purchaseOrderIssuedAt: editPoIssuedAt.trim() || null,
         fulfilmentBlockId: blockChanged ? nextBlockId : undefined,
@@ -575,7 +560,7 @@ export function PackageCostLayers({
     setOrphanEditing(true)
     setOrphanQty(String(qtyAvailable))
     setOrphanConvert(false)
-    setOrphanSupplier("")
+    setOrphanSupplierAccountId("")
     setOrphanCost("0")
     setOrphanNote("")
     setOrphanDate("")
@@ -591,8 +576,8 @@ export function PackageCostLayers({
       return
     }
     if (orphanConvert) {
-      if (!orphanSupplier.trim()) {
-        toast.error("Supplier is required to record a stock purchase.")
+      if (!orphanSupplierAccountId) {
+        toast.error("Select a company as the supplier.")
         return
       }
       if (newQty <= 0) {
@@ -611,7 +596,7 @@ export function PackageCostLayers({
         quantity: newQty,
         convertToPurchase: orphanConvert
           ? {
-              supplier: orphanSupplier.trim(),
+              supplierAccountId: orphanSupplierAccountId,
               unitCost: Number(orphanCost),
               note: orphanNote.trim() || null,
               poNumber: orphanPoNumber.trim() || null,
@@ -700,9 +685,9 @@ export function PackageCostLayers({
             <tr className="bg-muted/40 text-left text-[10px] uppercase tracking-wide text-muted-foreground">
               <th className="px-3 py-2 font-medium">Package</th>
               <th className="px-3 py-2 font-medium text-right">Portal</th>
-              <th className="px-3 py-2 font-medium text-right">Wix</th>
-              <th className="px-3 py-2 font-medium text-right">Salesforce</th>
-              <th className="px-3 py-2 font-medium text-right">SF pipeline</th>
+              <th className="px-3 py-2 font-medium text-right">Website</th>
+              <th className="px-3 py-2 font-medium text-right">Offline deals</th>
+              <th className="px-3 py-2 font-medium text-right">Pipeline</th>
               <th className="px-3 py-2 font-medium text-right">Total sold</th>
               <th className="px-3 py-2 font-medium text-right">Sellable</th>
             </tr>
@@ -711,16 +696,14 @@ export function PackageCostLayers({
             {packageSalesRows.map((row) => {
               const duration = packageDurationLabel(row.duration)
               const label = duration ? `${row.name} · ${duration}` : row.name
-              const rowClass = row.isShell
-                ? "border-t border-border bg-muted/20 text-muted-foreground"
-                : row.isCurrent
-                  ? "border-t border-border bg-muted/15 font-medium text-foreground"
-                  : "border-t border-border text-muted-foreground"
+              const rowClass = row.isCurrent
+                ? "border-t border-border bg-muted/15 font-medium text-foreground"
+                : "border-t border-border text-muted-foreground"
               return (
                 <tr key={row.id} className={rowClass}>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                      {row.isShell || row.isCurrent ? (
+                      {row.isCurrent ? (
                         <span>{label}</span>
                       ) : (
                         <Link
@@ -730,11 +713,7 @@ export function PackageCostLayers({
                           {label}
                         </Link>
                       )}
-                      {row.isShell ? (
-                        <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/80 border border-border rounded px-1 py-px">
-                          Shell
-                        </span>
-                      ) : isLinkedGroup ? (
+                      {isLinkedGroup ? (
                         <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/80 border border-border rounded px-1 py-px">
                           Linked
                         </span>
@@ -742,27 +721,23 @@ export function PackageCostLayers({
                     </div>
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
-                    {row.isShell ? "—" : soldCount(row.salesBreakdown.tradePortal)}
+                    {soldCount(row.salesBreakdown.tradePortal)}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
-                    {row.isShell ? "—" : soldCount(row.salesBreakdown.wix)}
+                    {soldCount(row.salesBreakdown.wix)}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
-                    {row.isShell ? "—" : soldCount(salesforceClosedWonSold(row.salesBreakdown))}
+                    {soldCount(salesforceClosedWonSold(row.salesBreakdown))}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
-                    {row.isShell
-                      ? "—"
-                      : soldCount(Math.max(0, Math.floor(row.salesBreakdown.salesforceOpenPipeline)))}
+                    {soldCount(Math.max(0, Math.floor(row.salesBreakdown.salesforceOpenPipeline)))}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
-                    {row.isShell
-                      ? soldCount(salesforceClosedWonSold(row.salesBreakdown))
-                      : soldCount(
-                          Math.max(0, Math.floor(row.salesBreakdown.wix)) +
-                            Math.max(0, Math.floor(row.salesBreakdown.tradePortal)) +
-                            salesforceClosedWonSold(row.salesBreakdown),
-                        )}
+                    {soldCount(
+                      Math.max(0, Math.floor(row.salesBreakdown.wix)) +
+                        Math.max(0, Math.floor(row.salesBreakdown.tradePortal)) +
+                        salesforceClosedWonSold(row.salesBreakdown),
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {row.sellable != null ? (
@@ -793,19 +768,14 @@ export function PackageCostLayers({
               {sharedLedgerParent.name}
             </Link>{" "}
             (3-day package). This day package shares that stock pool — sales here consume the same
-            supplier layers (same as Salesforce Stock Sources). Edit purchases on the 3-day package.
+            supplier layers. Edit purchases on the 3-day package.
           </p>
         ) : (
           <p className="text-[10px] text-muted-foreground">
-            Sold is closed-won / portal / Wix only (matches Salesforce Stock Source Quantity Sold). Left also
-            reserves open SF pipeline so it matches Sellable. Pipeline does not increase Sold until Closed Won.
+            Sold is portal, website, and offline deals. Left also reserves open pipeline so it matches
+            Sellable. Pipeline does not increase Sold until the deal is confirmed.
           </p>
         )}
-        <datalist id="supplier-suggestions">
-          {uniqueSuppliers.map((name) => (
-            <option key={name} value={name} />
-          ))}
-        </datalist>
         <div className="rounded-lg border border-border overflow-x-auto">
         <table className="w-full text-xs min-w-[860px]">
           <thead>
@@ -877,18 +847,17 @@ export function PackageCostLayers({
                 <td className="px-3 py-2 text-muted-foreground">
                   {orphanEditing && orphanConvert ? (
                     <div className="flex flex-col gap-1.5 min-w-[140px]">
-                      <input
-                        value={orphanSupplier}
-                        onChange={(e) => setOrphanSupplier(e.target.value)}
-                        placeholder="Supplier"
-                        list="supplier-suggestions"
+                      <CompanySupplierSelect
+                        companies={companies}
+                        value={orphanSupplierAccountId}
+                        onChange={setOrphanSupplierAccountId}
                         disabled={pending}
-                        className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
+                        className="px-2 py-1 rounded text-xs"
                       />
                       <input
                         value={orphanPoNumber}
                         onChange={(e) => setOrphanPoNumber(e.target.value)}
-                        placeholder="PO / invoice ref"
+                        placeholder="Leave blank to auto-generate"
                         disabled={pending}
                         className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
                       />
@@ -1042,9 +1011,6 @@ export function PackageCostLayers({
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       <div className="font-medium text-foreground">{attributedSold}</div>
-                      {attributedSold > consumed ? (
-                        <div className="text-[10px] text-muted-foreground">incl. offline SF</div>
-                      ) : null}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       <div className="font-medium text-foreground">{left}</div>
@@ -1066,17 +1032,21 @@ export function PackageCostLayers({
                     <td className="px-3 py-2 text-muted-foreground">
                       {editing ? (
                         <div className="flex flex-col gap-1.5 min-w-[140px]">
-                          <input
-                            value={editSupplier}
-                            onChange={(e) => setEditSupplier(e.target.value)}
-                            placeholder="Supplier"
-                            list="supplier-suggestions"
-                            className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
+                          <CompanySupplierSelect
+                            companies={companies}
+                            value={editSupplierAccountId}
+                            onChange={setEditSupplierAccountId}
+                            typedName={
+                              linkedPo?.supplier_account_id
+                                ? null
+                                : linkedPo?.supplier || layer.source || null
+                            }
+                            className="px-2 py-1 rounded text-xs"
                           />
                           <input
                             value={editPoNumber}
                             onChange={(e) => setEditPoNumber(e.target.value)}
-                            placeholder="PO / invoice ref"
+                            placeholder="Leave blank to auto-generate"
                             className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
                           />
                           <input
@@ -1085,22 +1055,37 @@ export function PackageCostLayers({
                             onChange={(e) => setEditPoIssuedAt(e.target.value)}
                             className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
                           />
+                          {layer.purchase_order_id ? (
+                            <Link
+                              href={`/admin/purchase-orders?po=${encodeURIComponent(layer.purchase_order_id)}`}
+                              className="text-[10px] text-primary hover:underline w-fit"
+                            >
+                              Open purchase order
+                            </Link>
+                          ) : null}
                         </div>
-                      ) : linkedPo ? (
+                      ) : linkedPo || layer.purchase_order_id ? (
                         <div className="flex flex-col gap-0.5">
-                          <span className="text-foreground">{linkedPo.supplier}</span>
+                          <span className="text-foreground">
+                            <SupplierNameLink
+                              supplierId={linkedPo?.supplier_id ?? layer.supplier_id}
+                              name={linkedPo?.supplier || layer.source || "—"}
+                            />
+                          </span>
                           <Link
-                            href="/admin/purchase-orders"
+                            href={`/admin/purchase-orders?po=${encodeURIComponent(linkedPo?.id ?? layer.purchase_order_id ?? "")}`}
                             className="text-[10px] text-primary hover:underline w-fit"
                           >
-                            PO {linkedPo.po_number}
+                            {linkedPo?.po_number ? `PO ${linkedPo.po_number}` : "View purchase order"}
                           </Link>
+                          {linkedPo?.issued_at ? (
+                            <span className="text-[10px] text-muted-foreground">
+                              {formatDisplayDate(linkedPo.issued_at)}
+                            </span>
+                          ) : null}
                         </div>
                       ) : layer.source ? (
-                        <div className="flex flex-col gap-0.5">
-                          <span>{layer.source}</span>
-                          <span className="text-[10px] italic text-muted-foreground/70">No PO yet — edit to add</span>
-                        </div>
+                        <SupplierNameLink supplierId={layer.supplier_id} name={layer.source} />
                       ) : (
                         <span className="text-muted-foreground/60">—</span>
                       )}
@@ -1235,31 +1220,6 @@ export function PackageCostLayers({
           </p>
         ) : (
           <>
-            {layers.length === 0 && hasSalesforceProduct ? (
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  disabled={pending}
-                  onClick={() => {
-                    start(async () => {
-                      const res = await importPackageStockSourcesFromSalesforce(packageId)
-                      if (!res.ok) {
-                        toast.error(res.message)
-                        return
-                      }
-                      toast.success(res.message ?? "Stock sources imported.")
-                      await refreshInventoryUi()
-                    })
-                  }}
-                  className="text-sm font-medium text-primary hover:underline disabled:opacity-50"
-                >
-                  Import stock purchases from Salesforce
-                </button>
-                <span className="text-[11px] text-muted-foreground">
-                  Records supplier / qty from SF Stock Sources without adding extra sellable stock.
-                </span>
-              </div>
-            ) : null}
             <button
               type="button"
               onClick={() => setAddOpen((o) => !o)}
@@ -1271,36 +1231,32 @@ export function PackageCostLayers({
         )}
         {addOpen && !isSharedLedgerView && (
           <div className="space-y-4">
-            <datalist id="supplier-suggestions">
-              {uniqueSuppliers.map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
             <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Purchase order
               </p>
               <p className="text-[11px] text-muted-foreground leading-relaxed -mt-1">
-                A purchase order is created automatically and linked to this stock. Re-use the same PO
-                reference if you are adding more units from an existing contract.
+                A purchase order number is generated automatically and linked here. Open it on Purchase
+                orders to add the contract, invoice, and other details. Re-use an existing PO number
+                only if this stock is from the same contract.
               </p>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block text-xs text-muted-foreground sm:col-span-2">
                   Supplier
-                  <input
-                    value={addSupplier}
-                    onChange={(e) => setAddSupplier(e.target.value)}
-                    placeholder="e.g. F1 Direct"
-                    list="supplier-suggestions"
-                    className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-                  />
+                  <div className="mt-1">
+                    <CompanySupplierSelect
+                      companies={companies}
+                      value={addSupplierAccountId}
+                      onChange={setAddSupplierAccountId}
+                    />
+                  </div>
                 </label>
                 <label className="block text-xs text-muted-foreground">
-                  PO / invoice reference (optional)
+                  Existing PO number (optional)
                   <input
                     value={addPoNumber}
                     onChange={(e) => setAddPoNumber(e.target.value)}
-                    placeholder="Leave blank to auto-generate"
+                    placeholder="Leave blank to generate a new PO"
                     className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
                   />
                 </label>
@@ -1398,8 +1354,7 @@ export function PackageCostLayers({
                 Add stock purchase
               </button>
               <p className="text-[11px] text-muted-foreground mt-2">
-                Creates the purchase order, adds stock at this buy price, and syncs supplier breakdown to
-                Salesforce Stock Sources on the next product sync.
+                Creates the purchase order and adds stock at this buy price.
               </p>
             </div>
           </div>

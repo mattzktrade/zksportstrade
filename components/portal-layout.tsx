@@ -24,7 +24,9 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
     { name: "All Packages", href: "/packages", icon: Ticket },
     { name: "My Bookings", href: "/bookings", icon: CalendarCheck },
     { name: "FAQs", href: "/faqs", icon: HelpCircle },
-    ...(profile.role === "admin" ? [{ name: "Admin", href: "/admin", icon: Shield }] : []),
+    ...(profile.role === "admin" || profile.role === "finance" || profile.role === "sales"
+      ? [{ name: "Admin", href: "/admin", icon: Shield }]
+      : []),
   ]
 
   async function handleSignOut() {

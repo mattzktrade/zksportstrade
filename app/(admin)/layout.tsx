@@ -3,9 +3,9 @@ import { AdminLayout } from "@/components/admin-layout"
 import { requireAdmin } from "@/lib/admin/require-admin"
 
 export default async function AdminGroupLayout({ children }: { children: React.ReactNode }) {
-  await requireAdmin()
+  const profile = await requireAdmin()
   return (
-    <AdminLayout>
+    <AdminLayout profileName={profile.full_name?.trim() || profile.email}>
       {children}
       <Toaster richColors position="top-center" />
     </AdminLayout>

@@ -6,7 +6,6 @@ import { toast } from "sonner"
 import {
   deletePackage,
   insertPackageInventory,
-  updateInventoryRow,
   updatePackageFields,
 } from "@/app/(admin)/actions"
 import type { LinkedInventoryPackage, LinkedInventoryShellPackage } from "@/lib/admin/linked-inventory"
@@ -25,7 +24,6 @@ import type { PurchaseOrderRow } from "@/lib/admin/purchase-orders"
 import {
   commitmentSellable,
   linkedPoolSellableForPackage,
-  salesforceClosedWonSold,
   type LinkedSellableMember,
 } from "@/lib/admin/package-sales-breakdown"
 import { PACKAGE_DURATION_OPTIONS, packageDurationLabel } from "@/lib/catalog/package-duration"
@@ -55,7 +53,7 @@ function currencyHint(currency: string): string {
   return `Amounts in ${c}`
 }
 
-export type PackageAdminPanelSection = "all" | "details" | "inventory" | "integrations"
+export type PackageAdminPanelSection = "all" | "details" | "inventory" | "visibility" | "integrations"
 
 export function PackageAdminPanel({
   initial,
@@ -113,8 +111,6 @@ export function PackageAdminPanel({
   const [featured, setFeatured] = useState(initial.featured)
   const [isHidden, setIsHidden] = useState(initial.is_hidden)
   const [brochureUrl, setBrochureUrl] = useState(typeof initial.brochure_url === "string" ? initial.brochure_url : "")
-  const [qtyHeld, setQtyHeld] = useState(String(initial.inventory?.qty_held ?? 0))
-
   useEffect(() => {
     setRaceId(initial.race_id)
     setName(initial.name)
@@ -137,7 +133,6 @@ export function PackageAdminPanel({
     setFeatured(initial.featured)
     setIsHidden(initial.is_hidden)
     setBrochureUrl(typeof initial.brochure_url === "string" ? initial.brochure_url : "")
-    setQtyHeld(String(initial.inventory?.qty_held ?? 0))
   }, [initial])
 
   function parsePrice(): number | null {
@@ -195,29 +190,6 @@ export function PackageAdminPanel({
     })
   }
 
-  function saveHeld() {
-    start(async () => {
-      const qa = initial.inventory?.qty_available ?? 0
-      const qh = Math.floor(Number(qtyHeld))
-      if (!Number.isFinite(qh) || qh < 0) {
-        toast.error("Held quantity must be a non-negative whole number.")
-        return
-      }
-      const res = await updateInventoryRow({
-        packageId: initial.id,
-        qty_available: qa,
-        qty_held: qh,
-      })
-      if (!res.ok) {
-        toast.error(res.message)
-        return
-      }
-      toast.success(
-        linkedPackages.length > 1 ? "Hold updated across linked packages." : "Held quantity updated.",
-      )
-      router.refresh()
-    })
-  }
 
   function addInventoryRow() {
     start(async () => {
@@ -254,7 +226,7 @@ export function PackageAdminPanel({
 
   const showDetails = section === "all" || section === "details"
   const showInventory = section === "all" || section === "inventory"
-  const showIntegrations = section === "all" || section === "integrations"
+  const showIntegrations = section === "all" || section === "visibility" || section === "integrations"
   const salePrice = section === "inventory" || section === "all" ? initial.trade_price : parsePrice()
   const qtyAvailable = initial.inventory?.qty_available ?? 0
   const qtyHeldNum = initial.inventory?.qty_held ?? 0
@@ -268,27 +240,12 @@ export function PackageAdminPanel({
     total: 0,
   }
   const soldTotal = salesBreakdown.total
-  const sfInv = initial.salesforce_inventory
-  const usesSalesforceInventory =
-    !!initial.inventory_group_id?.trim() && sfInv != null
   const layerStock = (initial.cost_layers ?? []).reduce(
     (sum, l) => sum + Math.max(0, Math.floor(Number(l.quantity) || 0)),
     0,
   )
-  // Cost layers are the purchase ledger — prefer them over a stale higher SF Stock
-  // (e.g. after deleting extra stock purchases that Salesforce has not yet been told about).
-  const stockDisplay =
-    layerStock > 0
-      ? layerStock
-      : usesSalesforceInventory && sfInv.stock != null
-        ? Math.max(0, Math.floor(sfInv.stock))
-        : Math.max(qtyAvailable, layerStock)
-  // Prefer closed-won places sold when Product2 Quantity_Sold looks like formula feedback
-  // (Available wiped to 0 while Sold claims the full stock).
-  const closedWonSold = salesforceClosedWonSold(salesBreakdown)
-  // Prefer portal closed-won ledger over Product2 Quantity_Sold — that field is often a
-  // Stock−Available formula and incorrectly counts day-pool holds on the 3-day product.
-  const soldDisplay = usesSalesforceInventory ? closedWonSold : soldTotal
+  const stockDisplay = layerStock > 0 ? layerStock : Math.max(qtyAvailable, layerStock)
+  const soldDisplay = soldTotal
 
   const linkedMembers: LinkedSellableMember[] =
     linkedPackages.length > 1
@@ -317,6 +274,9 @@ export function PackageAdminPanel({
       ? linkedMembers.reduce((sum, m) => sum + Math.max(0, Math.floor(m.breakdown.salesforceOpenPipeline)), 0)
       : Math.max(0, Math.floor(salesBreakdown.salesforceOpenPipeline))
 
+  const editingEvent = races.find((r) => r.id === raceId)
+  const isFormula1Event = (editingEvent?.category ?? "formula_1") === "formula_1"
+
   return (
     <div className="space-y-6 min-w-0 w-full">
       {showDetails ? (
@@ -325,7 +285,7 @@ export function PackageAdminPanel({
         <PackagePortalVisibilityCheckbox packageId={initial.id} isHidden={initial.is_hidden} className="mb-1" />
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block text-xs text-muted-foreground sm:col-span-2">
-            Race
+            {isFormula1Event ? "Race" : "Event"}
             <select
               value={raceId}
               onChange={(e) => setRaceId(e.target.value)}
@@ -347,7 +307,7 @@ export function PackageAdminPanel({
             />
           </label>
           <label className="block text-xs text-muted-foreground sm:col-span-2">
-            Circuit / listing title
+            {isFormula1Event ? "Circuit / listing title" : "Venue / listing title"}
             <input
               value={circuit}
               onChange={(e) => setCircuit(e.target.value)}
@@ -564,7 +524,7 @@ export function PackageAdminPanel({
                   </p>
                 ) : openPipelineHolds > 0 ? (
                   <p className="text-[10px] text-muted-foreground mt-0.5">
-                    After SF pipeline
+                    After pipeline
                   </p>
                 ) : null}
               </div>
@@ -574,13 +534,13 @@ export function PackageAdminPanel({
               </div>
               <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  {usesSalesforceInventory ? "Stock (SF)" : "Stock"}
+                  Stock
                 </p>
                 <p className="text-lg font-semibold tabular-nums">{stockDisplay}</p>
               </div>
               <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  {usesSalesforceInventory ? "Sold (SF)" : "Sold"}
+                  Sold
                 </p>
                 <p className="text-lg font-semibold tabular-nums">{soldDisplay}</p>
               </div>
@@ -606,30 +566,6 @@ export function PackageAdminPanel({
             />
             <div className="border-t border-border pt-4">
               <FulfilmentBlocksPanel packageId={initial.id} blocks={fulfilmentBlocks} />
-            </div>
-            <div className="rounded-lg border border-dashed border-border p-3 space-y-3 max-w-xs">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Manual hold</p>
-              {linkedPackages.length > 1 ? (
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Applies to all linked packages in this group (Saturday, Sunday, multi-day).
-                </p>
-              ) : null}
-              <label className="block text-xs text-muted-foreground">
-                Qty on hold
-                <input
-                  value={qtyHeld}
-                  onChange={(e) => setQtyHeld(e.target.value)}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-                />
-              </label>
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => saveHeld()}
-                className="px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted disabled:opacity-50"
-              >
-                Save hold
-              </button>
             </div>
           </>
         )}

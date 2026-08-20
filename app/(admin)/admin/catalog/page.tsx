@@ -9,7 +9,7 @@ export default async function AdminCatalogPage() {
   const races = await getAdminRaceOptions()
 
   return (
-    <div className="p-6 lg:p-8 max-w-[1400px]">
+    <div className="mx-auto max-w-[1540px] p-4 lg:p-5">
       <Suspense fallback={null}>
         <CatalogPackageRedirect />
       </Suspense>

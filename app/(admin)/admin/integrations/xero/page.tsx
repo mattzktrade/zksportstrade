@@ -14,8 +14,8 @@ export default async function XeroIntegrationPage({
   return (
     <div className="p-6 lg:p-8 max-w-2xl space-y-6">
       <div>
-        <Link href="/admin/integrations" className="text-sm text-muted-foreground hover:text-primary">
-          ← Integrations
+        <Link href="/admin/settings?tab=integrations" className="text-sm text-muted-foreground hover:text-primary">
+          ← Settings
         </Link>
         <h1 className="text-2xl font-semibold text-foreground mt-2">Xero integration</h1>
         <p className="text-sm text-muted-foreground mt-1">

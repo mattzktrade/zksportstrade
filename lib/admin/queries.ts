@@ -24,6 +24,9 @@ import {
   readSfInventorySnapshotsBulk,
   type SfInventorySnapshot,
 } from "@/lib/integrations/salesforce/inventory-snapshot"
+import { eventSeasonLabel } from "@/lib/catalog/event-label"
+import { isEventCategory, type EventCategory } from "@/lib/catalog/event-categories"
+import { retailPriceFromTrade } from "@/lib/integrations/retail-price"
 import { getSalesforceConnectionStatus, getStoredInstanceUrl } from "@/lib/integrations/salesforce/settings-store"
 
 const AGENT_PROFILE_COLUMNS =
@@ -40,6 +43,7 @@ export type AdminPackageRow = DbPackage & {
   layer_units_purchased?: number
   sales_breakdown: PackageSalesBreakdown
   salesforce_inventory: SfInventorySnapshot | null
+  effective_website_price?: number | null
 }
 
 export type LinkedInventorySibling = LinkedInventoryPackage
@@ -53,11 +57,11 @@ export async function getLinkedInventoryPackages(
 
   const { data: packages } = await supabase
     .from("packages")
-    .select("id, name, duration, salesforce_product_id")
+    .select("id, name, duration, salesforce_product_id, shell_parent_package_id")
     .eq("inventory_group_id", groupId)
     .order("name")
 
-  const rows = packages ?? []
+  const rows = (packages ?? []).filter((p) => !p.shell_parent_package_id)
   if (rows.length === 0) return []
 
   const ids = rows.map((p) => p.id)
@@ -142,6 +146,7 @@ export type AdminRaceOption = {
   country: string
   country_code: string
   season: number
+  category: EventCategory
 }
 
 export async function getAdminRaceOptions(): Promise<AdminRaceOption[]> {
@@ -152,11 +157,15 @@ const getAdminRaceOptionsCached = cache(async (): Promise<AdminRaceOption[]> => 
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("races")
-    .select("id,name,short_name,date_range,event_date,location,country,country_code,season")
+    .select("id,name,short_name,date_range,event_date,location,country,country_code,season,category")
+    .eq("is_archived", false)
     .order("season")
     .order("event_date")
   if (error || !data) return []
-  return data as AdminRaceOption[]
+  return data.map((row) => ({
+    ...row,
+    category: isEventCategory(String(row.category)) ? row.category : "formula_1",
+  })) as AdminRaceOption[]
 })
 
 export async function getPendingProfiles(): Promise<PortalProfile[]> {
@@ -364,7 +373,7 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
   const row = pkg as DbPackage
 
   const [{ data: race }, layersByPkg, salesByPkg, sfInventoryByProduct] = await Promise.all([
-    supabase.from("races").select("id,name").eq("id", row.race_id).maybeSingle(),
+    supabase.from("races").select("id,name,season").eq("id", row.race_id).maybeSingle(),
     getCostLayersByPackage([id]),
     getPackageSalesBreakdownByPackage([id]),
     getSalesforceInventorySnapshotsForPackages([row]),
@@ -372,7 +381,10 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
   const layers = layersByPkg.get(id) ?? []
   const summary = summarizePackageCost(row.currency || "USD", layers)
   if (summary) summary.package_id = id
-  const raceName = (race as { id: string; name: string } | null)?.name ?? row.race_id
+  const typedRace = race as { id: string; name: string; season: number } | null
+  const raceName = typedRace
+    ? eventSeasonLabel(typedRace.name, typedRace.season)
+    : row.race_id
   return {
     ...row,
     inventory: (inv as DbInventory | null) ?? null,
@@ -388,36 +400,60 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
 }
 
 /**
- * Fast catalog list — slim package columns, no cost layers, sales breakdown, SF, or Wix.
- * Full detail is loaded on the product page or when a catalog row is expanded.
+ * Fast catalog list — slim package columns plus bought/sold movement totals.
+ * Full cost-layer rows and Wix listings still load on the product page.
  */
-export async function getAdminCatalogListRows(): Promise<AdminPackageRow[]> {
+export async function getAdminCatalogListRows(options?: {
+  includeSalesforceInventory?: boolean
+}): Promise<AdminPackageRow[]> {
   const supabase = await createClient()
   const [{ data: races, error: re }, { data: packages, error: pe }, { data: inv, error: ie }] =
     await Promise.all([
-      supabase.from("races").select("id,name").order("event_date"),
+      supabase.from("races").select("id,name,season").order("event_date"),
       supabase.from("packages").select(CATALOG_LIST_PACKAGE_COLUMNS).order("sort_order"),
       supabase.from("package_inventory").select(INVENTORY_COLUMNS),
     ])
   if (re || pe || ie || !packages) return []
-  const raceName = new Map((races ?? []).map((r: { id: string; name: string }) => [r.id, r.name]))
+  const raceName = new Map(
+    (races ?? []).map((r: { id: string; name: string; season: number }) => [
+      r.id,
+      eventSeasonLabel(r.name, r.season),
+    ]),
+  )
   const invBy = new Map((inv ?? []).map((i: DbInventory) => [i.package_id, i]))
+  const packageIds = (packages as DbPackage[]).map((p) => p.id)
+  const [layerTotalsByPkg, salesByPkg, sfInventoryByProduct] = await Promise.all([
+    getCostLayerQuantityTotalsByPackage(packageIds),
+    getPackageSalesBreakdownByPackage(packageIds),
+    options?.includeSalesforceInventory
+      ? getSalesforceInventorySnapshotsForPackages(packages as DbPackage[])
+      : Promise.resolve(new Map<string, SfInventorySnapshot>()),
+  ])
   return (packages as DbPackage[]).map((p) => ({
     ...p,
     total_capacity: 0,
     requires_booking_approval: false,
-    image: null,
+    image: p.image ?? null,
     tier: "",
-    includes: [],
-    featured: false,
-    brochure_url: null,
-    description: null,
-    gallery_images: [],
+    includes: Array.isArray(p.includes)
+      ? p.includes.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+      : [],
+    featured: Boolean(p.featured),
+    brochure_url: typeof p.brochure_url === "string" ? p.brochure_url : null,
+    description: typeof p.description === "string" ? p.description : null,
+    gallery_images: Array.isArray(p.gallery_images)
+      ? p.gallery_images.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+      : [],
     salesforce_product_family: null,
-    retail_price_multiplier: null,
-    wix_retail_price: null,
-    sell_on_trade_portal: true,
-    sell_on_wix: false,
+    retail_price_multiplier: p.retail_price_multiplier ?? null,
+    wix_retail_price: p.wix_retail_price ?? null,
+    effective_website_price: retailPriceFromTrade(
+      p.trade_price,
+      p.retail_price_multiplier,
+      p.wix_retail_price,
+    ),
+    sell_on_trade_portal: p.sell_on_trade_portal !== false,
+    sell_on_wix: Boolean(p.sell_on_wix),
     sell_on_partners: false,
     integration_sync_status: "idle",
     integration_synced_at: null,
@@ -426,8 +462,12 @@ export async function getAdminCatalogListRows(): Promise<AdminPackageRow[]> {
     race_name: raceName.get(p.race_id) ?? p.race_id,
     cost_layers: [],
     cost_summary: null,
-    sales_breakdown: emptyPackageSalesBreakdown(p.id),
-    salesforce_inventory: null,
+    layer_units_purchased: layerTotalsByPkg.get(p.id)?.quantity_purchased ?? 0,
+    sales_breakdown: salesByPkg.get(p.id) ?? emptyPackageSalesBreakdown(p.id),
+    salesforce_inventory:
+      p.salesforce_product_id?.trim()
+        ? (sfInventoryByProduct.get(p.salesforce_product_id.trim()) ?? null)
+        : null,
   }))
 }
 
@@ -447,12 +487,17 @@ export async function getAdminPackageRows(
 ): Promise<AdminPackageRow[]> {
   const supabase = await createClient()
   const [{ data: races, error: re }, { data: packages, error: pe }, { data: inv, error: ie }] = await Promise.all([
-    supabase.from("races").select("id,name").order("event_date"),
+    supabase.from("races").select("id,name,season").order("event_date"),
     supabase.from("packages").select(PACKAGE_COLUMNS).order("sort_order"),
     supabase.from("package_inventory").select(INVENTORY_COLUMNS),
   ])
   if (re || pe || ie || !packages) return []
-  const raceName = new Map((races ?? []).map((r: { id: string; name: string }) => [r.id, r.name]))
+  const raceName = new Map(
+    (races ?? []).map((r: { id: string; name: string; season: number }) => [
+      r.id,
+      eventSeasonLabel(r.name, r.season),
+    ]),
+  )
   const invBy = new Map((inv ?? []).map((i: DbInventory) => [i.package_id, i]))
   const packageIds = (packages as DbPackage[]).map((p) => p.id)
   const includeCostLayers = options?.includeCostLayers === true
@@ -477,6 +522,11 @@ export async function getAdminPackageRows(
       cost_summary: summary,
       layer_units_purchased: totals?.quantity_purchased,
       sales_breakdown: salesByPkg.get(p.id) ?? emptyPackageSalesBreakdown(p.id),
+      effective_website_price: retailPriceFromTrade(
+        p.trade_price,
+        p.retail_price_multiplier,
+        p.wix_retail_price,
+      ),
       salesforce_inventory:
         p.salesforce_product_id?.trim() ? (sfInventoryByProduct.get(p.salesforce_product_id.trim()) ?? null) : null,
     }

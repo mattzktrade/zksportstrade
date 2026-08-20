@@ -7,9 +7,20 @@ import { toast } from "sonner"
 import { updateOrderSupplierAllocations } from "@/app/(admin)/actions"
 import { cn } from "@/lib/utils"
 import type { CostLayerRow } from "@/lib/admin/cost-layers"
+import type { PurchaseOrderRow } from "@/lib/admin/purchase-orders"
+import { DEAL_STAGE_LABELS, type PackageDealSaleRow } from "@/lib/crm/deal-types"
 import type { AdminOrderListRow } from "@/lib/orders/queries"
 import { AdminInvoiceStatusSelect } from "@/components/admin-invoice-status-select"
 import { formatMoney } from "@/lib/format/money"
+import { adminDealPath } from "@/lib/admin/deal-link"
+import { AccountNameLink, ContactNameLink, SupplierNameLink } from "@/components/admin/profile-name-link"
+import {
+  allocatePartyPreferSingleSupplier,
+  cogsFromTakes,
+  summarizeSupplierTakes,
+  type AllocatableSupplierLayer,
+  type SupplierAllocationTake,
+} from "@/lib/inventory/single-supplier-allocate"
 
 function formatPct(value: number): string {
   return `${(value * 100).toFixed(1)}%`
@@ -170,23 +181,96 @@ function SupplierAllocationEditor({
   )
 }
 
+function formatWhen(iso: string): string {
+  return new Date(iso).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+function orderSupplierLabel(order: AdminOrderListRow): string {
+  if (order.supplierAllocations.length > 0) {
+    return order.supplierAllocations.map((a) => `${a.quantity}x ${a.supplier}`).join(" · ")
+  }
+  return "Unassigned"
+}
+
+function layerToAllocatable(
+  layer: CostLayerRow,
+  purchaseOrders: ReadonlyMap<string, PurchaseOrderRow>,
+  booked: number,
+): AllocatableSupplierLayer {
+  const po = layer.purchase_order_id ? purchaseOrders.get(layer.purchase_order_id) : null
+  return {
+    id: layer.id,
+    available: Math.max(0, Math.floor(layer.quantity) - Math.max(0, booked)),
+    unit_cost: layer.unit_cost,
+    currency: layer.currency,
+    source: layer.source,
+    purchase_order_id: layer.purchase_order_id,
+    fulfilment_block_id: layer.fulfilment_block_id,
+    received_at: layer.received_at,
+    supplier: po?.supplier?.trim() || layer.source?.trim() || "Unassigned",
+  }
+}
+
 export function PackageOrdersTable({
   orders,
+  deals = [],
   costLayers,
+  purchaseOrders = [],
 }: {
   orders: AdminOrderListRow[]
+  deals?: PackageDealSaleRow[]
   costLayers: CostLayerRow[]
+  purchaseOrders?: PurchaseOrderRow[]
 }) {
-  if (orders.length === 0) {
+  if (orders.length === 0 && deals.length === 0) {
     return (
       <p className="text-sm text-muted-foreground border border-dashed border-border rounded-xl p-8 text-center">
-        No orders placed for this package yet.
+        No orders or offline deals recorded for this package yet.
       </p>
     )
   }
 
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const purchaseOrderById = useMemo(
+    () => new Map(purchaseOrders.map((po) => [po.id, po])),
+    [purchaseOrders],
+  )
+  const dealFulfillment = useMemo(() => {
+    const bookedByLayer = new Map<string, number>()
+    for (const order of orders) {
+      if (order.status === "cancelled") continue
+      for (const consumption of order.supplierConsumptions) {
+        if (!consumption.costLayerId) continue
+        bookedByLayer.set(
+          consumption.costLayerId,
+          (bookedByLayer.get(consumption.costLayerId) ?? 0) + consumption.quantity,
+        )
+      }
+    }
+    const layers = costLayers.map((layer) =>
+      layerToAllocatable(layer, purchaseOrderById, bookedByLayer.get(layer.id) ?? 0),
+    )
+    const takesByDeal = new Map<string, SupplierAllocationTake[]>()
+    for (const deal of [...deals].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    )) {
+      if (deal.supplierLabel) continue
+      takesByDeal.set(deal.id, allocatePartyPreferSingleSupplier(layers, deal.quantity))
+    }
+    return takesByDeal
+  }, [costLayers, deals, orders, purchaseOrderById])
+
   const sorted = [...orders].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  )
+  const sortedDeals = [...deals].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   )
 
   let totalRevenue = 0
@@ -202,7 +286,17 @@ export function PackageOrdersTable({
       pricedCount += 1
     }
   }
-  const cur = (sorted[0]?.currency || "USD").trim() || "USD"
+  for (const deal of sortedDeals) {
+    totalRevenue += deal.totalAmount
+    const attributed = dealFulfillment.get(deal.id) ?? []
+    const cogs = deal.cogs ?? cogsFromTakes(attributed)
+    if (cogs != null) {
+      totalCogs += cogs
+      totalProfit += deal.totalAmount - cogs
+      pricedCount += 1
+    }
+  }
+  const cur = (sorted[0]?.currency || sortedDeals[0]?.currency || "USD").trim() || "USD"
 
   return (
     <div className="space-y-4 min-w-0">
@@ -236,9 +330,17 @@ export function PackageOrdersTable({
       )}
 
       <p className="text-xs text-muted-foreground">
-        {sorted.length} order{sorted.length === 1 ? "" : "s"} for this package.{" "}
+        {sorted.length} portal/website order{sorted.length === 1 ? "" : "s"}
+        {sortedDeals.length > 0
+          ? ` and ${sortedDeals.length} offline deal${sortedDeals.length === 1 ? "" : "s"}`
+          : ""}{" "}
+        for this package.{" "}
         <Link href="/admin/orders" className="text-primary hover:underline">
           View all orders
+        </Link>
+        {" · "}
+        <Link href="/admin/deals" className="text-primary hover:underline">
+          View all deals
         </Link>
       </p>
 
@@ -247,7 +349,8 @@ export function PackageOrdersTable({
           <thead>
             <tr className="border-b border-border bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
               <th className="px-3 py-3 font-medium">Reference</th>
-              <th className="px-3 py-3 font-medium">Agent</th>
+              <th className="px-3 py-3 font-medium">Channel</th>
+              <th className="px-3 py-3 font-medium">Agent / account</th>
               <th className="px-3 py-3 font-medium text-right">Guests</th>
               <th className="px-3 py-3 font-medium text-right">Total</th>
               <th className="px-3 py-3 font-medium text-right">COGS</th>
@@ -259,67 +362,203 @@ export function PackageOrdersTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {sorted.map((o) => (
-              <tr key={o.id} className="hover:bg-muted/30">
-                <td className="px-3 py-3 font-mono text-xs whitespace-nowrap">{o.reference}</td>
-                <td className="px-3 py-3">
-                  <p className="font-medium text-foreground">{agentPrimary(o.agent)}</p>
-                  {o.agent?.email ? (
-                    <p className="text-xs text-muted-foreground">{o.agent.email}</p>
-                  ) : null}
-                </td>
-                <td className="px-3 py-3 text-right tabular-nums">{o.guests}</td>
-                <td className="px-3 py-3 text-right tabular-nums font-medium">
-                  {formatMoney(o.currency, Number(o.total_amount))}
-                </td>
-                <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">
-                  {o.profit.cost_known && o.profit.cogs != null
-                    ? formatMoney(o.profit.currency, o.profit.cogs)
-                    : "—"}
-                </td>
-                <td
-                  className={cn(
-                    "px-3 py-3 text-right tabular-nums font-medium",
-                    o.profit.cost_known && o.profit.gross_profit != null
-                      ? o.profit.gross_profit >= 0
-                        ? "text-emerald-600"
-                        : "text-destructive"
-                      : "text-muted-foreground",
-                  )}
-                >
-                  {o.profit.cost_known && o.profit.gross_profit != null
-                    ? formatMoney(o.profit.currency, o.profit.gross_profit)
-                    : "—"}
-                </td>
-                <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">
-                  {o.profit.margin != null ? formatPct(o.profit.margin) : "—"}
-                </td>
-                <td className="px-3 py-3 align-top">
-                  <SupplierAllocationEditor order={o} costLayers={costLayers} />
-                </td>
-                <td className="px-3 py-3">
-                  <AdminInvoiceStatusSelect
-                    key={`${o.invoice?.id ?? ""}-${o.invoice?.status ?? ""}`}
-                    invoiceId={o.invoice?.id ?? null}
-                    initialStatus={o.invoice?.status ?? null}
-                    deliveryProofs={o.deliveryProofs}
-                    className="max-w-[180px]"
-                  />
-                </td>
-                <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                  {new Date(o.created_at).toLocaleString("en-GB", {
-                    day: "numeric",
-                    month: "short",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </td>
-              </tr>
+            {sorted.map((o) => {
+              const rowId = `order:${o.id}`
+              const expanded = expandedId === rowId
+              return (
+                <OrderSaleRows
+                  key={o.id}
+                  order={o}
+                  expanded={expanded}
+                  onToggle={() => setExpandedId(expanded ? null : rowId)}
+                  costLayers={costLayers}
+                />
+              )
+            })}
+            {sortedDeals.map((deal) => (
+              <DealSaleRows
+                key={deal.id}
+                deal={deal}
+                takes={dealFulfillment.get(deal.id) ?? []}
+              />
             ))}
           </tbody>
         </table>
       </div>
     </div>
+  )
+}
+
+function MoneyCell({
+  value,
+  currency,
+  emphasize = false,
+}: {
+  value: number | null
+  currency: string
+  emphasize?: boolean
+}) {
+  if (value == null) return <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">—</td>
+  return (
+    <td
+      className={cn(
+        "px-3 py-3 text-right tabular-nums",
+        emphasize ? (value >= 0 ? "font-medium text-emerald-600" : "font-medium text-destructive") : "text-muted-foreground",
+      )}
+    >
+      {formatMoney(currency, value)}
+    </td>
+  )
+}
+
+function OrderSaleRows({
+  order,
+  expanded,
+  onToggle,
+  costLayers,
+}: {
+  order: AdminOrderListRow
+  expanded: boolean
+  onToggle: () => void
+  costLayers: CostLayerRow[]
+}) {
+  const cogs = order.profit.cost_known ? order.profit.cogs : null
+  const profit = order.profit.cost_known ? order.profit.gross_profit : null
+  return (
+    <>
+      <tr className={cn("hover:bg-muted/30", expanded && "bg-muted/20")}>
+        <td className="px-3 py-3 font-mono text-xs whitespace-nowrap">
+          <button type="button" onClick={onToggle} className="text-primary hover:underline">
+            {order.reference}
+          </button>
+        </td>
+        <td className="px-3 py-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          Portal
+        </td>
+        <td className="px-3 py-3">
+          <p className="font-medium text-foreground">{agentPrimary(order.agent)}</p>
+          {order.agent?.email ? <p className="text-xs text-muted-foreground">{order.agent.email}</p> : null}
+        </td>
+        <td className="px-3 py-3 text-right tabular-nums">{order.guests}</td>
+        <td className="px-3 py-3 text-right tabular-nums font-medium">
+          {formatMoney(order.currency, Number(order.total_amount))}
+        </td>
+        <MoneyCell value={cogs} currency={order.profit.currency || order.currency} />
+        <MoneyCell value={profit} currency={order.profit.currency || order.currency} emphasize />
+        <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">
+          {order.profit.margin != null ? formatPct(order.profit.margin) : "—"}
+        </td>
+        <td className="px-3 py-3 text-muted-foreground">{orderSupplierLabel(order)}</td>
+        <td className="px-3 py-3">
+          <AdminInvoiceStatusSelect
+            key={`${order.invoice?.id ?? ""}-${order.invoice?.status ?? ""}`}
+            invoiceId={order.invoice?.id ?? null}
+            initialStatus={order.invoice?.status ?? null}
+            deliveryProofs={order.deliveryProofs}
+            className="max-w-[180px]"
+          />
+        </td>
+        <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
+          {formatWhen(order.created_at)}
+        </td>
+      </tr>
+      {expanded ? (
+        <tr className="bg-muted/20">
+          <td colSpan={11} className="px-4 py-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <dl className="grid grid-cols-[120px_1fr] gap-y-2 text-xs">
+                <dt className="text-muted-foreground">Client</dt>
+                <dd className="font-medium">{order.client_name || "—"}</dd>
+                <dt className="text-muted-foreground">Email</dt>
+                <dd>{order.client_email || "—"}</dd>
+                <dt className="text-muted-foreground">Phone</dt>
+                <dd>{order.client_phone || "—"}</dd>
+                <dt className="text-muted-foreground">Guests</dt>
+                <dd>{order.guests}</dd>
+                <dt className="text-muted-foreground">Special requests</dt>
+                <dd>{order.special_requests || "—"}</dd>
+                <dt className="text-muted-foreground">Dietary</dt>
+                <dd>{order.dietary_requirements || "—"}</dd>
+                <dt className="text-muted-foreground">PO number</dt>
+                <dd>{order.po_number || "—"}</dd>
+              </dl>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Supplier fulfilment
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Keep the party on one supplier when that stock can cover the order.
+                  </p>
+                  <div className="mt-2">
+                    <SupplierAllocationEditor order={order} costLayers={costLayers} />
+                  </div>
+                </div>
+                <Link href="/admin/orders" className="text-xs font-medium text-primary hover:underline">
+                  Open in orders
+                </Link>
+              </div>
+            </div>
+          </td>
+        </tr>
+      ) : null}
+    </>
+  )
+}
+
+function DealSaleRows({
+  deal,
+  takes,
+}: {
+  deal: PackageDealSaleRow
+  takes: SupplierAllocationTake[]
+}) {
+  const attributedCogs = cogsFromTakes(takes)
+  const cogs = deal.cogs ?? attributedCogs
+  const profit = cogs == null ? deal.grossProfit : deal.totalAmount - cogs
+  const margin = profit == null || deal.totalAmount <= 0 ? deal.margin : profit / deal.totalAmount
+  const supplier = deal.supplierLabel || summarizeSupplierTakes(takes) || "—"
+  return (
+      <tr className="hover:bg-muted/30">
+        <td className="px-3 py-3 font-mono text-xs whitespace-nowrap">
+          <Link href={adminDealPath(deal.id)} className="text-primary hover:underline">
+            {deal.reference}
+          </Link>
+        </td>
+        <td className="px-3 py-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          Offline deal
+        </td>
+        <td className="px-3 py-3">
+          <AccountNameLink accountId={deal.accountId} name={deal.accountName || deal.contactName || "—"} className="font-medium text-foreground" />
+          {deal.accountName && deal.contactName ? (
+            <ContactNameLink accountId={deal.accountId} contactId={deal.contactId} name={deal.contactName} className="block text-xs text-muted-foreground" />
+          ) : null}
+        </td>
+        <td className="px-3 py-3 text-right tabular-nums">{deal.quantity}</td>
+        <td className="px-3 py-3 text-right tabular-nums font-medium">
+          {formatMoney(deal.currency, deal.totalAmount)}
+        </td>
+        <MoneyCell value={cogs} currency={deal.currency} />
+        <MoneyCell value={profit} currency={deal.currency} emphasize />
+        <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">
+          {margin != null ? formatPct(margin) : "—"}
+        </td>
+        <td className="px-3 py-3 text-muted-foreground">
+          {deal.lines.find((line) => line.supplierId && line.supplierName) ? (
+            <SupplierNameLink
+              supplierId={deal.lines.find((line) => line.supplierId)?.supplierId}
+              name={supplier}
+            />
+          ) : (
+            supplier
+          )}
+        </td>
+        <td className="px-3 py-3 text-xs text-muted-foreground">
+          {DEAL_STAGE_LABELS[deal.stage] ?? deal.stage}
+        </td>
+        <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
+          {formatWhen(deal.createdAt)}
+        </td>
+      </tr>
   )
 }

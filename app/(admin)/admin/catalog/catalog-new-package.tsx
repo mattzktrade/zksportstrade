@@ -1,13 +1,35 @@
 "use client"
 
-import { useEffect, useState, useTransition } from "react"
+import { useEffect, useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { createPackage } from "@/app/(admin)/actions"
+import { createNativeEvent, createPackage } from "@/app/(admin)/actions"
+import { CompanySupplierSelect } from "@/components/admin/company-supplier-select"
 import type { AdminRaceOption } from "@/lib/admin/queries"
 import { adminRaceLabel } from "@/lib/admin/race-label"
+import {
+  EVENT_CATEGORIES,
+  EVENT_CATEGORY_LABELS,
+  isEventCategory,
+  type EventCategory,
+} from "@/lib/catalog/event-categories"
 import { findPackageTemplate, PACKAGE_TEMPLATES } from "@/lib/catalog/package-templates"
 import { PACKAGE_DURATION_OPTIONS } from "@/lib/catalog/package-duration"
+
+const NEW_EVENT_ID = "__new__"
+
+const NAME_PLACEHOLDERS: Record<EventCategory, string> = {
+  formula_1: "3 Day Legend Paddock Club",
+  tennis: "Centre Court Hospitality",
+  football: "Hospitality suite",
+  concert: "VIP experience",
+  other: "Hospitality package",
+}
+
+function raceCategory(race: Pick<AdminRaceOption, "category"> | undefined): EventCategory {
+  const value = race?.category
+  return isEventCategory(String(value ?? "")) ? value : "formula_1"
+}
 
 function linesToList(s: string): string[] {
   return s
@@ -30,8 +52,12 @@ export function CatalogNewPackage({
   const router = useRouter()
   const [pending, start] = useTransition()
 
+  const [eventCategory, setEventCategory] = useState<EventCategory>("formula_1")
   const [templateId, setTemplateId] = useState("")
   const [raceId, setRaceId] = useState(races[0]?.id ?? "")
+  const [newEventName, setNewEventName] = useState("")
+  const [newEventShortName, setNewEventShortName] = useState("")
+  const [newEventSeason, setNewEventSeason] = useState(new Date().getFullYear())
   const [sellOnWix, setSellOnWix] = useState(false)
   const [wixMultiplier, setWixMultiplier] = useState("")
   const [wixManualPrice, setWixManualPrice] = useState("")
@@ -54,11 +80,16 @@ export function CatalogNewPackage({
   const [brochureUrl, setBrochureUrl] = useState("")
   const [initialQty, setInitialQty] = useState("0")
   const [initialUnitCost, setInitialUnitCost] = useState("")
-  const [initialSource, setInitialSource] = useState("")
+  const [initialSupplierAccountId, setInitialSupplierAccountId] = useState("")
   const [duration, setDuration] = useState("")
-  const [inventoryGroupId, setInventoryGroupId] = useState("")
 
+  const isFormula1 = eventCategory === "formula_1"
+  const creatingNewEvent = !isFormula1 && raceId === NEW_EVENT_ID
   const selectedRace = races.find((r) => r.id === raceId)
+  const eventsForCategory = useMemo(
+    () => races.filter((race) => raceCategory(race) === eventCategory),
+    [eventCategory, races],
+  )
 
   function applyRaceDefaults(race: AdminRaceOption) {
     setLocation(race.location)
@@ -69,10 +100,23 @@ export function CatalogNewPackage({
     setCircuit(race.name)
   }
 
+  function clearEventDefaults() {
+    setCircuit("")
+    setLocation("")
+    setCountry("")
+    setCountryCode("")
+    setEventDate("")
+    setDateRange("")
+  }
+
   function resetForm() {
-    const firstRace = races[0]
+    const firstF1 = races.find((race) => raceCategory(race) === "formula_1") ?? races[0]
+    setEventCategory("formula_1")
     setTemplateId("")
-    setRaceId(firstRace?.id ?? "")
+    setRaceId(firstF1?.id ?? "")
+    setNewEventName("")
+    setNewEventShortName("")
+    setNewEventSeason(new Date().getFullYear())
     setSellOnWix(false)
     setWixMultiplier("")
     setWixManualPrice("")
@@ -89,18 +133,29 @@ export function CatalogNewPackage({
     setBrochureUrl("")
     setInitialQty("0")
     setInitialUnitCost("")
-    setInitialSource("")
+    setInitialSupplierAccountId("")
     setDuration("")
-    setInventoryGroupId("")
-    if (firstRace) applyRaceDefaults(firstRace)
-    else {
-      setCircuit("")
-      setLocation("")
-      setCountry("")
-      setCountryCode("")
-      setEventDate("")
-      setDateRange("")
+    if (firstF1) applyRaceDefaults(firstF1)
+    else clearEventDefaults()
+  }
+
+  function selectCategory(next: EventCategory) {
+    setEventCategory(next)
+    setTemplateId("")
+    if (next !== "formula_1") setDuration("")
+    const matching = races.filter((race) => raceCategory(race) === next)
+    if (matching[0]) {
+      setRaceId(matching[0].id)
+      applyRaceDefaults(matching[0])
+      return
     }
+    if (next === "formula_1") {
+      setRaceId("")
+      clearEventDefaults()
+      return
+    }
+    setRaceId(NEW_EVENT_ID)
+    clearEventDefaults()
   }
 
   function applyTemplate(id: string) {
@@ -157,15 +212,33 @@ export function CatalogNewPackage({
 
   function submit() {
     start(async () => {
-      if (!raceId) {
+      if (isFormula1 && !raceId) {
         toast.error("Choose a race.")
         return
+      }
+      if (!isFormula1 && !creatingNewEvent && !raceId) {
+        toast.error("Choose an event.")
+        return
+      }
+      if (creatingNewEvent) {
+        if (!newEventName.trim() || !newEventShortName.trim()) {
+          toast.error("Enter the event name and short name.")
+          return
+        }
+        if (!location.trim() || !country.trim() || !countryCode.trim()) {
+          toast.error("Location, country, and country code are required for a new event.")
+          return
+        }
+        if (!eventDate.trim() || !dateRange.trim()) {
+          toast.error("Event date and date range are required for a new event.")
+          return
+        }
       }
       if (!name.trim()) {
         toast.error("Enter a display name.")
         return
       }
-      if (!duration.trim()) {
+      if (isFormula1 && !duration.trim()) {
         toast.error("Choose a duration (linked day splits).")
         return
       }
@@ -182,6 +255,10 @@ export function CatalogNewPackage({
       const qty = Math.floor(Number(initialQty))
       if (!Number.isFinite(qty) || qty < 0) {
         toast.error("Initial stock must be a non-negative whole number.")
+        return
+      }
+      if (qty > 0 && !initialSupplierAccountId) {
+        toast.error("Select a company as the source.")
         return
       }
       let initialCost: number | null = null
@@ -217,10 +294,31 @@ export function CatalogNewPackage({
         return
       }
 
+      let packageRaceId = raceId
+      if (creatingNewEvent) {
+        const eventRes = await createNativeEvent({
+          category: eventCategory,
+          name: newEventName.trim(),
+          shortName: newEventShortName.trim(),
+          location: location.trim(),
+          country: country.trim(),
+          countryCode: countryCode.trim(),
+          eventDate: eventDate.trim(),
+          dateRange: dateRange.trim(),
+          image: image.trim(),
+          season: newEventSeason,
+        })
+        if (!eventRes.ok || !eventRes.eventId) {
+          toast.error(eventRes.ok ? "Event was created but its ID was missing." : eventRes.message)
+          return
+        }
+        packageRaceId = eventRes.eventId
+      }
+
       const res = await createPackage({
-        race_id: raceId,
+        race_id: packageRaceId,
         name: name.trim(),
-        circuit: circuit.trim(),
+        circuit: circuit.trim() || newEventName.trim() || name.trim(),
         location: location.trim(),
         country: country.trim(),
         country_code: countryCode.trim(),
@@ -232,11 +330,10 @@ export function CatalogNewPackage({
         currency: "USD",
         total_capacity: cap,
         duration,
-        inventory_group_id: inventoryGroupId.trim() || null,
         includes: linesToList(includesText),
         trade_price: price,
         is_enquiry: isEnquiry,
-        requires_booking_approval: requiresBookingApproval,
+        requiresBookingApproval: requiresBookingApproval,
         featured,
         sort_order: 100,
         brochure_url: brochureUrl.trim() || null,
@@ -246,7 +343,7 @@ export function CatalogNewPackage({
         initial_qty_available: qty,
         initial_unit_cost: initialCost,
         initial_cost_note: null,
-        initial_source: initialSource.trim() || null,
+        initial_supplier_account_id: initialSupplierAccountId || null,
       })
       if (!res.ok) {
         toast.error(res.message)
@@ -265,15 +362,9 @@ export function CatalogNewPackage({
     })
   }
 
-  if (races.length === 0) {
-    return (
-      <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-4">
-        Add at least one race in Supabase before creating packages.
-      </p>
-    )
-  }
-
   if (!open) return null
+
+  const noF1Events = isFormula1 && eventsForCategory.length === 0
 
   return (
     <div className="rounded-xl border border-border bg-card p-5 sm:p-6 shadow-sm space-y-6">
@@ -290,38 +381,112 @@ export function CatalogNewPackage({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block text-xs text-muted-foreground sm:col-span-2">
-          Template (optional)
+          Event type
           <select
-            value={templateId}
-            onChange={(e) => applyTemplate(e.target.value)}
+            value={eventCategory}
+            onChange={(e) => selectCategory(e.target.value as EventCategory)}
             className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
           >
-            <option value="">Start from scratch</option>
-            {PACKAGE_TEMPLATES.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.label}
+            {EVENT_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {EVENT_CATEGORY_LABELS[category]}
               </option>
             ))}
           </select>
           <span className="block text-[11px] text-muted-foreground/80 mt-1">
-            Prefills name, description, inclusions, and capacity for recurring hospitality products.
+            Formula 1 keeps race templates and day-split inventory. Other types are for tennis, football, concerts, and similar events.
           </span>
         </label>
 
-        <label className="block text-xs text-muted-foreground sm:col-span-2">
-          Race
-          <select
-            value={raceId}
-            onChange={(e) => setRaceId(e.target.value)}
-            className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-          >
-            {races.map((r) => (
-              <option key={r.id} value={r.id}>
-                {adminRaceLabel(r)}
-              </option>
-            ))}
-          </select>
-        </label>
+        {isFormula1 ? (
+          <label className="block text-xs text-muted-foreground sm:col-span-2">
+            Template (optional)
+            <select
+              value={templateId}
+              onChange={(e) => applyTemplate(e.target.value)}
+              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+            >
+              <option value="">Start from scratch</option>
+              {PACKAGE_TEMPLATES.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+            <span className="block text-[11px] text-muted-foreground/80 mt-1">
+              Prefills name, description, inclusions, and capacity for recurring hospitality products.
+            </span>
+          </label>
+        ) : null}
+
+        {noF1Events ? (
+          <p className="sm:col-span-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-4">
+            Add at least one Formula 1 event under Inventory → Events before creating F1 packages.
+          </p>
+        ) : (
+          <label className="block text-xs text-muted-foreground sm:col-span-2">
+            {isFormula1 ? "Race" : "Event"}
+            <select
+              value={raceId}
+              onChange={(e) => {
+                const next = e.target.value
+                setRaceId(next)
+                if (next === NEW_EVENT_ID) clearEventDefaults()
+              }}
+              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+            >
+              {eventsForCategory.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {adminRaceLabel(r)}
+                </option>
+              ))}
+              {!isFormula1 ? <option value={NEW_EVENT_ID}>Create new event…</option> : null}
+            </select>
+            {!isFormula1 ? (
+              <span className="block text-[11px] text-muted-foreground/80 mt-1">
+                Choose an existing {EVENT_CATEGORY_LABELS[eventCategory].toLowerCase()} event, or create one here if it is not in the list yet.
+              </span>
+            ) : null}
+          </label>
+        )}
+
+        {creatingNewEvent ? (
+          <>
+            <label className="block text-xs text-muted-foreground">
+              Event name <span className="text-primary">*</span>
+              <input
+                value={newEventName}
+                onChange={(e) => {
+                  const value = e.target.value
+                  setNewEventName(value)
+                  if (!circuit.trim()) setCircuit(value)
+                }}
+                className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                placeholder="2026 Wimbledon Championships"
+              />
+            </label>
+            <label className="block text-xs text-muted-foreground">
+              Short name <span className="text-primary">*</span>
+              <input
+                value={newEventShortName}
+                onChange={(e) => setNewEventShortName(e.target.value)}
+                className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                placeholder="Wimbledon"
+              />
+            </label>
+            <label className="block text-xs text-muted-foreground sm:col-span-2 sm:max-w-xs">
+              Season
+              <input
+                type="number"
+                min={2020}
+                max={2100}
+                value={newEventSeason}
+                onChange={(e) => setNewEventSeason(Number(e.target.value))}
+                className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              />
+            </label>
+          </>
+        ) : null}
 
         <label className="block text-xs text-muted-foreground sm:col-span-2">
           Display name <span className="text-primary">*</span>
@@ -329,49 +494,44 @@ export function CatalogNewPackage({
             value={name}
             onChange={(e) => setName(e.target.value)}
             className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            placeholder="3 Day Legend Paddock Club"
+            placeholder={NAME_PLACEHOLDERS[eventCategory]}
           />
         </label>
 
         <label className="block text-xs text-muted-foreground sm:col-span-2 sm:max-w-md">
-          Duration (linked day splits) <span className="text-primary">*</span>
+          {isFormula1 ? (
+            <>
+              Duration (linked day splits) <span className="text-primary">*</span>
+            </>
+          ) : (
+            "Duration (optional)"
+          )}
           <select
-            required
+            required={isFormula1}
             value={duration}
             onChange={(e) => setDuration(e.target.value)}
             className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
           >
             {PACKAGE_DURATION_OPTIONS.map((o) => (
-              <option key={o.value || "none"} value={o.value} disabled={o.value === ""}>
+              <option key={o.value || "none"} value={o.value} disabled={isFormula1 && o.value === ""}>
                 {o.label}
               </option>
             ))}
           </select>
           <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground/90">
-            Saturday only, Sunday only, and 3-day options with the same product stem share inventory (e.g. Velocity
-            Terrace splits).
-          </span>
-        </label>
-
-        <label className="block text-xs text-muted-foreground sm:col-span-2 sm:max-w-md">
-          Linked inventory key
-          <input
-            value={inventoryGroupId}
-            onChange={(e) => setInventoryGroupId(e.target.value)}
-            className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
-            placeholder="Leave blank to auto-link, e.g. abudhabi-2026/velocity-terrace"
-          />
-          <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground/90">
-            Use the same key for the 3 day, 2 day, Saturday, Sunday, and Friday versions when they share one stock pool.
+            {isFormula1
+              ? "Saturday only, Sunday only, and 3-day options with the same product stem share inventory (e.g. Velocity Terrace splits)."
+              : "Leave unspecified unless this product has day or session splits that should share inventory."}
           </span>
         </label>
 
         <label className="block text-xs text-muted-foreground">
-          Circuit / listing title
+          {isFormula1 ? "Circuit / listing title" : "Venue / listing title"}
           <input
             value={circuit}
             onChange={(e) => setCircuit(e.target.value)}
             className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+            placeholder={isFormula1 ? undefined : "All England Lawn Tennis Club"}
           />
         </label>
 
@@ -391,6 +551,7 @@ export function CatalogNewPackage({
             value={dateRange}
             onChange={(e) => setDateRange(e.target.value)}
             className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+            placeholder={isFormula1 ? undefined : "29 Jun – 12 Jul"}
           />
         </label>
 
@@ -400,6 +561,7 @@ export function CatalogNewPackage({
             value={location}
             onChange={(e) => setLocation(e.target.value)}
             className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+            placeholder={isFormula1 ? undefined : "London"}
           />
         </label>
 
@@ -409,6 +571,7 @@ export function CatalogNewPackage({
             value={country}
             onChange={(e) => setCountry(e.target.value)}
             className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+            placeholder={isFormula1 ? undefined : "United Kingdom"}
           />
         </label>
 
@@ -418,7 +581,7 @@ export function CatalogNewPackage({
             value={countryCode}
             onChange={(e) => setCountryCode(e.target.value)}
             className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            placeholder="AE"
+            placeholder={isFormula1 ? "AE" : "GB"}
           />
         </label>
 
@@ -464,12 +627,12 @@ export function CatalogNewPackage({
           </label>
           <label className="block text-xs text-muted-foreground">
             Source
-            <input
-              value={initialSource}
-              onChange={(e) => setInitialSource(e.target.value)}
-              placeholder="e.g. F1 Direct"
-              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            />
+            <div className="mt-1.5">
+              <CompanySupplierSelect
+                value={initialSupplierAccountId}
+                onChange={setInitialSupplierAccountId}
+              />
+            </div>
           </label>
         </div>
       </div>
@@ -593,7 +756,7 @@ export function CatalogNewPackage({
 
       <button
         type="button"
-        disabled={pending}
+        disabled={pending || noF1Events}
         onClick={() => submit()}
         className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"
       >

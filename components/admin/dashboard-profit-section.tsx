@@ -210,8 +210,8 @@ export function DashboardProfitSection({ profit }: { profit: DashboardProfit }) 
   return (
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-2">
-        <PeriodSummaryCard title="This month" period={thisMonth} href="/admin/orders" />
-        <PeriodSummaryCard title={`${year} year to date`} period={yearToDate} href="/admin/orders" />
+        <PeriodSummaryCard title="This month" period={thisMonth} href="/admin/finance" />
+        <PeriodSummaryCard title={`${year} year to date`} period={yearToDate} href="/admin/finance" />
       </div>
 
       {profit.monthly.some((m) => m.periodKey.startsWith(String(year))) ? (

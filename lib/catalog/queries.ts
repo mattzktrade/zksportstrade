@@ -97,11 +97,17 @@ async function fetchFullCatalogBase(
   if (racesError || packagesError || invError) return null
   if (!allRaces || !allPackages) return null
 
-  const built = buildCatalog(allRaces as DbRace[], allPackages as DbPackage[], (inventory ?? []) as DbInventory[])
+  const visiblePackageRows = (allPackages as DbPackage[]).filter(
+    (pkg) =>
+      !pkg.is_hidden &&
+      pkg.sell_on_trade_portal !== false &&
+      !pkg.shell_parent_package_id,
+  )
+  const built = buildCatalog(allRaces as DbRace[], visiblePackageRows, (inventory ?? []) as DbInventory[])
   const packages = await attachLargestSameSuiteRemaining(
     supabase,
     built.packages,
-    (allPackages as DbPackage[]).map((p) => ({
+    visiblePackageRows.map((p) => ({
       id: p.id,
       inventory_group_id: p.inventory_group_id,
       duration: p.duration,
@@ -164,15 +170,21 @@ export async function getRaceCatalog(
     .order("sort_order")
   if (pkgError || !packageRows) return null
 
-  const packageIds = (packageRows as DbPackage[]).map((p) => p.id)
+  const visiblePackageRows = (packageRows as DbPackage[]).filter(
+    (pkg) =>
+      !pkg.is_hidden &&
+      pkg.sell_on_trade_portal !== false &&
+      !pkg.shell_parent_package_id,
+  )
+  const packageIds = visiblePackageRows.map((p) => p.id)
   const inventoryRows = await fetchInventoryForPackages(supabase, packageIds)
   const invByPackage = new Map(inventoryRows.map((i) => [i.package_id, i]))
 
-  let packages = (packageRows as DbPackage[]).map((p) => mapPackageRow(p, invByPackage.get(p.id)))
+  let packages = visiblePackageRows.map((p) => mapPackageRow(p, invByPackage.get(p.id)))
   packages = await attachLargestSameSuiteRemaining(
     supabase,
     packages,
-    (packageRows as DbPackage[]).map((p) => ({
+    visiblePackageRows.map((p) => ({
       id: p.id,
       inventory_group_id: p.inventory_group_id,
       duration: p.duration,
@@ -191,13 +203,21 @@ export async function getRaceCatalog(
   return { race, packages }
 }
 
-export async function getPackageById(id: string, agentProfileId?: string | null): Promise<Package | null> {
+export async function getPackageById(
+  id: string,
+  agentProfileId?: string | null,
+  options?: { includeUnlisted?: boolean },
+): Promise<Package | null> {
   const supabase = await createClient()
 
   const { data: p, error } = await supabase.from("packages").select(PACKAGE_COLUMNS).eq("id", id).maybeSingle()
   if (error || !p) return null
 
   const dbPkg = p as DbPackage
+  if (
+    !options?.includeUnlisted &&
+    (dbPkg.is_hidden || dbPkg.sell_on_trade_portal === false || Boolean(dbPkg.shell_parent_package_id))
+  ) return null
   const bookableFrom = bookableEventDateFrom()
 
   const { data: raceRow } = await supabase

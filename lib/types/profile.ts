@@ -28,7 +28,7 @@ export type PortalProfile = {
   company_name: string
   company_type?: CompanyType | null
   mobile?: string | null
-  role: "agent" | "admin"
+  role: "agent" | "admin" | "finance" | "sales"
   approval_status: "pending" | "approved" | "rejected"
   approval_note?: string | null
   created_at?: string

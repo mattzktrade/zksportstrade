@@ -6,6 +6,7 @@ import {
   SHELL_SINGLE_TICKET_FAMILY,
   type ShellDayDuration,
 } from "@/lib/catalog/shell-single-tickets"
+import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
 
 export type EnsureShellsResult = {
   /** Newly-created shell package ids in this call. */
@@ -52,6 +53,12 @@ export async function ensureShellSingleTicketsForParent(
 ): Promise<EnsureShellsResult> {
   const id = parentPackageId.trim()
   if (!id) return { created: [], shellPackageIds: [] }
+
+  // Native CMS/CRM mode does not create Salesforce reporting shells.
+  // Existing shell rows are left untouched for historical reference.
+  if (isNativePlatformMode()) {
+    return { created: [], shellPackageIds: [] }
+  }
 
   const { data: parentRow, error: parentErr } = await supabase
     .from("packages")
