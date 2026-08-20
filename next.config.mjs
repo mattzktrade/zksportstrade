@@ -13,6 +13,10 @@ function pushWebpackExternal(config, external) {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   serverExternalPackages: ["exceljs"],
+  // Next 16 production builds use Turbopack by default. The webpack() hook
+  // below is only for local `next dev --webpack`; an empty turbopack config
+  // tells Next this split is intentional.
+  turbopack: {},
   webpack: (config, { isServer, webpack, nextRuntime }) => {
     if (isServer && nextRuntime !== "edge") {
       // Instrumentation / Node compiles fail on the `node:` URI scheme and also
