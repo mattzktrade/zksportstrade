@@ -11,6 +11,7 @@ import type { PurchaseOrderRow } from "@/lib/admin/purchase-orders"
 import { DEAL_STAGE_LABELS, type PackageDealSaleRow } from "@/lib/crm/deal-types"
 import type { AdminOrderListRow } from "@/lib/orders/queries"
 import { AdminInvoiceStatusSelect } from "@/components/admin-invoice-status-select"
+import { AdminDesktopTable, AdminMobileList } from "@/components/admin/admin-page-kit"
 import { formatMoney } from "@/lib/format/money"
 import { adminDealPath } from "@/lib/admin/deal-link"
 import { AccountNameLink, ContactNameLink, SupplierNameLink } from "@/components/admin/profile-name-link"
@@ -344,7 +345,8 @@ export function PackageOrdersTable({
         </Link>
       </p>
 
-      <div className="rounded-xl border border-border bg-card overflow-x-auto">
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+        <AdminDesktopTable>
         <table className="w-full text-xs xl:text-sm min-w-[1120px]">
           <thead>
             <tr className="border-b border-border bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
@@ -384,6 +386,27 @@ export function PackageOrdersTable({
             ))}
           </tbody>
         </table>
+        </AdminDesktopTable>
+        <AdminMobileList>
+          {sorted.map((o) => (
+            <div key={o.id} className="flex items-start justify-between gap-3 px-4 py-3">
+              <div className="min-w-0">
+                <p className="font-mono text-xs font-semibold">{o.reference}</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">{o.agent?.company_name || o.agent?.full_name || o.agent?.email || "Portal order"}</p>
+              </div>
+              <p className="shrink-0 text-xs font-semibold">{formatMoney(o.currency, Number(o.total_amount))}</p>
+            </div>
+          ))}
+          {sortedDeals.map((deal) => (
+            <Link key={deal.id} href={adminDealPath(deal.id)} className="flex items-start justify-between gap-3 px-4 py-3">
+              <div className="min-w-0">
+                <p className="font-semibold text-primary">{deal.reference}</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">{deal.accountName || "Offline deal"}</p>
+              </div>
+              <p className="shrink-0 text-xs font-semibold">{DEAL_STAGE_LABELS[deal.stage] ?? deal.stage}</p>
+            </Link>
+          ))}
+        </AdminMobileList>
       </div>
     </div>
   )

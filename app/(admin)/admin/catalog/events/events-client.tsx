@@ -11,7 +11,7 @@ import {
   updateNativeEvent,
   type NativeEventInput,
 } from "@/app/(admin)/actions"
-import { AdminPageHeader, AdminPanel, AdminStatCard, StatusPill } from "@/components/admin/admin-page-kit"
+import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { adminEventPath } from "@/lib/admin/event-link"
 import {
   EVENT_CATEGORIES,
@@ -225,11 +225,11 @@ export function EventsClient({ events }: { events: NativeEventRow[] }) {
         }
       />
 
-      <section className="grid gap-3 sm:grid-cols-3">
+      <AdminStats className="sm:grid-cols-3">
         <AdminStatCard icon={CalendarDays} value={events.length} label="Total events" tone="blue" />
         <AdminStatCard icon={CheckCircle2} value={events.filter((event) => !event.is_archived).length} label="Active events" tone="green" />
         <AdminStatCard icon={Archive} value={events.filter((event) => event.is_archived).length} label="Archived events" tone="amber" />
-      </section>
+      </AdminStats>
 
       {formOpen && !editingId ? (
         <AdminPanel className="p-5">{renderEventForm()}</AdminPanel>
@@ -237,7 +237,7 @@ export function EventsClient({ events }: { events: NativeEventRow[] }) {
 
       <AdminPanel>
         <div className="flex flex-wrap items-center gap-3 border-b p-4">
-          <div className="relative min-w-[280px] flex-1">
+          <div className="relative min-w-0 w-full flex-1 sm:min-w-[280px]">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search event, circuit, country or season..." className="h-10 w-full rounded-md border pl-10 pr-3 text-sm outline-none focus:border-primary/50" />
           </div>
@@ -265,7 +265,7 @@ export function EventsClient({ events }: { events: NativeEventRow[] }) {
             Show archived
           </label>
         </div>
-        <div className="overflow-x-auto">
+        <AdminDesktopTable>
           <table className="w-full min-w-[900px] text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
@@ -324,7 +324,33 @@ export function EventsClient({ events }: { events: NativeEventRow[] }) {
               {filtered.length === 0 ? <tr><td colSpan={8} className="px-4 py-12 text-center text-sm text-slate-500">No events match this view.</td></tr> : null}
             </tbody>
           </table>
-        </div>
+        </AdminDesktopTable>
+        <AdminMobileList>
+          {filtered.map((event) => (
+            <div key={event.id} className="space-y-2 px-4 py-3">
+              <Link href={adminEventPath(event.id)} className="block">
+                <p className="font-semibold text-primary">{event.name}</p>
+                <p className="mt-0.5 text-[10px] text-slate-600">{event.date_range || event.event_date} · {event.location}</p>
+              </Link>
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusPill tone="blue">{EVENT_CATEGORY_LABELS[event.category]}</StatusPill>
+                <StatusPill tone={event.is_archived ? "gray" : "green"}>{event.is_archived ? "Archived" : "Active"}</StatusPill>
+                <span className="text-[8px] text-slate-500">{event.product_count} products</span>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => openEdit(event)} className="flex h-9 items-center gap-1.5 rounded-md border px-3 text-xs font-medium"><Pencil className="h-3.5 w-3.5" /> Edit</button>
+                <button type="button" disabled={pending} onClick={() => toggleArchive(event)} className="flex h-9 items-center gap-1.5 rounded-md border px-3 text-xs font-medium">
+                  {event.is_archived ? <RotateCcw className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
+                  {event.is_archived ? "Restore" : "Archive"}
+                </button>
+              </div>
+              {formOpen && editingId === event.id ? (
+                <div className="rounded-md border border-primary/20 bg-red-50/30 p-3">{renderEventForm()}</div>
+              ) : null}
+            </div>
+          ))}
+          {filtered.length === 0 ? <p className="px-4 py-12 text-center text-sm text-slate-500">No events match this view.</p> : null}
+        </AdminMobileList>
       </AdminPanel>
     </div>
   )

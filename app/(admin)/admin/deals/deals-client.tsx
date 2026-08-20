@@ -32,7 +32,7 @@ import { AccountKindPills } from "@/components/admin/account-kind-pills"
 import { ActionCombobox } from "@/components/admin/action-combobox"
 import { SearchableSelect } from "@/components/admin/searchable-select"
 import { EventFilter, uniqueEventFilterOptions } from "@/components/admin/event-filter"
-import { AdminPageHeader, AdminPanel, AdminStatCard, StatusPill } from "@/components/admin/admin-page-kit"
+import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import {
   DealLineBasket,
   type DealBasketLine,
@@ -847,7 +847,7 @@ export function DealsClient({
         description="View all deals, track status, and manage your personal pipeline."
       />
 
-      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-5">
         <AdminStatCard icon={UsersRound} value={openDeals.length} label="Open deals" tone="purple" />
         <AdminStatCard icon={ChartNoAxesCombined} value={money(pipelineValue)} label="Pipeline value" tone="blue" />
         <AdminStatCard icon={Clock3} value={awaitingApproval.length} label="Awaiting ZK approval" tone="amber" />
@@ -858,7 +858,7 @@ export function DealsClient({
           label="Won this month"
           tone="amber"
         />
-      </section>
+      </AdminStats>
 
       <AdminPanel className="overflow-visible">
         <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] px-4 pt-3">
@@ -879,13 +879,13 @@ export function DealsClient({
               {label}
             </button>
           ))}
-          <button type="button" className="ml-auto mb-3 h-9 rounded-md border px-3 text-[9px] font-medium">
+          <button type="button" className="mb-3 hidden h-9 rounded-md border px-3 text-[9px] font-medium sm:inline-flex sm:ml-auto">
             Save view
           </button>
           <button
             type="button"
             onClick={() => setShowCreate(true)}
-            className="mb-3 flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-[9px] font-semibold text-white"
+            className="mb-3 ml-auto flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-primary px-4 text-[9px] font-semibold text-white sm:ml-0 sm:w-auto"
           >
             <Plus className="h-3.5 w-3.5" /> New deal
           </button>
@@ -909,7 +909,7 @@ export function DealsClient({
             ))}
           </select>
           <EventFilter options={eventOptions} selectedIds={eventFilter} onChange={setEventFilter} />
-          <div className="relative ml-auto min-w-[260px]">
+          <div className="relative w-full min-w-0 sm:ml-auto sm:min-w-[260px] sm:w-auto sm:flex-1 sm:max-w-sm">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               value={query}
@@ -947,7 +947,7 @@ export function DealsClient({
           "grid min-h-[540px] items-start",
           selected && "xl:grid-cols-[minmax(0,1fr)_340px]",
         )}>
-          <div className={cn("min-w-0 overflow-x-auto no-scrollbar", selected && "border-r border-[#eceef1]")}>
+          <div className={cn("hidden min-w-0 overflow-x-auto no-scrollbar md:block", selected && "border-r border-[#eceef1]")}>
             <div className="px-4 py-2.5 text-[8px] text-slate-500">
               Showing {filtered.length} of {deals.length} deals
             </div>
@@ -1033,11 +1033,38 @@ export function DealsClient({
               </tbody>
             </table>
           </div>
+          <AdminMobileList>
+            {sorted.map((deal) => {
+              const pipelineStage = pipelineStageFor(deal.stage)
+              return (
+                <button
+                  type="button"
+                  key={deal.id}
+                  onClick={() => setSelectedId(deal.id)}
+                  className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left"
+                >
+                  <div className="min-w-0">
+                    <p className="font-semibold text-primary">{deal.reference}</p>
+                    <p className="mt-0.5 font-medium text-slate-700">{deal.account_name || "—"}</p>
+                    <p className="mt-1 text-[10px] leading-snug text-slate-600">{deal.race_name || deal.line_summary || "—"}</p>
+                    <p className="mt-0.5 text-[8px] text-slate-400">{shortDate(deal.created_at)}</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="font-semibold">{money(deal.total_amount, deal.currency)}</p>
+                    <div className="mt-1"><StatusPill tone={stageTone(deal.stage)}>{pipelineStage.label}</StatusPill></div>
+                  </div>
+                </button>
+              )
+            })}
+            {filtered.length === 0 ? (
+              <p className="px-4 py-14 text-center text-[10px] text-slate-400">No deals match this view.</p>
+            ) : null}
+          </AdminMobileList>
 
           {selected ? (
             <aside
               ref={previewRef}
-              className="min-w-0 bg-white xl:sticky xl:top-16 xl:z-20 xl:max-h-[calc(100vh-4rem)] xl:overflow-y-auto"
+              className="min-w-0 bg-white max-xl:fixed max-xl:inset-x-0 max-xl:bottom-0 max-xl:top-14 max-xl:z-40 max-xl:overflow-y-auto xl:sticky xl:top-16 xl:z-20 xl:max-h-[calc(100vh-4rem)] xl:overflow-y-auto"
             >
               <div className="space-y-4 p-5">
                 <div className="flex items-start justify-between gap-3">
@@ -1299,7 +1326,7 @@ export function DealsClient({
 
       {showEdit && selected ? (
         <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/40 p-4" onClick={() => setShowEdit(false)}>
-          <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-xl bg-white p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="max-h-[92dvh] w-full max-w-5xl overflow-y-auto rounded-xl bg-white p-4 sm:p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold">Edit {selected.reference}</h2>
@@ -1447,10 +1474,10 @@ export function DealsClient({
       {showCreate ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" onClick={resetCreateForm}>
           <div
-            className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
+            className="flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex shrink-0 items-start justify-between px-6 pt-6">
+            <div className="flex shrink-0 items-start justify-between px-4 pt-4 sm:px-6 sm:pt-6">
               <div>
                 <h2 className="text-lg font-semibold">Create new deal</h2>
                 <p className="text-sm text-slate-500">Choose the client and product, then confirm pricing and stock.</p>
@@ -1458,7 +1485,7 @@ export function DealsClient({
               <button type="button" onClick={resetCreateForm}><X className="h-5 w-5" /></button>
             </div>
 
-            <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-6 py-5">
+            <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
               <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <h3 className="text-sm font-semibold">1. Client</h3>

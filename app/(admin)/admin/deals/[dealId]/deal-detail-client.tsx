@@ -8,7 +8,7 @@ import { toast } from "sonner"
 import { updateNativeDealWorkflow } from "@/app/(admin)/actions"
 import { ActionCombobox } from "@/components/admin/action-combobox"
 import { SearchableSelect } from "@/components/admin/searchable-select"
-import { AdminPageHeader, AdminPanel, StatusPill } from "@/components/admin/admin-page-kit"
+import { AdminPageHeader, AdminPanel, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import type { DealBasketSupplier } from "@/components/admin/deal-line-basket"
 import { DEAL_NEXT_ACTION_OPTIONS, DEAL_SOURCE_LABELS, DEAL_SOURCES, DEAL_STAGES, DEAL_STAGE_LABELS, dealConfirmedOffPlatform, dealSourceLabel, friendlyDealActivitySummary, type CrmAccountOption, type DealPackageOption, type DealStage } from "@/lib/crm/deal-types"
 import type { DealAddressDraft, DealDetailPageData, DealFulfilmentClient } from "@/lib/crm/deal-detail"
@@ -436,7 +436,7 @@ export function DealDetailClient({
   }
 
   return (
-    <div className="mx-auto max-w-[1540px] space-y-3 p-5 lg:p-7">
+    <div className="mx-auto max-w-[1540px] space-y-3 p-3 sm:p-5 lg:p-7">
       <div>
         <Link href="/admin/deals" className="text-[11px] font-medium text-primary hover:underline">
           ← Deals
@@ -445,7 +445,7 @@ export function DealDetailClient({
           title={`${deal.reference} — ${deal.account_name || "Deal"}`}
           description={`${deal.race_name || "No event"} · ${deal.line_summary || "No products"}`}
           action={
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {canManageDeals ? (
                 <button
                   type="button"
@@ -822,7 +822,7 @@ export function DealDetailClient({
                 </button>
               ) : null}
             </div>
-            <div className="overflow-x-auto">
+            <AdminDesktopTable>
               <table className="w-full text-left text-[10px]">
                 <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-slate-400">
                   <tr>
@@ -891,7 +891,48 @@ export function DealDetailClient({
                   ))}
                 </tbody>
               </table>
-            </div>
+            </AdminDesktopTable>
+            <AdminMobileList>
+              {lines.map((line) => (
+                <div key={line.id} className="space-y-2 px-4 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <Link href={adminPackagePath(line.package_id, "orders")} className="min-w-0 font-medium text-primary">
+                      {line.packageName || line.package_id}
+                    </Link>
+                    <p className="shrink-0 font-semibold">{money(line.unit_sale_price, deal.currency)}</p>
+                  </div>
+                  <p className="text-[8px] text-slate-400">{line.quantity} units</p>
+                  {canManageDeals ? (
+                    <select
+                      value={line.supplierKey}
+                      disabled={pending}
+                      onChange={(event) => {
+                        const option = line.supplierOptions.find((item) => item.key === event.target.value)
+                        run(() =>
+                          updateDealLineSupplier({
+                            dealId: deal.id,
+                            lineId: line.id,
+                            supplierKey: event.target.value,
+                            costLayerId: option?.costLayerId ?? null,
+                            supplierId: option?.supplierId ?? null,
+                          }),
+                        )
+                      }}
+                      className="h-9 w-full rounded-md border bg-white px-2 text-[10px]"
+                    >
+                      <option value="">Choose supplier…</option>
+                      {line.supplierOptions.map((option) => (
+                        <option key={option.key} value={option.key}>
+                          {option.supplierName} · {option.remaining} left
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="text-[10px] text-slate-600">{line.supplierName || "No supplier"}</p>
+                  )}
+                </div>
+              ))}
+            </AdminMobileList>
           </AdminPanel>
 
           <AdminPanel>
@@ -1206,11 +1247,11 @@ export function DealDetailClient({
 
       {showCommercial ? (
         <div
-          className="fixed inset-0 z-[85] flex items-center justify-center bg-black/40 p-4"
+          className="fixed inset-0 z-[85] flex items-center justify-center bg-black/40 p-3 sm:p-4"
           onClick={() => setShowCommercial(false)}
         >
           <div
-            className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-xl bg-white p-6 shadow-2xl"
+            className="max-h-[92dvh] w-full max-w-5xl overflow-y-auto rounded-xl bg-white p-4 sm:p-6 shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">

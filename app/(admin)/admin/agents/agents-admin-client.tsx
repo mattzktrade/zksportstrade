@@ -12,7 +12,8 @@ export function AgentsAdminClient({ rows }: { rows: AdminAgentWithStats[] }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
+    <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="hidden overflow-x-auto md:block">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
@@ -131,6 +132,52 @@ export function AgentsAdminClient({ rows }: { rows: AdminAgentWithStats[] }) {
           })}
         </tbody>
       </table>
+      </div>
+      <div className="divide-y divide-border md:hidden">
+        {rows.map((a) => {
+          const open = expandedId === a.id
+          return (
+            <div key={a.id} className="p-4 space-y-2">
+              <button
+                type="button"
+                onClick={() => setExpandedId(open ? null : a.id)}
+                className="flex w-full items-start justify-between gap-3 text-left"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium text-foreground">{a.company_name || "—"}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{a.full_name || a.email}</p>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">{a.email}</p>
+                </div>
+                <div className="shrink-0 text-right text-xs">
+                  <p className="font-semibold">{a.orderCount} orders</p>
+                  {a.outstandingInvoiceCount > 0 ? (
+                    <p className="mt-0.5 font-semibold text-amber-800">{a.outstandingInvoiceCount} unpaid</p>
+                  ) : null}
+                </div>
+              </button>
+              <p className="text-xs text-muted-foreground">{a.revenueSummary}</p>
+              {open ? (
+                <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+                  {a.recentOrders.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No orders for this agent yet.</p>
+                  ) : (
+                    a.recentOrders.slice(0, 8).map((o) => (
+                      <div key={o.orderId} className="flex items-start justify-between gap-3 text-xs">
+                        <div className="min-w-0">
+                          <p className="font-mono font-medium">{o.reference}</p>
+                          <p className="text-muted-foreground">{o.packageName}</p>
+                        </div>
+                        <p className="shrink-0 font-medium">{formatMoney(o.currency, o.totalAmount)}</p>
+                      </div>
+                    ))
+                  )}
+                  <Link href="/admin/orders" className="inline-block text-xs font-medium text-primary">View all orders</Link>
+                </div>
+              ) : null}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

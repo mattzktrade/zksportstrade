@@ -14,13 +14,48 @@ export function AdminPageHeader({
 }) {
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-      <div>
+      <div className="min-w-0">
         <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-[#18191c]">{title}</h1>
-        <p className="mt-0.5 text-[11px] text-[#80848d]">{description}</p>
+        <p className="mt-0.5 hidden text-[11px] text-[#80848d] sm:block">{description}</p>
       </div>
-      {action}
+      {action ? <div className="flex flex-wrap items-center gap-2 sm:shrink-0">{action}</div> : null}
     </div>
   )
+}
+
+/** Summary cards at the top of admin pages. Hidden on phones so the work list comes first. */
+export function AdminStats({
+  children,
+  className,
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <section className={cn("admin-stats hidden md:grid gap-2", className)}>
+      {children}
+    </section>
+  )
+}
+
+export function AdminDesktopTable({
+  children,
+  className,
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
+  return <div className={cn("hidden overflow-x-auto md:block", className)}>{children}</div>
+}
+
+export function AdminMobileList({
+  children,
+  className,
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
+  return <div className={cn("divide-y divide-[#f0f1f3] md:hidden", className)}>{children}</div>
 }
 
 type Tone = "red" | "blue" | "green" | "purple" | "amber"
@@ -84,7 +119,7 @@ export function AdminFilterBar({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] px-3 py-3">
-      <div className="relative min-w-[220px] flex-1 sm:max-w-[340px]">
+      <div className="relative min-w-0 w-full flex-1 sm:min-w-[220px] sm:max-w-[340px]">
         <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
         <input
           type="search"

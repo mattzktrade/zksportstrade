@@ -32,7 +32,8 @@ export function PendingUsersTable({ profiles }: { profiles: PortalProfile[] }) {
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
+    <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="hidden overflow-x-auto md:block">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
@@ -50,6 +51,12 @@ export function PendingUsersTable({ profiles }: { profiles: PortalProfile[] }) {
           ))}
         </tbody>
       </table>
+      </div>
+      <div className="divide-y divide-border md:hidden">
+        {profiles.map((p) => (
+          <PendingMobileCard key={p.id} profile={p} disabled={pending} onAct={act} />
+        ))}
+      </div>
     </div>
   )
 }
@@ -102,5 +109,53 @@ function PendingRow({
         </div>
       </td>
     </tr>
+  )
+}
+
+function PendingMobileCard({
+  profile,
+  disabled,
+  onAct,
+}: {
+  profile: PortalProfile
+  disabled: boolean
+  onAct: (id: string, status: "approved" | "rejected", note: string) => void
+}) {
+  const [note, setNote] = useState("")
+  return (
+    <div className="space-y-3 p-4">
+      <div>
+        <p className="font-medium text-foreground">{profile.full_name || "—"}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{profile.email}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {profile.company_name || "—"} · {getCompanyTypeLabel(profile.company_type)}
+        </p>
+      </div>
+      <textarea
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Optional note (shown internally)"
+        rows={2}
+        className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs focus:outline-none focus:ring-2 focus:ring-primary/20"
+      />
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onAct(profile.id, "approved", note)}
+          className="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium disabled:opacity-50"
+        >
+          Approve
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onAct(profile.id, "rejected", note)}
+          className="px-3 py-2 rounded-lg border border-border text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+        >
+          Reject
+        </button>
+      </div>
+    </div>
   )
 }

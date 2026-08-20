@@ -154,52 +154,56 @@
  * The design PDF is a dense desktop concept, but its labels were initially
  * reproduced too literally at 8–11px. Keep the compact information hierarchy
  * while sizing text and controls for comfortable use at normal browser zoom.
+ *
+ * Use escaped class selectors (`.text-\[10px\]`) rather than
+ * `[class~="text-[10px]"]`. Lightning CSS / Chrome can drop the attribute
+ * form, which made local admin pages look zoomed out compared with production.
  */
-.admin-shell [class~="text-[8px]"] {
+.admin-shell .text-\[8px\] {
   font-size: 11.5px !important;
   line-height: 1.35 !important;
 }
 
-.admin-shell [class~="text-[9px]"] {
+.admin-shell .text-\[9px\] {
   font-size: 12.5px !important;
   line-height: 1.4 !important;
 }
 
-.admin-shell [class~="text-[10px]"] {
+.admin-shell .text-\[10px\] {
   font-size: 13.5px !important;
   line-height: 1.4 !important;
 }
 
-.admin-shell [class~="text-[11px]"] {
+.admin-shell .text-\[11px\] {
   font-size: 14.5px !important;
   line-height: 1.4 !important;
 }
 
-.admin-shell [class~="text-[12px]"] {
+.admin-shell .text-\[12px\] {
   font-size: 15.5px !important;
   line-height: 1.4 !important;
 }
 
-.admin-shell [class~="text-[13px]"] {
+.admin-shell .text-\[13px\] {
   font-size: 16.5px !important;
   line-height: 1.4 !important;
 }
 
-.admin-shell [class~="text-[18px]"] {
+.admin-shell .text-\[18px\] {
   font-size: 23px !important;
   line-height: 1.2 !important;
 }
 
-.admin-shell [class~="text-[22px]"] {
+.admin-shell .text-\[22px\] {
   font-size: 28px !important;
   line-height: 1.15 !important;
 }
 
-.admin-shell main [class~="h-8"] {
+.admin-shell main .h-8 {
   height: 40px !important;
 }
 
-.admin-shell main [class~="min-h-[78px]"] {
+.admin-shell main .min-h-\[78px\] {
   min-height: 104px !important;
 }
 
@@ -219,7 +223,23 @@
 }
 
 @media (max-width: 767px) {
-  .admin-shell [class~="text-[22px]"] {
+  .admin-shell .text-\[22px\] {
     font-size: 25px !important;
+  }
+
+  .admin-shell {
+    overflow-x: hidden;
+  }
+
+  .admin-shell main {
+    overflow-x: hidden;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .admin-shell select,
+  .admin-shell input:not([type="checkbox"]):not([type="radio"]),
+  .admin-shell textarea,
+  .admin-shell button {
+    max-width: 100%;
   }
 }

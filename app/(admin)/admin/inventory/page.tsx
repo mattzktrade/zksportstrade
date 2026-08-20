@@ -45,10 +45,10 @@ export default async function AdminInventoryPage() {
   const packages = toInventoryOptions(pkgRows)
 
   return (
-    <div className="p-6 lg:p-8 max-w-5xl space-y-6">
+    <div className="p-3 sm:p-6 lg:p-8 max-w-5xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Holds</h1>
-        <p className="text-sm text-muted-foreground mt-1">
+        <p className="hidden text-sm text-muted-foreground mt-1 sm:block">
           Reserve stock for a trade partner. Holds auto-release after the duration you set.
         </p>
       </div>

@@ -28,6 +28,9 @@ import {
   AdminPageHeader,
   AdminPanel,
   AdminStatCard,
+  AdminStats,
+  AdminDesktopTable,
+  AdminMobileList,
   StatusPill,
 } from "@/components/admin/admin-page-kit"
 import { AccountNameLink, ContactNameLink } from "@/components/admin/profile-name-link"
@@ -363,7 +366,7 @@ export function WorkflowTrackerClient({
   }
 
   return (
-    <div className="space-y-3 p-4 lg:p-5">
+    <div className="space-y-3 p-3 sm:p-4 lg:p-5">
       <AdminPageHeader
         title={mode === "finance" ? "Finance Deals Tracker" : "Sales Tracker"}
         description={
@@ -373,7 +376,7 @@ export function WorkflowTrackerClient({
         }
       />
 
-      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-5">
         {mode === "finance" ? (
           <>
             <AdminStatCard icon={Users} value={openFinanceDeals} label="Open finance deals" tone="blue" />
@@ -391,7 +394,7 @@ export function WorkflowTrackerClient({
             <AdminStatCard icon={AlertTriangle} value={activeRows.length - knownProfitRows.length} label="Missing cost" tone="amber" />
           </>
         )}
-      </section>
+      </AdminStats>
 
       <AdminPanel>
         {mode === "finance" ? (
@@ -411,7 +414,7 @@ export function WorkflowTrackerClient({
           </div>
         ) : null}
         <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] p-3">
-          <label className="relative min-w-[240px] flex-1">
+          <label className="relative min-w-0 w-full flex-1 sm:min-w-[240px]">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
@@ -423,7 +426,7 @@ export function WorkflowTrackerClient({
           <select
             value={eventScope}
             onChange={(event) => setEventScope(event.target.value as "future" | "all")}
-            className="h-9 rounded-md border bg-white px-3 text-[10px]"
+            className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto"
           >
             <option value="future">Future events</option>
             <option value="all">All dates</option>
@@ -431,19 +434,19 @@ export function WorkflowTrackerClient({
           <select
             value={activeEventKey}
             onChange={(event) => setEventKey(event.target.value)}
-            className="h-9 max-w-[280px] rounded-md border bg-white px-3 text-[10px]"
+            className="h-9 w-full max-w-none rounded-md border bg-white px-3 text-[10px] sm:w-auto sm:max-w-[280px]"
           >
             <option value="all">Any event</option>
             {eventOptions.map((option) => (
               <option key={option.key} value={option.key}>{option.label}</option>
             ))}
           </select>
-          <select value={period} onChange={(event) => setPeriod(event.target.value)} className="h-9 rounded-md border bg-white px-3 text-[10px]">
+          <select value={period} onChange={(event) => setPeriod(event.target.value)} className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto">
             <option value="all">All time</option>
             <option value="month">This month</option>
             <option value="quarter">This quarter</option>
           </select>
-          <select value={channel} onChange={(event) => setChannel(event.target.value)} className="h-9 rounded-md border bg-white px-3 text-[10px]">
+          <select value={channel} onChange={(event) => setChannel(event.target.value)} className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto">
             <option value="all">All sources</option>
             <option value="offline">Offline</option>
             <option value="trade_portal">Portal</option>
@@ -453,13 +456,13 @@ export function WorkflowTrackerClient({
             <option value="admin">Admin</option>
             <option value="salesforce_import">Salesforce</option>
           </select>
-          <select value={owner} onChange={(event) => setOwner(event.target.value)} className="h-9 rounded-md border bg-white px-3 text-[10px]">
+          <select value={owner} onChange={(event) => setOwner(event.target.value)} className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto">
             <option value="all">All owners</option>
             {owners.map((name) => <option key={name}>{name}</option>)}
           </select>
         </div>
 
-        <div className="overflow-x-auto">
+        <AdminDesktopTable>
           <table className="w-full text-left">
             <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
               <tr>
@@ -594,7 +597,65 @@ export function WorkflowTrackerClient({
               ) : null}
             </tbody>
           </table>
-        </div>
+        </AdminDesktopTable>
+        <AdminMobileList>
+          {sorted.map((row) => {
+            const invoiceStatus =
+              row.overdueSince && row.invoiceStatus === "awaiting_payment"
+                ? "overdue"
+                : row.invoiceStatus
+            const paid = isPaid(row)
+            return (
+              <article key={row.id} className="space-y-2 px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    {row.dealId ? (
+                      <a href={`/admin/deals/${row.dealId}`} className="font-semibold text-primary">
+                        {row.dealReference || row.reference}
+                      </a>
+                    ) : (
+                      <p className="font-semibold">{row.dealReference || row.reference}</p>
+                    )}
+                    <AccountNameLink accountId={row.accountId} name={row.accountName} className="mt-0.5 block font-medium" />
+                    <p className="mt-1 text-[10px] leading-snug text-slate-600">{row.eventPackage}</p>
+                    <p className="mt-0.5 text-[8px] text-slate-400">
+                      {formatEventDate(row.eventDate)} · {row.quantity} unit{row.quantity === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                  {mode === "finance" ? (
+                    <StatusPill tone={tone(invoiceStatus)}>{label(invoiceStatus || "No invoice")}</StatusPill>
+                  ) : (
+                    <p className="shrink-0 font-semibold">{money(row.total, row.currency)}</p>
+                  )}
+                </div>
+                {mode === "finance" ? (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[8px] text-slate-500">
+                    <span>{money(row.amountDue, row.currency)} due</span>
+                    <StatusPill tone={tone(row.bookingFormStatus)}>{label(row.bookingFormStatus || "Not created")}</StatusPill>
+                    {row.xeroInvoiceNumber && !row.id.startsWith("deal:") ? (
+                      <a href={`/api/invoices/${row.id}/pdf`} target="_blank" rel="noreferrer" className="font-semibold text-primary">
+                        View invoice
+                      </a>
+                    ) : null}
+                    {canManage && !paid && row.invoiceStatus !== "cancelled" ? (
+                      <button type="button" disabled={pending} onClick={() => markPaid(row)} className="font-semibold text-primary disabled:opacity-50">
+                        Mark paid
+                      </button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-[8px] text-slate-500">
+                    {row.grossProfit == null ? "Profit not costed" : `${money(row.grossProfit, row.currency)} GP`}
+                    {row.margin == null ? "" : ` · ${(row.margin * 100).toFixed(1)}%`}
+                  </p>
+                )}
+              </article>
+            )
+          })}
+          {sorted.length === 0 ? (
+            <p className="px-4 py-12 text-center text-[10px] text-slate-400">No matching deals.</p>
+          ) : null}
+        </AdminMobileList>
       </AdminPanel>
     </div>
   )

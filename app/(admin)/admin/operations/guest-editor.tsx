@@ -97,7 +97,7 @@ export function OperationsGuestEditor({
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4">
-      <div className="flex max-h-[92vh] w-full max-w-3xl min-h-0 flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+      <div className="flex max-h-[92dvh] w-full max-w-3xl min-h-0 flex-col overflow-hidden rounded-xl bg-white shadow-xl">
         <div className="flex shrink-0 items-start justify-between gap-4 border-b px-5 py-4">
           <div>
             <h2 className="text-sm font-semibold">{title}</h2>

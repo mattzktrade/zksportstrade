@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { CheckCircle2, Download, Package, Plus, Search, Sparkles, UsersRound } from "lucide-react"
 import { toast } from "sonner"
 import { ensureSupplier } from "@/app/(admin)/actions"
-import { AdminPageHeader, AdminPanel, AdminStatCard, StatusPill } from "@/components/admin/admin-page-kit"
+import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { adminSupplierPath } from "@/lib/crm/profile-links"
 import { cn } from "@/lib/utils"
 
@@ -91,16 +91,16 @@ export function SuppliersClient({ rows }: { rows: SupplierDirectoryRow[] }) {
         description="Supplier analysis, event coverage and sourcing options."
       />
 
-      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-4">
         <AdminStatCard icon={UsersRound} value={rows.filter((row) => row.active).length} label="Active suppliers" tone="blue" />
         <AdminStatCard icon={CheckCircle2} value={rows.filter((row) => row.purchaseOrders > 0).length} label="Used this month" tone="green" />
         <AdminStatCard icon={Sparkles} value={top?.name ?? "—"} label="Top supplier by order value" tone="purple" />
         <AdminStatCard icon={Package} value={money(totalSpend, "USD")} label="Tracked purchases" tone="amber" />
-      </section>
+      </AdminStats>
 
       <AdminPanel>
         <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] p-3">
-          <div className="relative min-w-[250px] flex-1 sm:max-w-[380px]">
+          <div className="relative min-w-0 w-full flex-1 sm:min-w-[250px] sm:max-w-[380px]">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
@@ -135,10 +135,11 @@ export function SuppliersClient({ rows }: { rows: SupplierDirectoryRow[] }) {
         ) : null}
 
         <div className={cn(
-          "grid min-h-[500px]",
+          "grid md:min-h-[500px]",
           selected && "xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]",
         )}>
-          <div className={cn("overflow-x-auto", selected && "border-r border-[#eceef1]")}>
+          <div className={cn("min-w-0", selected && "xl:border-r xl:border-[#eceef1]")}>
+            <AdminDesktopTable>
             <table className="w-full min-w-[760px] text-left">
               <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
                 <tr>
@@ -185,10 +186,37 @@ export function SuppliersClient({ rows }: { rows: SupplierDirectoryRow[] }) {
                 ))}
               </tbody>
             </table>
+            </AdminDesktopTable>
+            <AdminMobileList>
+              {filtered.map((row) => (
+                <button
+                  type="button"
+                  key={row.id}
+                  onClick={() => setSelectedId(row.id)}
+                  className={cn(
+                    "flex w-full items-start justify-between gap-3 px-4 py-3 text-left",
+                    selected?.id === row.id && "bg-red-50/60",
+                  )}
+                >
+                  <div className="min-w-0">
+                    <p className="font-semibold text-primary">{row.name}</p>
+                    <p className="mt-0.5 text-[10px] text-slate-600">{row.contactName || row.contactEmail || "No contact"}</p>
+                    <p className="mt-0.5 text-[8px] text-slate-400">{row.purchaseOrders} orders</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="font-semibold">{money(row.spend, row.currency)}</p>
+                    <div className="mt-1"><StatusPill tone={row.active ? "green" : "gray"}>{row.active ? "Active" : "Inactive"}</StatusPill></div>
+                  </div>
+                </button>
+              ))}
+              {filtered.length === 0 ? (
+                <p className="px-4 py-12 text-center text-[10px] text-slate-400">No suppliers match this view.</p>
+              ) : null}
+            </AdminMobileList>
           </div>
 
           {selected ? (
-            <aside className="p-4">
+            <aside className="p-4 max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:top-14 max-md:z-40 max-md:overflow-y-auto max-md:bg-white">
               <div className="space-y-4">
                 <div className="flex items-start justify-between">
                   <div>
@@ -198,7 +226,7 @@ export function SuppliersClient({ rows }: { rows: SupplierDirectoryRow[] }) {
                     </div>
                     <p className="mt-1 text-[9px] text-[#8e9299]">{selected.code || "Structured supplier"}</p>
                   </div>
-                  <button type="button" className="text-slate-400" onClick={() => setSelectedId(null)}>×</button>
+                  <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-xl text-slate-400 md:h-auto md:w-auto md:text-base" onClick={() => setSelectedId(null)}>×</button>
                 </div>
 
                 <dl className="grid grid-cols-[95px_1fr] gap-y-2 border-y border-[#eceef1] py-3 text-[9px]">

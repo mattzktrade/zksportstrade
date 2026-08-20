@@ -99,7 +99,7 @@ export function XeroIntegrationClient({
         <p className="font-semibold text-foreground">On each order</p>
         <ol className="list-decimal list-inside space-y-1">
           <li>Portal creates order + invoice row (awaiting invoice).</li>
-          <li>Queue runs Salesforce (Opportunity + guest contact) and Xero (ACCREC invoice).</li>
+          <li>Queue creates the Xero ACCREC invoice.</li>
           <li>Portal invoice moves to awaiting payment when Xero invoice is created.</li>
         </ol>
         <p>

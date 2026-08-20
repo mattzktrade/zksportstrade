@@ -13,8 +13,8 @@ export default function WixIntegrationPage() {
         </Link>
         <h1 className="text-2xl font-semibold text-foreground mt-2">Wix</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Shared stock and retail price on zk-sports.com. Paid Wix orders create portal bookings + Salesforce +
-          Xero.
+          Shared stock and retail price on zk-sports.com. Paid Wix orders create portal bookings and
+          keep website inventory in sync.
         </p>
       </div>
 

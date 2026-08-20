@@ -16,6 +16,9 @@ import {
   AdminPageHeader,
   AdminPanel,
   AdminStatCard,
+  AdminStats,
+  AdminDesktopTable,
+  AdminMobileList,
   StatusPill,
 } from "@/components/admin/admin-page-kit"
 import { AccountNameLink, ContactNameLink } from "@/components/admin/profile-name-link"
@@ -104,7 +107,7 @@ export function EventDetailClient({ detail }: { detail: NativeEventDetail }) {
         </div>
       </div>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-4">
         <AdminStatCard icon={Package} value={totals.productCount} label="Products" tone="blue" />
         <AdminStatCard icon={ShoppingCart} value={totals.sold} label="Units sold" tone="green" />
         <AdminStatCard icon={Boxes} value={totals.pipeline} label="In pipeline" tone="amber" />
@@ -115,14 +118,14 @@ export function EventDetailClient({ detail }: { detail: NativeEventDetail }) {
           hint={`${totals.remaining} remaining`}
           tone="purple"
         />
-      </section>
+      </AdminStats>
 
       <AdminPanel>
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h2 className="text-[13px] font-semibold">Products</h2>
           <p className="text-[10px] text-slate-500">{products.length} linked to this event</p>
         </div>
-        <div className="overflow-x-auto">
+        <AdminDesktopTable>
           <table className="w-full min-w-[760px] text-left text-sm">
             <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
               <tr>
@@ -173,13 +176,30 @@ export function EventDetailClient({ detail }: { detail: NativeEventDetail }) {
               ) : null}
             </tbody>
           </table>
-        </div>
+        </AdminDesktopTable>
+        <AdminMobileList>
+          {products.map((product) => (
+            <Link key={product.id} href={adminPackagePath(product.id)} className="flex items-start justify-between gap-3 px-4 py-3">
+              <div className="min-w-0">
+                <p className="font-semibold text-primary">{product.name}</p>
+                <p className="mt-0.5 text-[10px] text-slate-600">{product.durationLabel}</p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="font-semibold">{formatMoney(product.currency, product.price)}</p>
+                <p className="mt-0.5 text-[8px] text-slate-500">{product.available} remaining</p>
+              </div>
+            </Link>
+          ))}
+          {products.length === 0 ? (
+            <p className="px-4 py-10 text-center text-sm text-slate-500">No products are linked to this event yet.</p>
+          ) : null}
+        </AdminMobileList>
       </AdminPanel>
 
       <AdminPanel>
         <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
           <h2 className="text-[13px] font-semibold">Sales</h2>
-          <div className="relative min-w-[220px] flex-1">
+          <div className="relative min-w-0 w-full flex-1 sm:min-w-[220px]">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               value={saleQuery}
@@ -205,7 +225,7 @@ export function EventDetailClient({ detail }: { detail: NativeEventDetail }) {
             ))}
           </div>
         </div>
-        <div className="overflow-x-auto">
+        <AdminDesktopTable>
           <table className="w-full min-w-[920px] text-left text-sm">
             <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
               <tr>
@@ -262,7 +282,27 @@ export function EventDetailClient({ detail }: { detail: NativeEventDetail }) {
               ) : null}
             </tbody>
           </table>
-        </div>
+        </AdminDesktopTable>
+        <AdminMobileList>
+          {filteredSales.map((sale) => (
+            <Link key={sale.id} href={sale.href} className="flex items-start justify-between gap-3 px-4 py-3">
+              <div className="min-w-0">
+                <p className="font-semibold text-primary">{sale.reference}</p>
+                <p className="mt-0.5 text-[10px] text-slate-600">{sale.clientName}</p>
+                <p className="mt-0.5 text-[8px] text-slate-400">{sale.productName} · {sale.quantity}</p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="font-semibold">{formatMoney(sale.currency, sale.amount)}</p>
+                <div className="mt-1"><StatusPill tone={saleStatusTone(sale)}>{sale.status}</StatusPill></div>
+              </div>
+            </Link>
+          ))}
+          {filteredSales.length === 0 ? (
+            <p className="px-4 py-10 text-center text-sm text-slate-500">
+              {sales.length === 0 ? "No sales recorded for this event yet." : "No sales match this search."}
+            </p>
+          ) : null}
+        </AdminMobileList>
       </AdminPanel>
     </div>
   )

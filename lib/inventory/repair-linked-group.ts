@@ -55,7 +55,23 @@ export async function repairLinkedGroupInventory(parentPackageId: string): Promi
   }
 
   if (!isSalesforceConfigured()) {
-    return { ok: false, message: "Salesforce is not configured." }
+    try {
+      const { reconcileLinkedGroupFromPortalSales } = await import(
+        "@/lib/inventory/linked-group-inventory"
+      )
+      const changed = await reconcileLinkedGroupFromPortalSales(admin, parent.inventory_group_id)
+      return {
+        ok: true,
+        repaired: [],
+        threeDaySellable: null,
+        warnings: [],
+        message: changed
+          ? "Linked inventory reconciled from portal sales."
+          : "Linked inventory already matches portal sales.",
+      }
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) }
+    }
   }
   const connection = await getSalesforceConnectionStatus()
   if (!connection.connected) {

@@ -27,7 +27,7 @@ export default async function AdminAgentsPage({
     : rows
 
   return (
-    <div className="p-6 lg:p-8 max-w-6xl space-y-6">
+    <div className="p-3 sm:p-6 lg:p-8 max-w-6xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Agents</h1>
       </div>

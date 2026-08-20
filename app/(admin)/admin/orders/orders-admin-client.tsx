@@ -393,7 +393,7 @@ export function OrdersAdminClient({
   function cancelOrder(o: AdminOrderListRow) {
     if (
       !window.confirm(
-        `Cancel order ${o.reference}? This restores portal stock and keeps the row for records. You must close the Salesforce Opportunity separately if one was created.`,
+        `Cancel order ${o.reference}? This restores portal stock and keeps the row for records.`,
       )
     ) {
       return
@@ -514,14 +514,14 @@ export function OrdersAdminClient({
         </div>
       </div>
 
-      <p className="text-xs text-muted-foreground">
+      <p className="hidden text-xs text-muted-foreground sm:block">
         Showing <span className="font-medium text-foreground">{visible.length}</span> of{" "}
         <span className="font-medium text-foreground">{orders.length}</span> orders. Trade-portal invoices are created
         automatically in Xero when an order is placed.
       </p>
 
       {totals.buckets.length > 0 && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="hidden md:grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {totals.buckets.map((b) => {
             const margin = b.pricedRevenue > 0 ? b.profit / b.pricedRevenue : null
             return (

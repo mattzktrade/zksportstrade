@@ -81,7 +81,7 @@ export default async function AdminPackageDetailPage({ params, searchParams }: P
   }
 
   return (
-    <div className="p-4 lg:p-6 max-w-none">
+    <div className="p-3 sm:p-4 lg:p-6 max-w-none">
       <PackageDetailClient
         pkg={pkg}
         races={races}

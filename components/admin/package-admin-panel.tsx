@@ -206,7 +206,7 @@ export function PackageAdminPanel({
   function confirmDeletePackage() {
     if (
       !window.confirm(
-        `Delete package “${name || initial.id}”? This removes the portal listing and deletes the linked Wix and Salesforce products. Packages with existing orders cannot be deleted.`,
+        `Delete package “${name || initial.id}”? This removes the portal listing and the linked website product. Packages with existing orders cannot be deleted.`,
       )
     ) {
       return

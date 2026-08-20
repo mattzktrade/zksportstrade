@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowUpDown } from "lucide-react"
+import { ArrowUpDown, Upload } from "lucide-react"
 import { toast } from "sonner"
 import {
   createPurchaseOrder,
@@ -13,10 +13,13 @@ import {
   updatePurchaseOrder,
   uploadPurchaseOrderDocument,
 } from "@/app/(admin)/actions"
+import { PurchaseBulkUploadModal } from "@/app/(admin)/admin/purchase-orders/bulk-upload-modal"
 import { adminPackagePath } from "@/lib/admin/package-link"
-import type { PurchaseOrderStockLine, PurchaseOrderWithMeta } from "@/lib/admin/purchase-orders"
+import type { PurchaseOrderProductOption, PurchaseOrderStockLine, PurchaseOrderWithMeta } from "@/lib/admin/purchase-orders"
+import { PurchaseOrderStockEditor, PurchaseOrderDraftLines, emptyDraftPurchaseLine } from "@/app/(admin)/admin/purchase-orders/purchase-order-stock-editor"
 import { adminSupplierPath } from "@/lib/crm/profile-links"
 import { CompanySupplierSelect } from "@/components/admin/company-supplier-select"
+import { AdminDesktopTable, AdminMobileList } from "@/components/admin/admin-page-kit"
 import type { CrmCompanyOption } from "@/lib/crm/deals"
 
 const STOCK_PREVIEW_LIMIT = 3
@@ -74,15 +77,18 @@ function resolveInitialExpandedId(
 export function PurchaseOrdersClient({
   orders,
   companies,
+  products,
   initialPo = null,
 }: {
   orders: PurchaseOrderWithMeta[]
   companies: CrmCompanyOption[]
+  products: PurchaseOrderProductOption[]
   initialPo?: string | null
 }) {
   const router = useRouter()
   const [pending, start] = useTransition()
   const [showCreate, setShowCreate] = useState(false)
+  const [showBulkUpload, setShowBulkUpload] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(() =>
     resolveInitialExpandedId(orders, initialPo),
   )
@@ -94,14 +100,17 @@ export function PurchaseOrdersClient({
   // Create form state
   const [newPoNumber, setNewPoNumber] = useState("")
   const [newSupplierAccountId, setNewSupplierAccountId] = useState("")
+  const [newSupplierReference, setNewSupplierReference] = useState("")
   const [newIssuedAt, setNewIssuedAt] = useState("")
   const [newNote, setNewNote] = useState("")
   const [newFiles, setNewFiles] = useState<File[]>([])
+  const [newLines, setNewLines] = useState(() => [emptyDraftPurchaseLine()])
   const createFileInputRef = useRef<HTMLInputElement>(null)
 
   // Edit form state (mirrored per-row)
   const [editPoNumber, setEditPoNumber] = useState("")
   const [editSupplierAccountId, setEditSupplierAccountId] = useState("")
+  const [editSupplierReference, setEditSupplierReference] = useState("")
   const [editIssuedAt, setEditIssuedAt] = useState("")
   const [editNote, setEditNote] = useState("")
   const scrolledToPo = useRef(false)
@@ -140,6 +149,7 @@ export function PurchaseOrdersClient({
       if (!q) return true
       const hay = [
         o.po_number,
+        o.supplier_reference ?? "",
         o.supplier,
         o.note ?? "",
         ...o.usage.lines.map((line) => line.packageName),
@@ -173,27 +183,46 @@ export function PurchaseOrdersClient({
   function resetCreate() {
     setNewPoNumber("")
     setNewSupplierAccountId("")
+    setNewSupplierReference("")
     setNewIssuedAt("")
     setNewNote("")
     setNewFiles([])
+    setNewLines([emptyDraftPurchaseLine()])
     if (createFileInputRef.current) createFileInputRef.current.value = ""
   }
 
   function submitCreate() {
-    if (!newPoNumber.trim()) {
-      toast.error("PO number is required.")
-      return
-    }
     if (!newSupplierAccountId) {
       toast.error("Select a company as the supplier.")
       return
     }
+    const lines = newLines
+      .filter((line) => line.packageId && line.quantity.trim() !== "" && line.unitCost.trim() !== "")
+      .map((line) => ({
+        packageId: line.packageId,
+        quantity: Math.floor(Number(line.quantity)),
+        unitCost: Number(line.unitCost),
+      }))
+    if (lines.length === 0) {
+      toast.error("Add at least one product with quantity and buy price.")
+      return
+    }
+    if (lines.some((line) => !Number.isFinite(line.quantity) || line.quantity <= 0)) {
+      toast.error("Each product needs a positive whole-number quantity.")
+      return
+    }
+    if (lines.some((line) => !Number.isFinite(line.unitCost) || line.unitCost < 0)) {
+      toast.error("Each product needs a non-negative buy price.")
+      return
+    }
     start(async () => {
       const res = await createPurchaseOrder({
-        poNumber: newPoNumber.trim(),
+        poNumber: newPoNumber.trim() || null,
         supplierAccountId: newSupplierAccountId,
+        supplierReference: newSupplierReference.trim() || null,
         issuedAt: newIssuedAt.trim() || null,
         note: newNote.trim() || null,
+        lines,
       })
       if (!res.ok) {
         toast.error(res.message)
@@ -223,6 +252,7 @@ export function PurchaseOrdersClient({
     setEditingId(po.id)
     setEditPoNumber(po.po_number)
     setEditSupplierAccountId(po.supplier_account_id ?? "")
+    setEditSupplierReference(po.supplier_reference ?? "")
     setEditIssuedAt(po.issued_at ?? "")
     setEditNote(po.note ?? "")
     setExpandedId(po.id)
@@ -239,6 +269,7 @@ export function PurchaseOrdersClient({
         id: po.id,
         poNumber: editPoNumber.trim(),
         supplierAccountId: editSupplierAccountId,
+        supplierReference: editSupplierReference.trim() || null,
         issuedAt: editIssuedAt.trim() || null,
         clearIssuedAt,
         note: editNote,
@@ -299,10 +330,10 @@ export function PurchaseOrdersClient({
       <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] p-3">
         <input
           type="search"
-          placeholder="Search PO number, supplier, product, event…"
+          placeholder="Search internal PO, contract/invoice, supplier, product…"
           value={filters.search}
           onChange={(e) => setFilters((current) => ({ ...current, search: e.target.value }))}
-          className="h-8 flex-1 min-w-[240px] max-w-md px-3 rounded-md border border-[#e4e6ea] bg-white text-[10px] outline-none focus:border-primary/40"
+          className="h-8 w-full min-w-0 flex-1 sm:min-w-[240px] max-w-md px-3 rounded-md border border-[#e4e6ea] bg-white text-[10px] outline-none focus:border-primary/40"
         />
         <select
           value={filters.supplier}
@@ -350,7 +381,7 @@ export function PurchaseOrdersClient({
           className="h-8 rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]"
         >
           <option value="issuedAt">Sort: Issue date</option>
-          <option value="poNumber">Sort: PO #</option>
+          <option value="poNumber">Sort: Internal PO #</option>
         </select>
         <button
           type="button"
@@ -369,26 +400,40 @@ export function PurchaseOrdersClient({
             Clear filters
           </button>
         ) : null}
-        <button
-          type="button"
-          onClick={() => setShowCreate((v) => !v)}
-          className="ml-auto h-8 px-3 rounded-md bg-primary text-white text-[9px] font-semibold"
-        >
-          {showCreate ? "Cancel" : "New purchase order"}
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowBulkUpload(true)}
+            className="flex h-8 items-center gap-1.5 rounded-md border border-[#e4e6ea] px-3 text-[9px] font-semibold text-[#62666e]"
+          >
+            <Upload className="h-3.5 w-3.5" /> Bulk upload
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowCreate((v) => !v)}
+            className="h-8 px-3 rounded-md bg-primary text-white text-[9px] font-semibold"
+          >
+            {showCreate ? "Cancel" : "New purchase order"}
+          </button>
+        </div>
       </div>
 
       {showCreate ? (
-        <div className="border-b border-[#eceef1] bg-[#fafbfc] p-4 space-y-3">
-          <p className="text-sm font-semibold text-foreground">New purchase order</p>
-          <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-4 border-b border-[#eceef1] bg-[#fafbfc] p-4">
+          <div>
+            <p className="text-sm font-semibold text-foreground">New purchase order</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              Internal PO # is ours. Put the supplier contract or invoice number in its own field, then add the products you are buying.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <label className="block text-xs text-muted-foreground">
-              PO number
+              Internal PO #
               <input
                 value={newPoNumber}
                 onChange={(e) => setNewPoNumber(e.target.value)}
-                placeholder="e.g. F1D-2026-042"
-                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                placeholder="Leave blank to auto-assign"
+                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
               />
             </label>
             <label className="block text-xs text-muted-foreground">
@@ -403,66 +448,76 @@ export function PurchaseOrdersClient({
               </div>
             </label>
             <label className="block text-xs text-muted-foreground">
-              Issued date (optional)
+              Contract / invoice
+              <input
+                value={newSupplierReference}
+                onChange={(e) => setNewSupplierReference(e.target.value)}
+                placeholder="Supplier invoice or contract no."
+                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="block text-xs text-muted-foreground">
+              Issued date
               <input
                 type="date"
                 value={newIssuedAt}
                 onChange={(e) => setNewIssuedAt(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
               />
             </label>
-            <label className="block text-xs text-muted-foreground sm:col-span-2">
-              Note (optional)
+            <label className="block text-xs text-muted-foreground sm:col-span-2 xl:col-span-4">
+              Note
               <textarea
                 value={newNote}
                 onChange={(e) => setNewNote(e.target.value)}
-                className="mt-1 w-full min-h-[60px] px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                className="mt-1 min-h-[60px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                 placeholder="Payment terms, contact, anything you need to remember."
               />
             </label>
-            <div className="sm:col-span-2 space-y-2">
-              <p className="text-xs text-muted-foreground">Attachments (optional)</p>
-              {newFiles.length > 0 ? (
-                <ul className="space-y-1">
-                  {newFiles.map((file, index) => (
-                    <li
-                      key={`${file.name}-${file.size}-${index}`}
-                      className="flex items-center justify-between gap-2 rounded border border-border bg-background px-2 py-1 text-xs"
+          </div>
+          <PurchaseOrderDraftLines products={products} lines={newLines} onChange={setNewLines} />
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">Attachments</p>
+            {newFiles.length > 0 ? (
+              <ul className="space-y-1">
+                {newFiles.map((file, index) => (
+                  <li
+                    key={`${file.name}-${file.size}-${index}`}
+                    className="flex items-center justify-between gap-2 rounded border border-border bg-background px-2 py-1 text-xs"
+                  >
+                    <span className="truncate">{file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => setNewFiles((files) => files.filter((_, i) => i !== index))}
+                      className="text-[10px] font-medium text-destructive hover:underline"
                     >
-                      <span className="truncate">{file.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => setNewFiles((files) => files.filter((_, i) => i !== index))}
-                        className="text-[10px] font-medium text-destructive hover:underline"
-                      >
-                        Remove
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs italic text-muted-foreground">No invoice or signed contract attached yet.</p>
-              )}
-              <input
-                ref={createFileInputRef}
-                type="file"
-                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,image/webp"
-                onChange={(event) => {
-                  const file = event.target.files?.[0]
-                  if (!file) return
-                  setNewFiles((files) => [...files, file])
-                  event.target.value = ""
-                }}
-                className="text-xs"
-              />
-            </div>
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs italic text-muted-foreground">Attach the signed contract or supplier invoice if you have it.</p>
+            )}
+            <input
+              ref={createFileInputRef}
+              type="file"
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,image/webp"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (!file) return
+                setNewFiles((files) => [...files, file])
+                event.target.value = ""
+              }}
+              className="text-xs"
+            />
           </div>
           <div className="flex justify-end">
             <button
               type="button"
               disabled={pending}
               onClick={() => submitCreate()}
-              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
             >
               Create purchase order
             </button>
@@ -470,8 +525,8 @@ export function PurchaseOrdersClient({
         </div>
       ) : null}
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[960px] text-[9px]">
+      <AdminDesktopTable>
+        <table className="w-full min-w-[1100px] text-[9px]">
           <thead className="bg-[#fafbfc] text-left text-[8px] uppercase tracking-wide text-[#92969e]">
             <tr>
               <th className="px-3 py-2 font-medium">
@@ -480,11 +535,12 @@ export function PurchaseOrdersClient({
                   onClick={() => toggleSort("poNumber")}
                   className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-[#62666e]"
                 >
-                  PO #
+                  Internal PO #
                   {sortKey === "poNumber" ? <span>{sortDescending ? "↓" : "↑"}</span> : null}
                 </button>
               </th>
               <th className="px-3 py-2 font-medium">Supplier</th>
+              <th className="px-3 py-2 font-medium min-w-[8rem]">Contract / invoice</th>
               <th className="px-3 py-2 font-medium">
                 <button
                   type="button"
@@ -505,9 +561,9 @@ export function PurchaseOrdersClient({
           <tbody>
             {filteredOrders.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                <td colSpan={9} className="px-3 py-6 text-center text-sm text-muted-foreground">
                   {orders.length === 0
-                    ? "No purchase orders yet. Create one to start attaching contracts."
+                    ? "No purchase orders yet. Create one with the products you are buying."
                     : "No matching purchase orders."}
                 </td>
               </tr>
@@ -522,14 +578,17 @@ export function PurchaseOrdersClient({
                   editState={{
                     poNumber: editPoNumber,
                     supplierAccountId: editSupplierAccountId,
+                    supplierReference: editSupplierReference,
                     issuedAt: editIssuedAt,
                     note: editNote,
                     setPoNumber: setEditPoNumber,
                     setSupplierAccountId: setEditSupplierAccountId,
+                    setSupplierReference: setEditSupplierReference,
                     setIssuedAt: setEditIssuedAt,
                     setNote: setEditNote,
                   }}
                   companies={companies}
+                  products={products}
                   pending={pending}
                   onEdit={() => startEdit(po)}
                   onEditCancel={() => setEditingId(null)}
@@ -543,7 +602,64 @@ export function PurchaseOrdersClient({
             )}
           </tbody>
         </table>
-      </div>
+      </AdminDesktopTable>
+      <AdminMobileList>
+        {filteredOrders.length === 0 ? (
+          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+            {orders.length === 0
+              ? "No purchase orders yet. Create one with the products you are buying."
+              : "No matching purchase orders."}
+          </p>
+        ) : (
+          filteredOrders.map((po) => (
+            <div key={`mobile-${po.id}`} className="space-y-2 px-4 py-3">
+              <button type="button" onClick={() => setExpandedId((cur) => (cur === po.id ? null : po.id))} className="flex w-full items-start justify-between gap-3 text-left">
+                <div className="min-w-0">
+                  <p className="font-semibold text-primary">{po.po_number}</p>
+                  <p className="mt-0.5 text-[10px] text-slate-600">{po.supplier}</p>
+                  <p className="mt-0.5 text-[8px] text-slate-400">
+                    {po.supplier_reference ? `${po.supplier_reference} · ` : ""}
+                    {formatDate(po.issued_at)}
+                  </p>
+                </div>
+                <p className="shrink-0 text-[10px] font-semibold">{po.usage.quantity_remaining} remaining</p>
+              </button>
+              <p className="text-[10px] text-slate-600">
+                {groupedStockLines(po.usage.lines).slice(0, 2).map((line) => line.packageName).join(", ") || "Not linked"}
+                {groupedStockLines(po.usage.lines).length > 2 ? ` +${groupedStockLines(po.usage.lines).length - 2} more` : ""}
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <button type="button" onClick={() => startEdit(po)} disabled={pending} className="text-[11px] font-medium text-primary disabled:opacity-50">Edit</button>
+                <button type="button" onClick={() => confirmDelete(po)} disabled={pending} className="text-[11px] font-medium text-destructive disabled:opacity-50">Delete</button>
+              </div>
+              {expandedId === po.id || editingId === po.id ? (
+                <div className="space-y-3 rounded-md border border-[#eceef1] bg-[#fafbfc] p-3 text-[10px] text-slate-600">
+                  <p>
+                    <span className="font-medium text-slate-800">Contract / invoice:</span>{" "}
+                    {po.supplier_reference || "—"}
+                  </p>
+                  <p><span className="font-medium text-slate-800">Note:</span> {po.note || "No note"}</p>
+                  <PurchaseOrderStockEditor
+                    purchaseOrderId={po.id}
+                    lines={po.usage.lines}
+                    products={products}
+                    onChanged={() => router.refresh()}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ))
+        )}
+      </AdminMobileList>
+      {showBulkUpload ? (
+        <PurchaseBulkUploadModal
+          onClose={() => setShowBulkUpload(false)}
+          onImported={() => {
+            setShowBulkUpload(false)
+            router.refresh()
+          }}
+        />
+      ) : null}
     </div>
   )
 }
@@ -551,12 +667,28 @@ export function PurchaseOrdersClient({
 type EditState = {
   poNumber: string
   supplierAccountId: string
+  supplierReference: string
   issuedAt: string
   note: string
   setPoNumber: (v: string) => void
   setSupplierAccountId: (v: string) => void
+  setSupplierReference: (v: string) => void
   setIssuedAt: (v: string) => void
   setNote: (v: string) => void
+}
+
+function groupedStockLines(lines: PurchaseOrderStockLine[]): PurchaseOrderStockLine[] {
+  const byPackage = new Map<string, PurchaseOrderStockLine>()
+  for (const line of lines) {
+    const existing = byPackage.get(line.packageId)
+    if (!existing) {
+      byPackage.set(line.packageId, { ...line })
+      continue
+    }
+    existing.quantityPurchased += line.quantityPurchased
+    existing.quantityRemaining += line.quantityRemaining
+  }
+  return [...byPackage.values()]
 }
 
 function PurchaseOrderStockCells({
@@ -566,7 +698,8 @@ function PurchaseOrderStockCells({
   lines: PurchaseOrderStockLine[]
   preview?: boolean
 }) {
-  if (lines.length === 0) {
+  const display = preview ? groupedStockLines(lines) : lines
+  if (display.length === 0) {
     return (
       <>
         <td className="px-3 py-2 italic text-muted-foreground">Not linked</td>
@@ -576,10 +709,10 @@ function PurchaseOrderStockCells({
   }
 
   const visible =
-    preview && lines.length > STOCK_PREVIEW_LIMIT ? lines.slice(0, STOCK_PREVIEW_LIMIT) : lines
-  const extra = lines.length - visible.length
-  const showQty = lines.length > 1
-  const singleEvent = new Set(lines.map((line) => line.eventName)).size === 1
+    preview && display.length > STOCK_PREVIEW_LIMIT ? display.slice(0, STOCK_PREVIEW_LIMIT) : display
+  const extra = display.length - visible.length
+  const showQty = display.length > 1
+  const singleEvent = new Set(display.map((line) => line.eventName)).size === 1
 
   return (
     <>
@@ -604,11 +737,11 @@ function PurchaseOrderStockCells({
       </td>
       <td className="px-3 py-2 text-muted-foreground">
         {singleEvent ? (
-          lines[0]?.eventName ?? "—"
+          display[0]?.eventName ?? "—"
         ) : (
           <ul className="space-y-0.5">
             {visible.map((line) => (
-              <li key={line.packageId} className="leading-snug">
+              <li key={`${line.layerId}-event`} className="leading-snug">
                 {line.eventName}
               </li>
             ))}
@@ -629,6 +762,7 @@ function PurchaseOrderRow({
   editing,
   editState,
   companies,
+  products,
   pending,
   onEdit,
   onEditCancel,
@@ -644,6 +778,7 @@ function PurchaseOrderRow({
   editing: boolean
   editState: EditState
   companies: CrmCompanyOption[]
+  products: PurchaseOrderProductOption[]
   pending: boolean
   onEdit: () => void
   onEditCancel: () => void
@@ -683,7 +818,7 @@ function PurchaseOrderRow({
             type="button"
             onClick={onToggle}
             className="text-left hover:text-primary"
-            title="Show attachments and layer usage"
+            title="Show products, attachments, and details"
           >
             {po.po_number}
           </button>
@@ -695,6 +830,7 @@ function PurchaseOrderRow({
             </Link>
           ) : po.supplier}
         </td>
+        <td className="px-3 py-2 text-muted-foreground">{po.supplier_reference || "—"}</td>
         <td className="px-3 py-2 text-muted-foreground">{formatDate(po.issued_at)}</td>
         <PurchaseOrderStockCells lines={po.usage.lines} preview />
         <td className="px-3 py-2 text-right tabular-nums">{po.usage.quantity_purchased}</td>
@@ -721,162 +857,162 @@ function PurchaseOrderRow({
         </td>
       </tr>
       {(expanded || editing) && (
-        <tr className="border-t border-border bg-muted/20">
-          <td colSpan={8} className="px-4 py-3">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Details
-                </p>
-                {editing ? (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <label className="block text-xs text-muted-foreground">
-                      PO number
-                      <input
-                        value={editState.poNumber}
-                        onChange={(e) => editState.setPoNumber(e.target.value)}
-                        className="mt-1 w-full px-2 py-1 rounded border border-border bg-background text-sm"
-                      />
-                    </label>
-                    <label className="block text-xs text-muted-foreground">
-                      Supplier
-                      <div className="mt-1">
-                        <CompanySupplierSelect
-                          companies={companies}
-                          value={editState.supplierAccountId}
-                          onChange={editState.setSupplierAccountId}
-                          disabled={pending}
-                          typedName={po.supplier_account_id ? null : po.supplier}
-                          className="px-2 py-1 rounded text-sm"
+        <tr className="border-t border-border bg-[#fafbfc]">
+          <td colSpan={9} className="px-4 py-4">
+            <div className="space-y-4">
+              <PurchaseOrderStockEditor
+                purchaseOrderId={po.id}
+                lines={po.usage.lines}
+                products={products}
+                onChanged={onRefresh}
+              />
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Details
+                  </p>
+                  {editing ? (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="block text-xs text-muted-foreground">
+                        Internal PO #
+                        <input
+                          value={editState.poNumber}
+                          onChange={(e) => editState.setPoNumber(e.target.value)}
+                          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm"
                         />
+                      </label>
+                      <label className="block text-xs text-muted-foreground">
+                        Supplier
+                        <div className="mt-1">
+                          <CompanySupplierSelect
+                            companies={companies}
+                            value={editState.supplierAccountId}
+                            onChange={editState.setSupplierAccountId}
+                            disabled={pending}
+                            typedName={po.supplier_account_id ? null : po.supplier}
+                            className="rounded px-2 py-1 text-sm"
+                          />
+                        </div>
+                      </label>
+                      <label className="block text-xs text-muted-foreground">
+                        Contract / invoice
+                        <input
+                          value={editState.supplierReference}
+                          onChange={(e) => editState.setSupplierReference(e.target.value)}
+                          placeholder="Supplier invoice or contract no."
+                          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm"
+                        />
+                      </label>
+                      <label className="block text-xs text-muted-foreground">
+                        Issued date
+                        <input
+                          type="date"
+                          value={editState.issuedAt}
+                          onChange={(e) => editState.setIssuedAt(e.target.value)}
+                          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm"
+                        />
+                      </label>
+                      <label className="block text-xs text-muted-foreground sm:col-span-2">
+                        Note
+                        <textarea
+                          value={editState.note}
+                          onChange={(e) => editState.setNote(e.target.value)}
+                          className="mt-1 min-h-[60px] w-full rounded border border-border bg-background px-2 py-1 text-sm"
+                        />
+                      </label>
+                      <div className="flex gap-2 sm:col-span-2">
+                        <button
+                          type="button"
+                          disabled={pending}
+                          onClick={onEditSubmit}
+                          className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          disabled={pending}
+                          onClick={onEditCancel}
+                          className="rounded border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
                       </div>
-                    </label>
-                    <label className="block text-xs text-muted-foreground">
-                      Issued date
-                      <input
-                        type="date"
-                        value={editState.issuedAt}
-                        onChange={(e) => editState.setIssuedAt(e.target.value)}
-                        className="mt-1 w-full px-2 py-1 rounded border border-border bg-background text-sm"
-                      />
-                    </label>
-                    <label className="block text-xs text-muted-foreground sm:col-span-2">
-                      Note
-                      <textarea
-                        value={editState.note}
-                        onChange={(e) => editState.setNote(e.target.value)}
-                        className="mt-1 w-full min-h-[60px] px-2 py-1 rounded border border-border bg-background text-sm"
-                      />
-                    </label>
-                    <div className="sm:col-span-2 flex gap-2">
-                      <button
-                        type="button"
-                        disabled={pending}
-                        onClick={onEditSubmit}
-                        className="px-3 py-1.5 rounded bg-primary text-primary-foreground text-xs font-medium disabled:opacity-50"
-                      >
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        disabled={pending}
-                        onClick={onEditCancel}
-                        className="px-3 py-1.5 rounded border border-border text-xs font-medium hover:bg-muted disabled:opacity-50"
-                      >
-                        Cancel
-                      </button>
                     </div>
-                  </div>
-                ) : (
-                  <div className="text-xs text-muted-foreground space-y-1">
-                    <p>
-                      <span className="font-medium text-foreground">Note:</span>{" "}
-                      {po.note ? po.note : <span className="italic">no note</span>}
+                  ) : (
+                    <dl className="grid gap-x-4 gap-y-1.5 text-xs sm:grid-cols-2">
+                      <div>
+                        <dt className="text-muted-foreground">Internal PO #</dt>
+                        <dd className="font-medium text-foreground">{po.po_number}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Contract / invoice</dt>
+                        <dd className="font-medium text-foreground">{po.supplier_reference || "—"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Issued</dt>
+                        <dd>{formatDate(po.issued_at)}</dd>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <dt className="text-muted-foreground">Note</dt>
+                        <dd>{po.note ? po.note : <span className="italic">No note</span>}</dd>
+                      </div>
+                    </dl>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Attachments
+                  </p>
+                  {po.documents.length === 0 ? (
+                    <p className="text-xs italic text-muted-foreground">
+                      No signed contract or invoice attached yet.
                     </p>
-                    <p>
-                      <span className="font-medium text-foreground">Stock:</span>{" "}
-                      {po.usage.lines.length === 0 ? (
-                        <span className="italic">not linked to any product yet</span>
-                      ) : (
-                        `${po.usage.lines.length} product${po.usage.lines.length === 1 ? "" : "s"}`
-                      )}
-                    </p>
-                    {po.usage.lines.length > 0 ? (
-                      <ul className="mt-1 space-y-1">
-                        {po.usage.lines.map((line) => (
-                          <li key={line.packageId}>
-                            <Link
-                              href={adminPackagePath(line.packageId)}
-                              className="font-medium text-primary hover:underline"
-                            >
-                              {line.packageName}
-                            </Link>
-                            <span>
-                              {" "}
-                              · {line.eventName} · {line.quantityPurchased} bought
-                              {line.quantityRemaining !== line.quantityPurchased
-                                ? `, ${line.quantityRemaining} remaining`
-                                : ""}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
+                  ) : (
+                    <ul className="space-y-1">
+                      {po.documents.map((doc) => (
+                        <li
+                          key={doc.id}
+                          className="flex items-center justify-between gap-2 rounded border border-border bg-background px-2 py-1 text-xs"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => onOpenDocument(doc.id)}
+                            className="flex-1 truncate text-left text-primary hover:underline"
+                            title={doc.file_name}
+                          >
+                            {doc.file_name}
+                          </button>
+                          <span className="whitespace-nowrap tabular-nums text-muted-foreground">
+                            {formatBytes(doc.file_size)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onRemoveDocument(doc.id)}
+                            className="text-[10px] font-medium text-destructive hover:underline"
+                          >
+                            Remove
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,image/webp"
+                      disabled={uploading}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        if (f) void handleFileChosen(f)
+                      }}
+                      className="text-xs"
+                    />
+                    {uploading ? (
+                      <span className="text-[11px] text-muted-foreground">Uploading…</span>
                     ) : null}
                   </div>
-                )}
-              </div>
-              <div className="space-y-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Attachments
-                </p>
-                {po.documents.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic">
-                    No signed contract or invoice attached yet.
-                  </p>
-                ) : (
-                  <ul className="space-y-1">
-                    {po.documents.map((doc) => (
-                      <li
-                        key={doc.id}
-                        className="flex items-center justify-between gap-2 text-xs border border-border rounded px-2 py-1 bg-background"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => onOpenDocument(doc.id)}
-                          className="text-primary hover:underline text-left flex-1 truncate"
-                          title={doc.file_name}
-                        >
-                          {doc.file_name}
-                        </button>
-                        <span className="text-muted-foreground tabular-nums whitespace-nowrap">
-                          {formatBytes(doc.file_size)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => onRemoveDocument(doc.id)}
-                          className="text-[10px] font-medium text-destructive hover:underline"
-                        >
-                          Remove
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <div className="flex items-center gap-2 pt-1">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,image/webp"
-                    disabled={uploading}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0]
-                      if (f) void handleFileChosen(f)
-                    }}
-                    className="text-xs"
-                  />
-                  {uploading ? (
-                    <span className="text-[11px] text-muted-foreground">Uploading…</span>
-                  ) : null}
                 </div>
               </div>
             </div>

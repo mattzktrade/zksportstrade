@@ -15,6 +15,8 @@ import { toast } from "sonner"
 import {
   AdminPageHeader,
   AdminPanel,
+  AdminDesktopTable,
+  AdminMobileList,
   StatusPill,
 } from "@/components/admin/admin-page-kit"
 import {
@@ -66,14 +68,12 @@ export function SettingsClient({
   canManageUsers,
   users,
   integrations,
-  nativeMode,
   initialTab,
 }: {
   currentUserId: string
   canManageUsers: boolean
   users: SettingsStaffUser[]
   integrations: SettingsIntegrationCard[]
-  nativeMode: boolean
   initialTab: Tab
 }) {
   const router = useRouter()
@@ -106,7 +106,7 @@ export function SettingsClient({
   }
 
   return (
-    <div className="space-y-3 p-4 lg:p-5">
+    <div className="space-y-3 p-3 sm:p-4 lg:p-5">
       <AdminPageHeader
         title="Settings"
         description="Team logins, roles, and the services ZK connects to."
@@ -139,7 +139,7 @@ export function SettingsClient({
         <>
           <AdminPanel>
             <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] px-3 py-3">
-              <div className="relative min-w-[220px] flex-1 sm:max-w-[340px]">
+              <div className="relative min-w-0 w-full flex-1 sm:min-w-[220px] sm:max-w-[340px]">
                 <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
                 <input
                   type="search"
@@ -153,7 +153,7 @@ export function SettingsClient({
                 Trade portal agents stay under Portal → Agents. This list is CMS staff only.
               </p>
             </div>
-            <div className="overflow-x-auto">
+            <AdminDesktopTable>
               <table className="w-full min-w-[760px] text-left text-[10px]">
                 <thead className="bg-[#fafbfc] text-[9px] uppercase tracking-wide text-slate-400">
                   <tr>
@@ -243,21 +243,67 @@ export function SettingsClient({
                   ) : null}
                 </tbody>
               </table>
-            </div>
+            </AdminDesktopTable>
+            <AdminMobileList>
+              {filtered.map((user) => {
+                const you = user.id === currentUserId
+                return (
+                  <div key={user.id} className="space-y-2 px-4 py-3">
+                    <p className="font-semibold text-slate-800">
+                      {user.fullName}
+                      {you ? <span className="ml-1.5 text-[8px] font-medium text-slate-400">You</span> : null}
+                    </p>
+                    <p className="text-[10px] text-slate-600">{user.email}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusPill tone={roleTone(user.role)}>{cmsRoleLabel(user.role)}</StatusPill>
+                      <select
+                        value={user.role}
+                        disabled={pending}
+                        onChange={(e) => changeRole(user, e.target.value as CmsRole)}
+                        className="h-8 rounded-md border border-[#e5e7eb] bg-white px-2 text-[9px] disabled:opacity-50"
+                      >
+                        {CMS_STAFF_ROLES.map((role) => (
+                          <option key={role} value={role}>
+                            {cmsRoleLabel(role)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => setPasswordUser(user)}
+                        className="inline-flex items-center gap-1 text-[8px] font-semibold text-primary disabled:opacity-50"
+                      >
+                        <KeyRound className="h-3 w-3" />
+                        Set password
+                      </button>
+                      {you ? null : (
+                        <button
+                          type="button"
+                          disabled={pending}
+                          onClick={() => setDeleteUser(user)}
+                          className="inline-flex items-center gap-1 text-[8px] font-semibold text-slate-400 hover:text-red-600 disabled:opacity-50"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+              {filtered.length === 0 ? (
+                <p className="px-4 py-12 text-center text-slate-400">No team members match that search.</p>
+              ) : null}
+            </AdminMobileList>
           </AdminPanel>
         </>
       ) : null}
 
       {tab === "integrations" ? (
         <div className="space-y-3">
-          {nativeMode ? (
-            <div className="rounded-lg border border-primary/20 bg-red-50/60 px-4 py-3">
-              <p className="text-[11px] font-semibold text-slate-800">Native platform mode is on</p>
-              <p className="mt-0.5 text-[10px] text-slate-500">
-                Xero and Wix still run from this CMS. Salesforce is left in place but not used.
-              </p>
-            </div>
-          ) : null}
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {integrations.map((item) => (
               <Link
@@ -397,7 +443,7 @@ function CreateUserModal({
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
-        className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
+        className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between px-6 pt-6">

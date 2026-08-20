@@ -110,7 +110,7 @@ export function BookingRequestsAdminClient({ requests }: { requests: AdminBookin
         const selectedOpt = suppliers.find((o) => o.costLayerId === selected)
         const selectedInsufficient = Boolean(selected && selectedOpt && !selectedOpt.canCover)
         return (
-          <article key={r.id} className="rounded-xl border border-border bg-card p-5 shadow-sm space-y-4">
+          <article key={r.id} className="rounded-xl border border-border bg-card p-4 sm:p-5 shadow-sm space-y-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="font-mono text-sm font-semibold text-foreground">{r.reference}</p>

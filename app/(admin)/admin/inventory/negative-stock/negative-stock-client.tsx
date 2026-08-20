@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { AlertTriangle, ArrowUpDown, CalendarClock, CircleDollarSign, Download, PackageSearch, Search } from "lucide-react"
-import { AdminPageHeader, AdminPanel, AdminStatCard, StatusPill } from "@/components/admin/admin-page-kit"
+import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { EventFilter, uniqueEventFilterOptions } from "@/components/admin/event-filter"
 import { AccountNameLink, SupplierNameLink } from "@/components/admin/profile-name-link"
 import {
@@ -123,13 +123,13 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
   const filtersActive = hasActiveNegativeStockFilters(filters)
 
   return (
-    <div className="mx-auto max-w-[1540px] space-y-3 p-4 lg:p-5">
+    <div className="mx-auto max-w-[1540px] space-y-3 p-3 sm:p-4 lg:p-5">
       <AdminPageHeader
         title="Inventory / Negative stock list"
         description="Sold stock that has not been purchased yet. Purchase from the agreed supplier to fulfil the deal."
       />
 
-      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-4">
         <AdminStatCard icon={PackageSearch} value={stats.count} label="Deals to purchase" hint="Open sourcing shortages" />
         <AdminStatCard
           icon={CalendarClock}
@@ -152,11 +152,11 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
           hint="Revenue on sold deals"
           tone="purple"
         />
-      </section>
+      </AdminStats>
 
       <AdminPanel>
         <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] p-3">
-          <div className="relative min-w-[250px] flex-1 sm:max-w-[380px]">
+          <div className="relative min-w-0 w-full flex-1 sm:min-w-[250px] sm:max-w-[380px]">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               type="search"
@@ -273,7 +273,7 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
           {filtersActive ? <p>Filters applied</p> : null}
         </div>
 
-        <div className="overflow-x-auto">
+        <AdminDesktopTable>
           <table className="w-full min-w-[1180px] text-left">
             <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
               <tr>
@@ -383,7 +383,54 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
               ) : null}
             </tbody>
           </table>
-        </div>
+        </AdminDesktopTable>
+        <AdminMobileList>
+          {visible.map((row) => {
+            const cost = row.unitCost * row.quantity
+            const sale = row.unitSale * row.quantity
+            const profit = sale - cost
+            const urgency = urgencyForEvent(row.eventDate)
+            return (
+              <div key={row.id} className="space-y-2 px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-800">{row.eventName}</p>
+                    <p className="mt-0.5 text-[10px] text-slate-600">{row.packageName}</p>
+                    <p className="mt-0.5 text-[8px] text-slate-400">
+                      {row.dealReference ?? "—"} · {row.quantity} units
+                    </p>
+                  </div>
+                  <StatusPill tone={statusTone(row.status)}>{statusLabel(row.status)}</StatusPill>
+                </div>
+                <p className="text-[10px] text-slate-600">
+                  {row.supplierName ?? "Not assigned"} · {money(cost, row.currency)}
+                </p>
+                <p className={profit >= 0 ? "text-[10px] font-semibold text-emerald-600" : "text-[10px] font-semibold text-red-600"}>
+                  GP {money(profit, row.currency)}
+                  {urgency === "critical" ? " · Critical" : urgency === "urgent" ? " · Urgent" : ""}
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {row.dealId ? (
+                    <Link href={`/admin/deals/${row.dealId}`} className="rounded-md border border-[#e5e7eb] px-2 py-1.5 text-[8px] font-medium">
+                      View deal
+                    </Link>
+                  ) : null}
+                  <Link
+                    href={row.packageId ? `/admin/catalog/${row.packageId}` : "/admin/catalog"}
+                    className="rounded-md border border-[#e5e7eb] px-2 py-1.5 text-[8px] font-medium"
+                  >
+                    View product
+                  </Link>
+                </div>
+              </div>
+            )
+          })}
+          {visible.length === 0 ? (
+            <p className="px-4 py-14 text-center text-[10px] text-slate-400">
+              {rows.length === 0 ? "No negative stock requires purchasing." : "No shortages match the current filters."}
+            </p>
+          ) : null}
+        </AdminMobileList>
       </AdminPanel>
     </div>
   )

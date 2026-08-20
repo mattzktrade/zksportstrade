@@ -22,6 +22,9 @@ import {
   AdminPageHeader,
   AdminPanel,
   AdminStatCard,
+  AdminStats,
+  AdminDesktopTable,
+  AdminMobileList,
   StatusPill,
 } from "@/components/admin/admin-page-kit"
 import type {
@@ -297,11 +300,11 @@ export function CrmImportsClient({
   return (
     <div className="space-y-4">
       <AdminPageHeader
-        title="Salesforce CRM imports"
-        description="Stage, validate and apply historical contacts, opportunities and won sales without reconnecting Salesforce."
+        title="CRM imports"
+        description="Stage, validate and apply historical contacts, opportunities and won sales from CSV."
       />
 
-      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-4">
         <AdminStatCard icon={History} value={batches.length} label="Import batches" tone="purple" />
         <AdminStatCard icon={CheckCircle2} value={appliedTotal} label="Rows applied" tone="green" />
         <AdminStatCard icon={Upload} value={pendingBatches.length} label="Awaiting approval" tone="blue" />
@@ -311,7 +314,7 @@ export function CrmImportsClient({
           label="Rows requiring review"
           tone="amber"
         />
-      </section>
+      </AdminStats>
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[10px] leading-4 text-amber-900">
         <strong>Safe migration rule:</strong> imported Closed Won sales are marked for stock
@@ -427,7 +430,7 @@ export function CrmImportsClient({
                 </div>
               ) : null}
 
-              <div className="overflow-x-auto">
+              <AdminDesktopTable>
                 <table className="w-full min-w-[900px] text-left">
                   <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-slate-400">
                     <tr>
@@ -461,7 +464,25 @@ export function CrmImportsClient({
                     {previewRows.length === 0 ? <tr><td colSpan={6} className="px-4 py-14 text-center text-[10px] text-slate-400">No preview rows.</td></tr> : null}
                   </tbody>
                 </table>
-              </div>
+              </AdminDesktopTable>
+              <AdminMobileList>
+                {previewRows.map((row) => {
+                  const n = row.normalized_data
+                  return (
+                    <div key={row.id} className="space-y-1 px-4 py-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-semibold">Row {row.row_number}</p>
+                        <StatusPill tone={statusTone(row.status)}>{row.status}</StatusPill>
+                      </div>
+                      <p className="text-[10px] text-slate-700">{String(n.accountName ?? "—")}</p>
+                      <p className="text-[8px] text-slate-400">{String(n.contactName ?? n.email ?? "—")}</p>
+                      {row.validation_errors[0] ? <p className="text-[8px] text-red-600">{row.validation_errors[0]}</p> : null}
+                      {row.apply_error ? <p className="text-[8px] text-red-600">{row.apply_error}</p> : null}
+                    </div>
+                  )
+                })}
+                {previewRows.length === 0 ? <p className="px-4 py-14 text-center text-[10px] text-slate-400">No preview rows.</p> : null}
+              </AdminMobileList>
               {selected.total_rows > 500 ? (
                 <p className="border-t px-4 py-2 text-[8px] text-slate-400">
                   Showing the first 500 rows. Batch totals include all {selected.total_rows} rows.

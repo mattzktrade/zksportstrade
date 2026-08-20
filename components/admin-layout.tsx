@@ -11,6 +11,7 @@ import {
   UserCircle,
   LogOut,
   Menu,
+  X,
   ArrowLeft,
   ShoppingCart,
   ShieldCheck,
@@ -84,6 +85,29 @@ const navigation: NavItem[] = [
   { name: "Settings", href: "/admin/settings", icon: Settings },
 ]
 
+function adminPageTitle(pathname: string): string {
+  if (pathname === "/admin") return "Dashboard"
+  if (pathname.startsWith("/admin/finance")) return "Finance"
+  if (pathname.startsWith("/admin/operations")) return "Operations"
+  if (pathname.startsWith("/admin/deals")) return "Deals"
+  if (pathname.startsWith("/admin/leads") || pathname.startsWith("/admin/clients")) return "Accounts"
+  if (pathname.startsWith("/admin/sales-tracker")) return "Sales tracker"
+  if (pathname.startsWith("/admin/imports")) return "CRM imports"
+  if (pathname.startsWith("/admin/catalog/events")) return "Events"
+  if (pathname.startsWith("/admin/catalog")) return "Inventory"
+  if (pathname.startsWith("/admin/inventory/sales-list")) return "Sales list"
+  if (pathname.startsWith("/admin/inventory/negative-stock")) return "Negative stock"
+  if (pathname.startsWith("/admin/inventory")) return "Holds"
+  if (pathname.startsWith("/admin/purchase-orders")) return "Purchase orders"
+  if (pathname.startsWith("/admin/suppliers")) return "Suppliers"
+  if (pathname.startsWith("/admin/pending-users")) return "Pending users"
+  if (pathname.startsWith("/admin/booking-requests")) return "Paddock requests"
+  if (pathname.startsWith("/admin/agents")) return "Agents"
+  if (pathname.startsWith("/admin/place-order")) return "Place order"
+  if (pathname.startsWith("/admin/settings") || pathname.startsWith("/admin/integrations")) return "Settings"
+  return "Admin"
+}
+
 function itemIsActive(pathname: string, href: string): boolean {
   if (href === "/admin") return pathname === "/admin"
   const path = href.split("?")[0]
@@ -132,19 +156,19 @@ export function AdminLayout({
   }
 
   return (
-    <div className="admin-shell min-h-screen bg-[#f7f8fa]">
+    <div className="admin-shell min-h-dvh bg-[#f7f8fa]">
       {sidebarOpen && (
         <div className="fixed inset-0 bg-zk-black/50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
       <aside
         className={cn(
-          "fixed top-0 left-0 z-50 h-full bg-[#070707] text-slate-100 border-r border-white/10 flex flex-col transition-all duration-300 lg:translate-x-0 w-[224px]",
+          "fixed top-0 left-0 z-50 h-dvh bg-[#070707] text-slate-100 border-r border-white/10 flex flex-col transition-all duration-300 lg:translate-x-0 w-[min(224px,86vw)] lg:w-[224px] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]",
           sidebarOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        <div className="flex h-16 items-center border-b border-white/10 px-4">
-          <Link href="/admin" className="block">
+        <div className="flex h-16 items-center justify-between gap-2 border-b border-white/10 px-4">
+          <Link href="/admin" className="block min-w-0">
             <Image
               src={LOGO_WHITE.src}
               alt="ZK Sports & Entertainment"
@@ -155,6 +179,14 @@ export function AdminLayout({
               priority
             />
           </Link>
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(false)}
+            className="flex h-10 w-10 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-white lg:hidden"
+            aria-label="Close menu"
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
         <nav className="no-scrollbar flex-1 overflow-y-auto p-2.5 space-y-1">
@@ -170,7 +202,7 @@ export function AdminLayout({
                     type="button"
                     onClick={() => setOpenGroups((prev) => ({ ...prev, [item.name]: !expanded }))}
                     className={cn(
-                      "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[12px] transition-colors",
+                      "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2.5 text-[12px] transition-colors lg:py-2",
                       childActive ? "text-white" : "text-slate-400 hover:bg-white/5 hover:text-white",
                     )}
                   >
@@ -188,7 +220,7 @@ export function AdminLayout({
                             key={child.href}
                             href={child.href}
                             className={cn(
-                              "relative flex items-center gap-2 pl-8 pr-2.5 py-2 rounded-md text-[11px] transition-colors",
+                              "relative flex items-center gap-2 pl-8 pr-2.5 py-2.5 rounded-md text-[11px] transition-colors lg:py-2",
                               active
                                 ? "bg-white/10 text-white font-medium"
                                 : "text-slate-500 hover:bg-white/5 hover:text-slate-200",
@@ -226,7 +258,7 @@ export function AdminLayout({
                 key={item.name}
                 href={item.href!}
                 className={cn(
-                  "flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[12px] transition-all relative",
+                  "relative flex items-center gap-2.5 rounded-md px-2.5 py-2.5 text-[12px] transition-all lg:py-2",
                   isActive
                     ? "text-white font-medium bg-white/10"
                     : "text-slate-400 hover:text-white hover:bg-white/5",
@@ -262,15 +294,19 @@ export function AdminLayout({
       </aside>
 
       <div className="lg:pl-[224px] transition-all duration-300">
-        <header className="sticky top-0 z-30 border-b border-[#e9eaee] bg-white">
-          <div className="flex h-16 items-center justify-between gap-4 px-4 lg:px-7">
+        <header className="sticky top-0 z-30 border-b border-[#e9eaee] bg-white pt-[env(safe-area-inset-top)]">
+          <div className="flex h-14 items-center justify-between gap-3 px-3 sm:h-16 sm:px-4 lg:px-7">
             <button
               type="button"
               onClick={() => setSidebarOpen(true)}
-              className="h-9 w-9 flex items-center justify-center rounded-md hover:bg-muted lg:hidden"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md hover:bg-muted lg:hidden"
+              aria-label="Open menu"
             >
               <Menu className="h-5 w-5" />
             </button>
+            <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-800 lg:hidden">
+              {adminPageTitle(pathname)}
+            </p>
             <div className="relative ml-auto hidden w-full max-w-[420px] lg:block">
               <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
               <input
@@ -291,7 +327,7 @@ export function AdminLayout({
           </div>
         </header>
 
-        <main className="min-h-[calc(100vh-64px)]">{children}</main>
+        <main className="min-h-[calc(100vh-64px)] min-w-0">{children}</main>
       </div>
     </div>
   )

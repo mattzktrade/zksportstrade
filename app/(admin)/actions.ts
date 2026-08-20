@@ -26,7 +26,10 @@ import {
   linkPurchaseOrderToAccount,
 } from "@/lib/inventory/suppliers"
 import { getCrmCompanyOptions } from "@/lib/crm/deals"
-import { generatePurchaseOrderNumber } from "@/lib/admin/purchase-orders"
+import {
+  generatePurchaseOrderNumber,
+  setPurchaseOrderSupplierReference,
+} from "@/lib/admin/purchase-orders"
 import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
 import { enqueueOpportunityOutcomeServer, enqueueOrderIntegrationsServer } from "@/lib/integrations/enqueue-server"
 import { drainOutboxNow } from "@/lib/integrations/schedule-drain"
@@ -169,14 +172,16 @@ async function reconcileInventoryAfterCostLayerChange(
     return
   }
 
-  try {
-    const { syncPackageToSalesforce } = await import("@/lib/integrations/salesforce/products")
-    await syncPackageToSalesforce(id)
-  } catch (e) {
-    console.warn(
-      "[admin] Salesforce sync after cost-layer change failed:",
-      e instanceof Error ? e.message : e,
-    )
+  if (isSalesforceConfigured()) {
+    try {
+      const { syncPackageToSalesforce } = await import("@/lib/integrations/salesforce/products")
+      await syncPackageToSalesforce(id)
+    } catch (e) {
+      console.warn(
+        "[admin] Salesforce sync after cost-layer change failed:",
+        e instanceof Error ? e.message : e,
+      )
+    }
   }
   try {
     const { syncPackageCatalogToWix } = await import("@/lib/integrations/wix/catalog-sync")
@@ -263,7 +268,7 @@ export async function updateInvoiceStatus(
       revalidatePath("/bookings")
       return {
         ok: true,
-        message: `Invoice marked paid. Salesforce Closed Won was not queued (${enq.message}). Process sync queue or check Integrations.`,
+        message: `Invoice marked paid. Outcome sync was not queued (${enq.message}). Process the sync queue from Settings → Integrations if needed.`,
       }
     }
   }
@@ -430,8 +435,8 @@ export async function cancelAdminOrder(orderId: string): Promise<ActionResult> {
   return {
     ok: true,
     message: ref
-      ? `${ref} cancelled. Stock restored; Salesforce Closed Lost queued (process sync queue).`
-      : "Order cancelled. Stock restored; Salesforce Closed Lost queued.",
+      ? `${ref} cancelled. Stock restored.`
+      : "Order cancelled. Stock restored.",
   }
 }
 
@@ -723,10 +728,9 @@ export async function retryPackageIntegrationSync(packageId: string): Promise<Pa
   if (!id) return { ok: false, message: "Package id is missing." }
 
   if (!isSalesforceConfigured()) {
-    return {
-      ok: false,
-      message: "Salesforce is not configured. Check env vars, then try again.",
-    }
+    const enq = await enqueueProductUpsert(gate.supabase, id)
+    if (!enq.ok) return { ok: false, message: enq.message }
+    return { ok: true, message: "Website sync queued." }
   }
   const sf = await getSalesforceConnectionStatus()
   if (!sf.connected) {
@@ -1698,7 +1702,7 @@ export async function clearSalesforceSyncFailures(): Promise<ActionResult> {
   return { ok: true }
 }
 
-/** Pull offline Salesforce sales into portal inventory (light — no org-wide Available scan). */
+/** Salesforce inventory pull is retired. Kept so old admin buttons fail safely. */
 export async function pullSalesforceInventoryNow(): Promise<
   | {
       ok: true
@@ -1709,89 +1713,20 @@ export async function pullSalesforceInventoryNow(): Promise<
 > {
   const gate = await requireAdminAction()
   if (!gate.ok) return gate
-  try {
-    const { pullInventoryFromSalesforce } = await import(
-      "@/lib/integrations/salesforce/pull-inventory-from-salesforce"
-    )
-    // offlineSalesOnly: Closed Won + heal affected packages only. Full force pulls were
-    // burning TotalRequests and failing before offline sales could land.
-    const pull = await pullInventoryFromSalesforce({ force: true, offlineSalesOnly: true })
-    if (pull.skipped) {
-      return { ok: false, message: pull.message ?? "Salesforce inventory pull was skipped." }
-    }
-    revalidatePath("/admin/integrations/salesforce")
-    revalidatePath("/admin/catalog")
-    revalidatePath("/admin/inventory")
-    return { ok: true, pull, outbox: null }
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "Salesforce inventory pull failed." }
-  }
+  return { ok: false, message: "Salesforce runtime has been retired." }
 }
 
 /**
  * Import Salesforce Stock Sources into portal purchase lines for one package.
- * Ledger-only: does not increase sellable / available inventory.
+ * Salesforce runtime is retired — this action is a no-op.
  */
 export async function importPackageStockSourcesFromSalesforce(
   packageId: string,
 ): Promise<ActionResult & { imported?: number }> {
   const gate = await requireAdminAction()
   if (!gate.ok) return gate
-  const id = packageId.trim()
-  if (!id) return { ok: false, message: "Package id is missing." }
-
-  const { supabase } = gate
-  const { data: pkg, error } = await supabase
-    .from("packages")
-    .select("id, salesforce_product_id, shell_parent_package_id")
-    .eq("id", id)
-    .maybeSingle()
-  if (error) return { ok: false, message: error.message }
-  if (!pkg) return { ok: false, message: "Package not found." }
-  if (pkg.shell_parent_package_id) {
-    return { ok: false, message: "Shell single tickets do not own stock sources." }
-  }
-  const product2Id = typeof pkg.salesforce_product_id === "string" ? pkg.salesforce_product_id.trim() : ""
-  if (!product2Id) {
-    return { ok: false, message: "Link a Salesforce product first." }
-  }
-
-  try {
-    const { importStockSourcesFromSalesforce } = await import(
-      "@/lib/integrations/salesforce/stock-sources"
-    )
-    const admin = createAdminClient()
-    if (!admin) return { ok: false, message: "Service role is not configured." }
-    const result = await importStockSourcesFromSalesforce({
-      admin,
-      packageId: id,
-      product2Id,
-    })
-    revalidateAdminProfitPaths(id)
-    revalidatePath("/admin/inventory")
-    revalidatePath("/admin/catalog")
-    revalidatePath(`/admin/catalog/${encodeURIComponent(id)}`)
-    if (result.errors.length > 0 && result.imported === 0) {
-      return { ok: false, message: result.errors.join("; ") }
-    }
-    if (result.imported === 0) {
-      return {
-        ok: true,
-        message:
-          result.skipped > 0
-            ? "Portal already has matching stock purchase rows (or Salesforce has none to import)."
-            : "No Salesforce Stock Sources found to import.",
-        imported: 0,
-      }
-    }
-    return {
-      ok: true,
-      message: `Imported ${result.imported} stock purchase line${result.imported === 1 ? "" : "s"} from Salesforce (inventory unchanged).`,
-      imported: result.imported,
-    }
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "Stock source import failed." }
-  }
+  void packageId
+  return { ok: false, message: "Salesforce runtime has been retired." }
 }
 
 function autoPurchaseOrderNumber(): string {
@@ -2309,6 +2244,7 @@ export async function updateCostLayerQuantity(input: {
   revalidateAdminProfitPaths(input.packageId?.trim() || undefined)
   revalidatePath("/admin/inventory")
   revalidatePath("/admin/catalog")
+  revalidatePath("/admin/purchase-orders")
   revalidatePath("/packages")
   revalidatePath("/")
   if (input.packageId?.trim()) {
@@ -2333,6 +2269,7 @@ export async function deleteCostLayer(layerId: string): Promise<ActionResult> {
   if (error) return { ok: false, message: error.message }
   revalidatePath("/admin/catalog")
   revalidatePath("/admin/inventory")
+  revalidatePath("/admin/purchase-orders")
   revalidatePath("/admin")
   revalidatePath("/packages")
   revalidatePath("/")
@@ -2826,99 +2763,14 @@ export async function repairLinkedDayGroupInventory(input: {
 // WARNING: syncPackageToSalesforce PATCHes Name, Family, Description on whatever Product2 the
 // portal is linked to. Stock/Available are NOT pushed for linked inventory groups (SF owns them).
 // that this portal package "owns" — never to a shared single ticket used by other 3-days.
-const SALESFORCE_PRODUCT2_ID_RE = /^[a-zA-Z0-9]{15,18}$/
-
 export async function relinkPackageToSalesforceProduct(input: {
   packageId: string
   salesforceProductId: string | null
 }): Promise<ActionResult> {
   const gate = await requireAdminAction()
   if (!gate.ok) return gate
-  const { supabase } = gate
-
-  const packageId = input.packageId.trim()
-  if (!packageId) return { ok: false, message: "Package id is required." }
-
-  const raw = (input.salesforceProductId ?? "").trim()
-  const nextId = raw.length === 0 ? null : raw
-
-  if (nextId != null && !SALESFORCE_PRODUCT2_ID_RE.test(nextId)) {
-    return {
-      ok: false,
-      message: `Salesforce Product2 Id must be 15–18 alphanumeric characters (got "${nextId}").`,
-    }
-  }
-
-  const { data: existing, error: exErr } = await supabase
-    .from("packages")
-    .select("race_id, salesforce_product_id, inventory_group_id, duration, shell_parent_package_id")
-    .eq("id", packageId)
-    .maybeSingle()
-  if (exErr) return { ok: false, message: exErr.message }
-  if (!existing) return { ok: false, message: "Package not found." }
-
-  const existingId =
-    typeof (existing as { salesforce_product_id: string | null }).salesforce_product_id === "string"
-      ? ((existing as { salesforce_product_id: string }).salesforce_product_id.trim() || null)
-      : null
-
-  if (existingId === nextId) {
-    return { ok: true, message: "Salesforce Product Id unchanged." }
-  }
-
-  const { error: updErr } = await supabase
-    .from("packages")
-    .update({
-      salesforce_product_id: nextId,
-      integration_sync_status: "pending",
-      integration_sync_error: null,
-    })
-    .eq("id", packageId)
-  if (updErr) return { ok: false, message: updErr.message }
-
-  const enq = await enqueueProductUpsert(supabase, packageId)
-  if (!enq.ok) return { ok: false, message: enq.message }
-
-  const existingRow = existing as {
-    race_id: string
-    inventory_group_id: string | null
-    duration: string | null
-    shell_parent_package_id: string | null
-  }
-  if (nextId && existingRow.inventory_group_id?.trim() && !existingRow.shell_parent_package_id?.trim()) {
-    const { data: threeDay } = await supabase
-      .from("packages")
-      .select("id")
-      .eq("inventory_group_id", existingRow.inventory_group_id.trim())
-      .eq("duration", "3_day")
-      .limit(1)
-      .maybeSingle()
-    if (threeDay?.id) {
-      const repair = await repairLinkedGroupInventory(String(threeDay.id))
-      if (!repair.ok) {
-        console.warn("[relinkPackageToSalesforceProduct] Linked inventory repair:", repair.message)
-      }
-    }
-  }
-
-  if (nextId) {
-    try {
-      await pullInventoryFromSalesforce({ force: true })
-    } catch (e) {
-      console.warn(
-        "[relinkPackageToSalesforceProduct] SF inventory pull after relink:",
-        e instanceof Error ? e.message : e,
-      )
-    }
-  }
-
-  revalidatePackagePaths(existingRow.race_id)
-  return {
-    ok: true,
-    message: nextId
-      ? `Package linked to Salesforce Product2 ${nextId}. Inventory pulled from Salesforce for the linked group.`
-      : "Salesforce Product Id cleared. Next sync will match an existing product on the event if one exists, otherwise auto-create.",
-  }
+  void input
+  return { ok: false, message: "Salesforce runtime has been retired." }
 }
 
 // ============================================================================
@@ -2927,18 +2779,47 @@ export async function relinkPackageToSalesforceProduct(input: {
 
 type PurchaseOrderIdResult = { ok: true; id: string } | { ok: false; message: string }
 
+function parsePurchaseOrderLines(
+  lines: Array<{ packageId: string; quantity: number; unitCost: number }> | undefined,
+):
+  | { ok: true; lines: Array<{ packageId: string; quantity: number; unitCost: number }> }
+  | { ok: false; message: string } {
+  const parsed: Array<{ packageId: string; quantity: number; unitCost: number }> = []
+  for (const line of lines ?? []) {
+    const packageId = line.packageId.trim()
+    if (!packageId) continue
+    const quantity = Math.floor(Number(line.quantity))
+    const unitCost = Number(line.unitCost)
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return { ok: false, message: "Each product needs a positive whole-number quantity." }
+    }
+    if (!Number.isFinite(unitCost) || unitCost < 0) {
+      return { ok: false, message: "Each product needs a non-negative buy price." }
+    }
+    parsed.push({ packageId, quantity, unitCost })
+  }
+  if (parsed.length === 0) {
+    return { ok: false, message: "Add at least one product with quantity and buy price." }
+  }
+  return { ok: true, lines: parsed }
+}
+
 export async function createPurchaseOrder(input: {
-  poNumber: string
+  poNumber?: string | null
   supplierAccountId: string
+  supplierReference?: string | null
   issuedAt?: string | null
   note?: string | null
+  lines?: Array<{ packageId: string; quantity: number; unitCost: number }>
 }): Promise<PurchaseOrderIdResult> {
   const gate = await requireAdminAction()
   if (!gate.ok) return gate
 
-  const poNumber = input.poNumber.trim()
-  if (!poNumber) return { ok: false, message: "PO number is required." }
-  if (poNumber.length > 200) return { ok: false, message: "PO number must be 200 characters or fewer." }
+  const poNumber = input.poNumber?.trim() || generatePurchaseOrderNumber()
+  if (poNumber.length > 200) return { ok: false, message: "Internal PO number must be 200 characters or fewer." }
+
+  const lines = parsePurchaseOrderLines(input.lines)
+  if (!lines.ok) return lines
 
   const ensured = await ensureSupplierForAccount(gate.supabase, input.supplierAccountId)
   if (!ensured.ok) return ensured
@@ -2967,17 +2848,46 @@ export async function createPurchaseOrder(input: {
     }
     return { ok: false, message: error.message }
   }
-  const linked = await linkPurchaseOrderToAccount(gate.supabase, String(data), input.supplierAccountId)
+  const id = String(data)
+  const linked = await linkPurchaseOrderToAccount(gate.supabase, id, input.supplierAccountId)
   if (!linked.ok) return linked
+  const referenced = await setPurchaseOrderSupplierReference(
+    gate.supabase,
+    id,
+    input.supplierReference,
+  )
+  if (!referenced.ok) return referenced
+
+  for (const line of lines.lines) {
+    const { error: layerErr } = await gate.supabase.rpc("admin_add_cost_layer", {
+      p_package_id: line.packageId,
+      p_quantity: line.quantity,
+      p_unit_cost: line.unitCost,
+      p_currency: null,
+      p_note: null,
+      p_received_at: issuedAt,
+      p_source: supplier,
+      p_purchase_order_id: id,
+      p_fulfilment_block_id: null,
+    })
+    if (layerErr) {
+      return {
+        ok: false,
+        message: `Purchase order created, but a product could not be added: ${layerErr.message}`,
+      }
+    }
+  }
+
   revalidatePath("/admin/purchase-orders")
   revalidatePath("/admin/catalog")
-  return { ok: true, id: String(data) }
+  return { ok: true, id }
 }
 
 export async function updatePurchaseOrder(input: {
   id: string
   poNumber?: string | null
   supplierAccountId?: string | null
+  supplierReference?: string | null
   issuedAt?: string | null
   clearIssuedAt?: boolean
   note?: string | null
@@ -3025,6 +2935,14 @@ export async function updatePurchaseOrder(input: {
   if (supplierAccountId) {
     const linked = await linkPurchaseOrderToAccount(gate.supabase, id, supplierAccountId)
     if (!linked.ok) return linked
+  }
+  if (input.supplierReference !== undefined) {
+    const referenced = await setPurchaseOrderSupplierReference(
+      gate.supabase,
+      id,
+      input.supplierReference,
+    )
+    if (!referenced.ok) return referenced
   }
   revalidatePath("/admin/purchase-orders")
   revalidatePath("/admin/catalog")

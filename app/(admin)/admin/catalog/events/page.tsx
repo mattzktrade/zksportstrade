@@ -30,7 +30,7 @@ export default async function EventsPage() {
   }))
 
   return (
-    <div className="mx-auto max-w-[1540px] p-5 lg:p-7">
+    <div className="mx-auto max-w-[1540px] p-3 sm:p-5 lg:p-7">
       <EventsClient events={rows} />
     </div>
   )

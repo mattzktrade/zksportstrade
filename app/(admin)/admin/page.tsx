@@ -23,6 +23,9 @@ import {
   AdminPageHeader,
   AdminPanel,
   AdminStatCard,
+  AdminStats,
+  AdminDesktopTable,
+  AdminMobileList,
   SectionTitle,
   StatusPill,
 } from "@/components/admin/admin-page-kit"
@@ -206,13 +209,13 @@ export default async function AdminDashboardPage() {
   ]
 
   return (
-    <div className="mx-auto max-w-[1540px] space-y-3 p-4 lg:p-5">
+    <div className="mx-auto max-w-[1540px] space-y-3 p-3 sm:p-4 lg:p-5">
       <AdminPageHeader
         title="Dashboard"
         description="Overview of approvals, sales, operations and finance across ZK Sports."
       />
 
-      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-6">
         <AdminStatCard icon={UsersRound} value={pending ?? 0} label="Pending user approvals" hint="Requires admin review" />
         <AdminStatCard
           icon={FileSignature}
@@ -249,7 +252,7 @@ export default async function AdminDashboardPage() {
           hint="Awaiting payment"
           tone="amber"
         />
-      </section>
+      </AdminStats>
 
       <section className="grid gap-3 xl:grid-cols-2">
         <AdminPanel>
@@ -259,12 +262,12 @@ export default async function AdminDashboardPage() {
               <Link
                 href={task.href}
                 key={`${task.href}:${task.label}`}
-                className="flex items-center gap-3 px-4 py-3 text-[10px] hover:bg-slate-50"
+                className="flex min-w-0 items-center gap-3 px-4 py-3 text-[10px] hover:bg-slate-50"
               >
-                <span className="h-3.5 w-3.5 rounded border border-[#d8dbe0]" />
-                <span className="flex-1 font-medium text-[#44474d]">{task.label}</span>
+                <span className="h-3.5 w-3.5 shrink-0 rounded border border-[#d8dbe0]" />
+                <span className="min-w-0 flex-1 font-medium text-[#44474d]">{task.label}</span>
                 <StatusPill tone="gray">{task.tag}</StatusPill>
-                <span className="text-[8px] text-slate-400">{task.due ? shortDate(task.due) : "No due date"}</span>
+                <span className="hidden shrink-0 text-[8px] text-slate-400 sm:inline">{task.due ? shortDate(task.due) : "No due date"}</span>
               </Link>
             ))}
             {myTaskRows.length === 0 ? (
@@ -372,7 +375,7 @@ export default async function AdminDashboardPage() {
 
       <AdminPanel>
         <SectionTitle title="Recent deals" href="/admin/deals" hrefLabel="View deal pipeline" />
-        <div className="overflow-x-auto">
+        <AdminDesktopTable>
           <table className="w-full min-w-[760px] text-left">
             <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
               <tr>
@@ -425,7 +428,41 @@ export default async function AdminDashboardPage() {
               ) : null}
             </tbody>
           </table>
-        </div>
+        </AdminDesktopTable>
+        <AdminMobileList>
+          {recentDeals.map((row) => (
+            <Link key={row.id} href={`/admin/deals/${row.id}`} className="flex items-start justify-between gap-3 px-4 py-3">
+              <div className="min-w-0">
+                <p className="font-semibold text-primary">{row.reference}</p>
+                <p className="mt-0.5 font-medium text-slate-700">{row.accountName}</p>
+                <p className="mt-1 text-[10px] leading-snug text-slate-600">{row.eventPackage}</p>
+                <p className="mt-0.5 text-[8px] text-slate-400">{row.source} · {shortDate(row.createdAt)}</p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="font-semibold">{money(row.total, row.currency)}</p>
+                <div className="mt-1">
+                  <StatusPill
+                    tone={
+                      row.status === "paid" ||
+                      row.status === "paid_confirmed" ||
+                      row.status === "confirmed" ||
+                      row.status === "fulfilled"
+                        ? "green"
+                        : row.status === "cancelled" || row.status === "closed_lost"
+                          ? "red"
+                          : "amber"
+                    }
+                  >
+                    {row.status.replaceAll("_", " ")}
+                  </StatusPill>
+                </div>
+              </div>
+            </Link>
+          ))}
+          {recentDeals.length === 0 ? (
+            <p className="px-4 py-8 text-center text-[10px] text-slate-400">No deals yet.</p>
+          ) : null}
+        </AdminMobileList>
       </AdminPanel>
     </div>
   )

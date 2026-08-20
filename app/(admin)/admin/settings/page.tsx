@@ -1,10 +1,8 @@
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { hasCmsPermission } from "@/lib/auth/permissions"
 import { listCmsStaffUsers } from "@/lib/admin/settings-users"
-import { getSalesforceConnectionStatus } from "@/lib/integrations/salesforce/settings-store"
 import { getXeroConnectionStatus } from "@/lib/integrations/xero/settings-store"
 import { isWixConfigured } from "@/lib/integrations/wix/config"
-import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
 import { SettingsClient, type SettingsIntegrationCard } from "./settings-client"
 
 export const dynamic = "force-dynamic"
@@ -17,12 +15,10 @@ export default async function SettingsPage({
   const profile = await requireAdmin()
   const { tab } = await searchParams
   const canManageUsers = hasCmsPermission(profile, "users.manage")
-  const nativeMode = isNativePlatformMode()
 
-  const [users, xero, salesforce] = await Promise.all([
+  const [users, xero] = await Promise.all([
     canManageUsers ? listCmsStaffUsers() : Promise.resolve([]),
     getXeroConnectionStatus(),
-    getSalesforceConnectionStatus(),
   ])
   const wix = isWixConfigured()
 
@@ -47,22 +43,6 @@ export default async function SettingsPage({
       status: wix ? "API keys configured" : "Not configured",
       connected: wix,
     },
-    {
-      href: "/admin/integrations/salesforce",
-      title: nativeMode ? "Salesforce (legacy)" : "Salesforce",
-      description: nativeMode
-        ? "Kept for reference. This rebuild does not read or write Salesforce."
-        : "Products, opportunities, and guest contacts.",
-      status: nativeMode
-        ? "Disabled in native mode"
-        : salesforce.connected
-          ? "Connected"
-          : salesforce.configured
-            ? "Ready to connect"
-            : "Not configured",
-      connected: !nativeMode && salesforce.connected,
-      muted: nativeMode,
-    },
   ]
 
   return (
@@ -71,7 +51,6 @@ export default async function SettingsPage({
       canManageUsers={canManageUsers}
       users={users}
       integrations={integrations}
-      nativeMode={nativeMode}
       initialTab={tab === "integrations" || !canManageUsers ? "integrations" : "users"}
     />
   )

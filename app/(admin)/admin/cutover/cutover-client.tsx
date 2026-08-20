@@ -10,7 +10,7 @@ import type {
   CutoverPackageRow,
   CutoverRun,
 } from "@/lib/admin/cutover"
-import { AdminPageHeader, AdminPanel, AdminStatCard, StatusPill } from "@/components/admin/admin-page-kit"
+import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, StatusPill } from "@/components/admin/admin-page-kit"
 import {
   createCutoverBaseline,
   decideWonReconciliation,
@@ -135,14 +135,14 @@ export function CutoverClient({
   }
 
   return (
-    <div className="mx-auto max-w-[1540px] space-y-3 p-4 lg:p-5">
+    <div className="mx-auto max-w-[1540px] space-y-3 p-3 sm:p-4 lg:p-5">
       <AdminPageHeader
         title="Controlled Cutover"
         description="Parallel-run reconciliation, pilot evidence, sign-off and scoped rollback."
         action={<button onClick={exportReport} className="flex h-9 items-center gap-2 rounded-md border bg-white px-3 text-[9px] font-semibold"><Download className="h-3.5 w-3.5" /> Export report</button>}
       />
       <div className="flex flex-wrap items-center gap-2">
-        <select value={selectedRun.id} onChange={(event) => router.push(`/admin/cutover?run=${event.target.value}`)} className="h-9 min-w-[240px] rounded-md border bg-white px-3 text-[10px]">{runs.map((runRow) => <option key={runRow.id} value={runRow.id}>{runRow.name}</option>)}</select>
+        <select value={selectedRun.id} onChange={(event) => router.push(`/admin/cutover?run=${event.target.value}`)} className="h-9 min-w-0 w-full sm:min-w-[240px] sm:w-auto rounded-md border bg-white px-3 text-[10px]">{runs.map((runRow) => <option key={runRow.id} value={runRow.id}>{runRow.name}</option>)}</select>
         <StatusPill tone={tone(selectedRun.status)}>{label(selectedRun.status)}</StatusPill>
         {["baselined", "parallel_run"].includes(selectedRun.status) ? (
           <select
@@ -169,13 +169,13 @@ export function CutoverClient({
         <select disabled={pending || !(NEXT_STATUSES[selectedRun.status]?.length)} value="" onChange={(event) => { if (!event.target.value) return; const note = window.prompt(`Reason for moving to ${label(event.target.value)}:`) ?? ""; run(() => setCutoverStatus({ runId: selectedRun.id, status: event.target.value, note })) }} className="ml-auto h-9 rounded-md border bg-white px-3 text-[10px] disabled:opacity-50"><option value="">Advance status...</option>{(NEXT_STATUSES[selectedRun.status] ?? []).map((status) => <option key={status} value={status}>{label(status)}</option>)}</select>
       </div>
 
-      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-5">
         <AdminStatCard icon={ShieldCheck} value={packages.length} label="Packages baselined" tone="blue" />
         <AdminStatCard icon={AlertTriangle} value={driftRows.length} label="Stock drift rows" tone={driftRows.length ? "red" : "green"} />
         <AdminStatCard icon={History} value={unresolvedPackages.length} label="Package decisions" tone="amber" />
         <AdminStatCard icon={PlayCircle} value={openDeals.filter((row) => row.status === "prepared").length} label="Open deals prepared" tone="green" />
         <AdminStatCard icon={AlertTriangle} value={unresolvedDeals.length} label="Deal decisions" tone="red" />
-      </section>
+      </AdminStats>
 
       <AdminPanel>
         <div className="flex overflow-x-auto border-b px-3">

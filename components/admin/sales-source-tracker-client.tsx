@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import { CircleDollarSign, Download, Target, TrendingUp, Users } from "lucide-react"
 import type { WorkflowOrderRow } from "@/lib/admin/workflow-views"
-import { AdminPageHeader, AdminPanel, AdminStatCard, StatusPill } from "@/components/admin/admin-page-kit"
+import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 
 type SourceAggregate = {
   source: string
@@ -118,7 +118,7 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
   }
 
   return (
-    <div className="mx-auto max-w-[1540px] space-y-3 p-4 lg:p-5">
+    <div className="mx-auto max-w-[1540px] space-y-3 p-3 sm:p-4 lg:p-5">
       <AdminPageHeader
         title="Sales Tracker"
         description="Monitor confirmed native orders and imported historical won deals by sales source."
@@ -128,13 +128,13 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
           </button>
         }
       />
-      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-5">
         <AdminStatCard icon={CircleDollarSign} value={money(totalMonthRevenue)} label="This month revenue" tone="blue" />
         <AdminStatCard icon={TrendingUp} value={money(totalMonthProfit)} label="This month gross profit" tone="green" />
         <AdminStatCard icon={CircleDollarSign} value={money(totalYtdRevenue)} label="YTD revenue" />
         <AdminStatCard icon={Target} value={money(totalYtdProfit)} label="YTD gross profit" tone="green" />
         <AdminStatCard icon={Users} value={aggregates[0]?.source ?? "—"} label="Top-performing source" />
-      </section>
+      </AdminStats>
 
       <div className="flex flex-wrap gap-2">
         <select value={month} onChange={(event) => setMonth(Number(event.target.value))} className="h-9 rounded-md border bg-white px-3 text-[10px]">
@@ -148,7 +148,7 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_360px]">
         <div className="space-y-3">
           <AdminPanel>
-            <div className="overflow-x-auto">
+            <AdminDesktopTable>
               <table className="w-full min-w-[920px] text-left">
                 <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-slate-400">
                   <tr><th className="px-4 py-2.5">Source</th><th className="px-4 py-2.5 text-right">Deals</th><th className="px-4 py-2.5 text-right">Month revenue</th><th className="px-4 py-2.5 text-right">Month GP</th><th className="px-4 py-2.5 text-right">YTD revenue</th><th className="px-4 py-2.5 text-right">YTD GP</th><th className="px-4 py-2.5 text-right">Average order</th></tr>
@@ -158,7 +158,26 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
                   <tr className="bg-slate-50 font-semibold"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{aggregates.reduce((sum, row) => sum + row.rows.length, 0)}</td><td className="px-4 py-3 text-right">{money(totalMonthRevenue)}</td><td className="px-4 py-3 text-right">{money(totalMonthProfit)}</td><td className="px-4 py-3 text-right">{money(totalYtdRevenue)}</td><td className="px-4 py-3 text-right">{money(totalYtdProfit)}</td><td /></tr>
                 </tbody>
               </table>
-            </div>
+            </AdminDesktopTable>
+            <AdminMobileList>
+              {aggregates.map((row, index) => (
+                <button
+                  type="button"
+                  key={row.source}
+                  onClick={() => setSelectedSource(row.source)}
+                  className={`flex w-full items-start justify-between gap-3 px-4 py-3 text-left ${selected?.source === row.source ? "bg-red-50/50" : ""}`}
+                >
+                  <div className="min-w-0">
+                    <p className="font-semibold">{row.source}{index === 0 ? <span className="ml-2"><StatusPill tone="green">Top source</StatusPill></span> : null}</p>
+                    <p className="mt-0.5 text-[8px] text-slate-400">{row.rows.length} deals</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="font-semibold">{money(row.monthRevenue)}</p>
+                    <p className="mt-0.5 text-[8px] text-emerald-700">{money(row.monthProfit)} GP</p>
+                  </div>
+                </button>
+              ))}
+            </AdminMobileList>
           </AdminPanel>
           <section className="grid gap-3 lg:grid-cols-2">
             <AdminPanel>

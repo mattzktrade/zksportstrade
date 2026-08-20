@@ -11,6 +11,9 @@ import {
 import {
   AdminPanel,
   AdminStatCard,
+  AdminStats,
+  AdminDesktopTable,
+  AdminMobileList,
   SectionTitle,
   StatusPill,
 } from "@/components/admin/admin-page-kit"
@@ -71,13 +74,13 @@ export function SupplierProfilePanel({
 
   return (
     <div className="space-y-3">
-      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-5">
         <AdminStatCard icon={ShoppingCart} value={purchaseOrders.length} label="Purchase orders" tone="blue" />
         <AdminStatCard icon={PackageCheck} value={profile.unitsPurchased} label="Units we buy from them" tone="green" />
         <AdminStatCard icon={Boxes} value={profile.unitsRemaining} label="Units on stock layers" tone="purple" />
         <AdminStatCard icon={TrendingUp} value={profile.unitsAvailable} label="Available after commitments" tone="amber" />
         <AdminStatCard icon={CircleDollarSign} value={spendLabel} label="Tracked purchasing" tone="red" />
-      </section>
+      </AdminStats>
 
       <div className="grid gap-3 xl:grid-cols-[minmax(300px,0.72fr)_minmax(0,1.8fr)]">
         <div className="space-y-3">
@@ -198,7 +201,7 @@ export function SupplierProfilePanel({
             <div className="border-b border-[#eceef1] bg-[#fafbfc] px-4 py-2 text-[8px] text-[#8e9299]">
               Available subtracts stock already committed to open deals. Coverage is inferred from purchases and deal history.
             </div>
-            <div className="overflow-x-auto">
+            <AdminDesktopTable>
               <table className="w-full min-w-[760px] text-left">
                 <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
                   <tr>
@@ -236,12 +239,26 @@ export function SupplierProfilePanel({
                   ) : null}
                 </tbody>
               </table>
-            </div>
+            </AdminDesktopTable>
+            <AdminMobileList>
+              {products.map((product) => (
+                <Link key={product.packageId} href={adminPackagePath(product.packageId)} className="flex items-start justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-primary">{product.packageName}</p>
+                    <p className="mt-0.5 text-[8px] text-slate-400">{product.eventName}</p>
+                  </div>
+                  <p className="shrink-0 font-semibold text-emerald-600">{product.unitsAvailable} avail.</p>
+                </Link>
+              ))}
+              {products.length === 0 ? (
+                <p className="px-4 py-12 text-center text-[9px] text-slate-400">No stock or product history linked to this supplier.</p>
+              ) : null}
+            </AdminMobileList>
           </AdminPanel>
 
           <AdminPanel>
             <SectionTitle title={`Purchase orders (${purchaseOrders.length})`} href="/admin/purchase-orders" />
-            <div className="overflow-x-auto">
+            <AdminDesktopTable>
               <table className="w-full min-w-[700px] text-left">
                 <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
                   <tr>
@@ -279,12 +296,27 @@ export function SupplierProfilePanel({
                   ) : null}
                 </tbody>
               </table>
-            </div>
+            </AdminDesktopTable>
+            <AdminMobileList>
+              {purchaseOrders.map((po) => (
+                <Link key={po.id} href={purchaseOrderAdminHref(po.id)} className="flex items-start justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-primary">{po.poNumber}</p>
+                    <p className="mt-0.5 text-[10px] text-slate-600">{po.products.join(", ") || "Not linked"}</p>
+                    <p className="mt-0.5 text-[8px] text-slate-400">{date(po.issuedAt)}</p>
+                  </div>
+                  <p className="shrink-0 text-[10px] font-semibold">{po.unitsRemaining} remaining</p>
+                </Link>
+              ))}
+              {purchaseOrders.length === 0 ? (
+                <p className="px-4 py-12 text-center text-[9px] text-slate-400">No purchase orders linked to this supplier.</p>
+              ) : null}
+            </AdminMobileList>
           </AdminPanel>
 
           <AdminPanel>
             <SectionTitle title={`Related deals (${deals.length})`} href="/admin/deals" />
-            <div className="overflow-x-auto">
+            <AdminDesktopTable>
               <table className="w-full min-w-[760px] text-left">
                 <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
                   <tr>
@@ -335,7 +367,22 @@ export function SupplierProfilePanel({
                   ) : null}
                 </tbody>
               </table>
-            </div>
+            </AdminDesktopTable>
+            <AdminMobileList>
+              {deals.map((deal, index) => (
+                <Link key={`${deal.id}-${deal.packageId}-${index}`} href={adminDealPath(deal.id)} className="flex items-start justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-primary">{deal.reference}</p>
+                    <p className="mt-0.5 text-[10px] text-slate-600">{deal.packageName}</p>
+                    <p className="mt-0.5 text-[8px] text-slate-400">{deal.accountName || "—"} · {deal.quantity} units</p>
+                  </div>
+                  <StatusPill tone={stageTone(deal.stage)}>{DEAL_STAGE_LABELS[deal.stage]}</StatusPill>
+                </Link>
+              ))}
+              {deals.length === 0 ? (
+                <p className="px-4 py-12 text-center text-[9px] text-slate-400">No deal lines assigned to this supplier.</p>
+              ) : null}
+            </AdminMobileList>
           </AdminPanel>
         </div>
       </div>

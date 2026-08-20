@@ -22,6 +22,9 @@ import {
   AdminPageHeader,
   AdminPanel,
   AdminStatCard,
+  AdminStats,
+  AdminDesktopTable,
+  AdminMobileList,
   StatusPill,
 } from "@/components/admin/admin-page-kit"
 import type { AdminRaceOption } from "@/lib/admin/queries"
@@ -217,12 +220,12 @@ export function LeadsClient({
         description="Companies and people in one directory. Unassigned accounts stay at the top until someone owns them. Start a deal when there is something to sell."
       />
 
-      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-4">
         <AdminStatCard icon={Building2} value={clients.length} label="Accounts" tone="blue" />
         <AdminStatCard icon={UsersRound} value={contactCount} label="Contacts" tone="purple" />
         <AdminStatCard icon={UserRoundPlus} value={unassignedCount} label="Unassigned" tone="amber" />
         <AdminStatCard icon={UserRoundCheck} value={myCount} label="My accounts" tone="green" />
-      </section>
+      </AdminStats>
 
       <AdminPanel>
         <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] px-4 pt-3">
@@ -239,18 +242,18 @@ export function LeadsClient({
               {item === "accounts" ? "Accounts" : "Contacts"}
             </button>
           ))}
-          <div className="ml-auto mb-3 flex items-center gap-2">
+          <div className="mb-3 flex w-full flex-col gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:items-center">
             <button
               type="button"
               onClick={() => setShowBulkUpload(true)}
-              className="flex h-9 items-center gap-1.5 rounded-md border px-4 text-[9px] font-semibold"
+              className="flex h-9 items-center justify-center gap-1.5 rounded-md border px-4 text-[9px] font-semibold"
             >
               <Upload className="h-3.5 w-3.5" /> Bulk upload
             </button>
             <button
               type="button"
               onClick={() => setShowCreate(true)}
-              className="flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-[9px] font-semibold text-white"
+              className="flex h-9 items-center justify-center gap-1.5 rounded-md bg-primary px-4 text-[9px] font-semibold text-white"
             >
               <Plus className="h-3.5 w-3.5" /> New account
             </button>
@@ -284,7 +287,7 @@ export function LeadsClient({
               </option>
             ))}
           </select>
-          <div className="relative ml-auto min-w-[300px]">
+          <div className="relative w-full min-w-0 sm:ml-auto sm:min-w-[240px] sm:max-w-sm sm:flex-1">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               value={query}
@@ -296,7 +299,8 @@ export function LeadsClient({
         </div>
 
         {view === "accounts" ? (
-          <div className="no-scrollbar overflow-x-auto">
+          <>
+          <AdminDesktopTable className="no-scrollbar">
             <table className="w-full min-w-[1040px] text-left">
               <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
                 <tr>
@@ -378,9 +382,43 @@ export function LeadsClient({
                 ) : null}
               </tbody>
             </table>
-          </div>
+          </AdminDesktopTable>
+          <AdminMobileList>
+            {filteredClients.map((client) => {
+              const primary = client.contacts.find((contact) => contact.is_primary) ?? client.contacts[0]
+              const unassigned = !client.owner_profile_id
+              return (
+                <div key={client.id} className={cn("space-y-2 px-4 py-3", unassigned && "bg-amber-50/70")}>
+                  <Link href={adminAccountPath(client.id)} className="font-semibold text-primary">
+                    {client.name}
+                  </Link>
+                  <p className="text-[8px] text-slate-400">
+                    {accountKindLabels(client.account_types)}
+                    {unassigned ? " · needs owner" : ""}
+                  </p>
+                  {primary ? (
+                    <p className="text-[10px] text-slate-600">
+                      {primary.full_name}
+                      {primary.email ? ` · ${primary.email}` : ""}
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusPill tone={sourceTone(client.source)}>
+                      {ACCOUNT_SOURCE_LABELS[client.source]}
+                    </StatusPill>
+                    <span className="text-[8px] text-slate-500">{client.deal_count} deals · {money(client.lifetime_spend)}</span>
+                  </div>
+                </div>
+              )
+            })}
+            {filteredClients.length === 0 ? (
+              <p className="px-4 py-14 text-center text-[10px] text-slate-400">No accounts match this view.</p>
+            ) : null}
+          </AdminMobileList>
+          </>
         ) : (
-          <div className="no-scrollbar overflow-x-auto">
+          <>
+          <AdminDesktopTable className="no-scrollbar">
             <table className="w-full min-w-[980px] text-left">
               <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
                 <tr>
@@ -448,7 +486,24 @@ export function LeadsClient({
                 ) : null}
               </tbody>
             </table>
-          </div>
+          </AdminDesktopTable>
+          <AdminMobileList>
+            {contactRows.map(({ client, contact }) => (
+              <Link
+                key={contact.id}
+                href={adminContactPath(client.id, contact.id)}
+                className={cn("block space-y-1 px-4 py-3", !client.owner_profile_id && "bg-amber-50/70")}
+              >
+                <p className="font-semibold text-primary">{contact.full_name}</p>
+                <p className="text-[10px] text-slate-600">{client.name}</p>
+                <p className="text-[8px] text-slate-400">{contact.email || "No email"}</p>
+              </Link>
+            ))}
+            {contactRows.length === 0 ? (
+              <p className="px-4 py-14 text-center text-[10px] text-slate-400">No contacts match this view.</p>
+            ) : null}
+          </AdminMobileList>
+          </>
         )}
       </AdminPanel>
 
@@ -469,7 +524,7 @@ export function LeadsClient({
           onClick={resetCreate}
         >
           <div
-            className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
+            className="flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex shrink-0 items-start justify-between px-6 pt-6">

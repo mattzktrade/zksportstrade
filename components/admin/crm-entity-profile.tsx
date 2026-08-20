@@ -13,6 +13,9 @@ import {
   AdminPageHeader,
   AdminPanel,
   AdminStatCard,
+  AdminStats,
+  AdminDesktopTable,
+  AdminMobileList,
   SectionTitle,
   StatusPill,
 } from "@/components/admin/admin-page-kit"
@@ -208,13 +211,13 @@ export function CrmEntityProfileView({
 
       {activeTab === "customer" && profile && account ? (
         <>
-      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-5">
         <AdminStatCard icon={BriefcaseBusiness} value={deals.length} label="All deals" tone="blue" />
         <AdminStatCard icon={TrendingUp} value={wonDeals.length} label="Won / confirmed" tone="green" />
         <AdminStatCard icon={BriefcaseBusiness} value={openDeals.length} label="Open deals" tone="purple" />
         <AdminStatCard icon={BriefcaseBusiness} value={lostDeals.length} label="Lost / cancelled" tone="red" />
         <AdminStatCard icon={CircleDollarSign} value={wonValue} label="Confirmed deal value" tone="amber" />
-      </section>
+      </AdminStats>
 
       <div className="grid gap-3 xl:grid-cols-[minmax(300px,0.72fr)_minmax(0,1.8fr)]">
         <div className="space-y-3">
@@ -353,7 +356,7 @@ export function CrmEntityProfileView({
         <div className="space-y-3">
           <AdminPanel>
             <SectionTitle title={`Deals (${deals.length})`} href="/admin/deals" hrefLabel="View deal pipeline" />
-            <div className="overflow-x-auto">
+            <AdminDesktopTable>
               <table className="w-full min-w-[760px] text-left">
                 <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
                   <tr>
@@ -398,7 +401,27 @@ export function CrmEntityProfileView({
                   ) : null}
                 </tbody>
               </table>
-            </div>
+            </AdminDesktopTable>
+            <AdminMobileList>
+              {deals.map((deal) => (
+                <Link key={deal.id} href={adminDealPath(deal.id)} className="flex items-start justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-primary">{deal.reference}</p>
+                    <p className="mt-0.5 text-[10px] text-slate-600">
+                      {deal.products.map((product) => `${product.quantity}× ${product.name}`).join(", ") || "—"}
+                    </p>
+                    <p className="mt-0.5 text-[8px] text-slate-400">{deal.eventNames.join(", ") || "No event"}</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="font-semibold">{money(deal.totalAmount, deal.currency)}</p>
+                    <div className="mt-1"><StatusPill tone={stageTone(deal.stage)}>{DEAL_STAGE_LABELS[deal.stage]}</StatusPill></div>
+                  </div>
+                </Link>
+              ))}
+              {deals.length === 0 ? (
+                <p className="px-4 py-12 text-center text-[9px] text-slate-400">No deals recorded yet.</p>
+              ) : null}
+            </AdminMobileList>
           </AdminPanel>
 
           <div className="grid gap-3 lg:grid-cols-2">

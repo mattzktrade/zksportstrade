@@ -68,7 +68,7 @@ export function startLocalIntegrationCron(): void {
 
   const ms = intervalMs()
   console.log(
-    `[local-cron] Automatic sync enabled — every ${ms / 1000}s (offline SF sales, holds, outbox).`,
+    `[local-cron] Automatic sync enabled — every ${ms / 1000}s (holds, booking forms, invoices, Wix/Xero outbox).`,
   )
   console.log("[local-cron] Set LOCAL_CRON_INTERVAL_SEC in .env.local to change the interval.")
 

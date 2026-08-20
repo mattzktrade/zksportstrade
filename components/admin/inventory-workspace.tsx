@@ -31,7 +31,7 @@ import { saveSalesListCrmParty } from "@/app/(admin)/admin/inventory/sales-list/
 import type { AdminPackageRow } from "@/lib/admin/queries"
 import type { CrmAccountOption } from "@/lib/crm/deal-types"
 import { cn } from "@/lib/utils"
-import { AdminPageHeader, AdminPanel, AdminStatCard, StatusPill } from "@/components/admin/admin-page-kit"
+import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { EventFilter, uniqueEventFilterOptions } from "@/components/admin/event-filter"
 import {
   createDealBasketLine,
@@ -570,7 +570,7 @@ export function InventoryWorkspace({
         }
       />
 
-      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-4">
         <AdminStatCard
           icon={Package}
           value={eventScopeRows.length.toLocaleString()}
@@ -595,11 +595,11 @@ export function InventoryWorkspace({
           label={mode === "sales" ? "Low stock alerts" : "Draft / unpublished"}
           tone={mode === "sales" ? "amber" : "purple"}
         />
-      </section>
+      </AdminStats>
 
       <AdminPanel>
         <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] p-3">
-          <div className="relative min-w-[240px] flex-1 sm:max-w-[370px]">
+          <div className="relative min-w-0 w-full flex-1 sm:min-w-[240px] sm:max-w-[370px]">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               type="search"
@@ -699,10 +699,11 @@ export function InventoryWorkspace({
         ) : null}
 
         <div className={cn(
-          "grid min-h-[600px]",
+          "grid md:min-h-[600px]",
           selected && "xl:grid-cols-[minmax(0,1fr)_minmax(320px,360px)]",
         )}>
-          <div className={cn("min-w-0 overflow-x-auto", selected && "border-r border-[#eceef1]")}>
+          <div className={cn("min-w-0", selected && "xl:border-r xl:border-[#eceef1]")}>
+            <AdminDesktopTable>
             <table className="w-full min-w-[980px] text-left">
               <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
                 <tr>
@@ -801,17 +802,52 @@ export function InventoryWorkspace({
                 ) : null}
               </tbody>
             </table>
+            </AdminDesktopTable>
+            <AdminMobileList>
+              {rows.map((row) => {
+                const available = nativeAvailability[row.id]?.sellable ?? Math.max(
+                  0,
+                  Number(row.inventory?.qty_available ?? 0) - Number(row.inventory?.qty_held ?? 0),
+                )
+                return (
+                  <button
+                    type="button"
+                    key={row.id}
+                    onClick={() => setSelectedId(row.id)}
+                    className={cn(
+                      "flex w-full items-start justify-between gap-3 px-4 py-3 text-left",
+                      selected?.id === row.id && "bg-red-50/60",
+                    )}
+                  >
+                    <div className="min-w-0">
+                      <p className="font-semibold text-primary">{row.name}</p>
+                      <p className="mt-0.5 font-medium text-slate-700">{row.race_name}</p>
+                      <p className="mt-0.5 text-[8px] text-slate-400">{row.date_range || row.location || "—"}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="font-semibold">{money(row.trade_price, row.currency)}</p>
+                      <p className="mt-0.5 text-[8px] text-slate-500">
+                        {mode === "manage" ? `${liveQty(row)} live` : `${available} avail.`}
+                      </p>
+                    </div>
+                  </button>
+                )
+              })}
+              {rows.length === 0 ? (
+                <p className="px-4 py-12 text-center text-[10px] text-slate-400">No inventory matches these filters.</p>
+              ) : null}
+            </AdminMobileList>
           </div>
 
           {selected ? (
-            <aside className="bg-white p-5">
+            <aside className="bg-white p-4 sm:p-5 max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:top-14 max-md:z-40 max-md:overflow-y-auto">
               <div className="space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className="text-[12px] font-semibold text-[#292b30]">{selected.name} — {selected.race_name}</h2>
                     <p className="mt-0.5 text-[9px] text-[#8b8f97]">{selected.product_code || selected.id}</p>
                   </div>
-                  <button type="button" className="text-slate-400" onClick={() => setSelectedId(null)}>×</button>
+                  <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-xl text-slate-400 md:h-auto md:w-auto md:text-base" onClick={() => setSelectedId(null)}>×</button>
                 </div>
                 <div className="space-y-2">
                   <PackageGallery

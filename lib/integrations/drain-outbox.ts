@@ -60,7 +60,10 @@ async function drainIntegrationOutboxInner(
   const skipInventoryPull = options.skipInventoryPull ?? true
   if (!skipInventoryPull) {
     try {
-      await pullInventoryFromSalesforce()
+      const { isSalesforceRuntimeEnabled } = await import("@/lib/platform/runtime-mode")
+      if (isSalesforceRuntimeEnabled()) {
+        await pullInventoryFromSalesforce()
+      }
     } catch (e) {
       console.warn(
         "[integrations] Salesforce inventory pull before outbox drain failed:",

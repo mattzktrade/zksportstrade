@@ -31,6 +31,9 @@ import {
   AdminPageHeader,
   AdminPanel,
   AdminStatCard,
+  AdminStats,
+  AdminDesktopTable,
+  AdminMobileList,
   StatusPill,
 } from "@/components/admin/admin-page-kit"
 import { dealSourceLabel } from "@/lib/crm/deal-types"
@@ -423,18 +426,18 @@ export function OperationsClient({
   const delivered = scopedForTabs.filter((row) => operationsTicketStatus(row) === "delivered")
 
   return (
-    <div className="space-y-3 p-4 lg:p-5">
+    <div className="space-y-3 p-3 sm:p-4 lg:p-5">
       <AdminPageHeader
         title="Operations"
         description="Confirmed deals by event date. Collect guest details, wait for tickets, then mark them ready and delivered."
       />
-      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-5">
         <AdminStatCard icon={ClipboardCheck} value={scopedForTabs.length} label="Confirmed deals" tone="blue" />
         <AdminStatCard icon={UserRoundCheck} value={awaitingGuests.length} label="Awaiting guests" tone="amber" />
         <AdminStatCard icon={Truck} value={supplierAction.length} label="Supplier action" tone="amber" />
         <AdminStatCard icon={PackageCheck} value={readyToDeliver.length} label="Ready to deliver" tone="green" />
         <AdminStatCard icon={CircleDollarSign} value={delivered.length} label="Delivered" tone="green" />
-      </section>
+      </AdminStats>
 
       <AdminPanel>
         <div className="no-scrollbar flex overflow-x-auto border-b px-3">
@@ -458,7 +461,7 @@ export function OperationsClient({
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-2 border-b p-3">
-          <label className="relative min-w-[220px] flex-1">
+          <label className="relative min-w-0 w-full flex-1 sm:min-w-[220px]">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
@@ -470,7 +473,7 @@ export function OperationsClient({
           <select
             value={eventScope}
             onChange={(event) => setEventScope(event.target.value as "future" | "all")}
-            className="h-9 rounded-md border bg-white px-3 text-[10px]"
+            className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto"
           >
             <option value="future">Future events</option>
             <option value="all">All dates</option>
@@ -478,7 +481,7 @@ export function OperationsClient({
           <select
             value={activeEventKey}
             onChange={(event) => setEventKey(event.target.value)}
-            className="h-9 max-w-[280px] rounded-md border bg-white px-3 text-[10px]"
+            className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto sm:max-w-[280px]"
           >
             <option value="all">Any event</option>
             {eventOptions.map((option) => (
@@ -486,7 +489,7 @@ export function OperationsClient({
             ))}
           </select>
         </div>
-        <div className="overflow-x-auto">
+        <AdminDesktopTable>
           <table className="w-full text-left">
             <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-slate-400">
               <tr>
@@ -657,7 +660,74 @@ export function OperationsClient({
               ) : null}
             </tbody>
           </table>
-        </div>
+        </AdminDesktopTable>
+        <AdminMobileList>
+          {rows.map((row) => {
+            const ticket = operationsTicketStatus(row)
+            const editable = canEditStatuses(row, canManage)
+            return (
+              <article key={row.id} className="space-y-2 px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    {row.dealId ? (
+                      <a href={`/admin/deals/${row.dealId}`} className="font-semibold text-primary">
+                        {row.dealReference || row.reference}
+                      </a>
+                    ) : (
+                      <p className="font-semibold">{row.dealReference || row.reference}</p>
+                    )}
+                    <AccountNameLink accountId={row.accountId} name={row.accountName} className="mt-0.5 block font-medium" />
+                    <p className="mt-1 text-[10px] leading-snug text-slate-600">
+                      {eventPackageLines(row.eventPackage).join(" · ")}
+                    </p>
+                    <p className="mt-0.5 text-[8px] text-slate-400">{formatEventDate(row.eventDate)}</p>
+                  </div>
+                  <StatusPill tone={tone(ticket)}>{label(ticket)}</StatusPill>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <StatusPill tone={tone(row.invoiceStatus || "pending")}>{label(row.invoiceStatus || "pending")}</StatusPill>
+                  <span className="text-[8px] text-slate-500">
+                    {row.completeGuestCount}/{row.quantity} guests
+                  </span>
+                </div>
+                {canManage ? (
+                  <div className="flex flex-wrap gap-3 text-[8px] font-semibold text-primary">
+                    <button type="button" onClick={() => openGuests(row)}>Manage guests</button>
+                    {rowHasOrder(row) || row.dealId ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManagingId(row.id)
+                          setGuestsOpen(false)
+                          setSupplierOpen(true)
+                        }}
+                      >
+                        Manage supplier
+                      </button>
+                    ) : null}
+                    {editable ? (
+                      <select
+                        disabled={pending}
+                        value={ticket}
+                        onChange={(event) => patchStatus(row, "deliveryStatus", event.target.value)}
+                        className="h-8 rounded border bg-white px-2 text-[9px] font-medium text-slate-700"
+                      >
+                        {SELECTS.deliveryStatus.map((value) => (
+                          <option key={value} value={value}>{label(value)}</option>
+                        ))}
+                      </select>
+                    ) : null}
+                  </div>
+                ) : null}
+              </article>
+            )
+          })}
+          {rows.length === 0 ? (
+            <p className="px-4 py-10 text-center text-[10px] text-slate-400">
+              No matching deals{eventScope === "future" ? " for future events" : ""}.
+            </p>
+          ) : null}
+        </AdminMobileList>
       </AdminPanel>
 
       {guestsOpen && managing ? (

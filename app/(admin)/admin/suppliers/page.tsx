@@ -64,7 +64,7 @@ export default async function SuppliersPage() {
   }))
 
   return (
-    <div className="mx-auto max-w-[1540px] p-4 lg:p-5">
+    <div className="mx-auto max-w-[1540px] p-3 sm:p-4 lg:p-5">
       <SuppliersClient rows={rows} />
     </div>
   )

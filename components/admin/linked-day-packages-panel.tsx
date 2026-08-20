@@ -14,8 +14,6 @@ const DAY_LABEL: Record<ShellDayDuration, string> = {
   sunday_only: "Sunday",
 }
 
-const SF_PRODUCT2_ID_RE = /^[a-zA-Z0-9]{15,18}$/
-
 /** Derive a sensible sellable-day package name from the 3-day parent's name. */
 function suggestDayPackageName(parentName: string, duration: ShellDayDuration): string {
   const day = DAY_LABEL[duration]
@@ -105,7 +103,6 @@ function QuickAddDialog({
   const [sellOnWix, setSellOnWix] = useState(false)
   const [wixMultiplier, setWixMultiplier] = useState("")
   const [wixManualPrice, setWixManualPrice] = useState("")
-  const [salesforceProductId, setSalesforceProductId] = useState("")
 
   function submit() {
     if (pending) return
@@ -127,13 +124,6 @@ function QuickAddDialog({
         return
       }
       price = n
-    }
-
-    const sfIdRaw = salesforceProductId.trim()
-    const sfId = sfIdRaw.length === 0 ? null : sfIdRaw
-    if (sfId && !SF_PRODUCT2_ID_RE.test(sfId)) {
-      toast.error("Salesforce Product Id must be 15–18 alphanumeric characters (starts with 01t...).")
-      return
     }
 
     let mult: number | null = null
@@ -186,7 +176,6 @@ function QuickAddDialog({
         sell_on_wix: sellOnWix,
         retail_price_multiplier: mult,
         wix_retail_price: manualWix,
-        salesforce_product_id: sfId,
         // Linked inventory: stock lives on the 3-day parent and is seeded from siblings in
         // createPackage — do NOT set an initial qty here.
         initial_qty_available: 0,
@@ -198,11 +187,7 @@ function QuickAddDialog({
         toast.error(res.message)
         return
       }
-      const msg =
-        res.message ??
-        (sfId
-          ? `${DAY_LABEL[duration]} package created and linked to Salesforce.`
-          : `${DAY_LABEL[duration]} package created — Salesforce product will be auto-created on sync.`)
+      const msg = res.message ?? `${DAY_LABEL[duration]} package created.`
       if (/Wix product was not created|Wix API is not configured/i.test(msg)) {
         toast.message(msg, { duration: 12000 })
       } else {
@@ -223,8 +208,7 @@ function QuickAddDialog({
             </h3>
             <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
               Race, dates, description, includes, image, and the Linked inventory key are copied from the
-              3-day parent. Stock is shared. Salesforce gets a new product on sync (leave Product Id
-              blank) — you do not need to create the package in Salesforce first.
+              3-day parent. Stock is shared across the group.
             </p>
           </div>
           <button
@@ -314,23 +298,6 @@ function QuickAddDialog({
               </div>
             </div>
           ) : null}
-
-          <label className="block text-xs text-muted-foreground">
-            Salesforce Product2 Id (optional)
-            <input
-              value={salesforceProductId}
-              onChange={(e) => setSalesforceProductId(e.target.value)}
-              placeholder="Leave blank to auto-create — or paste 01t… to link an existing product"
-              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <span className="mt-1 block text-[10px] text-muted-foreground/80 leading-snug">
-              Leave blank for a new Sunday/Friday package — sync creates the Salesforce product and
-              shares stock with this 3-day group. Only paste an Id if the product already exists in
-              Salesforce and you want to link it instead of creating a duplicate.
-            </span>
-          </label>
 
           <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 text-[11px] text-muted-foreground space-y-1">
             <p>
