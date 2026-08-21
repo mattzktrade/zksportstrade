@@ -43,6 +43,7 @@ import { OperationsGuestEditor, type GuestDraft } from "@/app/(admin)/admin/oper
 import { OperationsSupplierEditor } from "@/app/(admin)/admin/operations/supplier-editor"
 import type { OperationsEmailKind } from "@/lib/operations/emails"
 import { orderStockSummaries } from "@/lib/operations/stock"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 import {
   deleteOrderGuest,
   reassignDealPackageStock,
@@ -222,12 +223,15 @@ export function OperationsClient({
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [search, setSearch] = useState("")
-  const [filter, setFilter] = useState("all")
-  const [eventScope, setEventScope] = useState<"future" | "all">("future")
-  const [eventKey, setEventKey] = useState("all")
-  const [sortKey, setSortKey] = useState<SortKey>("eventDate")
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
+  const [listState, setListState] = usePersistedAdminFilters("zk-admin-operations-filters-v1", {
+    search: "",
+    filter: "all",
+    eventScope: "future" as "future" | "all",
+    eventKey: "all",
+    sortKey: "eventDate" as SortKey,
+    sortDir: "asc" as "asc" | "desc",
+  })
+  const { search, filter, eventScope, eventKey, sortKey, sortDir } = listState
   const [managingId, setManagingId] = useState<string | null>(null)
   const [guestsOpen, setGuestsOpen] = useState(false)
   const [supplierOpen, setSupplierOpen] = useState(false)
@@ -305,12 +309,12 @@ export function OperationsClient({
   }, [scopedRows, sortDir, sortKey])
 
   function toggleSort(column: SortKey) {
-    if (sortKey === column) {
-      setSortDir((current) => (current === "asc" ? "desc" : "asc"))
-      return
-    }
-    setSortKey(column)
-    setSortDir(column === "eventDate" ? "asc" : "asc")
+    setListState((current) => {
+      if (current.sortKey === column) {
+        return { ...current, sortDir: current.sortDir === "asc" ? "desc" : "asc" }
+      }
+      return { ...current, sortKey: column, sortDir: "asc" }
+    })
   }
 
   function run(action: () => Promise<{ ok: boolean; message: string }>) {
@@ -451,7 +455,7 @@ export function OperationsClient({
             <button
               key={String(value)}
               type="button"
-              onClick={() => setFilter(String(value))}
+              onClick={() => setListState((current) => ({ ...current, filter: String(value) }))}
               className={`whitespace-nowrap border-b-2 px-3 py-3 text-[10px] font-semibold ${
                 filter === value ? "border-primary text-primary" : "border-transparent text-slate-500"
               }`}
@@ -465,14 +469,16 @@ export function OperationsClient({
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => setListState((current) => ({ ...current, search: event.target.value }))}
               placeholder="Search deals, clients or events..."
               className="h-9 w-full rounded-md border pl-9 pr-3 text-[10px] outline-none focus:border-primary"
             />
           </label>
           <select
             value={eventScope}
-            onChange={(event) => setEventScope(event.target.value as "future" | "all")}
+            onChange={(event) =>
+              setListState((current) => ({ ...current, eventScope: event.target.value as "future" | "all" }))
+            }
             className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto"
           >
             <option value="future">Future events</option>
@@ -480,7 +486,7 @@ export function OperationsClient({
           </select>
           <select
             value={activeEventKey}
-            onChange={(event) => setEventKey(event.target.value)}
+            onChange={(event) => setListState((current) => ({ ...current, eventKey: event.target.value }))}
             className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto sm:max-w-[280px]"
           >
             <option value="all">Any event</option>

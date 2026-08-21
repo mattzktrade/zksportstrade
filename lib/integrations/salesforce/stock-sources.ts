@@ -11,6 +11,7 @@ import {
   allocateUnattributedSoldAcrossLayers,
   resolveSoldByCostLayer,
 } from "@/lib/inventory/sold-by-cost-layer"
+import { loadFulfilmentSoldByCostLayer } from "@/lib/inventory/fulfilment-layer-sold"
 import { resolveLinkedStockLedger } from "@/lib/inventory/linked-stock-ledger"
 
 export { allocateUnattributedSoldAcrossLayers, resolveSoldByCostLayer }
@@ -131,6 +132,7 @@ export function groupLayersIntoStockSources(input: {
    * Used to attribute offline / non-order sales onto supplier stock FIFO.
    */
   totalPackageSold: number
+  fulfilmentSoldByLayer?: ReadonlyMap<string, number>
 }): StockSourceGroup[] {
   type Accum = {
     supplier: string
@@ -146,6 +148,7 @@ export function groupLayersIntoStockSources(input: {
   const soldByLayer = resolveSoldByCostLayer({
     layers: input.layers,
     consumptionsByLayer: input.consumptionsByLayer,
+    fulfilmentSoldByLayer: input.fulfilmentSoldByLayer,
     totalPackageSold: input.totalPackageSold,
   })
 
@@ -304,6 +307,7 @@ async function loadStockSourceInputsForPackage(
   purchaseOrderDocsByPo: Map<string, string[]>
   blocks: Map<string, BlockMini>
   consumptionsByLayer: Map<string, number>
+  fulfilmentSoldByLayer: Map<string, number>
   totalPackageSold: number
 }> {
   const { ledgerPackageId, usedParentLedger, duration, groupId, isShell } =
@@ -451,12 +455,24 @@ async function loadStockSourceInputsForPackage(
     }
   }
 
+  const soldPackageIds = [packageId, ledgerPackageId]
+  if (groupId) {
+    const { data: siblings } = await admin
+      .from("packages")
+      .select("id")
+      .eq("inventory_group_id", groupId)
+      .is("shell_parent_package_id", null)
+    soldPackageIds.push(...(siblings ?? []).map((row) => String(row.id)))
+  }
+  const fulfilmentSoldByLayer = await loadFulfilmentSoldByCostLayer(admin, soldPackageIds)
+
   return {
     layers,
     purchaseOrders,
     purchaseOrderDocsByPo,
     blocks,
     consumptionsByLayer,
+    fulfilmentSoldByLayer,
     totalPackageSold,
   }
 }

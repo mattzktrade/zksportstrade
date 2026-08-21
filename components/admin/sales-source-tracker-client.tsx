@@ -1,9 +1,10 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { CircleDollarSign, Download, Target, TrendingUp, Users } from "lucide-react"
 import type { WorkflowOrderRow } from "@/lib/admin/workflow-views"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 
 type SourceAggregate = {
   source: string
@@ -43,9 +44,12 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
     [rows],
   )
   const now = new Date()
-  const [year, setYear] = useState(years[0] ?? now.getUTCFullYear())
-  const [month, setMonth] = useState(now.getUTCMonth())
-  const [selectedSource, setSelectedSource] = useState("Portal")
+  const [listState, setListState] = usePersistedAdminFilters("zk-admin-sales-tracker-filters-v1", {
+    year: years[0] ?? now.getUTCFullYear(),
+    month: now.getUTCMonth(),
+    selectedSource: "Portal",
+  })
+  const { year, month, selectedSource } = listState
   const active = rows.filter(
     (row) => row.orderStatus !== "cancelled" && row.currency === "USD",
   )
@@ -137,10 +141,10 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
       </AdminStats>
 
       <div className="flex flex-wrap gap-2">
-        <select value={month} onChange={(event) => setMonth(Number(event.target.value))} className="h-9 rounded-md border bg-white px-3 text-[10px]">
+        <select value={month} onChange={(event) => setListState((current) => ({ ...current, month: Number(event.target.value) }))} className="h-9 rounded-md border bg-white px-3 text-[10px]">
           {Array.from({ length: 12 }, (_, index) => <option key={index} value={index}>{new Date(Date.UTC(2026, index, 1)).toLocaleDateString("en-GB", { month: "long" })}</option>)}
         </select>
-        <select value={year} onChange={(event) => setYear(Number(event.target.value))} className="h-9 rounded-md border bg-white px-3 text-[10px]">
+        <select value={year} onChange={(event) => setListState((current) => ({ ...current, year: Number(event.target.value) }))} className="h-9 rounded-md border bg-white px-3 text-[10px]">
           {(years.length ? years : [now.getUTCFullYear()]).map((value) => <option key={value}>{value}</option>)}
         </select>
       </div>
@@ -154,7 +158,7 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
                   <tr><th className="px-4 py-2.5">Source</th><th className="px-4 py-2.5 text-right">Deals</th><th className="px-4 py-2.5 text-right">Month revenue</th><th className="px-4 py-2.5 text-right">Month GP</th><th className="px-4 py-2.5 text-right">YTD revenue</th><th className="px-4 py-2.5 text-right">YTD GP</th><th className="px-4 py-2.5 text-right">Average order</th></tr>
                 </thead>
                 <tbody className="divide-y text-[10px]">
-                  {aggregates.map((row, index) => <tr key={row.source} onClick={() => setSelectedSource(row.source)} className={`cursor-pointer hover:bg-slate-50 ${selected?.source === row.source ? "bg-red-50/50" : ""}`}><td className="px-4 py-3 font-semibold">{row.source}{index === 0 ? <StatusPill tone="green">Top source</StatusPill> : null}</td><td className="px-4 py-3 text-right">{row.rows.length}</td><td className="px-4 py-3 text-right">{money(row.monthRevenue)}</td><td className="px-4 py-3 text-right text-emerald-700">{money(row.monthProfit)}</td><td className="px-4 py-3 text-right font-semibold">{money(row.ytdRevenue)}</td><td className="px-4 py-3 text-right text-emerald-700">{money(row.ytdProfit)}</td><td className="px-4 py-3 text-right">{money(row.rows.length ? row.ytdRevenue / row.rows.length : 0)}</td></tr>)}
+                  {aggregates.map((row, index) => <tr key={row.source} onClick={() => setListState((current) => ({ ...current, selectedSource: row.source }))} className={`cursor-pointer hover:bg-slate-50 ${selected?.source === row.source ? "bg-red-50/50" : ""}`}><td className="px-4 py-3 font-semibold">{row.source}{index === 0 ? <StatusPill tone="green">Top source</StatusPill> : null}</td><td className="px-4 py-3 text-right">{row.rows.length}</td><td className="px-4 py-3 text-right">{money(row.monthRevenue)}</td><td className="px-4 py-3 text-right text-emerald-700">{money(row.monthProfit)}</td><td className="px-4 py-3 text-right font-semibold">{money(row.ytdRevenue)}</td><td className="px-4 py-3 text-right text-emerald-700">{money(row.ytdProfit)}</td><td className="px-4 py-3 text-right">{money(row.rows.length ? row.ytdRevenue / row.rows.length : 0)}</td></tr>)}
                   <tr className="bg-slate-50 font-semibold"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{aggregates.reduce((sum, row) => sum + row.rows.length, 0)}</td><td className="px-4 py-3 text-right">{money(totalMonthRevenue)}</td><td className="px-4 py-3 text-right">{money(totalMonthProfit)}</td><td className="px-4 py-3 text-right">{money(totalYtdRevenue)}</td><td className="px-4 py-3 text-right">{money(totalYtdProfit)}</td><td /></tr>
                 </tbody>
               </table>
@@ -164,7 +168,7 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
                 <button
                   type="button"
                   key={row.source}
-                  onClick={() => setSelectedSource(row.source)}
+                  onClick={() => setListState((current) => ({ ...current, selectedSource: row.source }))}
                   className={`flex w-full items-start justify-between gap-3 px-4 py-3 text-left ${selected?.source === row.source ? "bg-red-50/50" : ""}`}
                 >
                   <div className="min-w-0">

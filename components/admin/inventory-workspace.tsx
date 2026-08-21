@@ -33,6 +33,7 @@ import type { CrmAccountOption } from "@/lib/crm/deal-types"
 import { cn } from "@/lib/utils"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { EventFilter, uniqueEventFilterOptions } from "@/components/admin/event-filter"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 import {
   createDealBasketLine,
   DealLineBasket,
@@ -175,20 +176,31 @@ export function InventoryWorkspace({
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [search, setSearch] = useState("")
-  const [stockFilter, setStockFilter] = useState<"all" | "available" | "low">(
-    mode === "sales" ? "available" : "all",
-  )
+  const [listState, setListState] = usePersistedAdminFilters(`zk-admin-inventory-${mode}-filters-v1`, {
+    search: "",
+    stockFilter: (mode === "sales" ? "available" : "all") as "all" | "available" | "low",
+    eventTimingFilter: "future" as "future" | "all",
+    eventFilter: [] as string[],
+    yearFilter: "",
+    stockTypeFilter: "",
+    statusFilter: "",
+    sortKey: "date" as "event" | "product" | "date" | "stock" | "price",
+    sortDescending: false,
+  })
+  const {
+    search,
+    stockFilter,
+    eventTimingFilter,
+    eventFilter,
+    yearFilter,
+    stockTypeFilter,
+    statusFilter,
+    sortKey,
+    sortDescending,
+  } = listState
   const [selectedId, setSelectedId] = useState<string | null>(
     initialRows.find((row) => !row.shell_parent_package_id && isCurrentOrFutureEvent(row))?.id ?? null,
   )
-  const [eventTimingFilter, setEventTimingFilter] = useState<"future" | "all">("future")
-  const [eventFilter, setEventFilter] = useState<string[]>([])
-  const [yearFilter, setYearFilter] = useState("")
-  const [stockTypeFilter, setStockTypeFilter] = useState("")
-  const [statusFilter, setStatusFilter] = useState("")
-  const [sortKey, setSortKey] = useState<"event" | "product" | "date" | "stock" | "price">("date")
-  const [sortDescending, setSortDescending] = useState(false)
   const [galleryIndex, setGalleryIndex] = useState(0)
   const [isHidden, setIsHidden] = useState(false)
   const [sellOnPortal, setSellOnPortal] = useState(true)
@@ -604,7 +616,7 @@ export function InventoryWorkspace({
             <input
               type="search"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => setListState((current) => ({ ...current, search: event.target.value }))}
               placeholder="Search event, product, circuit or package..."
               className="h-8 w-full rounded-md border border-[#e4e6ea] bg-white pl-9 pr-3 text-[10px] outline-none focus:border-primary/40"
             />
@@ -612,9 +624,12 @@ export function InventoryWorkspace({
           <select
             value={eventTimingFilter}
             onChange={(event) => {
-              setEventTimingFilter(event.target.value as "future" | "all")
-              setEventFilter([])
-              setYearFilter("")
+              setListState((current) => ({
+                ...current,
+                eventTimingFilter: event.target.value as "future" | "all",
+                eventFilter: [],
+                yearFilter: "",
+              }))
             }}
             className="h-8 rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] font-medium text-[#62666e]"
           >
@@ -624,19 +639,19 @@ export function InventoryWorkspace({
           <EventFilter
             options={eventOptions}
             selectedIds={eventFilter}
-            onChange={setEventFilter}
+            onChange={(eventFilter) => setListState((current) => ({ ...current, eventFilter }))}
             inputClassName="h-8 border-[#e4e6ea] text-[#62666e] focus:border-primary/40"
           />
-          <select value={yearFilter} onChange={(event) => setYearFilter(event.target.value)} className="h-8 rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]">
+          <select value={yearFilter} onChange={(event) => setListState((current) => ({ ...current, yearFilter: event.target.value }))} className="h-8 rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]">
             <option value="">All years</option>
             {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
           </select>
-          <select value={stockTypeFilter} onChange={(event) => setStockTypeFilter(event.target.value)} className="h-8 rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]">
+          <select value={stockTypeFilter} onChange={(event) => setListState((current) => ({ ...current, stockTypeFilter: event.target.value }))} className="h-8 rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]">
             <option value="">All stock</option>
             <option value="in_stock">In stock</option>
             <option value="out_of_stock">Out of stock</option>
           </select>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-8 rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]">
+          <select value={statusFilter} onChange={(event) => setListState((current) => ({ ...current, statusFilter: event.target.value }))} className="h-8 rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]">
             <option value="">All statuses</option>
             <option value="active">Not hidden</option>
             <option value="portal">Live on portal</option>
@@ -644,14 +659,14 @@ export function InventoryWorkspace({
             <option value="not_live">Not live</option>
             <option value="archived">Hidden</option>
           </select>
-          <select value={sortKey} onChange={(event) => setSortKey(event.target.value as typeof sortKey)} className="h-8 rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]">
+          <select value={sortKey} onChange={(event) => setListState((current) => ({ ...current, sortKey: event.target.value as typeof sortKey }))} className="h-8 rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]">
             <option value="event">Sort: Event</option>
             <option value="product">Sort: Product</option>
             <option value="date">Sort: Date</option>
             <option value="stock">Sort: Stock</option>
             <option value="price">Sort: Price</option>
           </select>
-          <button type="button" onClick={() => setSortDescending((value) => !value)} title={sortDescending ? "Descending" : "Ascending"} className="flex h-8 w-8 items-center justify-center rounded-md border border-[#e4e6ea] text-[#62666e]">
+          <button type="button" onClick={() => setListState((current) => ({ ...current, sortDescending: !current.sortDescending }))} title={sortDescending ? "Descending" : "Ascending"} className="flex h-8 w-8 items-center justify-center rounded-md border border-[#e4e6ea] text-[#62666e]">
             <ArrowUpDown className="h-3.5 w-3.5" />
           </button>
           <button
@@ -684,7 +699,7 @@ export function InventoryWorkspace({
               <button
                 key={value}
                 type="button"
-                onClick={() => setStockFilter(value as "all" | "available" | "low")}
+                onClick={() => setListState((current) => ({ ...current, stockFilter: value as "all" | "available" | "low" }))}
                 className={cn(
                   "rounded-md border px-3 py-1.5 text-[9px] font-medium",
                   stockFilter === value

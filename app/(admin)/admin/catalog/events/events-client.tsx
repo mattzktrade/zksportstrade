@@ -18,6 +18,7 @@ import {
   EVENT_CATEGORY_LABELS,
   type EventCategory,
 } from "@/lib/catalog/event-categories"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 
 export type NativeEventRow = {
   id: string
@@ -73,12 +74,15 @@ function localDateKey(date = new Date()): string {
 export function EventsClient({ events }: { events: NativeEventRow[] }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [query, setQuery] = useState("")
-  const [showArchived, setShowArchived] = useState(false)
-  const [eventTimingFilter, setEventTimingFilter] = useState<"future" | "all">("future")
-  const [categoryFilter, setCategoryFilter] = useState<EventCategory | "">("")
-  const [sortKey, setSortKey] = useState<"date" | "name" | "category" | "products">("date")
-  const [sortDescending, setSortDescending] = useState(false)
+  const [listState, setListState] = usePersistedAdminFilters("zk-admin-events-filters-v1", {
+    query: "",
+    showArchived: false,
+    eventTimingFilter: "future" as "future" | "all",
+    categoryFilter: "" as EventCategory | "",
+    sortKey: "date" as "date" | "name" | "category" | "products",
+    sortDescending: false,
+  })
+  const { query, showArchived, eventTimingFilter, categoryFilter, sortKey, sortDescending } = listState
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formOpen, setFormOpen] = useState(false)
   const [form, setForm] = useState<NativeEventInput>(EMPTY_EVENT)
@@ -239,29 +243,29 @@ export function EventsClient({ events }: { events: NativeEventRow[] }) {
         <div className="flex flex-wrap items-center gap-3 border-b p-4">
           <div className="relative min-w-0 w-full flex-1 sm:min-w-[280px]">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search event, circuit, country or season..." className="h-10 w-full rounded-md border pl-10 pr-3 text-sm outline-none focus:border-primary/50" />
+            <input value={query} onChange={(event) => setListState((current) => ({ ...current, query: event.target.value }))} placeholder="Search event, circuit, country or season..." className="h-10 w-full rounded-md border pl-10 pr-3 text-sm outline-none focus:border-primary/50" />
           </div>
-          <select value={eventTimingFilter} onChange={(event) => setEventTimingFilter(event.target.value as "future" | "all")} className="h-10 rounded-md border bg-white px-3 text-sm">
+          <select value={eventTimingFilter} onChange={(event) => setListState((current) => ({ ...current, eventTimingFilter: event.target.value as "future" | "all" }))} className="h-10 rounded-md border bg-white px-3 text-sm">
             <option value="future">Future events</option>
             <option value="all">All events</option>
           </select>
-          <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value as EventCategory | "")} className="h-10 rounded-md border bg-white px-3 text-sm">
+          <select value={categoryFilter} onChange={(event) => setListState((current) => ({ ...current, categoryFilter: event.target.value as EventCategory | "" }))} className="h-10 rounded-md border bg-white px-3 text-sm">
             <option value="">All categories</option>
             {EVENT_CATEGORIES.map((category) => (
               <option key={category} value={category}>{EVENT_CATEGORY_LABELS[category]}</option>
             ))}
           </select>
-          <select value={sortKey} onChange={(event) => setSortKey(event.target.value as typeof sortKey)} className="h-10 rounded-md border bg-white px-3 text-sm">
+          <select value={sortKey} onChange={(event) => setListState((current) => ({ ...current, sortKey: event.target.value as typeof sortKey }))} className="h-10 rounded-md border bg-white px-3 text-sm">
             <option value="date">Sort: Date</option>
             <option value="name">Sort: Event name</option>
             <option value="category">Sort: Category</option>
             <option value="products">Sort: Product count</option>
           </select>
-          <button type="button" onClick={() => setSortDescending((value) => !value)} title={sortDescending ? "Descending" : "Ascending"} className="flex h-10 w-10 items-center justify-center rounded-md border bg-white text-slate-500">
+          <button type="button" onClick={() => setListState((current) => ({ ...current, sortDescending: !current.sortDescending }))} title={sortDescending ? "Descending" : "Ascending"} className="flex h-10 w-10 items-center justify-center rounded-md border bg-white text-slate-500">
             <ArrowUpDown className="h-4 w-4" />
           </button>
           <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />
+            <input type="checkbox" checked={showArchived} onChange={(event) => setListState((current) => ({ ...current, showArchived: event.target.checked }))} />
             Show archived
           </label>
         </div>

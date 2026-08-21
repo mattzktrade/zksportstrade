@@ -9,6 +9,7 @@ import { ensureSupplier } from "@/app/(admin)/actions"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { adminSupplierPath } from "@/lib/crm/profile-links"
 import { cn } from "@/lib/utils"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 
 export type SupplierDirectoryRow = {
   id: string
@@ -36,7 +37,8 @@ function money(value: number, currency: string): string {
 export function SuppliersClient({ rows }: { rows: SupplierDirectoryRow[] }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [search, setSearch] = useState("")
+  const [listState, setListState] = usePersistedAdminFilters("zk-admin-suppliers-filters-v1", { search: "" })
+  const { search } = listState
   const [selectedId, setSelectedId] = useState<string | null>(rows[0]?.id ?? null)
   const [showAdd, setShowAdd] = useState(false)
   const [name, setName] = useState("")
@@ -104,7 +106,7 @@ export function SuppliersClient({ rows }: { rows: SupplierDirectoryRow[] }) {
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => setListState((current) => ({ ...current, search: event.target.value }))}
               placeholder="Search supplier, event or location..."
               className="h-8 w-full rounded-md border border-[#e4e6ea] bg-white pl-9 pr-3 text-[10px] outline-none focus:border-primary/40"
             />

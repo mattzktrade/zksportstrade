@@ -22,7 +22,7 @@ import {
   salesforceClosedWonSold,
   type LinkedSellableMember,
 } from "@/lib/admin/package-sales-breakdown"
-import { resolveSoldByCostLayer } from "@/lib/inventory/sold-by-cost-layer"
+import { resolveSoldByCostLayer, soldMapFromRecord } from "@/lib/inventory/sold-by-cost-layer"
 import { packageDurationLabel } from "@/lib/catalog/package-duration"
 import { SupplierNameLink } from "@/components/admin/profile-name-link"
 import { CompanySupplierSelect } from "@/components/admin/company-supplier-select"
@@ -58,6 +58,8 @@ type Props = {
   fulfilmentBlocks?: FulfilmentBlockRow[]
   /** When set, show "Import from Salesforce Stock Sources" for empty ledgers. */
   hasSalesforceProduct?: boolean
+  /** Closed-won deal quantities assigned to each cost layer. */
+  fulfilmentSoldByLayer?: Record<string, number>
   /** Refetch package inventory into parent state (preferred over router.refresh alone). */
   onInventoryChanged?: () => Promise<void> | void
 }
@@ -108,6 +110,7 @@ export function PackageCostLayers({
   purchaseOrders = [],
   fulfilmentBlocks = [],
   hasSalesforceProduct = false,
+  fulfilmentSoldByLayer,
   onInventoryChanged,
 }: Props) {
   const router = useRouter()
@@ -264,7 +267,7 @@ export function PackageCostLayers({
   }, [salesBreakdown, linkedPackages, packageId, packageDuration])
 
   const soldByLayerId = useMemo(() => {
-    // FIFO-allocate attributed sold; ignore shared quantity_remaining so Fri/Sat
+    // FIFO leftover only; ignore shared quantity_remaining so Fri/Sat
     // don't inherit Sunday's supplier split from the 3-day ledger.
     const sharedLinkedLedger =
       linkedPackages.length > 1 &&
@@ -277,9 +280,10 @@ export function PackageCostLayers({
     return resolveSoldByCostLayer({
       layers: displayLayers,
       consumptionsByLayer,
+      fulfilmentSoldByLayer: soldMapFromRecord(fulfilmentSoldByLayer),
       totalPackageSold: attributedLedgerSold,
     })
-  }, [displayLayers, attributedLedgerSold, linkedPackages.length, packageDuration])
+  }, [displayLayers, attributedLedgerSold, linkedPackages.length, packageDuration, fulfilmentSoldByLayer])
 
   /** Remaining after closed-won Sold and open SF pipeline (matches Sellable). */
   const leftByLayerId = useMemo(() => {
@@ -313,9 +317,10 @@ export function PackageCostLayers({
     let units = 0
     let cost = 0
     for (const l of displayLayers) {
-      if (l.quantity_remaining > 0) {
-        units += l.quantity_remaining
-        cost += l.unit_cost * l.quantity_remaining
+      const left = Math.max(0, Math.floor(leftByLayerId.get(l.id) ?? l.quantity_remaining))
+      if (left > 0) {
+        units += left
+        cost += l.unit_cost * left
       }
     }
     return {
@@ -323,7 +328,7 @@ export function PackageCostLayers({
       totalCostBasis: cost,
       weightedCost: units > 0 ? cost / units : null,
     }
-  }, [displayLayers])
+  }, [displayLayers, leftByLayerId])
 
   const grossUnit = useMemo(() => {
     if (salePrice == null || weightedCost == null) return null
@@ -1178,7 +1183,7 @@ export function PackageCostLayers({
                           >
                             Edit
                           </button>
-                          {consumed === 0 ? (
+                          {attributedSold === 0 ? (
                             <button
                               type="button"
                               disabled={pending}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import Link from "next/link"
 import { AlertTriangle, ArrowUpDown, CalendarClock, CircleDollarSign, Download, PackageSearch, Search } from "lucide-react"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
@@ -22,6 +22,7 @@ import {
   type NegativeStockUrgency,
 } from "@/lib/admin/negative-stock"
 import { cn } from "@/lib/utils"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 
 const EMPTY_FILTERS: NegativeStockFilters = {
   search: "",
@@ -30,6 +31,12 @@ const EMPTY_FILTERS: NegativeStockFilters = {
   urgency: "",
   assignedTo: "",
   status: "",
+}
+
+const DEFAULT_NEGATIVE_STOCK_LIST = {
+  ...EMPTY_FILTERS,
+  sortKey: "eventDate" as NegativeStockSortKey,
+  sortDescending: false,
 }
 
 function uniqueSorted(values: Array<string | null | undefined>): string[] {
@@ -92,9 +99,11 @@ function downloadCsv(rows: NegativeStockRow[]) {
 }
 
 export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
-  const [filters, setFilters] = useState<NegativeStockFilters>(EMPTY_FILTERS)
-  const [sortKey, setSortKey] = useState<NegativeStockSortKey>("eventDate")
-  const [sortDescending, setSortDescending] = useState(false)
+  const [listState, setListState] = usePersistedAdminFilters(
+    "zk-admin-negative-stock-filters-v1",
+    DEFAULT_NEGATIVE_STOCK_LIST,
+  )
+  const { sortKey, sortDescending, ...filters } = listState
 
   const eventOptions = useMemo(
     () =>
@@ -161,7 +170,7 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
             <input
               type="search"
               value={filters.search}
-              onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
+              onChange={(event) => setListState((current) => ({ ...current, search: event.target.value }))}
               placeholder="Search event, agent, supplier, ref..."
               className="h-8 w-full rounded-md border border-[#e4e6ea] bg-white pl-9 pr-3 text-[10px] outline-none focus:border-primary/40"
             />
@@ -169,12 +178,12 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
           <EventFilter
             options={eventOptions}
             selectedIds={filters.eventNames}
-            onChange={(eventNames) => setFilters((current) => ({ ...current, eventNames }))}
+            onChange={(eventNames) => setListState((current) => ({ ...current, eventNames }))}
             inputClassName="h-8 border-[#e4e6ea] text-[#62666e] focus:border-primary/40"
           />
           <select
             value={filters.supplierName}
-            onChange={(event) => setFilters((current) => ({ ...current, supplierName: event.target.value }))}
+            onChange={(event) => setListState((current) => ({ ...current, supplierName: event.target.value }))}
             className="h-8 max-w-[170px] rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]"
           >
             <option value="">All suppliers</option>
@@ -187,7 +196,7 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
           <select
             value={filters.urgency}
             onChange={(event) =>
-              setFilters((current) => ({
+              setListState((current) => ({
                 ...current,
                 urgency: event.target.value as "" | NegativeStockUrgency,
               }))
@@ -202,7 +211,7 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
           </select>
           <select
             value={filters.assignedTo}
-            onChange={(event) => setFilters((current) => ({ ...current, assignedTo: event.target.value }))}
+            onChange={(event) => setListState((current) => ({ ...current, assignedTo: event.target.value }))}
             className="h-8 max-w-[160px] rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]"
           >
             <option value="">Assigned to</option>
@@ -215,7 +224,7 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
           <select
             value={filters.status}
             onChange={(event) =>
-              setFilters((current) => ({
+              setListState((current) => ({
                 ...current,
                 status: event.target.value as "" | NegativeStockStatus,
               }))
@@ -229,7 +238,12 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
           </select>
           <select
             value={sortKey}
-            onChange={(event) => setSortKey(event.target.value as NegativeStockSortKey)}
+            onChange={(event) =>
+              setListState((current) => ({
+                ...current,
+                sortKey: event.target.value as NegativeStockSortKey,
+              }))
+            }
             className="h-8 rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]"
           >
             <option value="eventDate">Sort: Event date</option>
@@ -241,7 +255,7 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
           </select>
           <button
             type="button"
-            onClick={() => setSortDescending((value) => !value)}
+            onClick={() => setListState((current) => ({ ...current, sortDescending: !current.sortDescending }))}
             title={sortDescending ? "Descending" : "Ascending"}
             className="flex h-8 w-8 items-center justify-center rounded-md border border-[#e4e6ea] text-[#62666e]"
           >
@@ -250,7 +264,7 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
           {filtersActive ? (
             <button
               type="button"
-              onClick={() => setFilters(EMPTY_FILTERS)}
+              onClick={() => setListState((current) => ({ ...current, ...EMPTY_FILTERS }))}
               className="h-8 rounded-md border border-[#e4e6ea] px-3 text-[9px] text-[#62666e]"
             >
               Clear filters

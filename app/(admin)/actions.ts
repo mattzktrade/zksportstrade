@@ -26,6 +26,7 @@ import {
   linkPurchaseOrderToAccount,
 } from "@/lib/inventory/suppliers"
 import { packageIdsOnSharedThreeDayLedger, resolveLinkedStockLedger } from "@/lib/inventory/linked-stock-ledger"
+import { applyFulfilmentSoldToLayerRemaining } from "@/lib/inventory/fulfilment-layer-sold"
 import { getCrmCompanyOptions } from "@/lib/crm/deals"
 import {
   generatePurchaseOrderNumber,
@@ -1311,11 +1312,25 @@ export async function createPackage(input: {
           }
         }
       } else if (isMultiDayComboDuration(dur)) {
-        const dayCaps = siblingRows
-          .filter((s) => isDayDuration(s.duration))
-          .map((s) => invBy.get(s.id))
-          .filter((n): n is number => n != null)
-        if (dayCaps.length > 0) seedQty = Math.min(...dayCaps)
+        if (dur === "2_day") {
+          const sat = siblingRows.find((s) => s.duration === "saturday_only")
+          const sun = siblingRows.find((s) => s.duration === "sunday_only")
+          const satQty = sat ? invBy.get(sat.id) : null
+          const sunQty = sun ? invBy.get(sun.id) : null
+          if (satQty != null && sunQty != null) seedQty = Math.min(satQty, sunQty)
+          else if (satQty != null) seedQty = satQty
+          else if (sunQty != null) seedQty = sunQty
+          else {
+            const threeDay = siblingRows.find((s) => s.duration === "3_day")
+            if (threeDay) seedQty = invBy.get(threeDay.id) ?? null
+          }
+        } else {
+          const dayCaps = siblingRows
+            .filter((s) => isDayDuration(s.duration))
+            .map((s) => invBy.get(s.id))
+            .filter((n): n is number => n != null)
+          if (dayCaps.length > 0) seedQty = Math.min(...dayCaps)
+        }
       }
       if (seedQty != null) {
         await supabase.from("package_inventory").update({ qty_available: seedQty }).eq("package_id", id)
@@ -1430,7 +1445,7 @@ export async function createPackage(input: {
     }
   }
 
-  const DAY_DURATIONS_FOR_CREATE = ["thursday_only", "friday_only", "saturday_only", "sunday_only"] as const
+  const DAY_DURATIONS_FOR_CREATE = ["thursday_only", "friday_only", "saturday_only", "sunday_only", "2_day"] as const
   const isLinkedDayPackage =
     !!inventoryGroupId &&
     duration != null &&
@@ -2314,6 +2329,14 @@ export async function deleteCostLayer(layerId: string): Promise<ActionResult> {
     .eq("id", layerId.trim())
     .maybeSingle()
   if (layer) {
+    try {
+      await applyFulfilmentSoldToLayerRemaining(supabase, String((layer as { package_id?: string }).package_id ?? ""))
+    } catch (e) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "Could not move sold units off this purchase.",
+      }
+    }
     const removed = await removeUnusedSharedLedgerDuplicateLayers(supabase, [
       {
         id: layerId.trim(),
@@ -3054,6 +3077,16 @@ export async function deletePurchaseOrder(purchaseOrderId: string): Promise<Acti
     .eq("purchase_order_id", id)
 
   try {
+    const packageIds = [
+      ...new Set(
+        (layers ?? [])
+          .map((row) => String((row as { package_id?: string }).package_id ?? "").trim())
+          .filter(Boolean),
+      ),
+    ]
+    for (const packageId of packageIds) {
+      await applyFulfilmentSoldToLayerRemaining(gate.supabase, packageId)
+    }
     await removeUnusedSharedLedgerDuplicateLayers(
       gate.supabase,
       (layers ?? []).map((row) => ({

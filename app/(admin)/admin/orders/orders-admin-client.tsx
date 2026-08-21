@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState, useTransition } from "react"
+import { useMemo, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react"
 import { toast } from "sonner"
@@ -13,6 +13,7 @@ import { AdminInvoiceStatusSelect } from "@/components/admin-invoice-status-sele
 import { InvoicePdfDownloadLink } from "@/components/invoice-pdf-download-link"
 import { invoiceDisplayStatus, invoiceWorkflowStatusLabels } from "@/lib/invoices/status"
 import { formatMoney } from "@/lib/format/money"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 
 type InvoiceFilter = "all" | "awaiting_payment" | "paid" | "delivered"
 
@@ -29,6 +30,13 @@ type SortKey =
   | "profit"
   | "margin"
   | "payment_status"
+
+const DEFAULT_ORDERS_FILTERS = {
+  search: "",
+  invoiceFilter: "all" as InvoiceFilter,
+  sortKey: "created" as SortKey,
+  sortDir: "desc" as "asc" | "desc",
+}
 
 function formatPct(value: number): string {
   return `${(value * 100).toFixed(1)}%`
@@ -336,58 +344,18 @@ export function OrdersAdminClient({
 }) {
   const router = useRouter()
   const [pending, start] = useTransition()
-  const [search, setSearch] = useState("")
-  const [invoiceFilter, setInvoiceFilter] = useState<InvoiceFilter>(initialPaymentFilter ?? "all")
-  const [sortKey, setSortKey] = useState<SortKey>("created")
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
-  const [filtersReady, setFiltersReady] = useState(false)
-
-  useEffect(() => {
-    if (initialPaymentFilter) {
-      setInvoiceFilter(initialPaymentFilter)
-      setFiltersReady(true)
-      return
-    }
-    try {
-      const raw = localStorage.getItem(ORDERS_FILTER_STORAGE_KEY)
-      if (!raw) return
-      const saved = JSON.parse(raw) as {
-        search?: string
-        invoiceFilter?: InvoiceFilter
-        sortKey?: SortKey
-        sortDir?: "asc" | "desc"
-      }
-      if (typeof saved.search === "string") setSearch(saved.search)
-      if (
-        saved.invoiceFilter === "all" ||
-        saved.invoiceFilter === "awaiting_payment" ||
-        saved.invoiceFilter === "paid" ||
-        saved.invoiceFilter === "delivered"
-      ) {
-        setInvoiceFilter(saved.invoiceFilter)
-      }
-      if (saved.sortKey) setSortKey(saved.sortKey)
-      if (saved.sortDir === "asc" || saved.sortDir === "desc") setSortDir(saved.sortDir)
-    } catch {
-      /* ignore */
-    } finally {
-      setFiltersReady(true)
-    }
-  }, [initialPaymentFilter])
-
-  useEffect(() => {
-    if (!filtersReady) return
-    localStorage.setItem(
-      ORDERS_FILTER_STORAGE_KEY,
-      JSON.stringify({ search, invoiceFilter, sortKey, sortDir }),
-    )
-  }, [search, invoiceFilter, sortKey, sortDir, filtersReady])
+  const [filters, setFilters] = usePersistedAdminFilters(
+    ORDERS_FILTER_STORAGE_KEY,
+    {
+      ...DEFAULT_ORDERS_FILTERS,
+      invoiceFilter: initialPaymentFilter ?? "all",
+    },
+    { override: initialPaymentFilter ? { invoiceFilter: initialPaymentFilter } : null },
+  )
+  const { search, invoiceFilter, sortKey, sortDir } = filters
 
   function resetFilters() {
-    setSearch("")
-    setInvoiceFilter("all")
-    setSortKey("created")
-    setSortDir("desc")
+    setFilters(DEFAULT_ORDERS_FILTERS)
   }
 
   function cancelOrder(o: AdminOrderListRow) {
@@ -410,10 +378,14 @@ export function OrdersAdminClient({
   }
 
   const toggleSort = (key: SortKey) => {
-    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"))
-    else {
-      setSortKey(key)
-      setSortDir(key === "created" || key === "total" || key === "guests" ? "desc" : "asc")
+    if (sortKey === key) {
+      setFilters((current) => ({ ...current, sortDir: current.sortDir === "asc" ? "desc" : "asc" }))
+    } else {
+      setFilters((current) => ({
+        ...current,
+        sortKey: key,
+        sortDir: key === "created" || key === "total" || key === "guests" ? "desc" : "asc",
+      }))
     }
   }
 
@@ -479,7 +451,7 @@ export function OrdersAdminClient({
             type="search"
             placeholder="Search booking reference, package, agent…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => setFilters((current) => ({ ...current, search: e.target.value }))}
             className="w-full px-4 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
           />
         </div>
@@ -490,7 +462,7 @@ export function OrdersAdminClient({
               <button
                 key={String(tab.value)}
                 type="button"
-                onClick={() => setInvoiceFilter(tab.value)}
+                onClick={() => setFilters((current) => ({ ...current, invoiceFilter: tab.value }))}
                 className={cn(
                   "px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors",
                   invoiceFilter === tab.value

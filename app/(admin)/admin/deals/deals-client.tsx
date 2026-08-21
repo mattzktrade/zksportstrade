@@ -56,6 +56,7 @@ import { type AccountKind } from "@/lib/crm/account-kinds"
 import type { StaffOption } from "@/lib/crm/lead-types"
 import type { BookingFormAdminRow, BookingFormEventRow } from "@/lib/booking-forms/types"
 import { cn } from "@/lib/utils"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 import { adminDealPath } from "@/lib/admin/deal-link"
 import { adminAccountPath, adminContactPath } from "@/lib/crm/profile-links"
 import Link from "next/link"
@@ -286,13 +287,16 @@ export function DealsClient({
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [view, setView] = useState<PipelineView>("all")
-  const [query, setQuery] = useState("")
-  const [pipelineFilter, setPipelineFilter] = useState<PipelineStageId | "">("")
-  const [sourceFilter, setSourceFilter] = useState("")
-  const [eventFilter, setEventFilter] = useState<string[]>([])
-  const [sortKey, setSortKey] = useState<DealSortKey>("reference")
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
+  const [listState, setListState] = usePersistedAdminFilters("zk-admin-deals-filters-v1", {
+    view: "all" as PipelineView,
+    query: "",
+    pipelineFilter: "" as PipelineStageId | "",
+    sourceFilter: "",
+    eventFilter: [] as string[],
+    sortKey: "reference" as DealSortKey,
+    sortDir: "desc" as "asc" | "desc",
+  })
+  const { view, query, pipelineFilter, sourceFilter, eventFilter, sortKey, sortDir } = listState
   const [selectedId, setSelectedId] = useState<string | null>(
     initialSelectedId && deals.some((deal) => deal.id === initialSelectedId)
       ? initialSelectedId
@@ -385,12 +389,12 @@ export function DealsClient({
   }, [filtered, sortDir, sortKey])
 
   function toggleSort(column: DealSortKey) {
-    if (sortKey === column) {
-      setSortDir((current) => (current === "desc" ? "asc" : "desc"))
-      return
-    }
-    setSortKey(column)
-    setSortDir("desc")
+    setListState((current) => {
+      if (current.sortKey === column) {
+        return { ...current, sortDir: current.sortDir === "desc" ? "asc" : "desc" }
+      }
+      return { ...current, sortKey: column, sortDir: "desc" }
+    })
   }
 
   const selected = selectedId ? deals.find((deal) => deal.id === selectedId) ?? null : null
@@ -870,7 +874,7 @@ export function DealsClient({
             <button
               key={id}
               type="button"
-              onClick={() => setView(id)}
+              onClick={() => setListState((current) => ({ ...current, view: id }))}
               className={cn(
                 "border-b-2 px-3 pb-3 text-[10px] font-semibold",
                 view === id ? "border-primary text-primary" : "border-transparent text-slate-500",
@@ -894,7 +898,9 @@ export function DealsClient({
         <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] p-3">
           <select
             value={pipelineFilter}
-            onChange={(e) => setPipelineFilter(e.target.value as PipelineStageId | "")}
+            onChange={(e) =>
+              setListState((current) => ({ ...current, pipelineFilter: e.target.value as PipelineStageId | "" }))
+            }
             className="h-9 rounded-md border bg-white px-3 text-[9px]"
           >
             <option value="">All stages</option>
@@ -902,18 +908,18 @@ export function DealsClient({
               <option key={column.id} value={column.id}>{column.label}</option>
             ))}
           </select>
-          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="h-9 rounded-md border bg-white px-3 text-[9px]">
+          <select value={sourceFilter} onChange={(e) => setListState((current) => ({ ...current, sourceFilter: e.target.value }))} className="h-9 rounded-md border bg-white px-3 text-[9px]">
             <option value="">All sources</option>
             {DEAL_SOURCES.map((source) => (
               <option key={source} value={source}>{DEAL_SOURCE_LABELS[source]}</option>
             ))}
           </select>
-          <EventFilter options={eventOptions} selectedIds={eventFilter} onChange={setEventFilter} />
+          <EventFilter options={eventOptions} selectedIds={eventFilter} onChange={(eventFilter) => setListState((current) => ({ ...current, eventFilter }))} />
           <div className="relative w-full min-w-0 sm:ml-auto sm:min-w-[260px] sm:w-auto sm:flex-1 sm:max-w-sm">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => setListState((current) => ({ ...current, query: e.target.value }))}
               placeholder="Search deals, clients, events..."
               className="h-9 w-full rounded-md border pl-9 pr-3 text-[9px] outline-none focus:border-primary/50"
             />
@@ -928,7 +934,12 @@ export function DealsClient({
               <button
                 key={column.label}
                 type="button"
-                onClick={() => setPipelineFilter((current) => current === column.id ? "" : column.id)}
+                onClick={() =>
+                  setListState((current) => ({
+                    ...current,
+                    pipelineFilter: current.pipelineFilter === column.id ? "" : column.id,
+                  }))
+                }
                 className={cn(
                   "rounded-md border border-t-2 bg-white p-3 text-left transition-shadow",
                   column.colour,
@@ -1064,28 +1075,41 @@ export function DealsClient({
           {selected ? (
             <aside
               ref={previewRef}
-              className="min-w-0 bg-white max-xl:fixed max-xl:inset-x-0 max-xl:bottom-0 max-xl:top-14 max-xl:z-40 max-xl:overflow-y-auto xl:sticky xl:top-16 xl:z-20 xl:max-h-[calc(100vh-4rem)] xl:overflow-y-auto"
+              className="min-w-0 overflow-x-hidden bg-white max-xl:fixed max-xl:inset-x-0 max-xl:bottom-0 max-xl:top-14 max-xl:z-40 max-xl:overflow-y-auto xl:sticky xl:top-16 xl:z-20 xl:max-h-[calc(100vh-4rem)] xl:overflow-y-auto"
             >
               <div className="space-y-4 p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-[12px] font-semibold">
-                      <Link href={adminDealPath(selected.id)} className="text-primary hover:underline">
-                        {selected.reference}
-                      </Link>
-                      {" — "}
-                      {selected.account_name || "Deal"}
-                    </h2>
-                    <p className="mt-1 text-[8px] text-slate-400">
-                      {selected.recent_activities[0]
-                        ? `Last update by ${selected.recent_activities[0].actor_name || "someone"} · ${new Date(selected.recent_activities[0].created_at).toLocaleString("en-GB")}`
-                        : `Updated ${new Date(selected.updated_at).toLocaleString("en-GB")}`}
-                    </p>
+                <div className="flex min-w-0 flex-col gap-3">
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <h2
+                        className="truncate text-[12px] font-semibold"
+                        title={`${selected.reference} — ${selected.account_name || "Deal"}`}
+                      >
+                        <Link href={adminDealPath(selected.id)} className="text-primary hover:underline">
+                          {selected.reference}
+                        </Link>
+                        {" — "}
+                        {selected.account_name || "Deal"}
+                      </h2>
+                      <p className="mt-1 truncate text-[8px] text-slate-400">
+                        {selected.recent_activities[0]
+                          ? `Last update by ${selected.recent_activities[0].actor_name || "someone"} · ${new Date(selected.recent_activities[0].created_at).toLocaleString("en-GB")}`
+                          : `Updated ${new Date(selected.updated_at).toLocaleString("en-GB")}`}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(null)}
+                      className="shrink-0 p-0.5 text-slate-400 hover:text-slate-700"
+                      aria-label="Close deal preview"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Link
                       href={adminDealPath(selected.id)}
-                      className="flex h-8 items-center rounded-md border px-2 text-[8px] font-semibold"
+                      className="flex h-8 shrink-0 items-center rounded-md border px-2 text-[8px] font-semibold"
                     >
                       Open page
                     </Link>
@@ -1094,7 +1118,7 @@ export function DealsClient({
                       onClick={openDealEditor}
                       disabled={commercialEditLocked}
                       title={commercialEditLocked ? "Void the active form first, or edit before an order exists." : "Edit deal"}
-                      className="flex h-8 items-center gap-1.5 rounded-md border px-2 text-[8px] font-semibold disabled:opacity-40"
+                      className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2 text-[8px] font-semibold disabled:opacity-40"
                     >
                       <Pencil className="h-3 w-3" /> Edit deal
                     </button>
@@ -1107,11 +1131,10 @@ export function DealsClient({
                           ? "This deal has a portal order, so it cannot be deleted."
                           : "Delete this deal"
                       }
-                      className="flex h-8 items-center gap-1.5 rounded-md border border-red-200 px-2 text-[8px] font-semibold text-red-600 disabled:opacity-40"
+                      className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-red-200 px-2 text-[8px] font-semibold text-red-600 disabled:opacity-40"
                     >
                       <Trash2 className="h-3 w-3" /> Delete
                     </button>
-                    <button type="button" onClick={() => setSelectedId(null)} className="text-slate-400"><X className="h-4 w-4" /></button>
                   </div>
                 </div>
                 <dl className="grid grid-cols-[125px_1fr] gap-y-2.5 border-y py-4 text-[9px]">

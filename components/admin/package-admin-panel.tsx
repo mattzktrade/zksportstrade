@@ -562,6 +562,13 @@ export function PackageAdminPanel({
               purchaseOrders={purchaseOrders}
               fulfilmentBlocks={fulfilmentBlocks}
               hasSalesforceProduct={!!initial.salesforce_product_id?.trim()}
+              fulfilmentSoldByLayer={{
+                ...(initial.fulfilment_sold_by_layer ?? {}),
+                ...linkedPackages.reduce<Record<string, number>>((acc, p) => {
+                  Object.assign(acc, p.fulfilment_sold_by_layer)
+                  return acc
+                }, {}),
+              }}
               onInventoryChanged={onInventoryChanged}
             />
             <div className="border-t border-border pt-4">

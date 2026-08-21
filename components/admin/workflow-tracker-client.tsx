@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useMemo, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import {
   AlertTriangle,
@@ -36,6 +36,7 @@ import {
 import { AccountNameLink, ContactNameLink } from "@/components/admin/profile-name-link"
 import { markFinanceRowPaid, markFinanceRowUnpaid, replaceFinanceInvoice } from "@/app/(admin)/admin/deals/deal-finance-actions"
 import { dealSourceLabel } from "@/lib/crm/deal-types"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 
 type SortKey = "eventDate" | "reference" | "client" | "event"
 
@@ -138,15 +139,18 @@ export function WorkflowTrackerClient({
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [search, setSearch] = useState("")
-  const [status, setStatus] = useState("all")
-  const [channel, setChannel] = useState("all")
-  const [owner, setOwner] = useState("all")
-  const [period, setPeriod] = useState("all")
-  const [eventScope, setEventScope] = useState<"future" | "all">("future")
-  const [eventKey, setEventKey] = useState("all")
-  const [sortKey, setSortKey] = useState<SortKey>("eventDate")
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
+  const [listState, setListState] = usePersistedAdminFilters(`zk-admin-${mode}-tracker-filters-v1`, {
+    search: "",
+    status: "all",
+    channel: "all",
+    owner: "all",
+    period: "all",
+    eventScope: "future" as "future" | "all",
+    eventKey: "all",
+    sortKey: "eventDate" as SortKey,
+    sortDir: "asc" as "asc" | "desc",
+  })
+  const { search, status, channel, owner, period, eventScope, eventKey, sortKey, sortDir } = listState
   const owners = useMemo(
     () => [...new Set(rows.map((row) => row.ownerName).filter(Boolean))].sort() as string[],
     [rows],
@@ -238,12 +242,12 @@ export function WorkflowTrackerClient({
   }, [filtered, sortDir, sortKey])
 
   function toggleSort(column: SortKey) {
-    if (sortKey === column) {
-      setSortDir((current) => (current === "asc" ? "desc" : "asc"))
-      return
-    }
-    setSortKey(column)
-    setSortDir("asc")
+    setListState((current) => {
+      if (current.sortKey === column) {
+        return { ...current, sortDir: current.sortDir === "asc" ? "desc" : "asc" }
+      }
+      return { ...current, sortKey: column, sortDir: "asc" }
+    })
   }
 
   const activeRows = sorted.filter((row) =>
@@ -403,7 +407,7 @@ export function WorkflowTrackerClient({
               <button
                 key={value}
                 type="button"
-                onClick={() => setStatus(value)}
+                onClick={() => setListState((current) => ({ ...current, status: value }))}
                 className={`whitespace-nowrap border-b-2 px-3 py-3 text-[10px] font-semibold ${
                   status === value ? "border-primary text-primary" : "border-transparent text-slate-500"
                 }`}
@@ -418,14 +422,16 @@ export function WorkflowTrackerClient({
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => setListState((current) => ({ ...current, search: event.target.value }))}
               placeholder="Search order, account, event, owner or invoice..."
               className="h-9 w-full rounded-md border border-[#e2e4e8] bg-white pl-9 pr-3 text-[10px] outline-none focus:border-primary"
             />
           </label>
           <select
             value={eventScope}
-            onChange={(event) => setEventScope(event.target.value as "future" | "all")}
+            onChange={(event) =>
+              setListState((current) => ({ ...current, eventScope: event.target.value as "future" | "all" }))
+            }
             className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto"
           >
             <option value="future">Future events</option>
@@ -433,7 +439,7 @@ export function WorkflowTrackerClient({
           </select>
           <select
             value={activeEventKey}
-            onChange={(event) => setEventKey(event.target.value)}
+            onChange={(event) => setListState((current) => ({ ...current, eventKey: event.target.value }))}
             className="h-9 w-full max-w-none rounded-md border bg-white px-3 text-[10px] sm:w-auto sm:max-w-[280px]"
           >
             <option value="all">Any event</option>
@@ -441,12 +447,12 @@ export function WorkflowTrackerClient({
               <option key={option.key} value={option.key}>{option.label}</option>
             ))}
           </select>
-          <select value={period} onChange={(event) => setPeriod(event.target.value)} className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto">
+          <select value={period} onChange={(event) => setListState((current) => ({ ...current, period: event.target.value }))} className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto">
             <option value="all">All time</option>
             <option value="month">This month</option>
             <option value="quarter">This quarter</option>
           </select>
-          <select value={channel} onChange={(event) => setChannel(event.target.value)} className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto">
+          <select value={channel} onChange={(event) => setListState((current) => ({ ...current, channel: event.target.value }))} className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto">
             <option value="all">All sources</option>
             <option value="offline">Offline</option>
             <option value="trade_portal">Portal</option>
@@ -456,7 +462,7 @@ export function WorkflowTrackerClient({
             <option value="admin">Admin</option>
             <option value="salesforce_import">Salesforce</option>
           </select>
-          <select value={owner} onChange={(event) => setOwner(event.target.value)} className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto">
+          <select value={owner} onChange={(event) => setListState((current) => ({ ...current, owner: event.target.value }))} className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto">
             <option value="all">All owners</option>
             {owners.map((name) => <option key={name}>{name}</option>)}
           </select>

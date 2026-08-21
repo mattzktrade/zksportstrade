@@ -67,10 +67,24 @@ export function allocateUnattributedSoldAcrossLayers(input: {
 export function resolveSoldByCostLayer(input: {
   layers: readonly SoldCostLayer[]
   consumptionsByLayer?: ReadonlyMap<string, number>
+  /**
+   * Closed-won deal lines assigned to a cost layer. When any layer has a
+   * fulfilment quantity, that assignment is the booked sold figure — FIFO
+   * leftover only covers deals that were never pointed at a purchase.
+   */
+  fulfilmentSoldByLayer?: ReadonlyMap<string, number>
   totalPackageSold: number
 }): Map<string, number> {
+  const fulfilment = input.fulfilmentSoldByLayer
+  const hasFulfilment = !!fulfilment && [...fulfilment.values()].some((n) => n > 0)
   const bookedSoldByLayer = new Map<string, number>()
   for (const layer of input.layers) {
+    if (hasFulfilment) {
+      const purchased = Math.max(0, Math.floor(Number(layer.quantity) || 0))
+      const assigned = Math.max(0, Math.floor(fulfilment!.get(layer.id) ?? 0))
+      bookedSoldByLayer.set(layer.id, Math.min(purchased, assigned))
+      continue
+    }
     bookedSoldByLayer.set(layer.id, layerBookedSold(layer, input.consumptionsByLayer ?? new Map()))
   }
   return allocateUnattributedSoldAcrossLayers({
@@ -78,4 +92,22 @@ export function resolveSoldByCostLayer(input: {
     bookedSoldByLayer,
     totalPackageSold: input.totalPackageSold,
   })
+}
+
+export function recordFromSoldMap(map: ReadonlyMap<string, number>): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const [id, qty] of map) {
+    if (qty > 0) out[id] = qty
+  }
+  return out
+}
+
+export function soldMapFromRecord(record: Record<string, number> | undefined): Map<string, number> {
+  const out = new Map<string, number>()
+  if (!record) return out
+  for (const [id, qty] of Object.entries(record)) {
+    const n = Math.max(0, Math.floor(Number(qty) || 0))
+    if (n > 0) out.set(id, n)
+  }
+  return out
 }

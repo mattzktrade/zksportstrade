@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { hasCmsPermission } from "@/lib/auth/permissions"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { createClient } from "@/lib/supabase/server"
+import { applyFulfilmentSoldToLayerRemaining } from "@/lib/inventory/fulfilment-layer-sold"
 
 type Result = { ok: true; message: string } | { ok: false; message: string }
 
@@ -334,8 +335,19 @@ export async function updateDealLineSupplier(input: {
       .eq("package_id", line.package_id)
   }
 
+  try {
+    await applyFulfilmentSoldToLayerRemaining(supabase, String(line.package_id ?? ""))
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "Supplier saved, but remaining stock could not be updated.",
+    }
+  }
+
   revalidatePath("/admin/deals", "layout")
   revalidatePath("/admin/catalog", "layout")
+  revalidatePath("/admin/purchase-orders")
+  revalidatePath("/admin")
   return { ok: true, message: "Supplier updated." }
 }
 

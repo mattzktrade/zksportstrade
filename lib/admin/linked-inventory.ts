@@ -14,6 +14,8 @@ export type LinkedInventoryPackage = {
   sales_breakdown: PackageSalesBreakdown
   /** Purchase ledger for this package (empty on linked days — stock lives on the 3-day). */
   cost_layers?: CostLayerRow[]
+  /** Closed-won deal quantities assigned to cost layers (layer id → qty). */
+  fulfilment_sold_by_layer?: Record<string, number>
 }
 
 /** Hidden Single Ticket shell — shown in linked inventory table only (not sellable). */

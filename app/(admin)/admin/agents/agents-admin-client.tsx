@@ -1,17 +1,60 @@
 "use client"
 
-import { Fragment, useState } from "react"
+import { Fragment, useMemo, useState } from "react"
 import Link from "next/link"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { adminPackagePath } from "@/lib/admin/package-link"
 import type { AdminAgentWithStats } from "@/lib/admin/queries"
 import { AdminInvoiceStatusSelect } from "@/components/admin-invoice-status-select"
 import { formatMoney } from "@/lib/format/money"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 
-export function AgentsAdminClient({ rows }: { rows: AdminAgentWithStats[] }) {
+export function AgentsAdminClient({
+  rows,
+  initialQuery = "",
+}: {
+  rows: AdminAgentWithStats[]
+  initialQuery?: string
+}) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [filters, setFilters] = usePersistedAdminFilters(
+    "zk-admin-agents-filters-v1",
+    { query: "" },
+    { override: initialQuery.trim() ? { query: initialQuery } : null },
+  )
+  const needle = filters.query.trim().toLowerCase()
+  const filtered = useMemo(() => {
+    if (!needle) return rows
+    return rows.filter((a) => {
+      const blob = `${a.email} ${a.full_name} ${a.company_name} ${a.mobile ?? ""} ${a.orderSearchBlob}`.toLowerCase()
+      return blob.includes(needle)
+    })
+  }, [needle, rows])
 
   return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2 items-center">
+        <input
+          type="search"
+          value={filters.query}
+          onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
+          placeholder="Search name, company, email, order ref, or package"
+          className="flex-1 min-w-[200px] max-w-md px-4 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+        />
+        {needle ? (
+          <button
+            type="button"
+            onClick={() => setFilters({ query: "" })}
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Clear
+          </button>
+        ) : null}
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No agents match that search.</p>
+      ) : (
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <div className="hidden overflow-x-auto md:block">
       <table className="w-full text-sm">
@@ -29,7 +72,7 @@ export function AgentsAdminClient({ rows }: { rows: AdminAgentWithStats[] }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((a) => {
+          {filtered.map((a) => {
             const open = expandedId === a.id
             return (
               <Fragment key={a.id}>
@@ -134,7 +177,7 @@ export function AgentsAdminClient({ rows }: { rows: AdminAgentWithStats[] }) {
       </table>
       </div>
       <div className="divide-y divide-border md:hidden">
-        {rows.map((a) => {
+        {filtered.map((a) => {
           const open = expandedId === a.id
           return (
             <div key={a.id} className="p-4 space-y-2">
@@ -178,6 +221,8 @@ export function AgentsAdminClient({ rows }: { rows: AdminAgentWithStats[] }) {
           )
         })}
       </div>
+    </div>
+      )}
     </div>
   )
 }

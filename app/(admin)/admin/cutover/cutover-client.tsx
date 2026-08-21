@@ -21,6 +21,7 @@ import {
   setCutoverStatus,
   updateCutoverPackage,
 } from "./actions"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 
 function tone(status: string): "green" | "amber" | "red" | "blue" | "purple" | "gray" {
   if (["verified", "reconciled", "prepared", "pilot_passed", "approved"].includes(status)) return "green"
@@ -60,8 +61,12 @@ export function CutoverClient({
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [tab, setTab] = useState<"inventory" | "open" | "won" | "activity" | "recovery">("inventory")
-  const [search, setSearch] = useState("")
+  const [listState, setListState] = usePersistedAdminFilters("zk-admin-cutover-filters-v1", {
+    search: "",
+    tab: "inventory" as "inventory" | "open" | "won" | "activity" | "recovery",
+  })
+  const { search, tab } = listState
+  const setTab = (tab: typeof listState.tab) => setListState((current) => ({ ...current, tab }))
   const [name, setName] = useState(`Native pilot ${new Date().toISOString().slice(0, 10)}`)
   const [pilotRaceId, setPilotRaceId] = useState("")
   const [notes, setNotes] = useState("")
@@ -190,7 +195,7 @@ export function CutoverClient({
 
         {tab === "inventory" ? (
           <>
-            <div className="border-b p-3"><label className="relative block max-w-lg"><Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search packages..." className="h-9 w-full rounded-md border pl-9 pr-3 text-[10px]" /></label></div>
+            <div className="border-b p-3"><label className="relative block max-w-lg"><Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(event) => setListState((current) => ({ ...current, search: event.target.value }))} placeholder="Search packages..." className="h-9 w-full rounded-md border pl-9 pr-3 text-[10px]" /></label></div>
             <div className="overflow-x-auto"><table className="w-full min-w-[1200px] text-left"><thead className="bg-[#fafbfc] text-[8px] uppercase text-slate-400"><tr><th className="px-4 py-2.5">Package</th><th className="px-4 py-2.5">Available baseline → live</th><th className="px-4 py-2.5">Held baseline → live</th><th className="px-4 py-2.5">Sellable baseline → live</th><th className="px-4 py-2.5">Cost layers</th><th className="px-4 py-2.5">Opening balance</th><th className="px-4 py-2.5">Supplier source</th><th className="px-4 py-2.5">Action</th></tr></thead><tbody className="divide-y text-[9px]">
               {packageRows.map((row) => <tr key={row.id} className={row.availableDrift || row.heldDrift || row.sellableDrift ? "bg-amber-50/50" : ""}><td className="px-4 py-3"><p className="font-semibold">{row.packageName}</p><p className="text-[8px] text-slate-400">{row.packageId}</p></td><td className="px-4 py-3">{row.baselineAvailable} → {row.currentAvailable} <span className={row.availableDrift ? "text-amber-700" : "text-emerald-700"}>({row.availableDrift >= 0 ? "+" : ""}{row.availableDrift})</span></td><td className="px-4 py-3">{row.baselineHeld} → {row.currentHeld} ({row.heldDrift >= 0 ? "+" : ""}{row.heldDrift})</td><td className="px-4 py-3">{row.baselineSellable} → {row.currentSellable} ({row.sellableDrift >= 0 ? "+" : ""}{row.sellableDrift})</td><td className="px-4 py-3">{row.currentLayerUnits}<p className="text-[8px] text-slate-400">{row.unassignedCostUnits} unassigned</p></td><td className="px-4 py-3"><StatusPill tone={tone(row.openingBalanceStatus)}>{label(row.openingBalanceStatus)}</StatusPill></td><td className="px-4 py-3"><StatusPill tone={tone(row.supplierStatus)}>{label(row.supplierStatus)}</StatusPill></td><td className="px-4 py-3"><div className="flex gap-1"><button disabled={pending} onClick={() => { const raw = window.prompt("Verified live quantity:", String(row.currentAvailable)); if (raw == null) return; const quantity = Number(raw); const reason = window.prompt("Opening-balance evidence/reason:") || ""; if (!reason) return; run(() => setCutoverOpeningBalance({ runId: selectedRun.id, packageId: row.packageId, quantity, supplierStatus: row.supplierStatus, reason })) }} className="rounded border px-2 py-1 text-[8px] font-semibold">Set balance</button><button disabled={pending} onClick={() => { const note = window.prompt("Supplier reconciliation evidence:") || ""; if (!note) return; run(() => updateCutoverPackage({ runId: selectedRun.id, packageId: row.packageId, openingBalanceStatus: row.openingBalanceStatus, supplierStatus: "reconciled", note })) }} className="rounded border px-2 py-1 text-[8px] font-semibold">Supplier ✓</button></div></td></tr>)}
             </tbody></table></div>

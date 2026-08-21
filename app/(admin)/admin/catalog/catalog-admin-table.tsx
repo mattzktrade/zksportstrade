@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import Image from "next/image"
 import { LOGO_ICON } from "@/lib/branding"
 import Link from "next/link"
@@ -16,6 +16,7 @@ import { PackageAdminPanel } from "@/components/admin/package-admin-panel"
 import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
 import { formatMoneyCompact } from "@/lib/format/money"
 import { cn } from "@/lib/utils"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 
 const CATALOG_FILTER_STORAGE_KEY = "zk-admin-catalog-filters-v2"
 
@@ -37,12 +38,21 @@ type ScheduleFilter = "upcoming" | "all"
 type VisibilityFilter = "all" | "visible" | "hidden"
 
 type SavedCatalogFilters = {
-  search?: string
-  raceFilter?: string
-  scheduleFilter?: ScheduleFilter
-  visibilityFilter?: VisibilityFilter
-  stockFilter?: StockFilter
-  showShellTickets?: boolean
+  search: string
+  raceFilter: string
+  scheduleFilter: ScheduleFilter
+  visibilityFilter: VisibilityFilter
+  stockFilter: StockFilter
+  showShellTickets: boolean
+}
+
+const DEFAULT_CATALOG_FILTERS: SavedCatalogFilters = {
+  search: "",
+  raceFilter: "",
+  scheduleFilter: "upcoming",
+  visibilityFilter: "all",
+  stockFilter: "all",
+  showShellTickets: false,
 }
 
 function isShellTicketRow(row: AdminPackageRow): boolean {
@@ -94,50 +104,8 @@ export function CatalogAdminTable({
     [rows],
   )
 
-  const [search, setSearch] = useState("")
-  const [raceFilter, setRaceFilter] = useState("")
-  const [scheduleFilter, setScheduleFilter] = useState<ScheduleFilter>("upcoming")
-  const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>("all")
-  const [stockFilter, setStockFilter] = useState<StockFilter>("all")
-  const [showShellTickets, setShowShellTickets] = useState(false)
-  const [filtersReady, setFiltersReady] = useState(false)
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(CATALOG_FILTER_STORAGE_KEY)
-      if (!raw) return
-      const saved = JSON.parse(raw) as SavedCatalogFilters
-      if (typeof saved.search === "string") setSearch(saved.search)
-      if (typeof saved.raceFilter === "string") setRaceFilter(saved.raceFilter)
-      if (saved.scheduleFilter === "upcoming" || saved.scheduleFilter === "all") {
-        setScheduleFilter(saved.scheduleFilter)
-      }
-      if (saved.visibilityFilter === "all" || saved.visibilityFilter === "visible" || saved.visibilityFilter === "hidden") {
-        setVisibilityFilter(saved.visibilityFilter)
-      }
-      if (saved.stockFilter === "all" || saved.stockFilter === "in_stock" || saved.stockFilter === "out_of_stock") {
-        setStockFilter(saved.stockFilter)
-      }
-      if (typeof saved.showShellTickets === "boolean") setShowShellTickets(saved.showShellTickets)
-    } catch {
-      /* ignore */
-    } finally {
-      setFiltersReady(true)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!filtersReady) return
-    const payload: SavedCatalogFilters = {
-      search,
-      raceFilter,
-      scheduleFilter,
-      visibilityFilter,
-      stockFilter,
-      showShellTickets,
-    }
-    localStorage.setItem(CATALOG_FILTER_STORAGE_KEY, JSON.stringify(payload))
-  }, [search, raceFilter, scheduleFilter, visibilityFilter, stockFilter, showShellTickets, filtersReady])
+  const [filters, setFilters] = usePersistedAdminFilters(CATALOG_FILTER_STORAGE_KEY, DEFAULT_CATALOG_FILTERS)
+  const { search, raceFilter, scheduleFilter, visibilityFilter, stockFilter, showShellTickets } = filters
 
   const searchNorm = search.trim().toLowerCase()
 
@@ -189,12 +157,7 @@ export function CatalogAdminTable({
   const shellTicketCount = useMemo(() => sorted.filter(isShellTicketRow).length, [sorted])
 
   function resetFilters() {
-    setSearch("")
-    setRaceFilter("")
-    setScheduleFilter("upcoming")
-    setVisibilityFilter("all")
-    setStockFilter("all")
-    setShowShellTickets(false)
+    setFilters(DEFAULT_CATALOG_FILTERS)
   }
 
   const hasActiveFilters =
@@ -229,7 +192,7 @@ export function CatalogAdminTable({
           <input
             type="search"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => setFilters((current) => ({ ...current, search: e.target.value }))}
             placeholder="Search by name, circuit, race, id…"
             className="w-full pl-9 pr-3 py-2 rounded-lg border border-border bg-background text-sm"
             aria-label="Search packages"
@@ -242,11 +205,14 @@ export function CatalogAdminTable({
               value={scheduleFilter}
               onChange={(e) => {
                 const next = e.target.value as ScheduleFilter
-                setScheduleFilter(next)
-                if (next === "upcoming" && raceFilter) {
-                  const race = races.find((r) => r.id === raceFilter)
-                  if (race && !isBookableEventDate(race.event_date)) setRaceFilter("")
-                }
+                setFilters((current) => {
+                  let nextRace = current.raceFilter
+                  if (next === "upcoming" && current.raceFilter) {
+                    const race = races.find((r) => r.id === current.raceFilter)
+                    if (race && !isBookableEventDate(race.event_date)) nextRace = ""
+                  }
+                  return { ...current, scheduleFilter: next, raceFilter: nextRace }
+                })
               }}
               className="px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground"
             >
@@ -258,7 +224,7 @@ export function CatalogAdminTable({
             Race
             <select
               value={raceFilter}
-              onChange={(e) => setRaceFilter(e.target.value)}
+              onChange={(e) => setFilters((current) => ({ ...current, raceFilter: e.target.value }))}
               className="px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground"
             >
               <option value="">All races</option>
@@ -273,7 +239,9 @@ export function CatalogAdminTable({
             Portal visibility
             <select
               value={visibilityFilter}
-              onChange={(e) => setVisibilityFilter(e.target.value as VisibilityFilter)}
+              onChange={(e) =>
+                setFilters((current) => ({ ...current, visibilityFilter: e.target.value as VisibilityFilter }))
+              }
               className="px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground"
             >
               <option value="all">All</option>
@@ -285,7 +253,7 @@ export function CatalogAdminTable({
             Stock
             <select
               value={stockFilter}
-              onChange={(e) => setStockFilter(e.target.value as StockFilter)}
+              onChange={(e) => setFilters((current) => ({ ...current, stockFilter: e.target.value as StockFilter }))}
               className="px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground"
             >
               <option value="all">All</option>
@@ -297,7 +265,7 @@ export function CatalogAdminTable({
             <input
               type="checkbox"
               checked={showShellTickets}
-              onChange={(e) => setShowShellTickets(e.target.checked)}
+              onChange={(e) => setFilters((current) => ({ ...current, showShellTickets: e.target.checked }))}
               className="rounded border-border"
             />
             <span className="text-xs text-muted-foreground leading-snug">

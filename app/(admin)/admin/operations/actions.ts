@@ -6,6 +6,7 @@ import { assignTakesToDealLines, collapseTakesBySupplier } from "@/lib/operation
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
+import { applyFulfilmentSoldToLayerRemaining } from "@/lib/inventory/fulfilment-layer-sold"
 
 type Result = { ok: true; message: string } | { ok: false; message: string }
 
@@ -416,8 +417,18 @@ export async function reassignDealPackageStock(input: {
       if (updateError) throw new Error(updateError.message)
     }
 
+    try {
+      await applyFulfilmentSoldToLayerRemaining(gate.admin ?? gate.supabase, packageId)
+    } catch (e) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "Allocation saved, but remaining stock could not be updated.",
+      }
+    }
+
     revalidatePath("/admin/operations")
     revalidatePath("/admin/deals", "layout")
+    revalidatePath("/admin/catalog", "layout")
     return { ok: true, message: "Supplier allocation saved." }
   } catch (error) {
     return { ok: false, message: errorMessage(error) }

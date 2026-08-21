@@ -78,7 +78,10 @@ export function CatalogInventoryClient({ races }: { races: AdminRaceOption[] }) 
         <InventoryWorkspace
           initialRows={rows}
           mode="manage"
-          onAddProduct={() => setCreateOpen(true)}
+          onAddProduct={() => {
+            setCreateOpen(true)
+            document.getElementById("admin-new-package")?.scrollIntoView({ behavior: "smooth", block: "start" })
+          }}
           onDataChanged={handlePackageCreated}
         />
       )}

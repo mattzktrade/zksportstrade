@@ -98,9 +98,9 @@ export function packageCommittedUnits(b: PackageSalesBreakdown): number {
 
 /**
  * Linked-pool Remaining for one package — same rules as inventory sync:
- * - day package: stock − 3-day commitments − that day's commitments
+ * - day package: stock − 3-day commitments − that day's commitments (− 2-day on Sat/Sun)
  * - 3-day: min(Fri, Sat, Sun) remainings
- * - Sat&Sun (2-day): min(Sat, Sun)
+ * - Sat&Sun (2-day): min(Sat, Sun), which already includes 2-day sales
  * - shell: mirrors its day sibling (or 3-day when no sellable day exists)
  *
  * Never sum every sibling's pipeline onto every row (that produced false "191" for Velocity).
@@ -116,11 +116,15 @@ export function linkedPoolSellableForPackage(input: {
   const stock = Math.max(0, Math.floor(input.stock))
   const threeDay = input.members.find((m) => m.duration === "3_day")
   const threeDayCommitted = threeDay ? packageCommittedUnits(threeDay.breakdown) : 0
+  const twoDay = input.members.find((m) => m.duration === "2_day")
+  const twoDayCommitted = twoDay ? packageCommittedUnits(twoDay.breakdown) : 0
 
   const dayRemaining = (duration: string): number | null => {
     const day = input.members.find((m) => m.duration === duration && m.id !== threeDay?.id)
     if (!day) return null
-    return stock - threeDayCommitted - packageCommittedUnits(day.breakdown)
+    const weekendTake =
+      duration === "saturday_only" || duration === "sunday_only" ? twoDayCommitted : 0
+    return stock - threeDayCommitted - packageCommittedUnits(day.breakdown) - weekendTake
   }
 
   const duration = (input.shellMirrorDuration ?? input.targetDuration)?.trim() || null
@@ -129,7 +133,7 @@ export function linkedPoolSellableForPackage(input: {
     const days = ["thursday_only", "friday_only", "saturday_only", "sunday_only"]
       .map((d) => dayRemaining(d))
       .filter((n): n is number => n != null)
-    if (days.length === 0) return stock - threeDayCommitted
+    if (days.length === 0) return stock - threeDayCommitted - twoDayCommitted
     return Math.min(...days)
   }
 
@@ -139,15 +143,17 @@ export function linkedPoolSellableForPackage(input: {
     if (sat != null && sun != null) return Math.min(sat, sun)
     if (sat != null) return sat
     if (sun != null) return sun
-    return stock - threeDayCommitted
+    return stock - threeDayCommitted - twoDayCommitted
   }
 
   if (duration && LINKED_DAY_DURATIONS.has(duration)) {
     const own =
       input.members.find((m) => m.id === input.targetId) ??
       input.members.find((m) => m.duration === duration)
-    if (!own) return stock - threeDayCommitted
-    return stock - threeDayCommitted - packageCommittedUnits(own.breakdown)
+    if (!own) return stock - threeDayCommitted - twoDayCommitted
+    const weekendTake =
+      duration === "saturday_only" || duration === "sunday_only" ? twoDayCommitted : 0
+    return stock - threeDayCommitted - packageCommittedUnits(own.breakdown) - weekendTake
   }
 
   const self = input.members.find((m) => m.id === input.targetId)

@@ -7,6 +7,8 @@ import { createPackage } from "@/app/(admin)/actions"
 import type { LinkedDayPackageOverview, LinkedDayPackagePreset } from "@/lib/admin/linked-day-package-overview"
 import type { ShellDayDuration } from "@/lib/catalog/shell-single-tickets"
 
+type LinkedAddDuration = ShellDayDuration | "2_day"
+
 const DAY_LABEL: Record<ShellDayDuration, string> = {
   thursday_only: "Thursday",
   friday_only: "Friday",
@@ -14,23 +16,41 @@ const DAY_LABEL: Record<ShellDayDuration, string> = {
   sunday_only: "Sunday",
 }
 
-/** Derive a sensible sellable-day package name from the 3-day parent's name. */
-function suggestDayPackageName(parentName: string, duration: ShellDayDuration): string {
-  const day = DAY_LABEL[duration]
+function addDurationLabel(duration: LinkedAddDuration): string {
+  if (duration === "2_day") return "Saturday & Sunday"
+  return `${DAY_LABEL[duration]}-only`
+}
+
+function addDurationTitle(duration: LinkedAddDuration): string {
+  if (duration === "2_day") return "Saturday & Sunday"
+  return DAY_LABEL[duration]
+}
+
+/** Derive a sensible sellable package name from the 3-day parent's name. */
+function suggestLinkedPackageName(parentName: string, duration: LinkedAddDuration): string {
   const base = parentName.replace(/^\s*3\s*Days?\s+/i, "").trim()
+  if (duration === "2_day") {
+    if (!base) return "Saturday & Sunday Package"
+    return `Saturday & Sunday ${base}`
+  }
+  const day = DAY_LABEL[duration]
   if (!base) return `${day} Package`
   return `${day} ${base}`
 }
 
 /** Compact linked-group controls for the Inventory tab (sync + add day package). */
 export function LinkedDayInventoryToolbar({ overview }: { overview: LinkedDayPackageOverview }) {
-  const { inventoryGroupId, missingDayDurations, parentPreset } = overview
+  const { inventoryGroupId, missingDayDurations, missingTwoDay, parentPreset } = overview
 
-  const [addOpen, setAddOpen] = useState<ShellDayDuration | null>(null)
+  const [addOpen, setAddOpen] = useState<LinkedAddDuration | null>(null)
 
   if (!parentPreset && !inventoryGroupId) return null
 
-  const canOfferQuickAdd = !!parentPreset && !!inventoryGroupId && missingDayDurations.length > 0
+  const addOptions: Array<{ duration: LinkedAddDuration; label: string }> = [
+    ...missingDayDurations.map((d) => ({ duration: d as LinkedAddDuration, label: addDurationLabel(d) })),
+    ...(missingTwoDay ? [{ duration: "2_day" as const, label: addDurationLabel("2_day") }] : []),
+  ]
+  const canOfferQuickAdd = !!parentPreset && !!inventoryGroupId && addOptions.length > 0
   const missingIfNoGroup = !inventoryGroupId && !!parentPreset
 
   return (
@@ -52,14 +72,14 @@ export function LinkedDayInventoryToolbar({ overview }: { overview: LinkedDayPac
       {canOfferQuickAdd ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[11px] text-muted-foreground uppercase tracking-wide">Add day package:</span>
-          {missingDayDurations.map((d) => (
+          {addOptions.map((opt) => (
             <button
-              key={d}
+              key={opt.duration}
               type="button"
-              onClick={() => setAddOpen(d)}
+              onClick={() => setAddOpen(opt.duration)}
               className="px-3 py-1.5 rounded-md border border-primary/40 text-primary bg-background text-xs font-medium hover:bg-primary/5"
             >
-              + {DAY_LABEL[d]}-only
+              + {opt.label}
             </button>
           ))}
         </div>
@@ -88,7 +108,7 @@ function QuickAddDialog({
   inventoryGroupId,
   onClose,
 }: {
-  duration: ShellDayDuration
+  duration: LinkedAddDuration
   preset: LinkedDayPackagePreset
   inventoryGroupId: string
   onClose: () => void
@@ -96,7 +116,10 @@ function QuickAddDialog({
   const router = useRouter()
   const [pending, start] = useTransition()
 
-  const defaultName = useMemo(() => suggestDayPackageName(preset.parent_name, duration), [preset.parent_name, duration])
+  const defaultName = useMemo(
+    () => suggestLinkedPackageName(preset.parent_name, duration),
+    [preset.parent_name, duration],
+  )
   const [name, setName] = useState(defaultName)
   const [tradePrice, setTradePrice] = useState("")
   const [isEnquiry, setIsEnquiry] = useState(false)
@@ -187,7 +210,7 @@ function QuickAddDialog({
         toast.error(res.message)
         return
       }
-      const msg = res.message ?? `${DAY_LABEL[duration]} package created.`
+      const msg = res.message ?? `${addDurationTitle(duration)} package created.`
       if (/Wix product was not created|Wix API is not configured/i.test(msg)) {
         toast.message(msg, { duration: 12000 })
       } else {
@@ -204,11 +227,12 @@ function QuickAddDialog({
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="text-base font-semibold text-foreground">
-              New {DAY_LABEL[duration]} package
+              New {addDurationTitle(duration)} package
             </h3>
             <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
               Race, dates, description, includes, image, and the Linked inventory key are copied from the
-              3-day parent. Stock is shared across the group.
+              3-day parent. Stock is shared across the group — a Saturday & Sunday sale also
+              reduces the 3-day, Saturday, and Sunday remaining.
             </p>
           </div>
           <button
@@ -330,7 +354,7 @@ function QuickAddDialog({
             disabled={pending}
             className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"
           >
-            {pending ? "Creating…" : `Create ${DAY_LABEL[duration]} package`}
+            {pending ? "Creating…" : `Create ${addDurationTitle(duration)} package`}
           </button>
         </div>
       </div>

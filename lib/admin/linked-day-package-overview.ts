@@ -46,6 +46,8 @@ export type LinkedDayPackageOverview = {
   shells: LinkedDayShell[]
   /** Day durations that don't yet have a sellable single-day sibling. */
   missingDayDurations: ShellDayDuration[]
+  /** True when this weekend has Sat+Sun and the group has no 2-day (Saturday & Sunday) sibling. */
+  missingTwoDay: boolean
   /**
    * Fields from the canonical 3-day parent that should pre-fill a new linked day package.
    * When the current package is the 3-day itself, this is that package.
@@ -100,6 +102,7 @@ export async function getLinkedDayPackageOverview(packageId: string): Promise<Li
     siblings: [],
     shells: [],
     missingDayDurations: [],
+    missingTwoDay: false,
     parentPreset: null,
   }
 
@@ -245,6 +248,10 @@ export async function getLinkedDayPackageOverview(packageId: string): Promise<Li
     if (isDayDuration(d)) siblingDaysWithSellable.add(d)
   }
   const missingDayDurations = expectedDayDurations.filter((d) => !siblingDaysWithSellable.has(d))
+  const hasSaturdayAndSunday =
+    expectedDayDurations.includes("saturday_only") && expectedDayDurations.includes("sunday_only")
+  const missingTwoDay =
+    hasSaturdayAndSunday && !siblings.some((s) => (s.duration ?? "").trim() === "2_day")
 
   // Build the preset from the 3-day parent when we know it. Otherwise fall back to the
   // current package (still useful when admin is editing a single-day product first).
@@ -306,6 +313,7 @@ export async function getLinkedDayPackageOverview(packageId: string): Promise<Li
     siblings,
     shells,
     missingDayDurations,
+    missingTwoDay,
     parentPreset,
   }
 }

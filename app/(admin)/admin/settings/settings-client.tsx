@@ -33,6 +33,7 @@ import {
   updateStaffPassword,
   updateStaffRole,
 } from "./settings-actions"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 
 export type SettingsIntegrationCard = {
   href: string
@@ -69,17 +70,30 @@ export function SettingsClient({
   users,
   integrations,
   initialTab,
+  urlTab = null,
 }: {
   currentUserId: string
   canManageUsers: boolean
   users: SettingsStaffUser[]
   integrations: SettingsIntegrationCard[]
   initialTab: Tab
+  urlTab?: Tab | null
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [tab, setTab] = useState<Tab>(initialTab)
-  const [search, setSearch] = useState("")
+  const [listState, setListState] = usePersistedAdminFilters(
+    "zk-admin-settings-filters-v1",
+    { tab: initialTab, search: "" },
+    {
+      override: !canManageUsers
+        ? { tab: "integrations" as Tab }
+        : urlTab
+          ? { tab: urlTab }
+          : null,
+    },
+  )
+  const { tab, search } = listState
+  const setTab = (tab: Tab) => setListState((current) => ({ ...current, tab }))
   const [showCreate, setShowCreate] = useState(false)
   const [passwordUser, setPasswordUser] = useState<SettingsStaffUser | null>(null)
   const [deleteUser, setDeleteUser] = useState<SettingsStaffUser | null>(null)
@@ -144,7 +158,7 @@ export function SettingsClient({
                 <input
                   type="search"
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) => setListState((current) => ({ ...current, search: e.target.value }))}
                   placeholder="Search name, email or role..."
                   className="h-8 w-full rounded-md border border-[#e5e7eb] bg-white pl-9 pr-3 text-[10px] outline-none placeholder:text-[#a0a3a9] focus:border-primary/40"
                 />

@@ -37,6 +37,7 @@ import {
   type StaffOption,
 } from "@/lib/crm/lead-types"
 import { cn } from "@/lib/utils"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 
 type View = "accounts" | "contacts"
 
@@ -110,10 +111,13 @@ export function LeadsClient({
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [view, setView] = useState<View>("accounts")
-  const [query, setQuery] = useState("")
-  const [ownerFilter, setOwnerFilter] = useState("all")
-  const [sourceFilter, setSourceFilter] = useState("")
+  const [listState, setListState] = usePersistedAdminFilters("zk-admin-leads-filters-v1", {
+    view: "accounts" as View,
+    query: "",
+    ownerFilter: "all",
+    sourceFilter: "",
+  })
+  const { view, query, ownerFilter, sourceFilter } = listState
   const [showCreate, setShowCreate] = useState(false)
   const [showBulkUpload, setShowBulkUpload] = useState(false)
   const [companyName, setCompanyName] = useState("")
@@ -233,7 +237,7 @@ export function LeadsClient({
             <button
               key={item}
               type="button"
-              onClick={() => setView(item)}
+              onClick={() => setListState((current) => ({ ...current, view: item }))}
               className={cn(
                 "border-b-2 px-3 pb-3 text-[10px] font-semibold capitalize",
                 view === item ? "border-primary text-primary" : "border-transparent text-slate-500",
@@ -263,7 +267,7 @@ export function LeadsClient({
         <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] p-3">
           <select
             value={ownerFilter}
-            onChange={(e) => setOwnerFilter(e.target.value)}
+            onChange={(e) => setListState((current) => ({ ...current, ownerFilter: e.target.value }))}
             className="h-9 rounded-md border bg-white px-3 text-[9px]"
           >
             <option value="all">All owners</option>
@@ -277,7 +281,7 @@ export function LeadsClient({
           </select>
           <select
             value={sourceFilter}
-            onChange={(e) => setSourceFilter(e.target.value)}
+            onChange={(e) => setListState((current) => ({ ...current, sourceFilter: e.target.value }))}
             className="h-9 rounded-md border bg-white px-3 text-[9px]"
           >
             <option value="">All sources</option>
@@ -291,7 +295,7 @@ export function LeadsClient({
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => setListState((current) => ({ ...current, query: e.target.value }))}
               placeholder="Search companies, contacts, email..."
               className="h-9 w-full rounded-md border pl-9 pr-3 text-[9px] outline-none focus:border-primary/50"
             />

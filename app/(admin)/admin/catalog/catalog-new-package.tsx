@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, useTransition } from "react"
+import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createNativeEvent, createPackage } from "@/app/(admin)/actions"
@@ -50,6 +50,7 @@ export function CatalogNewPackage({
   onCreated?: () => void
 }) {
   const router = useRouter()
+  const formRef = useRef<HTMLDivElement>(null)
   const [pending, start] = useTransition()
 
   const [eventCategory, setEventCategory] = useState<EventCategory>("formula_1")
@@ -172,6 +173,11 @@ export function CatalogNewPackage({
       setIsEnquiry(t.requiresBookingApproval)
     }
   }
+
+  useEffect(() => {
+    if (!open) return
+    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }, [open])
 
   useEffect(() => {
     if (isEnquiry) {
@@ -367,7 +373,11 @@ export function CatalogNewPackage({
   const noF1Events = isFormula1 && eventsForCategory.length === 0
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5 sm:p-6 shadow-sm space-y-6">
+    <div
+      id="admin-new-package"
+      ref={formRef}
+      className="scroll-mt-20 rounded-xl border border-border bg-card p-5 sm:p-6 shadow-sm space-y-6"
+    >
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-base font-semibold text-foreground">New package</h2>
         <button

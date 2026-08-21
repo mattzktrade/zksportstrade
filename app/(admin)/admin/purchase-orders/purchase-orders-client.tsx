@@ -21,6 +21,7 @@ import { adminSupplierPath } from "@/lib/crm/profile-links"
 import { CompanySupplierSelect } from "@/components/admin/company-supplier-select"
 import { AdminDesktopTable, AdminMobileList } from "@/components/admin/admin-page-kit"
 import type { CrmCompanyOption } from "@/lib/crm/deals"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 
 const STOCK_PREVIEW_LIMIT = 3
 
@@ -38,6 +39,12 @@ const EMPTY_FILTERS: PoFilters = {
   supplier: "",
   event: "",
   product: "",
+}
+
+const DEFAULT_PO_LIST = {
+  ...EMPTY_FILTERS,
+  sortKey: "issuedAt" as SortKey,
+  sortDescending: true,
 }
 
 function formatDate(iso: string | null): string {
@@ -93,9 +100,8 @@ export function PurchaseOrdersClient({
     resolveInitialExpandedId(orders, initialPo),
   )
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [filters, setFilters] = useState<PoFilters>(EMPTY_FILTERS)
-  const [sortKey, setSortKey] = useState<SortKey>("issuedAt")
-  const [sortDescending, setSortDescending] = useState(true)
+  const [listState, setListState] = usePersistedAdminFilters("zk-admin-po-filters-v1", DEFAULT_PO_LIST)
+  const { sortKey, sortDescending, ...filters } = listState
 
   // Create form state
   const [newPoNumber, setNewPoNumber] = useState("")
@@ -172,12 +178,12 @@ export function PurchaseOrdersClient({
   }, [filters, orders, sortDescending, sortKey])
 
   function toggleSort(next: SortKey) {
-    if (sortKey === next) {
-      setSortDescending((value) => !value)
-      return
-    }
-    setSortKey(next)
-    setSortDescending(next === "issuedAt")
+    setListState((current) => {
+      if (current.sortKey === next) {
+        return { ...current, sortDescending: !current.sortDescending }
+      }
+      return { ...current, sortKey: next, sortDescending: next === "issuedAt" }
+    })
   }
 
   function resetCreate() {
@@ -338,12 +344,12 @@ export function PurchaseOrdersClient({
           type="search"
           placeholder="Search internal PO, contract/invoice, supplier, product…"
           value={filters.search}
-          onChange={(e) => setFilters((current) => ({ ...current, search: e.target.value }))}
+          onChange={(e) => setListState((current) => ({ ...current, search: e.target.value }))}
           className="h-8 w-full min-w-0 flex-1 sm:min-w-[240px] max-w-md px-3 rounded-md border border-[#e4e6ea] bg-white text-[10px] outline-none focus:border-primary/40"
         />
         <select
           value={filters.supplier}
-          onChange={(e) => setFilters((current) => ({ ...current, supplier: e.target.value }))}
+          onChange={(e) => setListState((current) => ({ ...current, supplier: e.target.value }))}
           className="h-8 max-w-[170px] rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]"
         >
           <option value="">All suppliers</option>
@@ -355,7 +361,7 @@ export function PurchaseOrdersClient({
         </select>
         <select
           value={filters.event}
-          onChange={(e) => setFilters((current) => ({ ...current, event: e.target.value }))}
+          onChange={(e) => setListState((current) => ({ ...current, event: e.target.value }))}
           className="h-8 max-w-[190px] rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]"
         >
           <option value="">All events</option>
@@ -367,7 +373,7 @@ export function PurchaseOrdersClient({
         </select>
         <select
           value={filters.product}
-          onChange={(e) => setFilters((current) => ({ ...current, product: e.target.value }))}
+          onChange={(e) => setListState((current) => ({ ...current, product: e.target.value }))}
           className="h-8 max-w-[190px] rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]"
         >
           <option value="">All products</option>
@@ -381,8 +387,7 @@ export function PurchaseOrdersClient({
           value={sortKey}
           onChange={(e) => {
             const next = e.target.value as SortKey
-            setSortKey(next)
-            setSortDescending(next === "issuedAt")
+            setListState((current) => ({ ...current, sortKey: next, sortDescending: next === "issuedAt" }))
           }}
           className="h-8 rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]"
         >
@@ -391,7 +396,7 @@ export function PurchaseOrdersClient({
         </select>
         <button
           type="button"
-          onClick={() => setSortDescending((value) => !value)}
+          onClick={() => setListState((current) => ({ ...current, sortDescending: !current.sortDescending }))}
           title={sortDescending ? "Descending" : "Ascending"}
           className="flex h-8 w-8 items-center justify-center rounded-md border border-[#e4e6ea] text-[#62666e]"
         >
@@ -400,7 +405,7 @@ export function PurchaseOrdersClient({
         {filtersActive ? (
           <button
             type="button"
-            onClick={() => setFilters(EMPTY_FILTERS)}
+            onClick={() => setListState((current) => ({ ...current, ...EMPTY_FILTERS }))}
             className="h-8 rounded-md border border-[#e4e6ea] px-3 text-[9px] text-[#62666e]"
           >
             Clear filters

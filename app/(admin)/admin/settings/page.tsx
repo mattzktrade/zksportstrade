@@ -52,6 +52,7 @@ export default async function SettingsPage({
       users={users}
       integrations={integrations}
       initialTab={tab === "integrations" || !canManageUsers ? "integrations" : "users"}
+      urlTab={tab === "integrations" || tab === "users" ? tab : null}
     />
   )
 }

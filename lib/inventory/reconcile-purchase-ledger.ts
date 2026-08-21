@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { resolveSoldByCostLayer } from "@/lib/inventory/sold-by-cost-layer"
 import { packageIdsOnSharedThreeDayLedger } from "@/lib/inventory/linked-stock-ledger"
+import { loadFulfilmentSoldByCostLayer, SOLD_DEAL_STAGES } from "@/lib/inventory/fulfilment-layer-sold"
 
 type LayerRow = {
   id: string
@@ -194,6 +195,18 @@ export async function reconcilePurchaseLedgers(admin: SupabaseClient): Promise<P
     const id = String(row.package_id ?? "")
     portalSoldByPkg.set(id, (portalSoldByPkg.get(id) ?? 0) + asInt(row.guests))
   }
+  const { data: dealLines } = await admin
+    .from("deal_line_items")
+    .select("package_id, quantity, deals!inner(order_id, stage)")
+  for (const row of dealLines ?? []) {
+    const deal = Array.isArray((row as { deals?: unknown }).deals)
+      ? (row as { deals: Array<{ order_id?: string | null; stage?: string }> }).deals[0]
+      : (row as { deals?: { order_id?: string | null; stage?: string } }).deals
+    if (!deal || deal.order_id) continue
+    if (!SOLD_DEAL_STAGES.has(String(deal.stage ?? ""))) continue
+    const id = String(row.package_id ?? "")
+    portalSoldByPkg.set(id, (portalSoldByPkg.get(id) ?? 0) + asInt(row.quantity))
+  }
 
   const { data: liveConsumed } = await admin
     .from("order_cost_consumptions")
@@ -236,6 +249,7 @@ export async function reconcilePurchaseLedgers(admin: SupabaseClient): Promise<P
   }
 
   const splitLedgerIds = await packageIdsOnSharedThreeDayLedger(admin, [...layersByPkg.keys()])
+  const fulfilmentSoldByLayer = await loadFulfilmentSoldByCostLayer(admin, [...layersByPkg.keys()])
 
   for (const [packageId, pkgLayers] of layersByPkg) {
     const purchased = pkgLayers.reduce((sum, layer) => sum + layer.quantity, 0)
@@ -246,6 +260,7 @@ export async function reconcilePurchaseLedgers(admin: SupabaseClient): Promise<P
     const soldByLayer = resolveSoldByCostLayer({
       layers: pkgLayers,
       consumptionsByLayer: consumedByLayer,
+      fulfilmentSoldByLayer,
       totalPackageSold: sold,
     })
 

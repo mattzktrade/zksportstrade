@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import Link from "next/link"
 import {
   ArrowLeft,
@@ -26,6 +26,7 @@ import { adminPackagePath } from "@/lib/admin/package-link"
 import type { NativeEventDetail } from "@/lib/admin/event-detail"
 import { EVENT_CATEGORY_LABELS } from "@/lib/catalog/event-categories"
 import { formatMoney } from "@/lib/format/money"
+import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 
 function formatDate(value: string): string {
   if (!value) return "—"
@@ -47,8 +48,11 @@ function saleStatusTone(sale: NativeEventDetail["sales"][number]): "green" | "am
 
 export function EventDetailClient({ detail }: { detail: NativeEventDetail }) {
   const { event, products, sales, totals } = detail
-  const [saleQuery, setSaleQuery] = useState("")
-  const [saleFilter, setSaleFilter] = useState<"all" | "confirmed" | "pipeline">("all")
+  const [listState, setListState] = usePersistedAdminFilters(`zk-admin-event-detail-filters-v1:${event.id}`, {
+    saleQuery: "",
+    saleFilter: "all" as "all" | "confirmed" | "pipeline",
+  })
+  const { saleQuery, saleFilter } = listState
 
   const filteredSales = useMemo(() => {
     const q = saleQuery.trim().toLowerCase()
@@ -203,7 +207,7 @@ export function EventDetailClient({ detail }: { detail: NativeEventDetail }) {
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               value={saleQuery}
-              onChange={(event) => setSaleQuery(event.target.value)}
+              onChange={(event) => setListState((current) => ({ ...current, saleQuery: event.target.value }))}
               placeholder="Search client, product, reference..."
               className="h-9 w-full rounded-md border pl-9 pr-3 text-[11px] outline-none focus:border-primary/50"
             />
@@ -217,7 +221,7 @@ export function EventDetailClient({ detail }: { detail: NativeEventDetail }) {
               <button
                 key={value}
                 type="button"
-                onClick={() => setSaleFilter(value)}
+                onClick={() => setListState((current) => ({ ...current, saleFilter: value }))}
                 className={`h-8 rounded px-3 ${saleFilter === value ? "bg-white shadow-sm" : "text-slate-500"}`}
               >
                 {label}

@@ -15,6 +15,10 @@ import {
   getPackageSalesBreakdownByPackage,
 } from "@/lib/admin/package-sales-breakdown-queries"
 import {
+  loadFulfilmentSoldByCostLayer,
+} from "@/lib/inventory/fulfilment-layer-sold"
+import { recordFromSoldMap } from "@/lib/inventory/sold-by-cost-layer"
+import {
   emptyPackageSalesBreakdown,
   type PackageSalesBreakdown,
 } from "@/lib/admin/package-sales-breakdown"
@@ -44,6 +48,7 @@ export type AdminPackageRow = DbPackage & {
   sales_breakdown: PackageSalesBreakdown
   salesforce_inventory: SfInventorySnapshot | null
   effective_website_price?: number | null
+  fulfilment_sold_by_layer?: Record<string, number>
 }
 
 export type LinkedInventorySibling = LinkedInventoryPackage
@@ -67,6 +72,7 @@ export async function getLinkedInventoryPackages(
   const ids = rows.map((p) => p.id)
   const salesByPkg = await getPackageSalesBreakdownByPackage(ids)
   const layersByPkg = await getCostLayersByPackage(ids)
+  const fulfilmentSold = recordFromSoldMap(await loadFulfilmentSoldByCostLayer(supabase, ids))
 
   const [invBy] = await Promise.all([
     (async () => {
@@ -90,6 +96,7 @@ export async function getLinkedInventoryPackages(
       salesforce_product_id: typed.salesforce_product_id ?? null,
       sales_breakdown: salesByPkg.get(p.id) ?? emptyPackageSalesBreakdown(p.id),
       cost_layers: layersByPkg.get(p.id) ?? [],
+      fulfilment_sold_by_layer: fulfilmentSold,
     }
   })
 }
@@ -372,11 +379,12 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
 
   const row = pkg as DbPackage
 
-  const [{ data: race }, layersByPkg, salesByPkg, sfInventoryByProduct] = await Promise.all([
+  const [{ data: race }, layersByPkg, salesByPkg, sfInventoryByProduct, fulfilmentSold] = await Promise.all([
     supabase.from("races").select("id,name,season").eq("id", row.race_id).maybeSingle(),
     getCostLayersByPackage([id]),
     getPackageSalesBreakdownByPackage([id]),
     getSalesforceInventorySnapshotsForPackages([row]),
+    loadFulfilmentSoldByCostLayer(supabase, [id]),
   ])
   const layers = layersByPkg.get(id) ?? []
   const summary = summarizePackageCost(row.currency || "USD", layers)
@@ -392,6 +400,7 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
     cost_layers: layers,
     cost_summary: summary,
     sales_breakdown: salesByPkg.get(id) ?? emptyPackageSalesBreakdown(id),
+    fulfilment_sold_by_layer: recordFromSoldMap(fulfilmentSold),
     salesforce_inventory:
       row.salesforce_product_id?.trim()
         ? sfInventoryByProduct.get(row.salesforce_product_id.trim()) ?? null
