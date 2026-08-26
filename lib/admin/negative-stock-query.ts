@@ -13,10 +13,22 @@ function one<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value
 }
 
+type ShortagePackageJoin = {
+  id: string
+  name: string
+  trade_price: number | null
+  location: string | null
+  currency?: string | null
+  races:
+    | { name: string; season: number | null; event_date: string | null }
+    | Array<{ name: string; season: number | null; event_date: string | null }>
+    | null
+}
+
 export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
   noStore()
   const supabase = await createClient()
-  const { data, error } = await supabase
+  const { data: sourcingData } = await supabase
     .from("sourcing_shortages")
     .select(
       `
@@ -29,9 +41,25 @@ export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
     .in("status", [...NEGATIVE_STOCK_OPEN_STATUSES])
     .order("created_at", { ascending: false })
 
-  if (error || !data) return []
+  const { data: historicalData } = await supabase
+    .from("inventory_shortages")
+    .select(
+      `
+      id, deal_id, deal_line_item_id, package_id, quantity, status, created_at, note,
+      packages(id, name, trade_price, location, currency, races(name, season, event_date))
+    `,
+    )
+    .eq("shortage_type", "historical_reconciliation")
+    .eq("status", "open")
+    .order("created_at", { ascending: false })
 
-  const dealIds = [...new Set(data.map((row) => row.deal_id).filter(Boolean))] as string[]
+  const dealIds = [
+    ...new Set(
+      [...(sourcingData ?? []), ...(historicalData ?? [])]
+        .map((row) => row.deal_id)
+        .filter(Boolean),
+    ),
+  ] as string[]
   const { data: deals } = dealIds.length
     ? await supabase
         .from("deals")
@@ -77,32 +105,9 @@ export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
     }),
   )
 
-  return data.map((row) => {
+  const brokeredRows: NegativeStockRow[] = (sourcingData ?? []).map((row) => {
     const pkg = one(
-      row.packages as
-        | {
-            id: string
-            name: string
-            trade_price: number | null
-            location: string | null
-            races: { name: string; season: number | null; event_date: string | null } | Array<{
-              name: string
-              season: number | null
-              event_date: string | null
-            }> | null
-          }
-        | Array<{
-            id: string
-            name: string
-            trade_price: number | null
-            location: string | null
-            races: { name: string; season: number | null; event_date: string | null } | Array<{
-              name: string
-              season: number | null
-              event_date: string | null
-            }> | null
-          }>
-        | null,
+      row.packages as ShortagePackageJoin | ShortagePackageJoin[] | null,
     )
     const race = one(pkg?.races)
     const supplier = one(row.suppliers as { id: string; name: string } | { id: string; name: string }[] | null)
@@ -130,6 +135,7 @@ export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
       status: (NEGATIVE_STOCK_OPEN_STATUSES.includes(row.status as NegativeStockStatus)
         ? row.status
         : "open") as NegativeStockStatus,
+      reason: "brokered" as const,
       createdAt: row.created_at,
       note: row.note,
       eventName,
@@ -143,4 +149,44 @@ export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
       ownerProfileId: deal?.ownerProfileId ?? null,
     }
   })
+
+  const historicalRows: NegativeStockRow[] = (historicalData ?? []).map((row) => {
+    const pkg = one(row.packages as ShortagePackageJoin | ShortagePackageJoin[] | null)
+    const race = one(pkg?.races)
+    const deal = row.deal_id ? dealMap.get(String(row.deal_id)) : null
+    const line =
+      deal?.lines.find((item) => item.id === row.deal_line_item_id) ??
+      deal?.lines.find((item) => item.package_id === row.package_id) ??
+      null
+    return {
+      id: String(row.id),
+      dealId: row.deal_id ? String(row.deal_id) : null,
+      packageId: String(row.package_id),
+      quantity: Number(row.quantity ?? 0),
+      unitCost: Number(line?.expected_unit_cost ?? 0),
+      unitSale: Number(line?.unit_sale_price ?? pkg?.trade_price ?? 0),
+      currency: pkg?.currency || "USD",
+      supplierId: null,
+      supplierName: null,
+      supplierQuoteAt: null,
+      quoteFresh: false,
+      status: "open",
+      reason: "historical_reconciliation",
+      createdAt: String(row.created_at),
+      note: row.note,
+      eventName: race?.name ? eventSeasonLabel(race.name, race.season) : "Event to reconcile",
+      eventDate: race?.event_date ?? null,
+      location: pkg?.location ?? null,
+      packageName: pkg?.name ?? "Package",
+      dealReference:
+        deal?.reference ??
+        (row.deal_id ? `D-${String(row.deal_id).slice(0, 8).toUpperCase()}` : null),
+      accountId: deal?.accountId ?? null,
+      accountName: deal?.accountName ?? null,
+      ownerName: deal?.ownerName ?? null,
+      ownerProfileId: deal?.ownerProfileId ?? null,
+    }
+  })
+
+  return [...historicalRows, ...brokeredRows]
 }

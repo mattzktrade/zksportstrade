@@ -1,6 +1,6 @@
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { getAdminCatalogListRows } from "@/lib/admin/queries"
-import { getNativePackageAvailability } from "@/lib/inventory/ledger"
+import { adminPackageSellable } from "@/lib/inventory/effective-availability"
 import { getCrmAccountOptions } from "@/lib/crm/deals"
 import { getSuppliers } from "@/lib/inventory/suppliers"
 import {
@@ -12,21 +12,23 @@ export const dynamic = "force-dynamic"
 
 export default async function InventorySalesListPage() {
   await requireAdmin()
-  const [rows, availabilityRows, accountOptions, suppliers] = await Promise.all([
+  const [rows, accountOptions, suppliers] = await Promise.all([
     getAdminCatalogListRows(),
-    getNativePackageAvailability(),
     getCrmAccountOptions(),
     getSuppliers(),
   ])
   const nativeAvailability: Record<string, InventoryAvailabilityPresentation> = {}
-  for (const row of availabilityRows) {
-    nativeAvailability[row.package_id] = {
-      // Deal reservation RPCs also increment package_inventory.qty_held, so the
-      // compatibility sellable figure already includes them. Do not subtract twice.
-      sellable: Math.max(0, row.legacy_sellable),
-      activeReservations: row.active_reservations,
-      openShortageQty: row.open_shortage_qty,
-      isLegacyShell: row.is_legacy_shell,
+  for (const row of rows) {
+    nativeAvailability[row.id] = {
+      sellable: adminPackageSellable(row),
+      activeReservations: row.canonical_availability?.reserved ?? row.inventory?.qty_held ?? 0,
+      openShortageQty: row.canonical_availability?.shortage ?? 0,
+      bought: row.canonical_availability?.bought ?? row.layer_units_purchased ?? 0,
+      committed: row.canonical_availability?.committed ?? row.sales_breakdown.total,
+      historicalShortageQty: row.canonical_availability?.historicalShortage ?? 0,
+      brokeredShortageQty: row.canonical_availability?.brokeredShortage ?? 0,
+      canonical: Boolean(row.canonical_availability),
+      isLegacyShell: Boolean(row.shell_parent_package_id),
     }
   }
 

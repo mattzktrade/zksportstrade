@@ -18,8 +18,12 @@ import type { PurchaseOrderRow } from "@/lib/admin/purchase-orders"
 import type { LinkedInventoryPackage, LinkedInventoryShellPackage } from "@/lib/admin/linked-inventory"
 import type { PackageSalesBreakdown } from "@/lib/admin/package-sales-breakdown"
 import {
+  linkedPoolAttributedPipeline,
+  linkedPoolAttributedSold,
   linkedPoolSellableForPackage,
+  packageClosedWonUnits,
   salesforceClosedWonSold,
+  unsignedPipelinePlaces,
   type LinkedSellableMember,
 } from "@/lib/admin/package-sales-breakdown"
 import { resolveSoldByCostLayer, soldMapFromRecord } from "@/lib/inventory/sold-by-cost-layer"
@@ -34,6 +38,7 @@ type Props = {
   packageCurrency: string
   packageName: string
   packageDuration?: string | null
+  eventDate?: string | null
   /** Optional sale price for the package, used to preview margin against weighted cost. */
   salePrice: number | null
   layers: CostLayerRow[]
@@ -99,6 +104,7 @@ export function PackageCostLayers({
   packageCurrency,
   packageName,
   packageDuration = null,
+  eventDate = null,
   salePrice,
   layers,
   salesBreakdown,
@@ -204,86 +210,66 @@ export function PackageCostLayers({
     return fromLayers > 0 ? fromLayers : Math.max(0, Math.floor(qtyAvailable))
   }, [stockTotal, displayLayers, qtyAvailable])
 
+  const linkedMembers: LinkedSellableMember[] = useMemo(
+    () =>
+      linkedPackages.map((p) => ({
+        id: p.id,
+        duration: p.duration,
+        breakdown: p.id === packageId ? salesBreakdown : p.sales_breakdown,
+      })),
+    [linkedPackages, packageId, salesBreakdown],
+  )
+
   /**
-   * Closed-won + portal/Wix sold attributed to THIS package's Stock Purchased ledger.
-   * Linked day packages share the 3-day cost layers but only attribute:
-   *   - day: 3-day sales + that day's sales (Fri/Sat ignore Sunday)
-   *   - 3-day: all linked non-shell sales (pool)
-   * Matches Salesforce Stock Source Quantity Sold.
+   * Closed-won + portal/Wix sold on this package's Stock Purchased ledger.
+   * Same figure as the Inventory Sold box: overlapping linked SKUs share the
+   * 3-day purchase, so we use pool remaining (Sunday + 2-day), not the sum of
+   * every Places Sold row.
    */
   const attributedLedgerSold = useMemo(() => {
-    const soldOf = (b: PackageSalesBreakdown) =>
-      salesforceClosedWonSold(b) +
-      Math.max(0, Math.floor(b.wix)) +
-      Math.max(0, Math.floor(b.tradePortal))
-
-    const ownSold = soldOf(salesBreakdown)
+    const ownSold = packageClosedWonUnits(salesBreakdown)
     if (linkedPackages.length <= 1) return ownSold
+    return linkedPoolAttributedSold({
+      stock: resolvedStockTotal,
+      targetId: packageId,
+      targetDuration: packageDuration ?? null,
+      members: linkedMembers,
+    })
+  }, [
+    salesBreakdown,
+    linkedPackages.length,
+    resolvedStockTotal,
+    packageId,
+    packageDuration,
+    linkedMembers,
+  ])
 
-    const dur = (packageDuration ?? "").trim()
-    const threeDay = linkedPackages.find((p) => (p.duration ?? "").trim() === "3_day")
-    const threeDaySold = threeDay
-      ? soldOf(threeDay.id === packageId ? salesBreakdown : threeDay.sales_breakdown)
-      : 0
-
-    if (dur === "3_day") {
-      let total = 0
-      for (const p of linkedPackages) {
-        total += soldOf(p.id === packageId ? salesBreakdown : p.sales_breakdown)
-      }
-      return total
-    }
-    if (LINKED_DAY_DURATIONS.has(dur) || dur === "2_day") {
-      return threeDaySold + ownSold
-    }
-    return ownSold
-  }, [salesBreakdown, linkedPackages, packageId, packageDuration])
-
-  /** Open SF pipeline attributed like Sold — holds Remaining but is not Quantity Sold. */
+  /** Signed pipeline that reduces this package's Sellable — matches Left to Sellable. */
   const attributedLedgerPipeline = useMemo(() => {
-    const openOf = (b: PackageSalesBreakdown) =>
-      Math.max(0, Math.floor(b.salesforceOpenPipeline))
-
-    const ownOpen = openOf(salesBreakdown)
+    const ownOpen = Math.max(0, Math.floor(salesBreakdown.salesforceOpenPipeline))
     if (linkedPackages.length <= 1) return ownOpen
-
-    const dur = (packageDuration ?? "").trim()
-    const threeDay = linkedPackages.find((p) => (p.duration ?? "").trim() === "3_day")
-    const threeDayOpen = threeDay
-      ? openOf(threeDay.id === packageId ? salesBreakdown : threeDay.sales_breakdown)
-      : 0
-
-    if (dur === "3_day") {
-      let total = 0
-      for (const p of linkedPackages) {
-        total += openOf(p.id === packageId ? salesBreakdown : p.sales_breakdown)
-      }
-      return total
-    }
-    if (LINKED_DAY_DURATIONS.has(dur) || dur === "2_day") {
-      return threeDayOpen + ownOpen
-    }
-    return ownOpen
-  }, [salesBreakdown, linkedPackages, packageId, packageDuration])
+    return linkedPoolAttributedPipeline({
+      stock: resolvedStockTotal,
+      targetId: packageId,
+      targetDuration: packageDuration ?? null,
+      members: linkedMembers,
+    })
+  }, [
+    salesBreakdown,
+    linkedPackages.length,
+    resolvedStockTotal,
+    packageId,
+    packageDuration,
+    linkedMembers,
+  ])
 
   const soldByLayerId = useMemo(() => {
-    // FIFO leftover only; ignore shared quantity_remaining so Fri/Sat
-    // don't inherit Sunday's supplier split from the 3-day ledger.
-    const sharedLinkedLedger =
-      linkedPackages.length > 1 &&
-      ((packageDuration && LINKED_DAY_DURATIONS.has(packageDuration.trim())) ||
-        packageDuration?.trim() === "3_day" ||
-        packageDuration?.trim() === "2_day")
-    const consumptionsByLayer = sharedLinkedLedger
-      ? new Map(displayLayers.map((l) => [l.id, 0]))
-      : undefined
     return resolveSoldByCostLayer({
       layers: displayLayers,
-      consumptionsByLayer,
       fulfilmentSoldByLayer: soldMapFromRecord(fulfilmentSoldByLayer),
       totalPackageSold: attributedLedgerSold,
     })
-  }, [displayLayers, attributedLedgerSold, linkedPackages.length, packageDuration, fulfilmentSoldByLayer])
+  }, [displayLayers, attributedLedgerSold, fulfilmentSoldByLayer])
 
   /** Remaining after closed-won Sold and open SF pipeline (matches Sellable). */
   const leftByLayerId = useMemo(() => {
@@ -341,16 +327,6 @@ export function PackageCostLayers({
   }, [grossUnit, salePrice])
 
   const isLinkedGroup = linkedPackages.length > 1
-
-  const linkedMembers: LinkedSellableMember[] = useMemo(
-    () =>
-      linkedPackages.map((p) => ({
-        id: p.id,
-        duration: p.duration,
-        breakdown: p.id === packageId ? salesBreakdown : p.sales_breakdown,
-      })),
-    [linkedPackages, packageId, salesBreakdown],
-  )
 
   const packageSalesRows = useMemo(() => {
     type Row = {
@@ -735,7 +711,7 @@ export function PackageCostLayers({
                     {soldCount(salesforceClosedWonSold(row.salesBreakdown))}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
-                    {soldCount(Math.max(0, Math.floor(row.salesBreakdown.salesforceOpenPipeline)))}
+                    {soldCount(unsignedPipelinePlaces(row.salesBreakdown))}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {soldCount(
@@ -759,6 +735,10 @@ export function PackageCostLayers({
           </tbody>
         </table>
         </div>
+        <p className="text-[10px] text-muted-foreground">
+          Pipeline is open deals before the booking form is signed. Those places stay visible
+          here and do not reduce Sellable. Signed contracts hold stock even before payment.
+        </p>
       </div>
 
       <div className="space-y-2">
@@ -777,8 +757,9 @@ export function PackageCostLayers({
           </p>
         ) : (
           <p className="text-[10px] text-muted-foreground">
-            Sold is portal, website, and offline deals. Left also reserves open pipeline so it matches
-            Sellable. Pipeline does not increase Sold until the deal is confirmed.
+            Sold is portal, website, and signed offline deals (including unpaid). Left follows
+            those held units so it matches Sellable. Proposal and unsigned deals do not reduce
+            Sellable — use a hold if the client asks you to keep stock.
           </p>
         )}
         <div className="rounded-lg border border-border overflow-x-auto">

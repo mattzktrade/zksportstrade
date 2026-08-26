@@ -1,6 +1,10 @@
 import { notFound } from "next/navigation"
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { getAdminCatalogListRows } from "@/lib/admin/queries"
+import {
+  adminPackageNetQuantity,
+  adminPackageSellable,
+} from "@/lib/inventory/effective-availability"
 import { getCrmAccountOptions } from "@/lib/crm/deals"
 import { getDealDetailPageData } from "@/lib/crm/deal-detail"
 import { getSalesStaffOptions } from "@/lib/crm/leads"
@@ -36,7 +40,8 @@ export default async function AdminDealDetailPage({
       packageName: row.name,
       price: row.trade_price,
       currency: row.currency || "USD",
-      stockLeft: Number(row.inventory?.qty_available ?? 0) - Number(row.inventory?.qty_held ?? 0),
+      stockLeft: adminPackageSellable(row),
+      netStock: adminPackageNetQuantity(row),
     }))
     .sort((a, b) => a.label.localeCompare(b.label))
 

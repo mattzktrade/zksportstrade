@@ -12,6 +12,7 @@ import {
 } from "@/lib/crm/account-bulk-upload"
 import { parseAccountKinds, primaryAccountType } from "@/lib/crm/account-kinds"
 import { ACCOUNT_SOURCES, type AccountSource } from "@/lib/crm/lead-types"
+import { fetchAllRows } from "@/lib/supabase/fetch-all-rows"
 
 type PreviewResult =
   | {
@@ -118,9 +119,19 @@ export async function applyAccountBulkUpload(input: {
     return { ok: false, message: "There are no valid rows to import." }
   }
 
-  const { data: existingAccounts, error: accountLoadError } = await gate.supabase
-    .from("crm_accounts")
-    .select("id, name, email, phone, owner_profile_id")
+  const { data: existingAccounts, error: accountLoadError } = await fetchAllRows<{
+    id: string
+    name: string
+    email: string | null
+    phone: string | null
+    owner_profile_id: string | null
+  }>((from, to) =>
+    gate.supabase
+      .from("crm_accounts")
+      .select("id, name, email, phone, owner_profile_id")
+      .order("id")
+      .range(from, to),
+  )
   if (accountLoadError) return { ok: false, message: accountLoadError.message }
 
   const accountsByKey = new Map<
@@ -136,9 +147,18 @@ export async function applyAccountBulkUpload(input: {
     })
   }
 
-  const { data: existingContacts, error: contactLoadError } = await gate.supabase
-    .from("crm_contacts")
-    .select("id, account_id, full_name, email")
+  const { data: existingContacts, error: contactLoadError } = await fetchAllRows<{
+    id: string
+    account_id: string
+    full_name: string
+    email: string | null
+  }>((from, to) =>
+    gate.supabase
+      .from("crm_contacts")
+      .select("id, account_id, full_name, email")
+      .order("id")
+      .range(from, to),
+  )
   if (contactLoadError) return { ok: false, message: contactLoadError.message }
 
   const contactsByAccount = new Map<string, Array<{ name: string; email: string | null }>>()

@@ -30,6 +30,7 @@ import {
   Warehouse,
   CalendarDays,
   TrendingUp,
+  CircleHelp,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useEffect, useState } from "react"
@@ -82,6 +83,7 @@ const navigation: NavItem[] = [
   { name: "Operations", href: "/admin/operations", icon: Wrench },
   { name: "Finance", href: "/admin/finance", icon: CircleDollarSign },
   { name: "Marketing", icon: Megaphone, disabled: true },
+  { name: "Help", href: "/admin/help", icon: CircleHelp },
   { name: "Settings", href: "/admin/settings", icon: Settings },
 ]
 
@@ -104,6 +106,7 @@ function adminPageTitle(pathname: string): string {
   if (pathname.startsWith("/admin/booking-requests")) return "Paddock requests"
   if (pathname.startsWith("/admin/agents")) return "Agents"
   if (pathname.startsWith("/admin/place-order")) return "Place order"
+  if (pathname.startsWith("/admin/help")) return "Help"
   if (pathname.startsWith("/admin/settings") || pathname.startsWith("/admin/integrations")) return "Settings"
   return "Admin"
 }

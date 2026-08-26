@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { Plus, Trash2 } from "lucide-react"
+import { searchAdminProductOptions } from "@/lib/admin/option-search"
 import { cn } from "@/lib/utils"
 
 export type DealBasketProduct = {
@@ -12,6 +13,7 @@ export type DealBasketProduct = {
   price: number | null
   currency: string
   stockLeft: number
+  netStock?: number
 }
 
 export type DealBasketSupplier = {
@@ -19,15 +21,38 @@ export type DealBasketSupplier = {
   name: string
 }
 
+export type DealNumericField = number | ""
+
 export type DealBasketLine = {
   key: string
   packageId: string
-  quantity: number
-  unitPrice: number
+  quantity: DealNumericField
+  unitPrice: DealNumericField
   sourcingMode: "owned" | "brokered"
   supplierId: string
   expectedUnitCost: number | null
   supplierQuoteAt: string
+}
+
+function parseDealNumericField(value: string): DealNumericField {
+  if (value.trim() === "") return ""
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : ""
+}
+
+export function numericDealField(value: DealNumericField): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0
+}
+
+export function isPricedDealBasketLine(line: DealBasketLine): boolean {
+  return (
+    typeof line.quantity === "number" &&
+    Number.isFinite(line.quantity) &&
+    line.quantity >= 1 &&
+    typeof line.unitPrice === "number" &&
+    Number.isFinite(line.unitPrice) &&
+    line.unitPrice >= 0
+  )
 }
 
 function localDateTimeValue(date = new Date()): string {
@@ -62,13 +87,10 @@ export function DealLineBasket({
   compact?: boolean
 }) {
   const [search, setSearch] = useState("")
-  const results = useMemo(() => {
-    const query = search.trim().toLowerCase()
-    if (!query) return []
-    return products
-      .filter((product) => product.label.toLowerCase().includes(query))
-      .slice(0, 8)
-  }, [lines, products, search])
+  const results = useMemo(
+    () => searchAdminProductOptions(products, search),
+    [products, search],
+  )
 
   function updateLine(key: string, patch: Partial<DealBasketLine>) {
     onChange(lines.map((line) => line.key === key ? { ...line, ...patch } : line))
@@ -85,10 +107,12 @@ export function DealLineBasket({
         {lines.map((line, index) => {
           const product = products.find((option) => option.id === line.packageId)
           if (!product) return null
+          const quantity = numericDealField(line.quantity)
+          const unitPrice = numericDealField(line.unitPrice)
           const expectedProfit =
             line.expectedUnitCost == null
               ? null
-              : (Number(line.unitPrice) - Number(line.expectedUnitCost)) * Number(line.quantity)
+              : (unitPrice - Number(line.expectedUnitCost)) * quantity
           return (
             <div key={line.key} className="rounded-lg border border-slate-200 bg-white p-3">
               <div className="flex items-start justify-between gap-3">
@@ -106,11 +130,26 @@ export function DealLineBasket({
               <div className={cn("mt-3 grid gap-2", compact ? "grid-cols-2" : "md:grid-cols-4")}>
                 <label className={compact ? "text-[8px]" : "text-xs"}>
                   <span className="mb-1 block text-slate-500">Quantity</span>
-                  <input type="number" min={1} value={line.quantity} onChange={(event) => updateLine(line.key, { quantity: Math.max(1, Number(event.target.value) || 1) })} className="h-9 w-full rounded-md border px-2" />
+                  <input
+                    type="number"
+                    min={1}
+                    value={line.quantity}
+                    onFocus={(event) => event.currentTarget.select()}
+                    onChange={(event) => updateLine(line.key, { quantity: parseDealNumericField(event.target.value) })}
+                    className="h-9 w-full rounded-md border px-2"
+                  />
                 </label>
                 <label className={compact ? "text-[8px]" : "text-xs"}>
                   <span className="mb-1 block text-slate-500">Sale price per person</span>
-                  <input type="number" min={0} step="0.01" value={line.unitPrice} onChange={(event) => updateLine(line.key, { unitPrice: Math.max(0, Number(event.target.value) || 0) })} className="h-9 w-full rounded-md border px-2" />
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={line.unitPrice}
+                    onFocus={(event) => event.currentTarget.select()}
+                    onChange={(event) => updateLine(line.key, { unitPrice: parseDealNumericField(event.target.value) })}
+                    className="h-9 w-full rounded-md border px-2"
+                  />
                 </label>
                 <label className={compact ? "text-[8px]" : "text-xs"}>
                   <span className="mb-1 block text-slate-500">Stock source</span>
@@ -131,11 +170,16 @@ export function DealLineBasket({
                     <option value="brokered">Brokered stock</option>
                   </select>
                 </label>
-                <div className={cn("rounded-md px-2 py-1.5", product.stockLeft >= line.quantity ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>
+                <div className={cn("rounded-md px-2 py-1.5", product.stockLeft >= quantity ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>
                   <p className={compact ? "text-[8px]" : "text-xs"}>Advertised: {product.currency} {Number(product.price ?? 0).toLocaleString()}</p>
                   <p className={cn("font-semibold", compact ? "text-[8px]" : "text-xs")}>
                     {product.stockLeft} in stock
                   </p>
+                  {product.netStock != null && product.netStock < 0 ? (
+                    <p className={compact ? "text-[8px]" : "text-xs"}>
+                      Net stock {product.netStock} — use brokered stock or add a purchase
+                    </p>
+                  ) : null}
                 </div>
               </div>
 
@@ -174,13 +218,29 @@ export function DealLineBasket({
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search another event or product…" className={cn("h-9 flex-1 rounded-md border bg-white px-3", compact ? "text-[9px]" : "text-sm")} />
         </div>
         {results.length > 0 ? (
-          <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-md border bg-white p-1 shadow-xl">
+          <div className="absolute z-30 mt-1 max-h-80 w-full overflow-y-auto rounded-md border bg-white p-1 shadow-xl">
             {results.map((product) => (
               <button key={product.id} type="button" onClick={() => addProduct(product)} className="block w-full rounded px-3 py-2 text-left hover:bg-slate-50">
                 <span className={cn("block font-medium", compact ? "text-[9px]" : "text-sm")}>{product.packageName}</span>
-                <span className={cn("text-slate-500", compact ? "text-[8px]" : "text-xs")}>{product.eventName} · {product.stockLeft} available</span>
+                <span className={cn("text-slate-500", compact ? "text-[8px]" : "text-xs")}>
+                  {product.eventName} · {product.stockLeft} available
+                  {product.netStock != null && product.netStock < 0
+                    ? ` · net stock ${product.netStock}`
+                    : ""}
+                </span>
               </button>
             ))}
+            {results.length > 6 ? (
+              <p className={cn("px-3 py-1.5 text-slate-400", compact ? "text-[8px]" : "text-[10px]")}>
+                {results.length} matching products — scroll or type more to narrow
+              </p>
+            ) : null}
+          </div>
+        ) : search.trim() ? (
+          <div className="absolute z-30 mt-1 w-full rounded-md border bg-white p-1 shadow-xl">
+            <p className={cn("px-3 py-2 text-slate-400", compact ? "text-[8px]" : "text-sm")}>
+              No matching products
+            </p>
           </div>
         ) : null}
       </div>

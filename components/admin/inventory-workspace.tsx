@@ -29,6 +29,11 @@ import {
 } from "@/app/(admin)/admin/catalog/inventory-actions"
 import { saveSalesListCrmParty } from "@/app/(admin)/admin/inventory/sales-list/actions"
 import type { AdminPackageRow } from "@/lib/admin/queries"
+import {
+  adminPackageNetQuantity,
+  adminPackageSellable,
+  adminPackageSoldQuantity,
+} from "@/lib/inventory/effective-availability"
 import type { CrmAccountOption } from "@/lib/crm/deal-types"
 import { cn } from "@/lib/utils"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
@@ -37,6 +42,8 @@ import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filter
 import {
   createDealBasketLine,
   DealLineBasket,
+  isPricedDealBasketLine,
+  numericDealField,
   type DealBasketLine,
   type DealBasketSupplier,
 } from "@/components/admin/deal-line-basket"
@@ -62,6 +69,11 @@ export type InventoryAvailabilityPresentation = {
   sellable: number
   activeReservations: number
   openShortageQty: number
+  bought?: number
+  committed?: number
+  historicalShortageQty?: number
+  brokeredShortageQty?: number
+  canonical?: boolean
   isLegacyShell: boolean
 }
 
@@ -75,27 +87,33 @@ function money(value: number | null, currency: string): string {
 }
 
 function liveQty(row: AdminPackageRow): number {
-  return Number(row.inventory?.qty_available ?? 0)
+  return adminPackageNetQuantity(row)
 }
 
 function heldQty(row: AdminPackageRow): number {
+  if (row.canonical_availability) return Math.max(0, Math.floor(row.canonical_availability.reserved))
   return Number(row.inventory?.qty_held ?? 0)
 }
 
 function soldQty(row: AdminPackageRow): number {
-  const local = Number(row.sales_breakdown?.total ?? 0)
-  const salesforce = Number(row.salesforce_inventory?.quantitySold ?? 0)
-  return Math.max(0, Math.floor(Math.max(local, salesforce)))
+  return adminPackageSoldQuantity(row)
 }
 
 function boughtQty(row: AdminPackageRow): number {
-  const purchased = Number(row.layer_units_purchased ?? 0)
-  if (purchased > 0) return purchased
-  const salesforceStock = row.salesforce_inventory?.stock
-  if (salesforceStock != null && Number.isFinite(salesforceStock) && salesforceStock > 0) {
-    return Math.floor(salesforceStock)
-  }
-  return liveQty(row) + soldQty(row)
+  // Purchased stock is the sum of recorded cost layers only. Falling back to
+  // Salesforce or live+sold hides missing purchase orders and invents supply.
+  return Math.max(
+    0,
+    Math.floor(Number(row.canonical_availability?.bought ?? row.layer_units_purchased ?? 0)),
+  )
+}
+
+function shortageQty(row: AdminPackageRow, native?: InventoryAvailabilityPresentation): number {
+  return Math.max(
+    native?.openShortageQty ?? 0,
+    row.canonical_availability?.shortage ?? 0,
+    soldQty(row) - boughtQty(row),
+  )
 }
 
 function downloadRows(rows: AdminPackageRow[], sharedGroupIds: Set<string>): void {
@@ -234,9 +252,11 @@ export function InventoryWorkspace({
           label: `${row.race_name} — ${row.name}`,
           price: row.trade_price,
           currency: row.currency || "USD",
-          stockLeft:
-            nativeAvailability[row.id]?.sellable ??
-            Math.max(0, Number(row.inventory?.qty_available ?? 0) - Number(row.inventory?.qty_held ?? 0)),
+          stockLeft: Math.min(
+            nativeAvailability[row.id]?.sellable ?? Number.POSITIVE_INFINITY,
+            adminPackageSellable(row),
+          ),
+          netStock: liveQty(row),
         })),
     [catalogRows, nativeAvailability],
   )
@@ -294,8 +314,10 @@ export function InventoryWorkspace({
   const rows = useMemo(() => {
     const query = search.trim().toLowerCase()
     const filtered = catalogRows.filter((row) => {
-      const available = nativeAvailability[row.id]?.sellable ??
-        Math.max(0, Number(row.inventory?.qty_available ?? 0) - Number(row.inventory?.qty_held ?? 0))
+      const available = Math.min(
+        nativeAvailability[row.id]?.sellable ?? Number.POSITIVE_INFINITY,
+        adminPackageSellable(row),
+      )
       if (stockFilter === "available" && available <= 0) return false
       if (stockFilter === "low" && (available <= 0 || available > 10)) return false
       if (eventTimingFilter === "future" && !isCurrentOrFutureEvent(row, today)) return false
@@ -318,8 +340,10 @@ export function InventoryWorkspace({
     })
     return filtered.sort((a, b) => {
       const available = (row: AdminPackageRow) =>
-        nativeAvailability[row.id]?.sellable ??
-        Math.max(0, Number(row.inventory?.qty_available ?? 0) - Number(row.inventory?.qty_held ?? 0))
+        Math.min(
+          nativeAvailability[row.id]?.sellable ?? Number.POSITIVE_INFINITY,
+          adminPackageSellable(row),
+        )
       const comparison =
         sortKey === "product"
           ? a.name.localeCompare(b.name)
@@ -386,14 +410,16 @@ export function InventoryWorkspace({
   ])
   const activeRows = eventScopeRows.filter((row) => !row.is_hidden)
   const lowStock = eventScopeRows.filter((row) => {
-    const available = nativeAvailability[row.id]?.sellable ??
-      Number(row.inventory?.qty_available ?? 0) - Number(row.inventory?.qty_held ?? 0)
+    const available = Math.min(
+      nativeAvailability[row.id]?.sellable ?? Number.POSITIVE_INFINITY,
+      adminPackageSellable(row),
+    )
     return available > 0 && available <= 10
   }).length
   const totalAvailable = eventScopeRows.reduce(
-    (sum, row) => sum + (
-      nativeAvailability[row.id]?.sellable ??
-      Math.max(0, Number(row.inventory?.qty_available ?? 0) - Number(row.inventory?.qty_held ?? 0))
+    (sum, row) => sum + Math.min(
+      nativeAvailability[row.id]?.sellable ?? Number.POSITIVE_INFINITY,
+      adminPackageSellable(row),
     ),
     0,
   )
@@ -454,6 +480,10 @@ export function InventoryWorkspace({
       toast.error("Select an existing contact or add a new contact name.")
       return
     }
+    if (dealLines.some((line) => !isPricedDealBasketLine(line))) {
+      toast.error("Check the quantity and sale price for every product.")
+      return
+    }
     startTransition(async () => {
       const party = await saveSalesListCrmParty({
         accountId: selectedDealAccount?.id ?? null,
@@ -472,8 +502,8 @@ export function InventoryWorkspace({
         contactId: party.contactId,
         lines: dealLines.map((line) => ({
           packageId: line.packageId,
-          quantity: line.quantity,
-          unitPrice: line.unitPrice,
+          quantity: numericDealField(line.quantity),
+          unitPrice: numericDealField(line.unitPrice),
           sourcingMode: line.sourcingMode,
           supplierId: line.supplierId || null,
           expectedUnitCost: line.expectedUnitCost,
@@ -737,9 +767,9 @@ export function InventoryWorkspace({
               </thead>
               <tbody className="divide-y divide-[#f0f1f3] text-[9px]">
                 {rows.map((row) => {
-                  const available = nativeAvailability[row.id]?.sellable ?? Math.max(
-                    0,
-                    Number(row.inventory?.qty_available ?? 0) - Number(row.inventory?.qty_held ?? 0),
+                  const available = Math.min(
+                    nativeAvailability[row.id]?.sellable ?? Number.POSITIVE_INFINITY,
+                    adminPackageSellable(row),
                   )
                   const availability = nativeAvailability[row.id]
                   const selectedRow = selected?.id === row.id
@@ -774,9 +804,11 @@ export function InventoryWorkspace({
                           <StatusPill tone={row.inventory_group_id && sharedGroupIds.has(row.inventory_group_id) ? "purple" : "green"}>
                             {row.inventory_group_id && sharedGroupIds.has(row.inventory_group_id) ? "Shared" : "Standalone"}
                           </StatusPill>
-                          {mode === "sales" && availability ? <StatusPill tone="blue">Native</StatusPill> : null}
+                          {mode === "sales" && availability ? (
+                            <StatusPill tone="blue">{availability.canonical ? "Allocated" : "Compatibility"}</StatusPill>
+                          ) : null}
                           {availability?.openShortageQty ? (
-                            <StatusPill tone="amber">{availability.openShortageQty} sourcing</StatusPill>
+                            <StatusPill tone="amber">{availability.openShortageQty} shortage</StatusPill>
                           ) : null}
                         </div>
                       </td>
@@ -820,9 +852,9 @@ export function InventoryWorkspace({
             </AdminDesktopTable>
             <AdminMobileList>
               {rows.map((row) => {
-                const available = nativeAvailability[row.id]?.sellable ?? Math.max(
-                  0,
-                  Number(row.inventory?.qty_available ?? 0) - Number(row.inventory?.qty_held ?? 0),
+                const available = Math.min(
+                  nativeAvailability[row.id]?.sellable ?? Number.POSITIVE_INFINITY,
+                  adminPackageSellable(row),
                 )
                 return (
                   <button
@@ -943,7 +975,7 @@ export function InventoryWorkspace({
                       <dt className="text-[#93979f]">Quantity available</dt>
                       <dd className="font-semibold">
                         {nativeAvailability[selected.id]?.sellable ??
-                          Math.max(0, liveQty(selected) - heldQty(selected))}
+                          adminPackageSellable(selected)}
                       </dd>
                     </>
                   )}
@@ -1021,7 +1053,7 @@ export function InventoryWorkspace({
 
                 <div className="border-t border-[#eceef1] pt-3">
                   <h3 className="mb-2 text-[9px] font-semibold text-[#555961]">Stock overview</h3>
-                  <div className={cn("grid gap-2", mode === "manage" ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3")}>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {(mode === "manage"
                       ? [
                           ["Live qty", liveQty(selected)],
@@ -1030,16 +1062,17 @@ export function InventoryWorkspace({
                           ["Sold", soldQty(selected)],
                         ]
                       : [
+                          ["Bought", nativeAvailability[selected.id]?.bought ?? boughtQty(selected)],
                           [
                             "Available",
                             nativeAvailability[selected.id]?.sellable ??
-                              Math.max(0, liveQty(selected) - heldQty(selected)),
+                              adminPackageSellable(selected),
                           ],
                           [
                             "Reserved",
                             nativeAvailability[selected.id]?.activeReservations ?? heldQty(selected),
                           ],
-                          ["Live", liveQty(selected)],
+                          ["Committed", nativeAvailability[selected.id]?.committed ?? soldQty(selected)],
                         ]
                     ).map(([label, value]) => (
                       <div key={String(label)} className="rounded-md bg-[#fafbfc] p-2 text-center">
@@ -1048,6 +1081,13 @@ export function InventoryWorkspace({
                       </div>
                     ))}
                   </div>
+                  {shortageQty(selected, nativeAvailability[selected.id]) > 0 ? (
+                    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-[8px] text-amber-800">
+                      {shortageQty(selected, nativeAvailability[selected.id])}{" "}
+                      sold place(s) are not covered by a recorded purchase. Add the missing purchase order or review
+                      the Negative Stock list.
+                    </div>
+                  ) : null}
                 </div>
 
                 {mode === "sales" ? (

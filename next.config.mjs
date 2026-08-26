@@ -72,6 +72,7 @@ const nextConfig = {
     remotePatterns: [
       { protocol: "https", hostname: "static.wixstatic.com", pathname: "/media/**" },
       { protocol: "https", hostname: "assets.quintevents.com", pathname: "/**" },
+      { protocol: "https", hostname: "*.supabase.co", pathname: "/storage/v1/object/public/**" },
     ],
   },
   async headers() {

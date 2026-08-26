@@ -26,6 +26,7 @@ function row(overrides: Partial<NegativeStockRow> = {}): NegativeStockRow {
     supplierQuoteAt: "2026-08-13T09:00:00.000Z",
     quoteFresh: true,
     status: "confirmed",
+    reason: "brokered",
     createdAt: "2026-08-01T00:00:00.000Z",
     note: null,
     eventName: "2026 British Grand Prix",
@@ -71,6 +72,7 @@ test("search and dropdown filters actually narrow the list", () => {
       search: "",
       eventNames: ["2026 British Grand Prix"],
       supplierName: "",
+      reason: "",
       urgency: "",
       assignedTo: "",
       status: "",
@@ -86,6 +88,7 @@ test("search and dropdown filters actually narrow the list", () => {
       search: "desert",
       eventNames: [],
       supplierName: "",
+      reason: "",
       urgency: "",
       assignedTo: "",
       status: "",
@@ -101,6 +104,7 @@ test("search and dropdown filters actually narrow the list", () => {
       search: "",
       eventNames: [],
       supplierName: "",
+      reason: "",
       urgency: "later",
       assignedTo: "",
       status: "",
@@ -122,6 +126,23 @@ test("sort by event date puts undated rows last when ascending", () => {
     sorted.map((item) => item.id),
     ["soon", "later", "none"],
   )
+})
+
+test("separates historical reconciliation gaps from brokered shortages", () => {
+  const rows = [
+    row({ id: "brokered", reason: "brokered" }),
+    row({ id: "historical", reason: "historical_reconciliation" }),
+  ]
+  const visible = filterNegativeStockRows(rows, {
+    search: "",
+    eventNames: [],
+    supplierName: "",
+    reason: "historical_reconciliation",
+    urgency: "",
+    assignedTo: "",
+    status: "",
+  })
+  assert.deepEqual(visible.map((item) => item.id), ["historical"])
 })
 
 test("summary counts urgent items and values from the full list", () => {
@@ -147,6 +168,7 @@ test("status labels and active-filter helper stay consistent", () => {
       search: "",
       eventNames: [],
       supplierName: "",
+      reason: "",
       urgency: "",
       assignedTo: "",
       status: "",
@@ -158,6 +180,7 @@ test("status labels and active-filter helper stay consistent", () => {
       search: "apex",
       eventNames: [],
       supplierName: "",
+      reason: "",
       urgency: "",
       assignedTo: "",
       status: "",

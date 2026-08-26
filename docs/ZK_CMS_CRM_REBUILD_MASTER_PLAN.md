@@ -1,9 +1,9 @@
 # ZK Business Platform Rebuild — Master Plan
 
-**Status:** First build ready for production deploy  
+**Status:** First-build admin complete — ready to share with the ZK team  
 **Document owner:** ZK Sports & Entertainment  
 **Created:** 11 August 2026  
-**Last updated:** 20 August 2026  
+**Last updated:** 26 August 2026  
 **Primary reference:** `docs/ZK CMS Rebuild Draft (1).pdf`  
 **Purpose:** The single source of truth for the Salesforce-to-ZK platform pivot, including scope, decisions, architecture, phases, progress, risks, testing, and outstanding questions.
 
@@ -43,10 +43,12 @@ This file must be updated throughout the rebuild:
 - `[x]` Phase 2B native booking forms and e-signature implemented (run one live two-party signing check after deploy)
 - `[x]` Phase 2C native order, Xero, payment, reminder, and cancellation automation implemented (confirm live Xero after deploy)
 - `[x]` Phase 2D first-build sales, finance, and operations queues are usable end to end, including imported deals without a native order
+- `[x]` Signed deals hold purchased stock; payment status stays independent. Supplier packing prefers one source per party.
 - `[~]` Phase 3 data cutover: imports exist; Matt is finishing imported deal and contact review. The Cutover admin tab is retired from the nav.
-- `[ ]` Phase 4 later modules skipped for now (sourcing comparisons, marketing, help, Slack/Outlook, partner API)
+- `[x]` Phase 4 help centre pulled into first-build as `/admin/help` (getting started + self-help). Other Phase 4 modules remain later: sourcing comparisons, marketing, Slack/Outlook, partner API.
 - `[x]` Phase 5 Salesforce runtime retirement: live Salesforce is off, hidden from Settings, and cron/outbox no longer call it. Historical IDs and import CSVs remain. Salesforce library files and database columns are kept.
-- `[ ]` Production deploy of this first build
+- `[x]` First-build admin is complete enough to share with the ZK team. In-app Help is the staff guide.
+- `[ ]` Production deploy of this first build (live Xero / booking-form smoke test after deploy)
 
 ---
 
@@ -95,11 +97,13 @@ Allow the team to:
 
 Rebuild the current admin area into the custom ZK CMS/CRM shown in the concept draft, beginning with the new navigation, dashboard framework, inventory, deals, and finance workflow.
 
+**First-build outcome (26 August 2026):** All three priorities are delivered in the admin product. Salesforce is not required for day-to-day work. Remaining work is production deploy, imported data review, and a live Xero / booking-form check — not more admin modules. Staff guidance lives at `/admin/help`.
+
 ---
 
 ## 3. Non-negotiable constraints
 
-1. **Local prototype first, then approved production.** The rebuild was built and checked locally. First-build production deploy is now the remaining rollout step and requires `ZK_PLATFORM_MODE=native`.
+1. **Local prototype first, then approved production.** The rebuild was built and checked locally. The first-build admin is now complete enough to share with the team. Production deploy is the remaining rollout step. Native mode is hardcoded; leftover `ZK_PLATFORM_MODE=native` is unused.
 2. **No destructive cleanup yet.** Do not delete Salesforce data, Supabase tables, columns, migrations, historical IDs, shell rows, or integration code during the prototype.
 3. **Additive database changes.** New migrations may add the native model, views, flags, and indexes. Legacy structures remain available until cutover is approved.
 4. **Salesforce must not remain operationally authoritative.** The native path must not read Salesforce to calculate stock or require Salesforce for products, deals, orders, or reporting.
@@ -177,7 +181,7 @@ Confirmed deals with:
 ### Settings
 
 - Roles and permissions by person, team, or preset role
-- Searchable guides and videos
+- Searchable in-app Help (`/admin/help`) with a getting-started guide for the team. Videos and a full knowledge base remain later work.
 - Integration status and activity for Xero, Wix, Slack, Outlook, signing provider, advertising platforms, and APIs
 - Editable templates for booking forms, finance reminders, guest communications, supplier emails, and notifications
 
@@ -366,6 +370,25 @@ Every mutation should produce an immutable ledger/audit entry:
 - Order commitment
 - Supplier allocation
 - Refund/cancellation
+
+Implementation status (24 August 2026):
+
+- `inventory_allocations` is the quantity-level source of allocation truth; `order_cost_consumptions` remains its COGS compatibility projection.
+- Allocation is lock-safe and idempotent, prefers one fulfilment block/PO/supplier, and splits FIFO only when one source cannot cover the party.
+- Owned reservations and orders are rejected when recorded purchase layers cannot cover them. Null-layer owned COGS is no longer permitted.
+- Supplier-confirmed, tickets-received, and delivered allocations are fulfilment-locked. Pending allocations may be rearranged to keep parties together.
+- Imported won-sale deficits are recorded separately as `historical_reconciliation` shortages. They are not brokered stock and do not create a supplier or cost.
+- `inventory_availability` is the canonical bought/reserved/committed/shortage/sellable read model. Portal checkout is capped by this model.
+- Historical reconciliation is previewed before application, is idempotent, and newly added purchase layers clear the oldest matching historical shortages first.
+- The rollout gate is `npm test`, `npm run build`, and `npm run test:inventory:db` after applying the migration to the target database.
+
+Implementation status (26 August 2026):
+
+- Signed, awaiting-invoice, and awaiting-payment deals hold purchased stock and can be assigned a fulfilment supplier. Payment status is independent: an unpaid signed deal is still sold stock.
+- Unsigned pipeline deals do not consume purchased layers unless an explicit hold/reservation is placed. Sending a booking form still creates a seven-day reservation.
+- Extra places on a signed deal allocate only the changed line (incremental), preferring suppliers already used on that deal when leftover stock is enough.
+- Supplier packing prefers one purchase source for a whole party where possible, packing the deal rather than each split line independently.
+- Cost-layer quantity changes keep remaining quantity in sync with reserved/committed allocations.
 
 ### Accounts, contacts, and leads
 
@@ -1044,14 +1067,14 @@ This is the operations slice needed to run confirmed work without Salesforce:
 
 ## Phase 4 — Broader platform modules
 
-These follow the immediate inventory and offline-sales priorities:
+These follow the immediate inventory and offline-sales priorities. Most remain later work. Help was pulled into the first-build so the team can use the admin without a separate handbook.
 
 - `[ ]` Sourcing requests and supplier comparisons
 - `[ ]` Deeper operations automation (templates centre, scheduled guest chasers, supplier email templates)
 - `[ ]` Campaign and ROI tracking
 - `[ ]` Targeted email campaigns
 - `[ ]` Advanced roles and permissions
-- `[ ]` Guides and help
+- `[x]` Guides and help — `/admin/help` first-build getting started + self-help (26 August 2026). Not a video knowledge base.
 - `[ ]` Integration health and activity centre
 - `[ ]` Template management
 - `[ ]` Slack and Outlook integrations
@@ -1061,7 +1084,7 @@ These follow the immediate inventory and offline-sales priorities:
 
 ## Phase 5 — Approved legacy retirement
 
-**Goal:** Take Salesforce out of the live product after the native first build is in use. Phase 4 modules are skipped.
+**Goal:** Take Salesforce out of the live product after the native first build is in use. Remaining Phase 4 modules stay skipped; Help was brought forward into the first build.
 
 **Status:** Runtime retirement done 20 August 2026. Schema and library deletion remain later, on purpose.
 
@@ -1306,9 +1329,28 @@ The first release is successful when:
 - **Decided:** Skip Phase 4 for now. Proceed with Phase 5 Salesforce retirement because Salesforce is fully replaced.
 - **Decided:** Phase 5 retires Salesforce at runtime without dropping historical columns or deleting the integration library yet. Native mode is now always on; leftover `SALESFORCE_*` credentials cannot reconnect the live product. Settings no longer shows Salesforce.
 
+### 26 August 2026
+
+- **Decided:** The first-build admin is complete enough to share with the ZK team. Remaining work is production deploy, imported deal/contact review, and a live Xero / booking-form smoke test — not more admin modules.
+- **Decided:** Pull a simple in-app Help tab into the first build (`/admin/help`): getting started for the team plus self-help on what each area does. Keep it short and practical. Videos, marketing, sourcing comparisons, Slack/Outlook, and partner API stay later.
+- **Decided:** Once both parties have signed, the deal holds purchased stock and can be assigned a fulfilment supplier. Payment status is independent — Awaiting payment still counts as sold stock.
+- **Decided:** Adding or editing a signed deal line allocates only that line. Prefer a supplier already used on the same deal when leftover stock is enough, rather than reshuffling every party on the product.
+- **Decided:** When packing purchased stock onto deals, keep a whole party on one supplier/purchase source where possible (pack the deal, not each split line).
+
 ---
 
 ## 18. Change log
+
+### 26 August 2026 — First-build admin complete; Help tab; signed-deal stock
+
+The admin first build is complete enough to share with the team. Salesforce is not part of day-to-day work.
+
+- In-app Help at `/admin/help`: getting started plus simple self-help for Dashboard, Portal, Inventory, Sales, Operations, Finance, and Settings. Marketing remains a later module.
+- Signed / awaiting-invoice / awaiting-payment deals hold purchased stock (`20260826130000_signed_deals_hold_purchased_stock.sql`). Payment status stays separate.
+- Extra places on a signed deal allocate only the changed line (`20260826160000_incremental_signed_deal_line_allocation.sql`).
+- Supplier packing prefers one source per party and packs the whole deal (`20260826140000_single_supplier_repack_allocations.sql`, `20260826150000_repack_deals_not_lines.sql`).
+- Cost-layer quantity changes keep remaining units in sync (`20260826120000_cost_layer_quantity_keeps_remaining_in_sync.sql`).
+- Staff should use Help, not this master plan, as the day-to-day user guide.
 
 ### 20 August 2026 — First build ready; operations complete; Cutover tab retired
 
@@ -1392,13 +1434,15 @@ This was the point at which finance/operations became usable on real portal and 
 
 ## 19. First-build go-live
 
-The product work for the first build is done. What is left is data review, deploy configuration, and a short live smoke test.
+The product work for the first-build admin is done, including a staff Help tab. What is left is data review, deploy configuration, and a short live smoke test.
+
+The ZK team can start using the admin now. Point them to **Help** in the left menu (`/admin/help`) rather than this master plan.
 
 ### Still to do (people / data)
 
 1. **Finish checking imported deals and contacts.** Accounts, contacts, product mapping, suppliers, and prices. This is expected and not a code blocker.
 2. **Confirm live stock on a sample of products** against what the team believes is actually left. Catalog is the source of truth; Operations leftover now follows the same sold counts.
-3. **Staff access.** Confirm Admin / Finance / Sales users can log in on production with the right permissions.
+3. **Staff access.** Confirm Admin / Finance / Sales users can log in on production with the right permissions. Point them at **Help** in the left menu before they start selling.
 4. **One live booking-form round trip** after deploy (send, client sign, ZK countersign, Xero invoice appears).
 5. **One live Xero payment webhook check** (or a known paid invoice) so Paid/Confirmed still advances.
 
@@ -1496,7 +1540,7 @@ Do **not** drop `salesforce_*` columns or import tables. Historical IDs stay rea
 
 ### Out of scope for this go-live
 
-Phase 4 modules remain later work: sourcing comparisons, marketing campaigns, help centre, Slack/Outlook, partner API. Physical deletion of Salesforce TypeScript modules and unused columns is also later work.
+Later Phase 4 modules remain out of scope: sourcing comparisons, marketing campaigns, Slack/Outlook, partner API, and a video knowledge base. Physical deletion of Salesforce TypeScript modules and unused columns is also later work. In-app Help is in scope and shipped with this first build.
 
 ---
 
@@ -1505,6 +1549,8 @@ Phase 4 modules remain later work: sourcing comparisons, marketing campaigns, he
 - `docs/ZK CMS Rebuild Draft (1).pdf`
 - `docs/INTEGRATION_MASTER_PLAN.md`
 - `docs/TEAM_PORTAL_OVERVIEW.md`
+- `/admin/help` — staff getting started and self-help (first-build)
+- `lib/admin/help-guide.ts`
 - `docs/SF_PIPELINE_STOCK_HOLDS_PLAN.md`
 - `docs/PHASE2_SALESFORCE_SETUP.md`
 - `docs/PHASE2.5_XERO_SETUP.md`
@@ -1516,6 +1562,11 @@ Phase 4 modules remain later work: sourcing comparisons, marketing campaigns, he
 - `supabase/migrations/20260811160000_native_inventory_foundation.sql`
 - `supabase/migrations/20260819120000_operations_delivery_and_deal_ops.sql`
 - `supabase/migrations/20260819170000_operations_reassign_linked_stock.sql`
+- `supabase/migrations/20260826120000_cost_layer_quantity_keeps_remaining_in_sync.sql`
+- `supabase/migrations/20260826130000_signed_deals_hold_purchased_stock.sql`
+- `supabase/migrations/20260826140000_single_supplier_repack_allocations.sql`
+- `supabase/migrations/20260826150000_repack_deals_not_lines.sql`
+- `supabase/migrations/20260826160000_incremental_signed_deal_line_allocation.sql`
 - `lib/operations/stock.ts`
 - `lib/inventory/day-capacity.ts`
 - `lib/inventory/native-availability.ts`

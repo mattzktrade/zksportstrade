@@ -310,7 +310,7 @@ export function CompanyDetailsEditor({
               <input value={city} onChange={(e) => setCity(e.target.value)} className={fieldClass} />
             </label>
             <label className={labelClass}>
-              Postcode
+              Postcode (optional)
               <input value={postcode} onChange={(e) => setPostcode(e.target.value)} className={fieldClass} />
             </label>
           </div>

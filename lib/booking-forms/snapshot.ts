@@ -166,7 +166,10 @@ export async function buildBookingFormSnapshot(
   const addressLines = [
     account.billing_address_line1,
     account.billing_address_line2,
-    [account.billing_city, account.billing_postcode].filter(Boolean).join(", "),
+    [account.billing_city, account.billing_postcode]
+      .map((value) => String(value ?? "").trim())
+      .filter(Boolean)
+      .join(", "),
     account.billing_country,
   ]
     .map((value) => String(value ?? "").trim())

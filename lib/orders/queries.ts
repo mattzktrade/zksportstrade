@@ -231,6 +231,7 @@ const ADMIN_ORDER_SELECT = `
   reference,
   agent_profile_id,
   package_id,
+  deal_id,
   status,
   guests,
   unit_price,
@@ -332,6 +333,7 @@ async function hydrateAdminOrders(rows: RawAdminOrder[]): Promise<AdminOrderList
     )
     return {
       ...(row as OrderRow),
+      deal_id: row.deal_id ? String(row.deal_id) : null,
       packages: one(row.packages),
       agent: one(row.profiles),
       invoice: one(row.invoices),

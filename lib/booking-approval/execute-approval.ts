@@ -113,7 +113,10 @@ export async function executeBookingApproval(
     )
     if (allocErr) {
       const msg = allocErr.message.toLowerCase()
-      if (msg.includes("insufficient_layer_remaining")) {
+      if (
+        msg.includes("insufficient_layer_remaining") ||
+        msg.includes("insufficient_purchased_day_capacity")
+      ) {
         return {
           ok: false,
           message:

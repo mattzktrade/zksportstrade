@@ -16,6 +16,12 @@ export type CostLayerRow = {
   purchase_order_id: string | null
   fulfilment_block_id: string | null
   supplier_id: string | null
+  day_components?: Array<{
+    day_slot: string
+    units_per_package: number
+    quantity_total: number
+    quantity_remaining: number
+  }>
 }
 
 export type CostConsumptionRow = {
@@ -60,7 +66,7 @@ export type OrderCostSummary = {
 }
 
 const COST_LAYER_COLUMNS =
-  "id, package_id, quantity, quantity_remaining, unit_cost, currency, note, source, received_at, created_at, updated_at, purchase_order_id, fulfilment_block_id, supplier_id" as const
+  "id, package_id, quantity, quantity_remaining, unit_cost, currency, note, source, received_at, created_at, updated_at, purchase_order_id, fulfilment_block_id, supplier_id, day_components:package_cost_layer_day_components(day_slot,units_per_package,quantity_total,quantity_remaining)" as const
 
 const CONSUMPTION_COLUMNS =
   "id, order_id, cost_layer_id, package_id, quantity, unit_cost, currency, supplier_source_snapshot, fulfilment_block_snapshot, created_at" as const
@@ -90,6 +96,12 @@ export async function getCostLayersForPackage(packageId: string): Promise<CostLa
     quantity: Math.floor(n((row as CostLayerRow).quantity)),
     quantity_remaining: Math.floor(n((row as CostLayerRow).quantity_remaining)),
     unit_cost: n((row as CostLayerRow).unit_cost),
+    day_components: ((row as CostLayerRow).day_components ?? []).map((component) => ({
+      day_slot: component.day_slot,
+      units_per_package: Math.max(1, Math.floor(n(component.units_per_package))),
+      quantity_total: Math.floor(n(component.quantity_total)),
+      quantity_remaining: Math.floor(n(component.quantity_remaining)),
+    })),
   }))
 }
 
@@ -103,12 +115,19 @@ export async function getCostLayerQuantityTotalsByPackage(
   const ids = [...new Set(packageIds.map((id) => id.trim()).filter(Boolean))]
   if (ids.length === 0) return out
   const supabase = await createClient()
+  const batches: string[][] = []
   for (let i = 0; i < ids.length; i += IN_FILTER_BATCH) {
-    const batch = ids.slice(i, i + IN_FILTER_BATCH)
-    const { data, error } = await supabase
+    batches.push(ids.slice(i, i + IN_FILTER_BATCH))
+  }
+  const results = await Promise.all(
+    batches.map((batch) =>
+      supabase
       .from("package_cost_layers")
       .select("package_id, quantity, quantity_remaining")
-      .in("package_id", batch)
+        .in("package_id", batch),
+    ),
+  )
+  for (const { data, error } of results) {
     if (error || !data) continue
     for (const raw of data) {
       const row = raw as { package_id: string; quantity: number; quantity_remaining: number }
@@ -142,6 +161,12 @@ export async function getCostLayersByPackage(
       quantity: Math.floor(n(row.quantity)),
       quantity_remaining: Math.floor(n(row.quantity_remaining)),
       unit_cost: n(row.unit_cost),
+      day_components: (row.day_components ?? []).map((component) => ({
+        day_slot: component.day_slot,
+        units_per_package: Math.max(1, Math.floor(n(component.units_per_package))),
+        quantity_total: Math.floor(n(component.quantity_total)),
+        quantity_remaining: Math.floor(n(component.quantity_remaining)),
+      })),
     })
     out.set(row.package_id, list)
   }

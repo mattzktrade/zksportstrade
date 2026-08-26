@@ -1,6 +1,7 @@
 export const NEGATIVE_STOCK_OPEN_STATUSES = ["open", "quoted", "confirmed"] as const
 
 export type NegativeStockStatus = (typeof NEGATIVE_STOCK_OPEN_STATUSES)[number]
+export type NegativeStockReason = "brokered" | "historical_reconciliation"
 export type NegativeStockUrgency = "critical" | "urgent" | "later" | "unknown"
 export type NegativeStockSortKey = "eventDate" | "event" | "created" | "cost" | "sale" | "profit"
 
@@ -17,6 +18,7 @@ export type NegativeStockRow = {
   supplierQuoteAt: string | null
   quoteFresh: boolean
   status: NegativeStockStatus
+  reason: NegativeStockReason
   createdAt: string
   note: string | null
   eventName: string
@@ -34,6 +36,7 @@ export type NegativeStockFilters = {
   search: string
   eventNames: string[]
   supplierName: string
+  reason: "" | NegativeStockReason
   urgency: "" | NegativeStockUrgency
   assignedTo: string
   status: "" | NegativeStockStatus
@@ -60,6 +63,10 @@ export function statusLabel(status: NegativeStockStatus): string {
   return "Needs quote"
 }
 
+export function reasonLabel(reason: NegativeStockReason): string {
+  return reason === "historical_reconciliation" ? "Missing historical purchase" : "Brokered stock"
+}
+
 export function money(value: number, currency = "USD"): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -80,6 +87,7 @@ export function hasActiveNegativeStockFilters(filters: NegativeStockFilters): bo
     filters.search.trim() ||
       filters.eventNames.length > 0 ||
       filters.supplierName ||
+      filters.reason ||
       filters.urgency ||
       filters.assignedTo ||
       filters.status,
@@ -95,6 +103,7 @@ export function filterNegativeStockRows(
   return rows.filter((row) => {
     if (filters.eventNames.length > 0 && !filters.eventNames.includes(row.eventName)) return false
     if (filters.supplierName && (row.supplierName ?? "Not assigned") !== filters.supplierName) return false
+    if (filters.reason && row.reason !== filters.reason) return false
     if (filters.assignedTo && (row.ownerName ?? "Unassigned") !== filters.assignedTo) return false
     if (filters.status && row.status !== filters.status) return false
     if (filters.urgency && urgencyForEvent(row.eventDate, now) !== filters.urgency) return false
@@ -110,6 +119,7 @@ export function filterNegativeStockRows(
       row.dealId,
       row.note,
       statusLabel(row.status),
+      reasonLabel(row.reason),
     ]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(query))

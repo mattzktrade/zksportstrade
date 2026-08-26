@@ -306,6 +306,12 @@ function stockReassignMessage(message: string): string {
   if (value.includes("insufficient_layer_remaining")) {
     return "That supplier no longer has enough remaining stock."
   }
+  if (value.includes("allocation_locked")) {
+    return "This supplier allocation is locked because fulfilment has been confirmed or tickets have been received."
+  }
+  if (value.includes("insufficient_purchased_stock")) {
+    return "There is not enough purchased stock to assign this booking. Add a purchase order or mark the deal as brokered."
+  }
   if (value.includes("invalid_cost_layer")) return "Choose a supplier that actually holds this stock."
   if (value.includes("could not find the function") || value.includes("does not exist")) {
     return "Apply the latest operations SQL in Supabase, then try again."
@@ -392,7 +398,13 @@ export async function reassignDealPackageStock(input: {
       lines,
       collapseTakesBySupplier(
         allocations,
-        layers.map((layer) => ({ id: layer.id, supplierId: layer.supplier_id })),
+        layers.map((layer) => ({
+          id: layer.id,
+          supplierId:
+            (layer.purchase_order_id
+              ? supplierByPo.get(layer.purchase_order_id) ?? null
+              : null) || layer.supplier_id,
+        })),
       ),
     )
     if (!mapping.ok) return mapping
@@ -403,7 +415,9 @@ export async function reassignDealPackageStock(input: {
       const layer = layerById.get(assignment.costLayerId)
       if (!layer) return { ok: false, message: "One of the selected suppliers is no longer available." }
       const supplierId =
-        layer.supplier_id || (layer.purchase_order_id ? supplierByPo.get(layer.purchase_order_id) ?? null : null)
+        (layer.purchase_order_id
+          ? supplierByPo.get(layer.purchase_order_id) ?? null
+          : null) || layer.supplier_id
       const { error: updateError } = await gate.admin
         .from("deal_line_items")
         .update({

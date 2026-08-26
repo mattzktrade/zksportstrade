@@ -138,12 +138,12 @@ export async function syncPackageCatalogToWix(packageId: string): Promise<WixCat
   const payload = await buildCatalogListingPayload(admin, packageId)
 
   const { data: inv } = await admin
-    .from("package_inventory")
-    .select("qty_available, qty_held")
+    .from("inventory_availability")
+    .select("available_quantity")
     .eq("package_id", packageId)
     .maybeSingle()
 
-  const portalSellable = Math.max(0, (inv?.qty_available ?? 0) - (inv?.qty_held ?? 0))
+  const portalSellable = Math.max(0, Number(inv?.available_quantity ?? 0))
   // Wix has no suite-split warning — cap storefront stock at the largest single
   // supplier/block remaining so online shoppers can't book a party that must split.
   // Portal agents still see the full pool sum. If there is only one source (or no

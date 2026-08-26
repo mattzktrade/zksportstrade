@@ -1,5 +1,9 @@
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { getAdminCatalogListRows } from "@/lib/admin/queries"
+import {
+  adminPackageNetQuantity,
+  adminPackageSellable,
+} from "@/lib/inventory/effective-availability"
 import { getCrmAccountOptions, getDealListRows } from "@/lib/crm/deals"
 import { getSalesStaffOptions } from "@/lib/crm/leads"
 import { getBookingFormsForDeals } from "@/lib/booking-forms/queries"
@@ -42,8 +46,8 @@ export default async function DealsPage({
       packageName: row.name,
       price: row.trade_price,
       currency: row.currency || "USD",
-      stockLeft:
-        Number(row.inventory?.qty_available ?? 0) - Number(row.inventory?.qty_held ?? 0),
+      stockLeft: adminPackageSellable(row),
+      netStock: adminPackageNetQuantity(row),
     }))
     .sort((a, b) => a.label.localeCompare(b.label))
   const createPackageOptions = packageOptions.filter((option) =>

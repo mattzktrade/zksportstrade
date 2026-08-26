@@ -8,10 +8,15 @@ export type PackageSalesBreakdown = {
    */
   salesforceOffline: number
   /**
-   * Open (non-closed) Salesforce opportunity line quantities on this package's Product2.
-   * Populated on package detail pages from live SF reads; 0 on fast catalog list loads.
+   * Open Salesforce pipeline overlay. Native signed deals count as sold instead.
+   * Live Salesforce overlay may also land here on package expand.
    */
   salesforceOpenPipeline: number
+  /**
+   * Unsigned open deals (proposal, booking form, awaiting signature). Shown in Pipeline
+   * and does not reduce Sellable.
+   */
+  unsignedOpenPipeline: number
   /** Trade portal, admin, and partner API bookings. */
   tradePortal: number
   total: number
@@ -20,6 +25,11 @@ export type PackageSalesBreakdown = {
 /** Closed-won places sold in Salesforce (excludes open pipeline). */
 export function salesforceClosedWonSold(b: PackageSalesBreakdown): number {
   return Math.max(0, Math.floor(b.salesforceOffline))
+}
+
+/** Unsigned open deals shown in the Pipeline column — does not reduce Sellable. */
+export function unsignedPipelinePlaces(b: PackageSalesBreakdown): number {
+  return Math.max(0, Math.floor(b.unsignedOpenPipeline ?? 0))
 }
 
 /**
@@ -50,13 +60,16 @@ export function commitmentSellable(input: {
 
 /** Human-readable sold-by-channel line for inventory UI. */
 export function formatPackageSalesBreakdown(b: PackageSalesBreakdown): string {
-  if (b.total <= 0 && b.salesforceOpenPipeline <= 0) return "No sales recorded yet"
+  const unsigned = unsignedPipelinePlaces(b)
+  if (b.total <= 0 && b.salesforceOpenPipeline <= 0 && unsigned <= 0) {
+    return "No sales recorded yet"
+  }
   const parts: string[] = []
   if (b.wix > 0) parts.push(`${b.wix} on website`)
   const closedWon = salesforceClosedWonSold(b)
   if (closedWon > 0) parts.push(`${closedWon} offline deals`)
-  if (b.salesforceOpenPipeline > 0) {
-    parts.push(`${Math.floor(b.salesforceOpenPipeline)} in pipeline`)
+  if (unsigned > 0) {
+    parts.push(`${unsigned} in pipeline`)
   }
   if (b.tradePortal > 0) parts.push(`${b.tradePortal} on portal`)
   return parts.join(" · ")
@@ -68,6 +81,7 @@ export function emptyPackageSalesBreakdown(packageId: string): PackageSalesBreak
     wix: 0,
     salesforceOffline: 0,
     salesforceOpenPipeline: 0,
+    unsignedOpenPipeline: 0,
     tradePortal: 0,
     total: 0,
   }
@@ -86,13 +100,79 @@ export type LinkedSellableMember = {
   breakdown: PackageSalesBreakdown
 }
 
+/** Closed-won + portal/Wix bookings — the units that count as Sold (not unsigned pipeline). */
+export function packageClosedWonUnits(b: PackageSalesBreakdown): number {
+  return (
+    salesforceClosedWonSold(b) +
+    Math.max(0, Math.floor(b.wix)) +
+    Math.max(0, Math.floor(b.tradePortal))
+  )
+}
+
 /** Closed-won + open pipeline + portal/Wix bookings for one package. */
 export function packageCommittedUnits(b: PackageSalesBreakdown): number {
   return (
-    Math.max(0, Math.floor(b.salesforceOffline)) +
-    Math.max(0, Math.floor(b.salesforceOpenPipeline)) +
-    Math.max(0, Math.floor(b.wix)) +
-    Math.max(0, Math.floor(b.tradePortal))
+    packageClosedWonUnits(b) +
+    Math.max(0, Math.floor(b.salesforceOpenPipeline))
+  )
+}
+
+/** Closed-won remaining — same as Sellable with signed pipeline zeroed. */
+function withoutOpenPipeline(members: readonly LinkedSellableMember[]): LinkedSellableMember[] {
+  return members.map((member) => ({
+    ...member,
+    breakdown: {
+      ...member.breakdown,
+      salesforceOpenPipeline: 0,
+    },
+  }))
+}
+
+type LinkedPoolInput = {
+  stock: number
+  targetId: string
+  targetDuration: string | null
+  members: readonly LinkedSellableMember[]
+  shellMirrorDuration?: string | null
+}
+
+export function linkedPoolClosedWonRemaining(input: LinkedPoolInput): number {
+  return linkedPoolSellableForPackage({
+    stock: input.stock,
+    targetId: input.targetId,
+    targetDuration: input.targetDuration,
+    members: withoutOpenPipeline(input.members),
+    shellMirrorDuration: input.shellMirrorDuration,
+  })
+}
+
+/**
+ * Units of the shared pool this package can no longer sell — stock minus
+ * closed-won remaining. Matches the Inventory Sold box.
+ *
+ * Never sum sibling SKU totals: Friday-only and Sunday-only both draw from the
+ * same 3-day purchase, so adding their Places Sold rows overstates 3-day Sold
+ * and understates Left. 3-day Sold is the busiest-day take (Sunday + Sat&Sun).
+ */
+export function linkedPoolAttributedSold(input: LinkedPoolInput): number {
+  const stock = Math.max(0, Math.floor(input.stock))
+  return Math.max(0, stock - linkedPoolClosedWonRemaining(input))
+}
+
+/**
+ * Signed pipeline that actually reduces this package's Sellable after Sold.
+ * Friday-only pipeline does not hold 3-day remaining.
+ */
+export function linkedPoolAttributedPipeline(input: LinkedPoolInput): number {
+  return Math.max(
+    0,
+    linkedPoolClosedWonRemaining(input) - linkedPoolSellableForPackage({
+      stock: input.stock,
+      targetId: input.targetId,
+      targetDuration: input.targetDuration,
+      members: input.members,
+      shellMirrorDuration: input.shellMirrorDuration,
+    }),
   )
 }
 
@@ -109,7 +189,7 @@ export function linkedPoolSellableForPackage(input: {
   stock: number
   targetId: string
   targetDuration: string | null
-  members: LinkedSellableMember[]
+  members: readonly LinkedSellableMember[]
   /** Shells pass the day duration they mirror (friday_only / …). */
   shellMirrorDuration?: string | null
 }): number {

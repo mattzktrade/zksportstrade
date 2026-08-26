@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import { test } from "node:test"
 import {
   consumeDayCapacity,
@@ -11,11 +12,45 @@ import {
   isSupplierQuoteFresh,
 } from "../lib/inventory/native-availability"
 
+const standaloneInventoryMigration = readFileSync(
+  "supabase/migrations/20260824250000_standalone_day_package_inventory.sql",
+  "utf8",
+).toLowerCase()
+const shortageBackedStandaloneMigration = readFileSync(
+  "supabase/migrations/20260824290000_detach_shortage_backed_day_packages.sql",
+  "utf8",
+).toLowerCase()
+
 test("3-day / 2-day / day products map onto shared day slots", () => {
   assert.deepEqual(daySlotsForDuration("3_day"), ["friday", "saturday", "sunday"])
   assert.deepEqual(daySlotsForDuration("2_day"), ["saturday", "sunday"])
   assert.deepEqual(daySlotsForDuration("friday_only"), ["friday"])
   assert.deepEqual(daySlotsForDuration("sunday_only"), ["sunday"])
+})
+
+test("independently purchased day packages can persist standalone inventory", () => {
+  assert.match(standaloneInventoryMigration, /inventory_is_standalone boolean/)
+  assert.match(standaloneInventoryMigration, /new\.inventory_group_id := null/)
+  assert.match(standaloneInventoryMigration, /new\.inventory_pool_id := null/)
+  assert.match(standaloneInventoryMigration, /raise exception 'package_inventory_in_use'/)
+  assert.match(standaloneInventoryMigration, /set qty_available = v_own_remaining/)
+})
+
+test("historical shortage-backed day sales can move to standalone inventory", () => {
+  assert.match(
+    shortageBackedStandaloneMigration,
+    /shortage\.shortage_type = 'historical_reconciliation'/,
+  )
+  assert.match(shortageBackedStandaloneMigration, /shortage\.status = 'open'/)
+  assert.match(
+    shortageBackedStandaloneMigration,
+    /select sum\(shortage\.quantity\)[\s\S]*< line\.quantity/,
+  )
+  assert.match(
+    shortageBackedStandaloneMigration,
+    /allocation\.state in \('reserved', 'committed'\)/,
+  )
+  assert.match(shortageBackedStandaloneMigration, /orders\.status <> 'cancelled'/)
 })
 
 test("shared pool sellable is the min of required day capacity", () => {

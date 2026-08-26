@@ -56,11 +56,9 @@ export function allocateUnattributedSoldAcrossLayers(input: {
     remainingToAllocate -= take
   }
 
-  if (remainingToAllocate > 0 && ordered.length > 0) {
-    const newest = ordered[ordered.length - 1]
-    soldByLayer.set(newest.id, (soldByLayer.get(newest.id) ?? 0) + remainingToAllocate)
-  }
-
+  // Any remainder is a real stock shortage. Never attach it to an exhausted
+  // purchase layer: that would falsely claim a supplier sold stock they did
+  // not provide. The canonical shortage projection records the uncovered qty.
   return soldByLayer
 }
 

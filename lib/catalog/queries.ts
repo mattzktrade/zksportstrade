@@ -94,8 +94,17 @@ async function fetchFullCatalogBase(
     .order("sort_order")
   const { data: inventory, error: invError } = await supabase.from("package_inventory").select(INVENTORY_COLUMNS)
 
-  if (racesError || packagesError || invError) return null
+  if (racesError || packagesError) {
+    console.warn("[portal] catalog query failed:", racesError?.message ?? packagesError?.message)
+    return null
+  }
   if (!allRaces || !allPackages) return null
+  if (invError) {
+    console.warn(
+      "[portal] package_inventory unavailable; showing catalog without stock counts:",
+      invError.message,
+    )
+  }
 
   const visiblePackageRows = (allPackages as DbPackage[]).filter(
     (pkg) =>

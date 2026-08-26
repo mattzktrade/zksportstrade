@@ -8,6 +8,7 @@ import { isOperationsEmailKind } from "@/lib/operations/emails"
 import { getBookingFormsForDeal } from "@/lib/booking-forms/queries"
 import type { BookingFormAdminRow, BookingFormEventRow } from "@/lib/booking-forms/types"
 import { dealSupplierKey, type DealSupplierOption } from "@/lib/crm/deal-supplier-options"
+import { costDaySlotsForDuration } from "@/lib/inventory/day-cost-allocation"
 
 export type DealAddressDraft = {
   line1: string
@@ -199,6 +200,23 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
   const fulfilment = asFulfilment(dealExtra.data?.fulfilment_details)
 
   const packageIds = [...new Set(deal.lines.map((line) => line.package_id).filter(Boolean))]
+  const { data: availabilityRows } = packageIds.length
+    ? await supabase
+        .from("inventory_availability")
+        .select("package_id,ledger_package_id")
+        .in("package_id", packageIds)
+    : { data: [] as Array<{ package_id: string; ledger_package_id: string }> }
+  const ledgerPackageByPackage = new Map(
+    (availabilityRows ?? []).map((row) => [
+      String(row.package_id),
+      String(row.ledger_package_id ?? row.package_id),
+    ]),
+  )
+  const layerPackageIds = [
+    ...new Set(
+      packageIds.map((packageId) => ledgerPackageByPackage.get(packageId) ?? packageId),
+    ),
+  ]
   const lineSupplierIds = [
     ...new Set(deal.lines.map((line) => line.supplier_id).filter((id): id is string => Boolean(id))),
   ]
@@ -220,9 +238,16 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
             .eq("deal_id", deal.id)
             .order("sort_order"),
       packageIds.length
-        ? supabase.from("packages").select("id, name").in("id", packageIds)
-        : Promise.resolve({ data: [] as Array<{ id: string; name: string }> }),
-      getCostLayersByPackage(packageIds),
+        ? supabase.from("packages").select("id, name, duration, event_date").in("id", packageIds)
+        : Promise.resolve({
+            data: [] as Array<{
+              id: string
+              name: string
+              duration: string | null
+              event_date: string | null
+            }>,
+          }),
+      getCostLayersByPackage(layerPackageIds),
       supabase
         .from("deal_line_items")
         .select("id, supplier_id, fulfilment_cost_layer_id, sourcing_mode")
@@ -238,6 +263,7 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
         : Promise.resolve({ data: [] as Array<{ id: string; full_name: string | null }> }),
     ])
   const packageName = new Map((packages ?? []).map((row) => [row.id, row.name]))
+  const packageMeta = new Map((packages ?? []).map((row) => [row.id, row]))
   const noteActorName = new Map(
     (noteActors ?? []).map((row) => [row.id, row.full_name?.trim() || null]),
   )
@@ -248,49 +274,59 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
   const layerSupplierIds = [
     ...new Set(allLayers.map((layer) => layer.supplier_id).filter((id): id is string => Boolean(id))),
   ]
-  const [{ data: purchaseOrders }, { data: namedSuppliers }] = await Promise.all([
-    poIds.length
-      ? supabase.from("purchase_orders").select("id, po_number, supplier").in("id", poIds)
-      : Promise.resolve({ data: [] as Array<{ id: string; po_number: string; supplier: string }> }),
-    [...new Set([...lineSupplierIds, ...layerSupplierIds])].length
-      ? supabase
-          .from("suppliers")
-          .select("id, name")
-          .in("id", [...new Set([...lineSupplierIds, ...layerSupplierIds])])
-      : Promise.resolve({ data: [] as Array<{ id: string; name: string }> }),
-  ])
+  const { data: purchaseOrders } = poIds.length
+    ? await supabase
+        .from("purchase_orders")
+        .select("id, po_number, supplier, supplier_id")
+        .in("id", poIds)
+    : { data: [] as Array<{
+        id: string
+        po_number: string
+        supplier: string
+        supplier_id: string | null
+      }> }
+  const supplierNameIds = [
+    ...new Set(
+      [
+        ...lineSupplierIds,
+        ...layerSupplierIds,
+        ...(purchaseOrders ?? []).map((row) => row.supplier_id),
+      ].filter((id): id is string => Boolean(id)),
+    ),
+  ]
+  const { data: namedSuppliers } = supplierNameIds.length
+    ? await supabase.from("suppliers").select("id, name").in("id", supplierNameIds)
+    : { data: [] as Array<{ id: string; name: string }> }
   const poById = new Map((purchaseOrders ?? []).map((row) => [row.id, row]))
   const supplierById = new Map((namedSuppliers ?? []).map((row) => [row.id, row.name]))
-  let lineExtraRows = lineExtraQuery.error ? [] : (lineExtraQuery.data ?? [])
-  let assignedRows = assignedQuery.error ? [] : (assignedQuery.data ?? [])
-  const missingAssign = lineExtraRows.some(
-    (row) =>
-      !row.fulfilment_cost_layer_id &&
-      String((row as { sourcing_mode?: string }).sourcing_mode ?? "owned") === "owned",
+  const lineExtraRows = lineExtraQuery.error ? [] : (lineExtraQuery.data ?? [])
+  const assignedRows = assignedQuery.error ? [] : (assignedQuery.data ?? [])
+  const { data: canonicalFulfilments } = await supabase
+    .from("deal_line_inventory_fulfilment")
+    .select(
+      "deal_line_item_id,fully_allocated,supplier_id,cost_layer_id,supplier_label",
+    )
+    .in(
+      "deal_line_item_id",
+      [...new Set([...lineExtraRows, ...assignedRows].map((row) => String(row.id)))],
+    )
+  const canonicalByLine = new Map(
+    (canonicalFulfilments ?? []).map((row) => [String(row.deal_line_item_id), row]),
   )
-  if (missingAssign) {
-    await supabase.rpc("assign_deal_suppliers", { p_deal_id: deal.id })
-    const [refreshedLines, refreshedAssigned] = await Promise.all([
-      supabase
-        .from("deal_line_items")
-        .select("id, supplier_id, fulfilment_cost_layer_id, sourcing_mode")
-        .eq("deal_id", deal.id),
-      packageIds.length
-        ? supabase
-            .from("deal_line_items")
-            .select("id, package_id, quantity, supplier_id, fulfilment_cost_layer_id, deals!inner(stage)")
-            .in("package_id", packageIds)
-        : Promise.resolve({ data: assignedRows, error: null }),
-    ])
-    if (!refreshedLines.error) lineExtraRows = refreshedLines.data ?? lineExtraRows
-    if (!refreshedAssigned.error) assignedRows = refreshedAssigned.data ?? assignedRows
-  }
   const lineExtra = new Map(
     lineExtraRows.map((row) => [
       String(row.id),
       {
-        supplierId: (row.supplier_id as string | null) ?? null,
-        costLayerId: (row.fulfilment_cost_layer_id as string | null) ?? null,
+        supplierId: String(row.sourcing_mode ?? "owned") === "brokered"
+          ? (row.supplier_id as string | null) ?? null
+          : canonicalByLine.get(String(row.id))?.fully_allocated
+            ? (canonicalByLine.get(String(row.id))?.supplier_id as string | null) ?? null
+            : null,
+        costLayerId: String(row.sourcing_mode ?? "owned") === "brokered"
+          ? (row.fulfilment_cost_layer_id as string | null) ?? null
+          : canonicalByLine.get(String(row.id))?.fully_allocated
+            ? (canonicalByLine.get(String(row.id))?.cost_layer_id as string | null) ?? null
+            : null,
       },
     ]),
   )
@@ -306,10 +342,10 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
   }
   const layerMeta: LayerMeta[] = allLayers.map((layer) => {
     const po = layer.purchase_order_id ? poById.get(layer.purchase_order_id) : null
-    const supplierId = layer.supplier_id ?? null
+    const supplierId = po?.supplier_id ?? layer.supplier_id ?? null
     const supplierName =
       po?.supplier?.trim() ||
-      (layer.supplier_id ? supplierById.get(layer.supplier_id) : null) ||
+      (supplierId ? supplierById.get(supplierId) : null) ||
       layer.source?.trim() ||
       "Unassigned"
     return {
@@ -320,7 +356,7 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
       supplierId,
       supplierName,
       key: dealSupplierKey({
-        supplierId: layer.supplier_id,
+        supplierId,
         source: po?.supplier || layer.source,
         layerId: layer.id,
       }),
@@ -328,30 +364,32 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
   })
   const layerById = new Map(layerMeta.map((layer) => [layer.id, layer]))
 
-  const assignedByPackageKey = new Map<string, number>()
-  for (const row of assignedRows) {
-    const dealJoin = (row as { deals?: { stage?: string } | Array<{ stage?: string }> }).deals
-    const dealStage = Array.isArray(dealJoin) ? dealJoin[0]?.stage : dealJoin?.stage
-    if (["cancelled", "closed_lost"].includes(String(dealStage ?? ""))) continue
-    const packageId = String(row.package_id)
-    const layer = row.fulfilment_cost_layer_id ? layerById.get(String(row.fulfilment_cost_layer_id)) : null
-    const key = layer?.key
-      ?? dealSupplierKey({
-        supplierId: (row.supplier_id as string | null) ?? null,
-        source: null,
-      })
-    if (key === "unassigned") continue
-    const mapKey = `${packageId}:${key}`
-    assignedByPackageKey.set(mapKey, (assignedByPackageKey.get(mapKey) ?? 0) + Number(row.quantity ?? 0))
-  }
-
   function optionsForPackage(packageId: string): DealSupplierOption[] {
     const grouped = new Map<string, DealSupplierOption>()
-    for (const layer of layerMeta.filter((item) => item.packageId === packageId && item.remaining > 0)) {
+    const ledgerPackageId = ledgerPackageByPackage.get(packageId) ?? packageId
+    const meta = packageMeta.get(packageId)
+    const requiredSlots = costDaySlotsForDuration(
+      meta?.duration ?? null,
+      meta?.event_date ?? null,
+    ).map((slot) => slot.replace(/_only$/, ""))
+    for (const layer of layerMeta.filter((item) => item.packageId === ledgerPackageId)) {
+      const sourceLayer = allLayers.find((candidate) => candidate.id === layer.id)
+      const matchingComponents = requiredSlots.map((slot) =>
+        sourceLayer?.day_components?.find((component) => component.day_slot === slot),
+      )
+      const remaining =
+        requiredSlots.length > 0 && matchingComponents.every(Boolean)
+          ? Math.min(
+              ...matchingComponents.map((component) =>
+                Math.max(0, Math.floor(Number(component?.quantity_remaining) || 0)),
+              ),
+            )
+          : layer.remaining
+      if (remaining <= 0) continue
       const current = grouped.get(layer.key)
       if (current) {
-        current.remaining += layer.remaining
-        if (layer.remaining > (current.remaining - layer.remaining)) {
+        current.remaining += remaining
+        if (remaining > current.remaining - remaining) {
           current.costLayerId = layer.id
           current.unitCost = layer.unitCost
           current.supplierId = layer.supplierId
@@ -361,20 +399,13 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
       grouped.set(layer.key, {
         key: layer.key,
         supplierName: layer.supplierName,
-        remaining: layer.remaining,
+        remaining,
         costLayerId: layer.id,
         supplierId: layer.supplierId,
         unitCost: layer.unitCost,
       })
     }
     return [...grouped.values()]
-      .map((option) => ({
-        ...option,
-        remaining: Math.max(
-          0,
-          option.remaining - (assignedByPackageKey.get(`${packageId}:${option.key}`) ?? 0),
-        ),
-      }))
       .sort((a, b) => a.supplierName.localeCompare(b.supplierName))
   }
 
@@ -430,10 +461,13 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
     deal,
     lines: deal.lines.map((line) => {
       const extra = lineExtra.get(line.id)
+      const canonical = canonicalByLine.get(line.id)
+      const isBrokered = line.sourcing_mode === "brokered"
+      const displaySupplierId = isBrokered ? line.supplier_id : extra?.supplierId ?? null
       const selectedLayer = extra?.costLayerId ? layerById.get(extra.costLayerId) : null
       const supplierKey = selectedLayer?.key
         ?? dealSupplierKey({
-          supplierId: extra?.supplierId ?? line.supplier_id,
+          supplierId: displaySupplierId,
           source: null,
         })
       const options = optionsForPackage(line.package_id)
@@ -443,19 +477,23 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
           key: supplierKey,
           supplierName:
             selectedLayer?.supplierName ||
-            (line.supplier_id ? supplierById.get(line.supplier_id) : null) ||
+            (displaySupplierId ? supplierById.get(displaySupplierId) : null) ||
             "Selected supplier",
           remaining: 0,
           costLayerId: extra?.costLayerId ?? null,
-          supplierId: extra?.supplierId ?? line.supplier_id,
+          supplierId: displaySupplierId,
           unitCost: selectedLayer?.unitCost ?? line.expected_unit_cost,
         })
       }
       return {
         ...line,
         packageName: packageName.get(line.package_id) ?? null,
-        supplierName: selected?.supplierName
-          ?? (line.supplier_id ? supplierById.get(line.supplier_id) ?? null : null),
+        supplierName:
+          (!isBrokered && canonical?.fully_allocated
+            ? String(canonical.supplier_label ?? "").trim() || null
+            : null)
+          ?? selected?.supplierName
+          ?? (displaySupplierId ? supplierById.get(displaySupplierId) ?? null : null),
         supplierKey: selected?.key ?? (supplierKey === "unassigned" ? "" : supplierKey),
         supplierOptions: options,
       }

@@ -108,6 +108,9 @@ function ProductStockEditor({
   const liveOptions = previewSupplierOptions(options, drafts)
   const assigned = drafts.reduce((sum, row) => sum + (Math.floor(Number(row.quantity)) || 0), 0)
   const error = validateSupplierDrafts(drafts, options, product.quantity)
+  const lockedAllocation = allocations.find(
+    (row) => row.orderId === orderId && row.packageId === product.packageId && row.locked,
+  )
 
   function setRow(key: string, patch: Partial<SupplierStockDraft>) {
     setDrafts((currentRows) =>
@@ -132,7 +135,12 @@ function ProductStockEditor({
         {product.quantity}× {product.description}
       </p>
 
-      {options.length === 0 ? (
+      {lockedAllocation ? (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2 text-[9px] text-amber-800">
+          Allocation locked: {lockedAllocation.lockReason || "fulfilment has started"}. Reassigning now could change
+          the supplier responsible for delivery.
+        </div>
+      ) : options.length === 0 ? (
         <p className="mt-3 text-[9px] text-amber-700">No remaining stock for this product.</p>
       ) : (
         <>

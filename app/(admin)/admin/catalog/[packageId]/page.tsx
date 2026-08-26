@@ -7,8 +7,8 @@ import {
   getLinkedInventoryPackages,
 } from "@/lib/admin/queries"
 import { getLinkedDayPackageOverview } from "@/lib/admin/linked-day-package-overview"
-import { getDealsForPackage } from "@/lib/crm/deals"
-import { getOrdersForPackage } from "@/lib/orders/queries"
+import { getDealsForPackages } from "@/lib/crm/deals"
+import { getOrdersForPackages } from "@/lib/orders/queries"
 import { getWixChannelListingsForPackage } from "@/lib/admin/wix-channel-listings"
 import { ensurePurchaseOrdersForPackageLayers, getPurchaseOrders } from "@/lib/admin/purchase-orders"
 import { getFulfilmentBlocksWithUsage } from "@/lib/admin/fulfilment-blocks"
@@ -35,19 +35,25 @@ export default async function AdminPackageDetailPage({ params, searchParams }: P
   const decodedId = decodeURIComponent(packageId)
   const initialTab = parseAdminPackageTab(tab ?? null)
 
-  const [linkedDayOverview, initialPkg, races, orders, deals, wixListings, initialPurchaseOrders, fulfilmentBlocks] =
+  const [linkedDayOverview, initialPkg] = await Promise.all([
+    getLinkedDayPackageOverview(decodedId),
+    getAdminPackageById(decodedId),
+  ])
+
+  if (!initialPkg) notFound()
+  const linkedSalePackageIds =
+    linkedDayOverview.inventoryGroupId && linkedDayOverview.siblings.length > 0
+      ? linkedDayOverview.siblings.map((pkg) => pkg.id)
+      : [decodedId]
+  const [races, orders, deals, wixListings, initialPurchaseOrders, fulfilmentBlocks] =
     await Promise.all([
-      getLinkedDayPackageOverview(decodedId),
-      getAdminPackageById(decodedId),
       getAdminRaceOptions(),
-      getOrdersForPackage(decodedId),
-      getDealsForPackage(decodedId),
+      getOrdersForPackages(linkedSalePackageIds),
+      getDealsForPackages(linkedSalePackageIds),
       getWixChannelListingsForPackage(decodedId),
       getPurchaseOrders(),
       getFulfilmentBlocksWithUsage(decodedId),
     ])
-
-  if (!initialPkg) notFound()
 
   let pkg = initialPkg
   let purchaseOrders = initialPurchaseOrders

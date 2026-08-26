@@ -1,7 +1,10 @@
 import { unstable_noStore as noStore } from "next/cache"
+import { fetchAllRows } from "@/lib/supabase/fetch-all-rows"
 import { createClient } from "@/lib/supabase/server"
 import type { CrmAccountOption, DealListRow, DealStage, PackageDealSaleRow } from "@/lib/crm/deal-types"
+import { dealStageCountsAsSold } from "@/lib/crm/deal-types"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
+import { costLayerSupplierPoolKey } from "@/lib/inventory/supplier-pool"
 
 export type { DealListRow, DealStage } from "@/lib/crm/deal-types"
 export { DEAL_STAGE_LABELS } from "@/lib/crm/deal-types"
@@ -16,46 +19,72 @@ function one<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value
 }
 
+type AccountOptionRow = { id: string; name: string }
+type AccountOptionContactRow = {
+  id: string
+  account_id: string
+  full_name: string
+  email: string | null
+  phone: string | null
+  active: boolean
+}
+
 export async function getCrmAccountOptions(): Promise<CrmAccountOption[]> {
   noStore()
   const supabase = await createClient()
-  const { data, error } = await supabase
-    .from("crm_accounts")
-    .select("id, name, crm_contacts(id, full_name, email, phone, active)")
-    .eq("active", true)
-    .order("name")
+  const [accountsRes, contactsRes] = await Promise.all([
+    fetchAllRows<AccountOptionRow>((from, to) =>
+      supabase.from("crm_accounts").select("id, name").eq("active", true).order("id").range(from, to),
+    ),
+    fetchAllRows<AccountOptionContactRow>((from, to) =>
+      supabase
+        .from("crm_contacts")
+        .select("id, account_id, full_name, email, phone, active")
+        .eq("active", true)
+        .order("id")
+        .range(from, to),
+    ),
+  ])
 
-  if (error || !data) return []
+  if (accountsRes.error || contactsRes.error) return []
 
-  return data.map((account) => ({
-    id: account.id,
-    name: account.name,
-    contacts: (
-      (account.crm_contacts ?? []) as Array<{
-        id: string
-        full_name: string
-        email: string | null
-        phone: string | null
-        active: boolean
-      }>
-    )
-      .filter((contact) => contact.active)
-      .map(({ id, full_name, email, phone }) => ({ id, full_name, email, phone }))
-      .sort((a, b) => a.full_name.localeCompare(b.full_name)),
-  }))
+  const contactsByAccount = new Map<
+    string,
+    Array<{ id: string; full_name: string; email: string | null; phone: string | null }>
+  >()
+  for (const contact of contactsRes.data) {
+    const list = contactsByAccount.get(contact.account_id) ?? []
+    list.push({
+      id: contact.id,
+      full_name: contact.full_name,
+      email: contact.email,
+      phone: contact.phone,
+    })
+    contactsByAccount.set(contact.account_id, list)
+  }
+
+  return accountsRes.data
+    .map((account) => ({
+      id: account.id,
+      name: account.name,
+      contacts: (contactsByAccount.get(account.id) ?? []).sort((a, b) =>
+        a.full_name.localeCompare(b.full_name),
+      ),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export async function getCrmCompanyOptions(): Promise<CrmCompanyOption[]> {
   noStore()
   const supabase = await createClient()
-  const { data, error } = await supabase
-    .from("crm_accounts")
-    .select("id, name")
-    .eq("active", true)
-    .order("name")
+  const { data, error } = await fetchAllRows<AccountOptionRow>((from, to) =>
+    supabase.from("crm_accounts").select("id, name").eq("active", true).order("id").range(from, to),
+  )
 
-  if (error || !data) return []
-  return data.map((account) => ({ id: account.id, name: account.name }))
+  if (error) return []
+  return data
+    .map((account) => ({ id: account.id, name: account.name }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export async function getDealListRows(options?: { ids?: string[] }): Promise<DealListRow[]> {
@@ -369,8 +398,6 @@ export async function getDealListRows(options?: { ids?: string[] }): Promise<Dea
 
 export type { PackageDealSaleRow } from "@/lib/crm/deal-types"
 
-const PACKAGE_SOLD_STAGES = ["awaiting_payment", "paid_confirmed", "in_fulfilment", "fulfilled"] as const
-
 type PackageDealQueryRow = {
   id: string
   package_id: string
@@ -459,8 +486,110 @@ export async function getDealsForPackages(packageIds: readonly string[]): Promis
   if (error || !data) return []
 
   const rows = data as PackageDealQueryRow[]
+  const { data: fulfilmentRows } = await supabase
+    .from("deal_line_inventory_fulfilment")
+    .select(
+      "deal_line_item_id,fully_allocated,supplier_id,cost_layer_id,supplier_label,weighted_unit_cost",
+    )
+    .in("deal_line_item_id", rows.map((row) => row.id))
+  const fulfilmentByLine = new Map(
+    (fulfilmentRows ?? []).map((row) => [String(row.deal_line_item_id), row]),
+  )
+  const lineIds = rows.map((row) => row.id)
+  const { data: allocationRows } = await supabase
+    .from("inventory_allocations")
+    .select("deal_line_item_id,cost_layer_id,quantity")
+    .in("deal_line_item_id", lineIds)
+    .in("state", ["reserved", "committed"])
+  const allocationLayerIds = [
+    ...new Set(
+      (allocationRows ?? [])
+        .map((allocation) => allocation.cost_layer_id)
+        .filter((value): value is string => !!value),
+    ),
+  ]
+  const { data: allocationLayers } = allocationLayerIds.length
+    ? await supabase
+        .from("package_cost_layers")
+        .select("id,source,supplier_id,purchase_order_id")
+        .in("id", allocationLayerIds)
+    : { data: [] as Array<{
+        id: string
+        source: string | null
+        supplier_id: string | null
+        purchase_order_id: string | null
+      }> }
+  const allocationPurchaseOrderIds = [
+    ...new Set(
+      (allocationLayers ?? [])
+        .map((layer) => layer.purchase_order_id)
+        .filter((value): value is string => !!value),
+    ),
+  ]
+  const { data: allocationPurchaseOrders } = allocationPurchaseOrderIds.length
+    ? await supabase
+        .from("purchase_orders")
+        .select("id,supplier,supplier_id")
+        .in("id", allocationPurchaseOrderIds)
+    : { data: [] as Array<{
+        id: string
+        supplier: string
+        supplier_id: string | null
+      }> }
+  const allocationPurchaseOrderById = new Map(
+    (allocationPurchaseOrders ?? []).map((order) => [order.id, order]),
+  )
+  const allocationLayerById = new Map(
+    (allocationLayers ?? []).map((layer) => {
+      const purchase = layer.purchase_order_id
+        ? allocationPurchaseOrderById.get(layer.purchase_order_id)
+        : null
+      const name = (purchase?.supplier || layer.source || "Unassigned").trim()
+      return [
+        layer.id,
+        {
+          key: costLayerSupplierPoolKey({
+            layerSupplierId: layer.supplier_id,
+            purchaseSupplierId: purchase?.supplier_id,
+            purchaseSupplier: purchase?.supplier,
+            layerSource: layer.source,
+          }) || `name:${name.toLowerCase()}`,
+          name,
+        },
+      ]
+    }),
+  )
+  const allocationsByLine = new Map<
+    string,
+    Map<string, { key: string; name: string; quantity: number }>
+  >()
+  for (const allocation of allocationRows ?? []) {
+    const layer = allocation.cost_layer_id
+      ? allocationLayerById.get(allocation.cost_layer_id)
+      : null
+    if (!layer) continue
+    const lineId = String(allocation.deal_line_item_id)
+    const bySupplier =
+      allocationsByLine.get(lineId) ??
+      new Map<string, { key: string; name: string; quantity: number }>()
+    const current = bySupplier.get(layer.key)
+    if (current) {
+      current.quantity += Math.max(0, Math.floor(Number(allocation.quantity) || 0))
+    } else {
+      bySupplier.set(layer.key, {
+        ...layer,
+        quantity: Math.max(0, Math.floor(Number(allocation.quantity) || 0)),
+      })
+    }
+    allocationsByLine.set(lineId, bySupplier)
+  }
   const supplierIds = [
-    ...new Set(rows.map((row) => row.supplier_id).filter((value): value is string => !!value)),
+    ...new Set(
+      [
+        ...rows.map((row) => row.supplier_id),
+        ...(fulfilmentRows ?? []).map((row) => row.supplier_id),
+      ].filter((value): value is string => !!value),
+    ),
   ]
   const ownerIds = [
     ...new Set(
@@ -506,8 +635,33 @@ export async function getDealsForPackages(packageIds: readonly string[]): Promis
     if (!deal || deal.stage === "cancelled" || deal.stage === "closed_lost") continue
     const quantity = Math.max(0, Math.floor(Number(row.quantity) || 0))
     const unitSalePrice = Number(row.unit_sale_price ?? 0)
-    const expectedUnitCost =
-      row.expected_unit_cost == null ? null : Number(row.expected_unit_cost)
+    const sourcingMode = (row.sourcing_mode ?? "owned") as "owned" | "brokered"
+    const fulfilment = fulfilmentByLine.get(row.id)
+    const fullyAllocated = Boolean(fulfilment?.fully_allocated)
+    const expectedUnitCost = sourcingMode === "brokered"
+      ? row.expected_unit_cost == null ? null : Number(row.expected_unit_cost)
+      : fullyAllocated && fulfilment?.weighted_unit_cost != null
+        ? Number(fulfilment.weighted_unit_cost)
+        : null
+    const allocatedSupplierId =
+      fullyAllocated && typeof fulfilment?.supplier_id === "string"
+        ? fulfilment.supplier_id
+        : null
+    const allocatedSupplierLabel =
+      fullyAllocated && typeof fulfilment?.supplier_label === "string"
+        ? fulfilment.supplier_label
+        : null
+    const supplierAllocations = [
+      ...(allocationsByLine.get(row.id)?.values() ?? []),
+    ].filter((allocation) => allocation.quantity > 0)
+    const allocatedSupplierKey =
+      supplierAllocations.length === 1
+        ? supplierAllocations[0].key
+        : allocatedSupplierId
+          ? `id:${allocatedSupplierId}`
+          : allocatedSupplierLabel && !allocatedSupplierLabel.includes(" · ")
+            ? `name:${allocatedSupplierLabel.replace(/^\d+x\s+/i, "").trim().toLowerCase()}`
+            : ""
     const lineTotal = quantity * unitSalePrice
     const pkg = one(row.packages)
     const line = {
@@ -517,9 +671,19 @@ export async function getDealsForPackages(packageIds: readonly string[]): Promis
       quantity,
       unitSalePrice,
       expectedUnitCost,
-      sourcingMode: (row.sourcing_mode ?? "owned") as "owned" | "brokered",
-      supplierId: row.supplier_id,
-      supplierName: row.supplier_id ? supplierName.get(row.supplier_id) ?? null : null,
+      sourcingMode,
+      supplierId: sourcingMode === "brokered" ? row.supplier_id : allocatedSupplierId,
+      supplierName: sourcingMode === "brokered"
+        ? row.supplier_id ? supplierName.get(row.supplier_id) ?? null : null
+        : allocatedSupplierLabel,
+      supplierKey: sourcingMode === "owned" ? allocatedSupplierKey : "",
+      supplierAllocations: sourcingMode === "owned" ? supplierAllocations : [],
+      costLayerId:
+        sourcingMode === "owned" &&
+        fullyAllocated &&
+        typeof fulfilment?.cost_layer_id === "string"
+          ? fulfilment.cost_layer_id
+          : null,
     }
     const existing = byDeal.get(deal.id)
     if (existing) {
@@ -595,5 +759,5 @@ export async function getDealsForPackages(packageIds: readonly string[]): Promis
 }
 
 export function isPackageSoldDealStage(stage: string): boolean {
-  return (PACKAGE_SOLD_STAGES as readonly string[]).includes(stage)
+  return dealStageCountsAsSold(stage)
 }

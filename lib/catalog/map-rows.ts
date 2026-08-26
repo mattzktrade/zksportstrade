@@ -36,6 +36,7 @@ type DbPackage = {
   tier: string
   duration?: string | null
   inventory_group_id?: string | null
+  inventory_is_standalone?: boolean
   shell_parent_package_id?: string | null
   includes: unknown
   featured: boolean
@@ -72,6 +73,7 @@ type DbInventory = {
   package_id: string
   qty_available: number
   qty_held: number
+  available_quantity?: number
 }
 
 export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Package {
@@ -118,7 +120,12 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
 
   const qtyAvailable = inv?.qty_available ?? 0
   const qtyHeld = inv?.qty_held ?? 0
-  const sellable = Math.max(0, qtyAvailable - qtyHeld)
+  const sellable = Math.max(
+    0,
+    inv?.available_quantity == null
+      ? qtyAvailable - qtyHeld
+      : Number(inv.available_quantity),
+  )
 
   return {
     id: p.id,

@@ -4,6 +4,7 @@ import {
   emptyPackageSalesBreakdown,
   type PackageSalesBreakdown,
 } from "@/lib/admin/package-sales-breakdown"
+import { dealStageCountsAsSold, dealStageIsUnsignedPipeline, dealStageReservesSellable } from "@/lib/crm/deal-types"
 
 function addGuests(target: PackageSalesBreakdown, channel: string, guests: number): void {
   const qty = Math.max(0, Math.floor(guests))
@@ -44,15 +45,22 @@ export async function getPackageSalesBreakdownByPackage(
   const supabase = await createClient()
   const IN_FILTER_BATCH = 80
   const ordersWithLines = new Set<string>()
-
+  const batches: string[][] = []
   for (let i = 0; i < ids.length; i += IN_FILTER_BATCH) {
-    const batch = ids.slice(i, i + IN_FILTER_BATCH)
-    const { data: lines } = await supabase
-      .from("order_line_items")
-      .select("package_id, quantity, order_id, orders!inner(status, channel)")
-      .in("package_id", batch)
-      .neq("orders.status", "cancelled")
+    batches.push(ids.slice(i, i + IN_FILTER_BATCH))
+  }
 
+  const orderLineResults = await Promise.all(
+    batches.map((batch) =>
+      supabase
+        .from("order_line_items")
+        .select("package_id, quantity, order_id, orders!inner(status, channel)")
+        .in("package_id", batch)
+        .neq("orders.status", "cancelled"),
+    ),
+  )
+
+  for (const { data: lines } of orderLineResults) {
     for (const row of lines ?? []) {
       const pkgId = typeof row.package_id === "string" ? row.package_id.trim() : ""
       if (!pkgId) continue
@@ -65,14 +73,17 @@ export async function getPackageSalesBreakdownByPackage(
     }
   }
 
-  for (let i = 0; i < ids.length; i += IN_FILTER_BATCH) {
-    const batch = ids.slice(i, i + IN_FILTER_BATCH)
-    const { data: orders, error: orderErr } = await supabase
-      .from("orders")
-      .select("id, package_id, channel, guests")
-      .in("package_id", batch)
-      .neq("status", "cancelled")
+  const orderResults = await Promise.all(
+    batches.map((batch) =>
+      supabase
+        .from("orders")
+        .select("id, package_id, channel, guests")
+        .in("package_id", batch)
+        .neq("status", "cancelled"),
+    ),
+  )
 
+  for (const { data: orders, error: orderErr } of orderResults) {
     if (orderErr || !orders) continue
     for (const row of orders) {
       if (typeof row.id === "string" && ordersWithLines.has(row.id)) continue
@@ -86,26 +97,17 @@ export async function getPackageSalesBreakdownByPackage(
 
   const wanted = new Set(ids)
   const dealLines: Array<Record<string, unknown>> = []
-  for (let i = 0; i < ids.length; i += IN_FILTER_BATCH) {
-    const batch = ids.slice(i, i + IN_FILTER_BATCH)
-    const { data } = await supabase
-      .from("deal_line_items")
-      .select("package_id, quantity, deals!inner(id, order_id, stage, source)")
-      .in("package_id", batch)
+  const dealLineResults = await Promise.all(
+    batches.map((batch) =>
+      supabase
+        .from("deal_line_items")
+        .select("package_id, quantity, deals!inner(id, order_id, stage, source)")
+        .in("package_id", batch),
+    ),
+  )
+  for (const { data } of dealLineResults) {
     if (data) dealLines.push(...data)
   }
-
-  const soldDealStages = new Set(["awaiting_payment", "paid_confirmed", "in_fulfilment", "fulfilled"])
-  const pipelineDealStages = new Set([
-    "draft",
-    "sourcing",
-    "proposal",
-    "booking_form_sent",
-    "awaiting_client_signature",
-    "awaiting_zk_signature",
-    "signed",
-    "awaiting_invoice",
-  ])
 
   for (const row of dealLines ?? []) {
     const pkgId = typeof row.package_id === "string" ? row.package_id.trim() : ""
@@ -116,10 +118,12 @@ export async function getPackageSalesBreakdownByPackage(
     const source = typeof deal.source === "string" ? deal.source : "offline"
     const channel = source === "portal" ? "trade_portal" : source === "website" ? "wix" : "offline"
     const breakdown = out.get(pkgId) ?? emptyPackageSalesBreakdown(pkgId)
-    if (soldDealStages.has(stage)) {
+    if (dealStageCountsAsSold(stage)) {
       addGuests(breakdown, channel, Number(row.quantity))
-    } else if (pipelineDealStages.has(stage)) {
+    } else if (dealStageReservesSellable(stage)) {
       breakdown.salesforceOpenPipeline += Math.max(0, Math.floor(Number(row.quantity) || 0))
+    } else if (dealStageIsUnsignedPipeline(stage)) {
+      breakdown.unsignedOpenPipeline += Math.max(0, Math.floor(Number(row.quantity) || 0))
     }
     out.set(pkgId, breakdown)
   }

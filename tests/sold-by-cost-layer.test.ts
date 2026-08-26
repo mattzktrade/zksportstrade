@@ -33,3 +33,38 @@ test("fulfilment assignment moves sold onto the chosen purchase", () => {
   assert.equal(sold.get("legacy"), 0)
   assert.equal(sold.get("f1"), 40)
 })
+
+test("fully allocated later purchases leave the oldest imported lot unsold", () => {
+  const bamA = {
+    id: "bam-a",
+    quantity: 10,
+    quantity_remaining: 2,
+    received_at: "2026-08-20T00:00:00.000Z",
+  }
+  const bamB = {
+    id: "bam-b",
+    quantity: 4,
+    quantity_remaining: 0,
+    received_at: "2026-08-20T00:00:00.000Z",
+  }
+  const sold = resolveSoldByCostLayer({
+    layers: [unknown, bamA, bamB],
+    fulfilmentSoldByLayer: new Map([
+      ["bam-a", 10],
+      ["bam-b", 4],
+    ]),
+    totalPackageSold: 14,
+  })
+  assert.equal(sold.get("legacy"), 0)
+  assert.equal(sold.get("bam-a"), 10)
+  assert.equal(sold.get("bam-b"), 4)
+})
+
+test("does not invent supplier stock when sold exceeds purchased", () => {
+  const sold = resolveSoldByCostLayer({
+    layers: [f1],
+    fulfilmentSoldByLayer: new Map([["f1", 42]]),
+    totalPackageSold: 42,
+  })
+  assert.equal(sold.get("f1"), 40)
+})

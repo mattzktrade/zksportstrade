@@ -15,6 +15,7 @@ import {
 } from "@/lib/catalog/event-categories"
 import { findPackageTemplate, PACKAGE_TEMPLATES } from "@/lib/catalog/package-templates"
 import { PACKAGE_DURATION_OPTIONS } from "@/lib/catalog/package-duration"
+import { CatalogImageField } from "@/components/admin/catalog-image-field"
 
 const NEW_EVENT_ID = "__new__"
 
@@ -78,11 +79,13 @@ export function CatalogNewPackage({
   const [isEnquiry, setIsEnquiry] = useState(false)
   const [requiresBookingApproval, setRequiresBookingApproval] = useState(false)
   const [featured, setFeatured] = useState(false)
+  const [isHidden, setIsHidden] = useState(false)
   const [brochureUrl, setBrochureUrl] = useState("")
   const [initialQty, setInitialQty] = useState("0")
   const [initialUnitCost, setInitialUnitCost] = useState("")
   const [initialSupplierAccountId, setInitialSupplierAccountId] = useState("")
   const [duration, setDuration] = useState("")
+  const [inventoryIsStandalone, setInventoryIsStandalone] = useState(false)
 
   const isFormula1 = eventCategory === "formula_1"
   const creatingNewEvent = !isFormula1 && raceId === NEW_EVENT_ID
@@ -131,11 +134,13 @@ export function CatalogNewPackage({
     setIsEnquiry(false)
     setRequiresBookingApproval(false)
     setFeatured(false)
+    setIsHidden(false)
     setBrochureUrl("")
     setInitialQty("0")
     setInitialUnitCost("")
     setInitialSupplierAccountId("")
     setDuration("")
+    setInventoryIsStandalone(false)
     if (firstF1) applyRaceDefaults(firstF1)
     else clearEventDefaults()
   }
@@ -143,7 +148,10 @@ export function CatalogNewPackage({
   function selectCategory(next: EventCategory) {
     setEventCategory(next)
     setTemplateId("")
-    if (next !== "formula_1") setDuration("")
+    if (next !== "formula_1") {
+      setDuration("")
+      setInventoryIsStandalone(false)
+    }
     const matching = races.filter((race) => raceCategory(race) === next)
     if (matching[0]) {
       setRaceId(matching[0].id)
@@ -180,12 +188,12 @@ export function CatalogNewPackage({
   }, [open])
 
   useEffect(() => {
-    if (isEnquiry) {
+    if (isEnquiry || isHidden) {
       setSellOnWix(false)
       setWixMultiplier("")
       setWixManualPrice("")
     }
-  }, [isEnquiry])
+  }, [isEnquiry, isHidden])
 
   useEffect(() => {
     if (!selectedRace) return
@@ -336,11 +344,13 @@ export function CatalogNewPackage({
         currency: "USD",
         total_capacity: cap,
         duration,
+        inventory_is_standalone: inventoryIsStandalone,
         includes: linesToList(includesText),
         trade_price: price,
         is_enquiry: isEnquiry,
         requires_booking_approval: requiresBookingApproval,
         featured,
+        is_hidden: isHidden,
         sort_order: 100,
         brochure_url: brochureUrl.trim() || null,
         sell_on_wix: sellOnWix,
@@ -519,7 +529,11 @@ export function CatalogNewPackage({
           <select
             required={isFormula1}
             value={duration}
-            onChange={(e) => setDuration(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value
+              setDuration(next)
+              if (!next || next === "3_day") setInventoryIsStandalone(false)
+            }}
             className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
           >
             {PACKAGE_DURATION_OPTIONS.map((o) => (
@@ -528,6 +542,20 @@ export function CatalogNewPackage({
               </option>
             ))}
           </select>
+          {isFormula1 && duration && duration !== "3_day" ? (
+            <label className="mt-2 flex items-start gap-2 rounded-md border border-border p-2.5 text-[11px] leading-relaxed">
+              <input
+                type="checkbox"
+                checked={inventoryIsStandalone}
+                onChange={(e) => setInventoryIsStandalone(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <strong>Separate inventory.</strong> Use this when this day package was purchased
+                independently rather than taken from the linked 3-day stock.
+              </span>
+            </label>
+          ) : null}
           <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground/90">
             {isFormula1
               ? "Saturday only, Sunday only, and 3-day options with the same product stem share inventory (e.g. Velocity Terrace splits)."
@@ -664,16 +692,30 @@ export function CatalogNewPackage({
           <input type="checkbox" checked={featured} onChange={(e) => setFeatured(e.target.checked)} />
           Featured
         </label>
+        <label className="flex items-start gap-2 text-sm sm:col-span-2">
+          <input
+            type="checkbox"
+            checked={isHidden}
+            onChange={(e) => setIsHidden(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            Hidden on portal
+            <span className="block text-[11px] text-muted-foreground/80">
+              Keep this product off the agent portal and website. Use this for internal stock such as parking passes.
+            </span>
+          </span>
+        </label>
         <label className="flex items-center gap-2 text-sm sm:col-span-2">
           <input
             type="checkbox"
             checked={sellOnWix}
             onChange={(e) => setSellOnWix(e.target.checked)}
-            disabled={isEnquiry}
+            disabled={isEnquiry || isHidden}
           />
           Sell on Wix website
         </label>
-        {sellOnWix && !isEnquiry ? (
+        {sellOnWix && !isEnquiry && !isHidden ? (
           <div className="sm:col-span-2 rounded-lg border border-border bg-muted/30 p-4 space-y-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Wix website pricing
@@ -719,15 +761,12 @@ export function CatalogNewPackage({
             )}
           </div>
         ) : null}
-        <label className="block text-xs text-muted-foreground sm:col-span-2">
-          Primary image URL
-          <input
-            value={image}
-            onChange={(e) => setImage(e.target.value)}
-            className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
-            placeholder="https://…"
-          />
-        </label>
+        <CatalogImageField
+          className="sm:col-span-2"
+          label="Primary image"
+          value={image}
+          onChange={setImage}
+        />
         <label className="block text-xs text-muted-foreground sm:col-span-2">
           Extra gallery image URLs (one per line)
           <textarea

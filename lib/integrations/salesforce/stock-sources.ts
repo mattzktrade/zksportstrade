@@ -13,6 +13,11 @@ import {
 } from "@/lib/inventory/sold-by-cost-layer"
 import { loadFulfilmentSoldByCostLayer } from "@/lib/inventory/fulfilment-layer-sold"
 import { resolveLinkedStockLedger } from "@/lib/inventory/linked-stock-ledger"
+import {
+  emptyPackageSalesBreakdown,
+  linkedPoolAttributedSold,
+  type LinkedSellableMember,
+} from "@/lib/admin/package-sales-breakdown"
 
 export { allocateUnattributedSoldAcrossLayers, resolveSoldByCostLayer }
 
@@ -49,10 +54,10 @@ export { allocateUnattributedSoldAcrossLayers, resolveSoldByCostLayer }
  *
  * Linked inventory groups are special: day / 2-day / 3-day Product2s all share the
  * 3-day cost ledger, but each Product2's Quantity_Sold__c is FIFO-allocated from
- * an attributed sold total:
- *   - 3-day → all linked non-shell sales (pool)
- *   - day   → 3-day sales + that day's sales only (Fri ignores Sunday)
- *   - 2-day → 3-day sales + 2-day sales
+ * that product's pool consumption (same as portal Inventory Sold / Stock Purchased):
+ *   - 3-day → busiest-day take (not the sum of every sibling SKU)
+ *   - day   → 3-day sales + that day's sales (+ 2-day on Sat/Sun)
+ *   - 2-day → min(Sat, Sun) consumption
  * Pool-wide consumptions / quantity_remaining are ignored for that attribution.
  */
 
@@ -209,39 +214,32 @@ async function readExistingPortalStockSources(product2Id: string): Promise<Exist
   return rows
 }
 
-const LINKED_DAY_DURATIONS = new Set([
-  "thursday_only",
-  "friday_only",
-  "saturday_only",
-  "sunday_only",
-])
-
 /**
- * How many shared-ledger units this Product2 should show as sold on Stock Sources:
- * - 3-day: every linked sale (pool total)
- * - day package: 3-day sales + that day's own sales only (Fri ignores Sunday sales)
- * - 2-day: 3-day sales + 2-day own sales
+ * How many shared-ledger units this Product2 should show as sold on Stock Sources.
+ * Same overlap rules as portal Inventory Sold — never sum every sibling SKU.
  */
 export function computeLinkedStockSourceAttributedSold(input: {
   packageId: string
   duration: string
   siblings: readonly { id: string; duration: string | null; sold: number }[]
 }): number {
-  const soldById = new Map(input.siblings.map((r) => [r.id, Math.max(0, Math.floor(r.sold))]))
-  const threeDay = input.siblings.find((r) => (r.duration ?? "").trim() === "3_day")
-  const threeDaySold = threeDay ? soldById.get(threeDay.id) ?? 0 : 0
-  const ownSold = soldById.get(input.packageId) ?? 0
-
-  if (input.duration === "3_day") {
-    return input.siblings.reduce((sum, r) => sum + (soldById.get(r.id) ?? 0), 0)
-  }
-  if (LINKED_DAY_DURATIONS.has(input.duration)) {
-    return threeDaySold + ownSold
-  }
-  if (input.duration === "2_day") {
-    return threeDaySold + ownSold
-  }
-  return ownSold
+  const members: LinkedSellableMember[] = input.siblings.map((row) => {
+    const breakdown = emptyPackageSalesBreakdown(row.id)
+    const sold = Math.max(0, Math.floor(row.sold))
+    breakdown.salesforceOffline = sold
+    breakdown.total = sold
+    return { id: row.id, duration: row.duration, breakdown }
+  })
+  const virtualStock = input.siblings.reduce(
+    (sum, row) => sum + Math.max(0, Math.floor(row.sold)),
+    0,
+  )
+  return linkedPoolAttributedSold({
+    stock: virtualStock,
+    targetId: input.packageId,
+    targetDuration: input.duration,
+    members,
+  })
 }
 
 async function linkedStockSourceAttributedSold(

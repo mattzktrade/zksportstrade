@@ -7,6 +7,7 @@ import {
   getInventoryHoldsWithDetails,
   type InventoryPackageOption,
 } from "@/lib/admin/queries"
+import { adminPackageSellable } from "@/lib/inventory/effective-availability"
 import { PageLoadingSpinner } from "@/components/page-loading-spinner"
 
 const InventoryAdminClient = dynamic(
@@ -24,8 +25,8 @@ function toInventoryOptions(pkgRows: Awaited<ReturnType<typeof getAdminCatalogLi
       circuit: p.circuit,
       date_range: p.date_range,
       location: p.location,
-      qty_available: p.inventory!.qty_available,
-      qty_held: p.inventory!.qty_held,
+      qty_available: adminPackageSellable(p),
+      qty_held: 0,
     }))
     .sort((a, b) => a.race_name.localeCompare(b.race_name) || a.name.localeCompare(b.name))
 }

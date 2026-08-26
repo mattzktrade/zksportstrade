@@ -25,8 +25,14 @@ import {
   ensureSupplierForAccount,
   linkPurchaseOrderToAccount,
 } from "@/lib/inventory/suppliers"
-import { packageIdsOnSharedThreeDayLedger, resolveLinkedStockLedger } from "@/lib/inventory/linked-stock-ledger"
-import { applyFulfilmentSoldToLayerRemaining } from "@/lib/inventory/fulfilment-layer-sold"
+import { resolveLinkedStockLedger } from "@/lib/inventory/linked-stock-ledger"
+import {
+  costDaySlotsForDuration,
+  dayLabel,
+  deriveTradePriceDayWeights,
+  validateManualDayPercentages,
+  type CostDaySlot,
+} from "@/lib/inventory/day-cost-allocation"
 import { getCrmCompanyOptions } from "@/lib/crm/deals"
 import {
   generatePurchaseOrderNumber,
@@ -120,36 +126,98 @@ async function remapToLinkedStockLedger(
   return { packageId: ledger.ledgerPackageId, fulfilmentBlockId: null }
 }
 
-async function removeUnusedSharedLedgerDuplicateLayers(
+type CostLayerRpcInput = {
+  packageId: string
+  sourcePackageId: string
+  quantity: number
+  unitCost: number
+  currency: string | null
+  note: string | null
+  receivedAt: string | null
+  source: string | null
+  purchaseOrderId: string | null
+  fulfilmentBlockId?: string | null
+}
+
+function isMissingRpcSignature(error: { code?: string; message: string } | null): boolean {
+  if (!error) return false
+  const message = error.message.toLowerCase()
+  return error.code === "PGRST202" || message.includes("could not find the function")
+}
+
+function linkedDayCostErrorMessage(message: string): string {
+  const normalized = message.toLowerCase()
+  const marker = "missing_day_trade_prices"
+  if (normalized.includes(marker)) {
+    const suffix = message.slice(normalized.indexOf(marker) + marker.length)
+    const days = suffix
+      .replace(/^[:\s]+/, "")
+      .split(/[,;|]/)
+      .map((day) => day.trim().replace(/^["'{\[]+|["'}\]]+$/g, ""))
+      .filter((day): day is CostDaySlot =>
+        day === "thursday_only" ||
+        day === "friday_only" ||
+        day === "saturday_only" ||
+        day === "sunday_only",
+      )
+    const labels = [...new Set(days)].map(dayLabel)
+    return labels.length > 0
+      ? `Add a positive trade price for ${labels.join(" and ")}, or save manual day percentages totaling exactly 100%.`
+      : "Add positive trade prices for every included day, or save manual day percentages totaling exactly 100%."
+  }
+  if (
+    normalized.includes("cost_policy_required") ||
+    normalized.includes("cost_policy_setup_required") ||
+    normalized.includes("day_cost_setup_required")
+  ) {
+    return "Day cost allocation needs setup. Add all included day trade prices or save manual percentages totaling exactly 100%."
+  }
+  if (normalized.includes("manual_weights_must_total_one")) {
+    return "Manual day percentages must total exactly 100%."
+  }
+  return message
+}
+
+async function addCostLayerWithSourcePackage(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  layers: Array<{ id: string; package_id: string; quantity: number; quantity_remaining: number }>,
-): Promise<string[]> {
-  const unused = layers.filter((layer) => layer.quantity_remaining === layer.quantity)
-  if (unused.length === 0) return []
-  const splitIds = await packageIdsOnSharedThreeDayLedger(
-    supabase,
-    unused.map((layer) => layer.package_id),
-  )
-  const candidates = unused.filter((layer) => splitIds.has(layer.package_id))
-  if (candidates.length === 0) return []
-
-  const { data: consumed } = await supabase
-    .from("order_cost_consumptions")
-    .select("cost_layer_id")
-    .in(
-      "cost_layer_id",
-      candidates.map((layer) => layer.id),
+  input: CostLayerRpcInput,
+): Promise<{ error: { code?: string; message: string } | null }> {
+  const base = {
+    p_package_id: input.packageId,
+    p_quantity: input.quantity,
+    p_unit_cost: input.unitCost,
+    p_currency: input.currency,
+    p_note: input.note,
+    p_received_at: input.receivedAt,
+    p_source: input.source,
+    p_purchase_order_id: input.purchaseOrderId,
+    ...(input.fulfilmentBlockId !== undefined
+      ? { p_fulfilment_block_id: input.fulfilmentBlockId }
+      : {}),
+  }
+  if (input.purchaseOrderId) {
+    const purchaseOrderLayer = await supabase.rpc(
+      "admin_add_purchase_order_cost_layer",
+      {
+        ...base,
+        p_source_package_id: input.sourcePackageId,
+      },
     )
-  const consumedIds = new Set(
-    (consumed ?? []).map((row) => String((row as { cost_layer_id?: string | null }).cost_layer_id ?? "")),
-  )
-  const ids = candidates.filter((layer) => !consumedIds.has(layer.id)).map((layer) => layer.id)
-  if (ids.length === 0) return []
+    if (!isMissingRpcSignature(purchaseOrderLayer.error)) {
+      return { error: purchaseOrderLayer.error }
+    }
+  }
+  const current = await supabase.rpc("admin_add_cost_layer", {
+    ...base,
+    p_source_package_id: input.sourcePackageId,
+  })
+  if (!isMissingRpcSignature(current.error)) return { error: current.error }
 
-  const admin = createAdminClient() ?? supabase
-  const { error } = await admin.from("package_cost_layers").delete().in("id", ids)
-  if (error) throw new Error(error.message)
-  return ids
+  // Supports an application-first deployment while the additive migration is
+  // still rolling out. Only signature lookup errors fall back; validation and
+  // transaction errors from the new function are always returned unchanged.
+  const legacy = await supabase.rpc("admin_add_cost_layer", base)
+  return { error: legacy.error }
 }
 
 async function getInventorySyncPackageIds(
@@ -523,6 +591,7 @@ export async function updatePackageFields(input: {
   total_capacity: number
   duration: string
   inventory_group_id?: string | null
+  inventory_is_standalone?: boolean
   includes: string[]
   trade_price: number | null
   is_enquiry: boolean
@@ -561,8 +630,9 @@ export async function updatePackageFields(input: {
   if (!existing) return { ok: false, message: "Package not found." }
 
   const raceId = input.race_id.trim()
+  const inventoryIsStandalone = input.inventory_is_standalone === true
   const manualInventoryGroupId = input.inventory_group_id?.trim() || null
-  const inventoryGroupId = duration
+  const inventoryGroupId = duration && !inventoryIsStandalone
     ? manualInventoryGroupId ?? deriveInventoryGroupId(id, duration, raceId)
     : null
   const requiresBookingApproval =
@@ -586,6 +656,7 @@ export async function updatePackageFields(input: {
       total_capacity: cap,
       duration: duration || null,
       inventory_group_id: inventoryGroupId,
+      inventory_is_standalone: inventoryIsStandalone,
       requires_booking_approval: requiresBookingApproval,
       includes: input.includes,
       trade_price: input.trade_price,
@@ -597,7 +668,16 @@ export async function updatePackageFields(input: {
     })
     .eq("id", id)
 
-  if (error) return { ok: false, message: error.message }
+  if (error) {
+    if (error.message.toLowerCase().includes("package_inventory_in_use")) {
+      return {
+        ok: false,
+        message:
+          "This package still has allocated stock, active holds, orders, or sales without a recorded shortage and cannot be detached safely.",
+      }
+    }
+    return { ok: false, message: error.message }
+  }
 
   const previousInventoryGroupId =
     typeof existing.inventory_group_id === "string" ? existing.inventory_group_id.trim() || null : null
@@ -616,6 +696,9 @@ export async function updatePackageFields(input: {
 
   if (inventoryGroupId) {
     await supabase.rpc("reconcile_linked_multi_day_inventory", { p_group_id: inventoryGroupId })
+    await supabase.rpc("admin_ensure_inventory_pool_for_group", {
+      p_inventory_group_id: inventoryGroupId,
+    })
     await enqueuePackageInventoryChannelSync(supabase, id)
   } else {
     const enq = await enqueueProductUpsert(supabase, id)
@@ -1086,6 +1169,7 @@ export async function createPackage(input: {
   total_capacity: number
   duration: string
   inventory_group_id?: string | null
+  inventory_is_standalone?: boolean
   includes: string[]
   trade_price: number | null
   is_enquiry: boolean
@@ -1183,7 +1267,7 @@ export async function createPackage(input: {
     return { ok: false, message: "Manual Wix price must be zero or a positive number." }
   }
 
-  const sellOnWix = input.sell_on_wix === true && !input.is_enquiry
+  const sellOnWix = input.sell_on_wix === true && !input.is_enquiry && input.is_hidden !== true
   if (sellOnWix) {
     const { retailPriceFromTrade } = await import("@/lib/integrations/retail-price")
     const retail = retailPriceFromTrade(input.trade_price, retailMultiplier, wixRetailPrice)
@@ -1196,8 +1280,9 @@ export async function createPackage(input: {
     }
   }
 
+  const inventoryIsStandalone = input.inventory_is_standalone === true
   const manualInventoryGroupId = input.inventory_group_id?.trim() || null
-  const inventoryGroupId = duration
+  const inventoryGroupId = duration && !inventoryIsStandalone
     ? manualInventoryGroupId ?? deriveInventoryGroupId(id, duration || null, raceId)
     : null
   const requiresBookingApproval =
@@ -1236,6 +1321,7 @@ export async function createPackage(input: {
     tier: "paddock",
     duration: duration || null,
     inventory_group_id: inventoryGroupId,
+    inventory_is_standalone: inventoryIsStandalone,
     requires_booking_approval: requiresBookingApproval,
     includes: input.includes,
     featured: input.featured,
@@ -1360,20 +1446,21 @@ export async function createPackage(input: {
       await supabase.from("packages").delete().eq("id", id)
       return resolved
     }
-    const { error: layerErr } = await supabase.rpc("admin_add_cost_layer", {
-      p_package_id: id,
-      p_quantity: qty,
-      p_unit_cost: cost,
-      p_currency: input.currency.trim() || "USD",
-      p_note: note,
-      p_received_at: null,
-      p_source: null,
-      p_purchase_order_id: resolved.id,
+    const { error: layerErr } = await addCostLayerWithSourcePackage(supabase, {
+      packageId: id,
+      sourcePackageId: id,
+      quantity: qty,
+      unitCost: cost,
+      currency: input.currency.trim() || "USD",
+      note,
+      receivedAt: null,
+      source: null,
+      purchaseOrderId: resolved.id,
     })
     if (layerErr) {
       await supabase.from("package_inventory").delete().eq("package_id", id)
       await supabase.from("packages").delete().eq("id", id)
-      return { ok: false, message: layerErr.message }
+      return { ok: false, message: linkedDayCostErrorMessage(layerErr.message) }
     }
     try {
       const { data: po } = await supabase
@@ -1646,16 +1733,23 @@ export async function updateOrderSupplierAllocations(input: {
     }
   }
 
-  const { error } = await gate.supabase.rpc("admin_set_order_cost_allocations", {
+  const { error } = await gate.supabase.rpc("admin_reassign_order_package_stock", {
     p_order_id: orderId,
+    p_package_id: packageId,
     p_allocations: allocations,
   })
   if (error) {
     const msg = error.message.toLowerCase()
-    if (msg.includes("allocation_total_must_equal_order_guests")) {
+    if (
+      msg.includes("allocation_total_must_equal_order_guests") ||
+      msg.includes("allocation_total_must_equal_line_quantity")
+    ) {
       return { ok: false, message: "Supplier quantities must add up to the order guest count." }
     }
-    if (msg.includes("insufficient_layer_remaining")) {
+    if (
+      msg.includes("insufficient_layer_remaining") ||
+      msg.includes("insufficient_purchased_day_capacity")
+    ) {
       return {
         ok: false,
         message:
@@ -1907,6 +2001,124 @@ async function uploadPurchaseOrderDocumentFromFile(
   return { ok: true }
 }
 
+export async function saveInventoryGroupCostPolicy(input: {
+  inventoryGroupId: string
+  sourcePackageId?: string
+  mode: "derived" | "manual"
+  percentages?: Partial<Record<CostDaySlot, string | number>>
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  const inventoryGroupId = input.inventoryGroupId.trim()
+  if (!inventoryGroupId) return { ok: false, message: "Linked inventory group is missing." }
+
+  const { data: packageData, error: packageError } = await gate.supabase
+    .from("packages")
+    .select("id,duration,event_date,trade_price")
+    .eq("inventory_group_id", inventoryGroupId)
+    .is("shell_parent_package_id", null)
+  if (packageError) return { ok: false, message: packageError.message }
+  const packages = (packageData ?? []) as Array<{
+    id: string
+    duration: string | null
+    event_date: string | null
+    trade_price: number | string | null
+  }>
+  const requestedSource = input.sourcePackageId?.trim()
+  const source =
+    packages.find(
+      (pkg) =>
+        pkg.id === requestedSource &&
+        (pkg.duration === "3_day" || pkg.duration === "2_day"),
+    ) ??
+    packages.find((pkg) => pkg.duration === "3_day") ??
+    packages.find((pkg) => pkg.duration === "2_day")
+  if (!source) {
+    return { ok: false, message: "This group needs a 2-day or 3-day source package." }
+  }
+
+  const days = costDaySlotsForDuration(source.duration, source.event_date)
+  let manualWeights: Partial<Record<CostDaySlot, number>> | null = null
+  if (input.mode === "manual") {
+    const validation = validateManualDayPercentages(days, input.percentages ?? {})
+    if (!validation.ok) return { ok: false, message: validation.message }
+    manualWeights = Object.fromEntries(
+      days.map((day) => [day, validation.weights[day]]),
+    ) as Partial<Record<CostDaySlot, number>>
+  } else {
+    const derived = deriveTradePriceDayWeights({
+      sourceDuration: source.duration,
+      eventDate: source.event_date,
+      members: packages.map((pkg) => ({
+        packageId: pkg.id,
+        duration: pkg.duration,
+        tradePrice: pkg.trade_price == null ? null : Number(pkg.trade_price),
+      })),
+    })
+    if (derived.status === "setup_required") {
+      return {
+        ok: false,
+        message: `Add a positive trade price for ${derived.missingDays.map(dayLabel).join(" and ")}, or use manual percentages totaling exactly 100%.`,
+      }
+    }
+  }
+
+  const rpcManualWeights =
+    manualWeights == null
+      ? null
+      : Object.fromEntries(
+          Object.entries(manualWeights).map(([day, weight]) => [
+            day.replace(/_only$/, ""),
+            weight,
+          ]),
+        )
+  const allocationMethod =
+    input.mode === "derived" ? "normalized_trade_price" : "manual"
+  const primary = await gate.supabase.rpc("admin_set_inventory_group_cost_policy", {
+    p_inventory_group_id: inventoryGroupId,
+    p_allocation_method: allocationMethod,
+    p_manual_weights: rpcManualWeights,
+  })
+  let policyError = primary.error
+  if (isMissingRpcSignature(policyError)) {
+    const alternate = await gate.supabase.rpc("admin_set_inventory_group_cost_policy", {
+      p_inventory_group_id: inventoryGroupId,
+      p_mode: input.mode,
+      p_manual_weights: rpcManualWeights,
+    })
+    policyError = alternate.error
+  }
+  if (isMissingRpcSignature(policyError)) {
+    const legacyAlternate = await gate.supabase.rpc("admin_set_inventory_group_cost_policy", {
+      p_group_id: inventoryGroupId,
+      p_policy_mode: input.mode,
+      p_weights: rpcManualWeights,
+    })
+    policyError = legacyAlternate.error
+  }
+  if (isMissingRpcSignature(policyError)) {
+    return {
+      ok: false,
+      message: "Day cost policy saving is unavailable until the linked-day costing database migration is deployed.",
+    }
+  }
+  if (policyError) {
+    return { ok: false, message: linkedDayCostErrorMessage(policyError.message) }
+  }
+
+  revalidatePath("/admin/catalog")
+  for (const pkg of packages) {
+    revalidatePath(`/admin/catalog/${encodeURIComponent(pkg.id)}`)
+  }
+  return {
+    ok: true,
+    message:
+      input.mode === "manual"
+        ? "Manual day cost percentages saved for future purchases."
+        : "Day cost percentages will be derived from current trade prices for future purchases.",
+  }
+}
+
 /** Add stock and create (or link) the purchase order in one step. Optional contract upload. */
 export async function addStockPurchaseLayer(formData: FormData): Promise<ActionResult> {
   const gate = await requireAdminAction()
@@ -1956,18 +2168,31 @@ export async function addStockPurchaseLayer(formData: FormData): Promise<ActionR
   })
   if (!resolved.ok) return resolved
 
-  const { error } = await supabase.rpc("admin_add_cost_layer", {
-    p_package_id: target.packageId,
-    p_quantity: q,
-    p_unit_cost: c,
-    p_currency: null,
-    p_note: note,
-    p_received_at: received,
-    p_source: null,
-    p_purchase_order_id: resolved.id,
-    p_fulfilment_block_id: target.fulfilmentBlockId,
+  const { error } = await addCostLayerWithSourcePackage(supabase, {
+    packageId: target.packageId,
+    sourcePackageId: packageId,
+    quantity: q,
+    unitCost: c,
+    currency: null,
+    note,
+    receivedAt: received,
+    source: null,
+    purchaseOrderId: resolved.id,
+    fulfilmentBlockId: target.fulfilmentBlockId,
   })
   if (error) {
+    if (!resolved.linkedExisting) {
+      const { error: cleanupError } = await supabase
+        .from("purchase_orders")
+        .delete()
+        .eq("id", resolved.id)
+      if (cleanupError) {
+        console.warn(
+          "[addStockPurchaseLayer] failed to remove unused purchase order:",
+          cleanupError.message,
+        )
+      }
+    }
     const m = error.message.toLowerCase()
     if (m.includes("fulfilment_block_wrong_package")) {
       return { ok: false, message: "Fulfilment block does not belong to this package." }
@@ -1975,7 +2200,7 @@ export async function addStockPurchaseLayer(formData: FormData): Promise<ActionR
     if (m.includes("fulfilment_block_not_found")) {
       return { ok: false, message: "Fulfilment block not found." }
     }
-    return { ok: false, message: error.message }
+    return { ok: false, message: linkedDayCostErrorMessage(error.message) }
   }
 
   const rawFile = formData.get("file")
@@ -2063,16 +2288,17 @@ export async function addCostLayer(input: {
   }
   const { supabase } = gate
   const target = await remapToLinkedStockLedger(supabase, input.packageId, fulfilmentBlockId)
-  const { error } = await supabase.rpc("admin_add_cost_layer", {
-    p_package_id: target.packageId,
-    p_quantity: q,
-    p_unit_cost: c,
-    p_currency: input.currency?.trim() || null,
-    p_note: input.note ?? null,
-    p_received_at: received,
-    p_source: input.source?.trim() || null,
-    p_purchase_order_id: purchaseOrderId,
-    p_fulfilment_block_id: target.fulfilmentBlockId,
+  const { error } = await addCostLayerWithSourcePackage(supabase, {
+    packageId: target.packageId,
+    sourcePackageId: input.packageId,
+    quantity: q,
+    unitCost: c,
+    currency: input.currency?.trim() || null,
+    note: input.note ?? null,
+    receivedAt: received,
+    source: input.source?.trim() || null,
+    purchaseOrderId,
+    fulfilmentBlockId: target.fulfilmentBlockId,
   })
   if (error) {
     const m = error.message.toLowerCase()
@@ -2085,7 +2311,7 @@ export async function addCostLayer(input: {
     if (m.includes("fulfilment_block_not_found")) {
       return { ok: false, message: "Fulfilment block not found." }
     }
-    return { ok: false, message: error.message }
+    return { ok: false, message: linkedDayCostErrorMessage(error.message) }
   }
 
   try {
@@ -2325,44 +2551,49 @@ export async function deleteCostLayer(layerId: string): Promise<ActionResult> {
   const { supabase } = gate
   const { data: layer } = await supabase
     .from("package_cost_layers")
-    .select("package_id, quantity, quantity_remaining")
+    .select("package_id, purchase_order_id")
     .eq("id", layerId.trim())
     .maybeSingle()
-  if (layer) {
-    try {
-      await applyFulfilmentSoldToLayerRemaining(supabase, String((layer as { package_id?: string }).package_id ?? ""))
-    } catch (e) {
+  const purchaseOrderId =
+    typeof layer?.purchase_order_id === "string" ? layer.purchase_order_id : null
+  const { data: docs } = purchaseOrderId
+    ? await supabase
+        .from("purchase_order_documents")
+        .select("file_path")
+        .eq("purchase_order_id", purchaseOrderId)
+    : { data: [] }
+  const { error } = await supabase.rpc("admin_delete_cost_layer_and_empty_purchase_order", {
+    p_layer_id: layerId.trim(),
+  })
+  if (error) {
+    const message = error.message.toLowerCase()
+    if (
+      message.includes("layer_has_active_allocations") ||
+      message.includes("layer_already_consumed")
+    ) {
       return {
         ok: false,
-        message: e instanceof Error ? e.message : "Could not move sold units off this purchase.",
+        message: "Cannot delete this stock purchase because it still fulfils an active sale.",
       }
     }
-    const removed = await removeUnusedSharedLedgerDuplicateLayers(supabase, [
-      {
-        id: layerId.trim(),
-        package_id: String((layer as { package_id?: string }).package_id ?? ""),
-        quantity: Math.max(0, Math.floor(Number((layer as { quantity?: number }).quantity) || 0)),
-        quantity_remaining: Math.max(
-          0,
-          Math.floor(Number((layer as { quantity_remaining?: number }).quantity_remaining) || 0),
-        ),
-      },
-    ])
-    if (removed.length > 0) {
-      revalidatePath("/admin/catalog")
-      revalidatePath("/admin/inventory")
-      revalidatePath("/admin/purchase-orders")
-      revalidatePath("/admin")
-      revalidatePath("/packages")
-      revalidatePath("/")
-      if (layer.package_id) {
-        await reconcileInventoryAfterCostLayerChange(supabase, String(layer.package_id))
+    return { ok: false, message: error.message }
+  }
+  if (purchaseOrderId) {
+    const { data: remainingPurchaseOrder } = await supabase
+      .from("purchase_orders")
+      .select("id")
+      .eq("id", purchaseOrderId)
+      .maybeSingle()
+    if (!remainingPurchaseOrder) {
+      const paths = (docs ?? [])
+        .map((document) => String((document as { file_path?: string }).file_path ?? "").trim())
+        .filter(Boolean)
+      if (paths.length > 0) {
+        const admin = createAdminClient()
+        if (admin) await admin.storage.from(PO_DOCUMENT_BUCKET).remove(paths)
       }
-      return { ok: true }
     }
   }
-  const { error } = await supabase.rpc("admin_delete_cost_layer", { p_layer_id: layerId.trim() })
-  if (error) return { ok: false, message: error.message }
   revalidatePath("/admin/catalog")
   revalidatePath("/admin/inventory")
   revalidatePath("/admin/purchase-orders")
@@ -2487,16 +2718,17 @@ export async function updateOrphanPackageStock(input: {
       return resolved
     }
 
-    const { error: addErr } = await supabase.rpc("admin_add_cost_layer", {
-      p_package_id: packageId,
-      p_quantity: newQty,
-      p_unit_cost: unitCost,
-      p_currency: null,
-      p_note: convert.note?.trim() || "Converted from untracked stock",
-      p_received_at: received,
-      p_source: null,
-      p_purchase_order_id: resolved.id,
-      p_fulfilment_block_id: fulfilmentBlockId,
+    const { error: addErr } = await addCostLayerWithSourcePackage(supabase, {
+      packageId,
+      sourcePackageId: packageId,
+      quantity: newQty,
+      unitCost,
+      currency: null,
+      note: convert.note?.trim() || "Converted from untracked stock",
+      receivedAt: received,
+      source: null,
+      purchaseOrderId: resolved.id,
+      fulfilmentBlockId,
     })
     if (addErr) {
       if (currentAvailable > 0) {
@@ -2509,7 +2741,7 @@ export async function updateOrphanPackageStock(input: {
       if (m.includes("fulfilment_block_wrong_package")) {
         return { ok: false, message: "Fulfilment block does not belong to this package." }
       }
-      return { ok: false, message: addErr.message }
+      return { ok: false, message: linkedDayCostErrorMessage(addErr.message) }
     }
 
     const { error: bfErr } = await supabase.rpc("admin_backfill_package_order_costs", {
@@ -2954,10 +3186,14 @@ export async function createPurchaseOrder(input: {
   )
   if (!referenced.ok) return referenced
 
-  const stockLines = new Map<string, { packageId: string; quantity: number; unitCost: number }>()
+  const stockLines = new Map<
+    string,
+    { packageId: string; sourcePackageId: string; quantity: number; unitCost: number }
+  >()
   for (const line of lines.lines) {
     const target = await remapToLinkedStockLedger(gate.supabase, line.packageId)
-    const existing = stockLines.get(target.packageId)
+    const key = `${target.packageId}\u0000${line.packageId}`
+    const existing = stockLines.get(key)
     if (existing) {
       const totalQty = existing.quantity + line.quantity
       existing.unitCost =
@@ -2967,29 +3203,31 @@ export async function createPurchaseOrder(input: {
       existing.quantity = totalQty
       continue
     }
-    stockLines.set(target.packageId, {
+    stockLines.set(key, {
       packageId: target.packageId,
+      sourcePackageId: line.packageId,
       quantity: line.quantity,
       unitCost: line.unitCost,
     })
   }
 
   for (const line of stockLines.values()) {
-    const { error: layerErr } = await gate.supabase.rpc("admin_add_cost_layer", {
-      p_package_id: line.packageId,
-      p_quantity: line.quantity,
-      p_unit_cost: line.unitCost,
-      p_currency: null,
-      p_note: null,
-      p_received_at: issuedAt,
-      p_source: supplier,
-      p_purchase_order_id: id,
-      p_fulfilment_block_id: null,
+    const { error: layerErr } = await addCostLayerWithSourcePackage(gate.supabase, {
+      packageId: line.packageId,
+      sourcePackageId: line.sourcePackageId,
+      quantity: line.quantity,
+      unitCost: line.unitCost,
+      currency: null,
+      note: null,
+      receivedAt: issuedAt,
+      source: supplier,
+      purchaseOrderId: id,
+      fulfilmentBlockId: null,
     })
     if (layerErr) {
       return {
         ok: false,
-        message: `Purchase order created, but a product could not be added: ${layerErr.message}`,
+        message: `Purchase order created, but a product could not be added: ${linkedDayCostErrorMessage(layerErr.message)}`,
       }
     }
   }
@@ -3076,33 +3314,6 @@ export async function deletePurchaseOrder(purchaseOrderId: string): Promise<Acti
     .select("id, package_id, quantity, quantity_remaining")
     .eq("purchase_order_id", id)
 
-  try {
-    const packageIds = [
-      ...new Set(
-        (layers ?? [])
-          .map((row) => String((row as { package_id?: string }).package_id ?? "").trim())
-          .filter(Boolean),
-      ),
-    ]
-    for (const packageId of packageIds) {
-      await applyFulfilmentSoldToLayerRemaining(gate.supabase, packageId)
-    }
-    await removeUnusedSharedLedgerDuplicateLayers(
-      gate.supabase,
-      (layers ?? []).map((row) => ({
-        id: String((row as { id: string }).id),
-        package_id: String((row as { package_id?: string }).package_id ?? ""),
-        quantity: Math.max(0, Math.floor(Number((row as { quantity?: number }).quantity) || 0)),
-        quantity_remaining: Math.max(
-          0,
-          Math.floor(Number((row as { quantity_remaining?: number }).quantity_remaining) || 0),
-        ),
-      })),
-    )
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "Could not remove duplicate split-product stock." }
-  }
-
   // Best-effort: also delete stored attachment files.
   const { data: docs } = await gate.supabase
     .from("purchase_order_documents")
@@ -3112,7 +3323,11 @@ export async function deletePurchaseOrder(purchaseOrderId: string): Promise<Acti
   const { error } = await gate.supabase.rpc("admin_delete_purchase_order", { p_id: id })
   if (error) {
     const m = error.message.toLowerCase()
-    if (m.includes("purchase_order_stock_sold") || m.includes("layer_already_consumed")) {
+    if (
+      m.includes("purchase_order_stock_sold") ||
+      m.includes("layer_already_consumed") ||
+      m.includes("layer_has_active_allocations")
+    ) {
       return {
         ok: false,
         message: "Cannot delete this purchase order because some of its stock has already been sold.",
@@ -3397,7 +3612,7 @@ export async function fetchAdminCatalogList(): Promise<import("@/lib/admin/queri
   // (portal-only reconcile ignored open SF pipeline and burned no SF API but still
   // corrupted sellable; full SF heal here burned TotalRequests).
   const { getAdminCatalogListRows } = await import("@/lib/admin/queries")
-  return getAdminCatalogListRows({ includeSalesforceInventory: true })
+  return getAdminCatalogListRows()
 }
 
 export async function fetchAdminPackageForCatalogExpand(
@@ -3493,6 +3708,13 @@ export async function setPackageOpeningBalance(input: {
   })
   if (error) {
     const m = error.message.toLowerCase()
+    if (m.includes("canonical_stock_adjustment_requires_purchase_layer")) {
+      return {
+        ok: false,
+        message:
+          "Record the verified stock as a supplier purchase so quantity, day capacity, and cost remain auditable.",
+      }
+    }
     if (m.includes("opening_balance_below_held")) {
       return {
         ok: false,
@@ -3537,6 +3759,13 @@ export async function adjustPackageStockWithReason(input: {
   })
   if (error) {
     const m = error.message.toLowerCase()
+    if (m.includes("canonical_stock_adjustment_requires_purchase_layer")) {
+      return {
+        ok: false,
+        message:
+          "Adjust the relevant supplier purchase instead so quantity, day capacity, and cost remain aligned.",
+      }
+    }
     if (m.includes("adjustment_below_held")) {
       return { ok: false, message: "Adjustment would leave available stock below held units." }
     }
@@ -3645,6 +3874,9 @@ function validateNativeEvent(input: NativeEventInput):
   const countryCode = input.countryCode.trim().toUpperCase().slice(0, 8)
   const eventDate = input.eventDate.trim()
   const dateRange = input.dateRange.trim()
+  if (/chatgpt\.com|oaidalle/i.test(input.image)) {
+    return { ok: false, message: "ChatGPT image links expire and cannot be saved. Upload the image file instead." }
+  }
   const image = sanitizeHttpsUrl(input.image) ?? "/placeholder.svg"
   const season = Math.floor(Number(input.season))
 
@@ -4238,6 +4470,15 @@ export async function updateNativeDealWorkflow(input: {
     }
     if (message.includes("loss_reason_required")) {
       return { ok: false, message: "Enter a reason before closing the deal as lost." }
+    }
+    if (
+      message.includes("insufficient_purchased_stock") ||
+      message.includes("allocation_incomplete")
+    ) {
+      return {
+        ok: false,
+        message: "This deal cannot be confirmed because there is not enough purchased stock.",
+      }
     }
     return { ok: false, message: error.message }
   }

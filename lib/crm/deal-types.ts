@@ -31,15 +31,77 @@ export const DEAL_STAGES: readonly DealStage[] = [
   "cancelled",
 ]
 
+/** Paid stages that are ready to fulfil. Payment status is independent of stock hold. */
+export const DEAL_CONFIRMED_STAGES: readonly DealStage[] = [
+  "paid_confirmed",
+  "in_fulfilment",
+  "fulfilled",
+]
+
+export function dealStageIsConfirmed(stage: DealStage | string): boolean {
+  return (DEAL_CONFIRMED_STAGES as readonly string[]).includes(stage)
+}
+
+/**
+ * Native signed contracts now consume purchased stock (see DEAL_SOLD_STAGES).
+ * This list is kept for Salesforce overlay / leftover pipeline demand only.
+ */
+export const DEAL_STOCK_RESERVE_STAGES: readonly DealStage[] = []
+
+export function dealStageReservesSellable(stage: DealStage | string): boolean {
+  return (DEAL_STOCK_RESERVE_STAGES as readonly string[]).includes(stage)
+}
+
+/** Open deals before both parties have signed the booking form. Shown as pipeline, not reserved. */
+export const DEAL_UNSIGNED_PIPELINE_STAGES: readonly DealStage[] = [
+  "draft",
+  "sourcing",
+  "proposal",
+  "booking_form_sent",
+  "awaiting_client_signature",
+  "awaiting_zk_signature",
+]
+
+export function dealStageIsUnsignedPipeline(stage: DealStage | string): boolean {
+  return (DEAL_UNSIGNED_PIPELINE_STAGES as readonly string[]).includes(stage)
+}
+
+/**
+ * After both parties have signed. These deals hold purchased stock and can be
+ * assigned a fulfilment supplier. Payment status can still be Awaiting payment.
+ */
+export const DEAL_SOLD_STAGES: readonly DealStage[] = [
+  "signed",
+  "awaiting_invoice",
+  "awaiting_payment",
+  "paid_confirmed",
+  "in_fulfilment",
+  "fulfilled",
+]
+
+export function dealStageCountsAsSold(stage: DealStage | string): boolean {
+  return (DEAL_SOLD_STAGES as readonly string[]).includes(stage)
+}
+
+export function dealStageHoldsPurchasedStock(stage: DealStage | string): boolean {
+  return dealStageCountsAsSold(stage)
+}
+
+/** Live pipeline that is not paid yet — must not be treated as ready to fulfil. */
+export function dealStageIsOpenPipeline(stage: DealStage | string): boolean {
+  return (
+    !dealStageIsConfirmed(stage) &&
+    stage !== "closed_lost" &&
+    stage !== "cancelled"
+  )
+}
+
 /** Paid/fulfilled sales that never got a portal order — typical of Salesforce/historical imports. */
 export function dealConfirmedOffPlatform(deal: {
   order_id: string | null
   stage: DealStage
 }): boolean {
-  return (
-    !deal.order_id &&
-    ["paid_confirmed", "in_fulfilment", "fulfilled"].includes(deal.stage)
-  )
+  return !deal.order_id && dealStageIsConfirmed(deal.stage)
 }
 
 export const DEAL_SOURCES = ["offline", "website", "portal", "referral", "other"] as const
@@ -119,6 +181,9 @@ export type PackageDealSaleLine = {
   sourcingMode: "owned" | "brokered"
   supplierId: string | null
   supplierName: string | null
+  supplierKey: string
+  supplierAllocations: Array<{ key: string; name: string; quantity: number }>
+  costLayerId: string | null
 }
 
 export type PackageDealSaleRow = {

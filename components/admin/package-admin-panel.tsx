@@ -23,6 +23,7 @@ import type { FulfilmentBlockWithUsage } from "@/lib/admin/fulfilment-blocks"
 import type { PurchaseOrderRow } from "@/lib/admin/purchase-orders"
 import {
   commitmentSellable,
+  linkedPoolClosedWonRemaining,
   linkedPoolSellableForPackage,
   type LinkedSellableMember,
 } from "@/lib/admin/package-sales-breakdown"
@@ -104,6 +105,9 @@ export function PackageAdminPanel({
   const [tradePrice, setTradePrice] = useState(initial.trade_price != null ? String(initial.trade_price) : "")
   const [duration, setDuration] = useState(initial.duration ?? "")
   const [inventoryGroupId, setInventoryGroupId] = useState(initial.inventory_group_id ?? "")
+  const [inventoryIsStandalone, setInventoryIsStandalone] = useState(
+    initial.inventory_is_standalone ?? false,
+  )
   const [isEnquiry, setIsEnquiry] = useState(initial.is_enquiry)
   const [requiresBookingApproval, setRequiresBookingApproval] = useState(
     initial.requires_booking_approval ?? false,
@@ -128,6 +132,7 @@ export function PackageAdminPanel({
     setTradePrice(initial.trade_price != null ? String(initial.trade_price) : "")
     setDuration(initial.duration ?? "")
     setInventoryGroupId(initial.inventory_group_id ?? "")
+    setInventoryIsStandalone(initial.inventory_is_standalone ?? false)
     setIsEnquiry(initial.is_enquiry)
     setRequiresBookingApproval(initial.requires_booking_approval ?? false)
     setFeatured(initial.featured)
@@ -172,6 +177,7 @@ export function PackageAdminPanel({
         total_capacity: cap,
         duration,
         inventory_group_id: inventoryGroupId.trim() || null,
+        inventory_is_standalone: inventoryIsStandalone,
         includes: linesToList(includesText),
         trade_price: price,
         is_enquiry: isEnquiry,
@@ -229,13 +235,14 @@ export function PackageAdminPanel({
   const showIntegrations = section === "all" || section === "visibility" || section === "integrations"
   const salePrice = section === "inventory" || section === "all" ? initial.trade_price : parsePrice()
   const qtyAvailable = initial.inventory?.qty_available ?? 0
-  const qtyHeldNum = initial.inventory?.qty_held ?? 0
+  const qtyHeldNum = initial.canonical_availability?.reserved ?? initial.inventory?.qty_held ?? 0
   const inventorySellable = Math.max(0, qtyAvailable - qtyHeldNum)
   const salesBreakdown = initial.sales_breakdown ?? {
     package_id: initial.id,
     wix: 0,
     salesforceOffline: 0,
     salesforceOpenPipeline: 0,
+    unsignedOpenPipeline: 0,
     tradePortal: 0,
     total: 0,
   }
@@ -244,9 +251,9 @@ export function PackageAdminPanel({
     (sum, l) => sum + Math.max(0, Math.floor(Number(l.quantity) || 0)),
     0,
   )
-  const stockDisplay = layerStock > 0 ? layerStock : Math.max(qtyAvailable, layerStock)
-  const soldDisplay = soldTotal
-
+  const stockDisplay =
+    initial.canonical_availability?.bought ??
+    (layerStock > 0 ? layerStock : Math.max(qtyAvailable, layerStock))
   const linkedMembers: LinkedSellableMember[] =
     linkedPackages.length > 1
       ? linkedPackages.map((p) => ({
@@ -255,9 +262,8 @@ export function PackageAdminPanel({
           breakdown: p.id === initial.id ? salesBreakdown : p.sales_breakdown,
         }))
       : []
-
   // Per-package pool Remaining (Fri ≠ Sun ≠ 3-day). Do not sum every sibling's pipeline.
-  const sellable =
+  const calculatedSellable =
     linkedMembers.length > 0
       ? linkedPoolSellableForPackage({
           stock: stockDisplay,
@@ -269,6 +275,32 @@ export function PackageAdminPanel({
           stock: stockDisplay,
           breakdown: salesBreakdown,
         })
+  const linkedSoldRemaining =
+    linkedMembers.length > 0
+      ? linkedPoolClosedWonRemaining({
+          stock: stockDisplay,
+          targetId: initial.id,
+          targetDuration: initial.duration ?? null,
+          members: linkedMembers,
+        })
+      : null
+  const soldDisplay =
+    linkedSoldRemaining == null
+      ? soldTotal
+      : Math.max(0, stockDisplay - linkedSoldRemaining)
+  const sellable = Math.max(
+    0,
+    calculatedSellable - qtyHeldNum,
+  )
+  const netStock = Math.floor(
+    linkedMembers.length > 0
+      ? (linkedSoldRemaining ?? stockDisplay - soldDisplay)
+      : initial.canonical_availability?.net ?? calculatedSellable,
+  )
+  const ownedShortage = initial.canonical_availability
+    ? Math.max(initial.canonical_availability.historicalShortage, -netStock, 0)
+    : Math.max(soldDisplay - stockDisplay, 0)
+  const pipelineOversubscription = Math.max(0, -calculatedSellable - ownedShortage)
   const openPipelineHolds =
     linkedMembers.length > 0
       ? linkedMembers.reduce((sum, m) => sum + Math.max(0, Math.floor(m.breakdown.salesforceOpenPipeline)), 0)
@@ -385,11 +417,25 @@ export function PackageAdminPanel({
             <input
               value={inventoryGroupId}
               onChange={(e) => setInventoryGroupId(e.target.value)}
+              disabled={inventoryIsStandalone}
               className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
-              placeholder="Leave blank to auto-link by race and package slug"
+              placeholder={inventoryIsStandalone ? "Standalone inventory" : "Auto-generated when blank"}
             />
             <span className="block text-[11px] text-muted-foreground/80 mt-1 leading-relaxed">
-              Packages with the same key share inventory. Use this to link 3 day, 2 day, Saturday, and Sunday versions.
+              Packages with the same key share inventory.
+            </span>
+            <span className="mt-2 flex items-start gap-2 rounded-md border border-border p-2.5 text-[11px] leading-relaxed">
+              <input
+                type="checkbox"
+                checked={inventoryIsStandalone}
+                onChange={(e) => setInventoryIsStandalone(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <strong className="text-foreground">Use separate inventory for this package.</strong>{" "}
+                Select this when the day package was purchased independently and should not consume the
+                3-day stock.
+              </span>
             </span>
           </label>
           <label className="block text-xs text-muted-foreground sm:col-span-2">
@@ -508,29 +554,39 @@ export function PackageAdminPanel({
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-2xl">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 max-w-3xl">
               <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Sellable</p>
                 <p
                   className={`text-lg font-semibold tabular-nums ${
-                    sellable < 0 ? "text-destructive" : ""
+                    ownedShortage > 0 || pipelineOversubscription > 0 ? "text-destructive" : ""
                   }`}
                 >
                   {sellable}
                 </p>
-                {sellable < 0 ? (
+                {ownedShortage > 0 ? (
                   <p className="text-[10px] text-destructive/90 mt-0.5">
-                    Oversold (pipeline holds stock)
+                    {ownedShortage} sold place{ownedShortage === 1 ? "" : "s"} not covered
+                  </p>
+                ) : pipelineOversubscription > 0 ? (
+                  <p className="text-[10px] text-destructive/90 mt-0.5">
+                    Pipeline exceeds stock by {pipelineOversubscription}
                   </p>
                 ) : openPipelineHolds > 0 ? (
                   <p className="text-[10px] text-muted-foreground mt-0.5">
-                    After pipeline
+                    After signed contracts
                   </p>
                 ) : null}
               </div>
               <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wide text-muted-foreground">On hold</p>
                 <p className="text-lg font-semibold tabular-nums">{qtyHeldNum}</p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Net stock</p>
+                <p className={`text-lg font-semibold tabular-nums ${netStock < 0 ? "text-destructive" : ""}`}>
+                  {netStock}
+                </p>
               </div>
               <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -550,6 +606,7 @@ export function PackageAdminPanel({
               packageId={initial.id}
               packageName={initial.name}
               packageDuration={initial.duration}
+              eventDate={initial.event_date}
               packageCurrency={(initial.currency || "USD").trim() || "USD"}
               salePrice={salePrice}
               layers={initial.cost_layers}

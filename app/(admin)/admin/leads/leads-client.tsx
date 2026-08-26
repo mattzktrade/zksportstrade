@@ -624,7 +624,7 @@ export function LeadsClient({
                     <input
                       value={postcode}
                       onChange={(e) => setPostcode(e.target.value)}
-                      placeholder="Postcode"
+                      placeholder="Postcode (optional)"
                       className="h-11 w-full rounded-md border px-3 text-sm"
                     />
                     <input

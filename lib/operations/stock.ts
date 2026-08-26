@@ -27,6 +27,8 @@ export type OperationsStockAllocation = {
   supplierKey: string
   supplierName: string
   supplierId: string | null
+  locked?: boolean
+  lockReason?: string | null
 }
 
 export type OperationsSupplierOption = {

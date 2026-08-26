@@ -9,6 +9,7 @@ import {
   Target,
   UserRoundPlus,
   UsersRound,
+  CircleHelp,
   type LucideIcon,
 } from "lucide-react"
 import { requireAdmin } from "@/lib/admin/require-admin"
@@ -117,7 +118,10 @@ export default async function AdminDashboardPage() {
       .limit(5),
   ])
 
-  const totalAvailable = (inventory ?? []).reduce((sum, row) => sum + Number(row.qty_available ?? 0), 0)
+  const totalAvailable = (inventory ?? []).reduce(
+    (sum, row) => sum + Number(row.qty_available ?? 0),
+    0,
+  )
   const confirmedSales = salesRows.filter(
     (row) => row.orderStatus !== "cancelled" && row.currency === "USD",
   )
@@ -213,6 +217,15 @@ export default async function AdminDashboardPage() {
       <AdminPageHeader
         title="Dashboard"
         description="Overview of approvals, sales, operations and finance across ZK Sports."
+        action={
+          <Link
+            href="/admin/help"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[#e5e7eb] bg-white px-3 text-[11px] font-semibold text-[#3c4043] hover:bg-slate-50"
+          >
+            <CircleHelp className="h-3.5 w-3.5" />
+            Getting started
+          </Link>
+        }
       />
 
       <AdminStats className="grid-cols-2 lg:grid-cols-3">

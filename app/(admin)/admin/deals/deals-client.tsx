@@ -35,6 +35,8 @@ import { EventFilter, uniqueEventFilterOptions } from "@/components/admin/event-
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import {
   DealLineBasket,
+  isPricedDealBasketLine,
+  numericDealField,
   type DealBasketLine,
   type DealBasketSupplier,
 } from "@/components/admin/deal-line-basket"
@@ -498,7 +500,7 @@ export function DealsClient({
     newAccountMode || newContactMode || Boolean(selectedAccount && selectedAccount.contacts.length === 0)
   const hasNewContactDetails = Boolean(newContactName.trim() && newContactEmail.trim())
   const hasNewAccountAddress = Boolean(
-    newBillingLine1.trim() && newBillingCity.trim() && newBillingPostcode.trim() && newBillingCountry.trim(),
+    newBillingLine1.trim() && newBillingCity.trim() && newBillingCountry.trim(),
   )
   const canSubmitDeal =
     createLines.length > 0 &&
@@ -625,8 +627,8 @@ export function DealsClient({
         toast.error("Add the contact email — it is used on the booking form and invoice.")
         return
       }
-      if (!newBillingLine1.trim() || !newBillingCity.trim() || !newBillingPostcode.trim() || !newBillingCountry.trim()) {
-        toast.error("Add the billing address — it is used on the booking form and invoice.")
+      if (!newBillingLine1.trim() || !newBillingCity.trim() || !newBillingCountry.trim()) {
+        toast.error("Add the billing address — it is used on the booking form and invoice. Postcode can be left blank.")
         return
       }
     } else {
@@ -652,7 +654,7 @@ export function DealsClient({
       toast.error("Add at least one product.")
       return
     }
-    if (createLines.some((line) => line.quantity < 1 || line.unitPrice < 0)) {
+    if (createLines.some((line) => !isPricedDealBasketLine(line))) {
       toast.error("Check the quantity and sale price for every product.")
       return
     }
@@ -671,7 +673,7 @@ export function DealsClient({
             line1: newBillingLine1.trim(),
             line2: newBillingLine2.trim() || null,
             city: newBillingCity.trim(),
-            postcode: newBillingPostcode.trim(),
+            postcode: newBillingPostcode.trim() || null,
             country: newBillingCountry.trim(),
           },
           contacts: [{
@@ -734,8 +736,8 @@ export function DealsClient({
         contactId: resolvedContactId,
         lines: createLines.map((line) => ({
           packageId: line.packageId,
-          quantity: line.quantity,
-          unitPrice: line.unitPrice,
+          quantity: numericDealField(line.quantity),
+          unitPrice: numericDealField(line.unitPrice),
           sourcingMode: line.sourcingMode,
           supplierId: line.supplierId || null,
           expectedUnitCost: line.expectedUnitCost,
@@ -1591,7 +1593,7 @@ export function DealsClient({
                           <input
                             value={newBillingPostcode}
                             onChange={(e) => setNewBillingPostcode(e.target.value)}
-                            placeholder="Postcode"
+                            placeholder="Postcode (optional)"
                             className="h-10 rounded-md border bg-white px-3 text-sm"
                           />
                           <input
@@ -1758,7 +1760,7 @@ export function DealsClient({
                   <div className="text-right">
                     <p className="text-[10px] uppercase text-slate-400">Deal total</p>
                     <p className="text-lg font-semibold">
-                      {money(createLines.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0), "USD")}
+                      {money(createLines.reduce((sum, line) => sum + numericDealField(line.quantity) * numericDealField(line.unitPrice), 0), "USD")}
                     </p>
                   </div>
                 </div>

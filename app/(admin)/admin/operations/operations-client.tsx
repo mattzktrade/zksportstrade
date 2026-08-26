@@ -147,14 +147,10 @@ function deliveryPatch(row: WorkflowOrderRow, delivery: "not_ready" | "ready" | 
             : row.fulfilmentStatus,
     guestDetailsStatus: row.guestDetailsStatus,
     communicationStatus: row.communicationStatus,
-    supplierStatus:
-      delivery === "not_ready"
-        ? row.supplierStatus === "tickets_received"
-          ? "pending"
-          : row.supplierStatus
-        : row.supplierStatus === "unassigned"
-          ? "pending"
-          : "tickets_received",
+    // Delivery progress must not fabricate supplier confirmation or ticket
+    // receipt. Those are separate, explicit fulfilment facts and they lock
+    // stock allocations against automatic rebalancing.
+    supplierStatus: row.supplierStatus,
     deliveryStatus: delivery,
   }
 }

@@ -69,6 +69,11 @@ export type SupplierProfile = {
   unitsAvailable: number
 }
 
+// package_cost_layers has two FKs to packages (package_id and source_package_id).
+// PostgREST returns PGRST201 unless the ledger package relationship is hinted.
+const COST_LAYER_PROFILE_SELECT =
+  "id, package_id, purchase_order_id, quantity, quantity_remaining, unit_cost, currency, packages!package_id(name, race_id, races(name, season))" as const
+
 type LayerRow = {
   id: string
   package_id: string
@@ -123,11 +128,11 @@ export async function getSupplierProfile(supplierId: string): Promise<SupplierPr
         .ilike("supplier", supplier.name),
       supabase
         .from("package_cost_layers")
-        .select("id, package_id, purchase_order_id, quantity, quantity_remaining, unit_cost, currency, packages(name, race_id, races(name, season))")
+        .select(COST_LAYER_PROFILE_SELECT)
         .eq("supplier_id", id),
       supabase
         .from("package_cost_layers")
-        .select("id, package_id, purchase_order_id, quantity, quantity_remaining, unit_cost, currency, packages(name, race_id, races(name, season))")
+        .select(COST_LAYER_PROFILE_SELECT)
         .is("supplier_id", null)
         .ilike("source", supplier.name),
       supabase
@@ -157,7 +162,7 @@ export async function getSupplierProfile(supplierId: string): Promise<SupplierPr
   const { data: poLayers } = poIds.length
     ? await supabase
         .from("package_cost_layers")
-        .select("id, package_id, purchase_order_id, quantity, quantity_remaining, unit_cost, currency, packages(name, race_id, races(name, season))")
+        .select(COST_LAYER_PROFILE_SELECT)
         .in("purchase_order_id", poIds)
     : { data: [] }
 

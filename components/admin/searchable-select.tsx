@@ -1,13 +1,30 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { ChevronsUpDown } from "lucide-react"
+import { adminSearchTextMatches } from "@/lib/admin/option-search"
 import { cn } from "@/lib/utils"
+
+const MENU_GAP = 4
+const VIEWPORT_MARGIN = 12
+const MENU_MAX_HEIGHT = 320
 
 export type SearchableSelectOption = {
   value: string
   label: string
+}
+
+type MenuBox = {
+  top?: number
+  bottom?: number
+  left: number
+  width: number
+  maxHeight: number
+}
+
+function viewportHeight() {
+  return window.visualViewport?.height ?? window.innerHeight
 }
 
 export function SearchableSelect({
@@ -31,7 +48,7 @@ export function SearchableSelect({
   const selected = options.find((option) => option.value === value) ?? null
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState(selected?.label ?? "")
-  const [menuBox, setMenuBox] = useState<{ top: number; left: number; width: number } | null>(null)
+  const [menuBox, setMenuBox] = useState<MenuBox | null>(null)
 
   useEffect(() => {
     if (!open) setQuery(selected?.label ?? "")
@@ -47,38 +64,78 @@ export function SearchableSelect({
     return () => document.removeEventListener("pointerdown", onPointerDown)
   }, [])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) {
       setMenuBox(null)
       return
     }
-    function updatePosition() {
+    function updatePosition(event?: Event) {
+      if (
+        event &&
+        menuRef.current &&
+        event.target instanceof Node &&
+        menuRef.current.contains(event.target)
+      ) {
+        return
+      }
       const el = inputRef.current
       if (!el) return
       const rect = el.getBoundingClientRect()
-      setMenuBox({ top: rect.bottom + 4, left: rect.left, width: rect.width })
+      const spaceBelow = viewportHeight() - rect.bottom - MENU_GAP - VIEWPORT_MARGIN
+      const spaceAbove = rect.top - MENU_GAP - VIEWPORT_MARGIN
+      const openAbove = spaceBelow < MENU_MAX_HEIGHT && spaceAbove > spaceBelow
+      const available = Math.max(0, openAbove ? spaceAbove : spaceBelow)
+      const maxHeight = Math.min(MENU_MAX_HEIGHT, available)
+      const next: MenuBox = {
+        ...(openAbove
+          ? { bottom: viewportHeight() - rect.top + MENU_GAP }
+          : { top: rect.bottom + MENU_GAP }),
+        left: rect.left,
+        width: rect.width,
+        maxHeight,
+      }
+      setMenuBox((current) =>
+        current &&
+        current.top === next.top &&
+        current.bottom === next.bottom &&
+        current.left === next.left &&
+        current.width === next.width &&
+        current.maxHeight === next.maxHeight
+          ? current
+          : next,
+      )
     }
     updatePosition()
     window.addEventListener("resize", updatePosition)
+    window.visualViewport?.addEventListener("resize", updatePosition)
+    window.visualViewport?.addEventListener("scroll", updatePosition)
     window.addEventListener("scroll", updatePosition, true)
     return () => {
       window.removeEventListener("resize", updatePosition)
+      window.visualViewport?.removeEventListener("resize", updatePosition)
+      window.visualViewport?.removeEventListener("scroll", updatePosition)
       window.removeEventListener("scroll", updatePosition, true)
     }
   }, [open])
 
   const matches = useMemo(() => {
-    const q = query.trim().toLowerCase()
+    const q = query.trim()
     if (!q || query === selected?.label) return options
-    return options.filter((option) => option.label.toLowerCase().includes(q))
+    return options.filter((option) => adminSearchTextMatches(option.label, q))
   }, [options, query, selected?.label])
 
   const menu =
     open && menuBox ? (
       <div
         ref={menuRef}
-        style={{ top: menuBox.top, left: menuBox.left, width: menuBox.width }}
-        className="fixed z-[120] max-h-56 overflow-y-auto rounded-md border bg-white py-1 shadow-lg"
+        style={{
+          top: menuBox.top,
+          bottom: menuBox.bottom,
+          left: menuBox.left,
+          width: menuBox.width,
+          maxHeight: menuBox.maxHeight,
+        }}
+        className="fixed z-[120] overflow-y-auto overscroll-contain rounded-md border bg-white py-1 shadow-lg"
       >
         {matches.length === 0 ? (
           <p className="px-3 py-2 text-[10px] text-slate-400">{emptyLabel}</p>

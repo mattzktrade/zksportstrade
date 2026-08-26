@@ -19,6 +19,7 @@ import {
   type EventCategory,
 } from "@/lib/catalog/event-categories"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import { CatalogImageField } from "@/components/admin/catalog-image-field"
 
 export type NativeEventRow = {
   id: string
@@ -187,9 +188,8 @@ export function EventsClient({ events }: { events: NativeEventRow[] }) {
             ["country", "Country", "Singapore"],
             ["countryCode", "Country code", "SG"],
             ["dateRange", "Display date range", "09 – 11 Oct"],
-            ["image", "Event image URL", "https://..."],
           ] as const).map(([key, label, placeholder]) => (
-            <label key={key} className={key === "image" ? "text-sm xl:col-span-2" : "text-sm"}>
+            <label key={key} className="text-sm">
               <span className="mb-1.5 block font-medium text-slate-700">{label}</span>
               <input
                 value={String(form[key])}
@@ -199,6 +199,11 @@ export function EventsClient({ events }: { events: NativeEventRow[] }) {
               />
             </label>
           ))}
+          <CatalogImageField
+            className="xl:col-span-2"
+            value={form.image}
+            onChange={(url) => update("image", url)}
+          />
           <label className="text-sm">
             <span className="mb-1.5 block font-medium text-slate-700">Event date</span>
             <input type="date" value={form.eventDate} onChange={(event) => update("eventDate", event.target.value)} className="h-10 w-full rounded-md border bg-white px-3 text-sm" />

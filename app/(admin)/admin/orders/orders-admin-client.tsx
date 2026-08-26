@@ -7,6 +7,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react"
 import { toast } from "sonner"
 import { cancelAdminOrder } from "@/app/(admin)/actions"
 import { adminPackagePath } from "@/lib/admin/package-link"
+import { adminOrderDealPath } from "@/lib/admin/deal-link"
 import { cn } from "@/lib/utils"
 import type { AdminOrderListRow } from "@/lib/orders/queries"
 import { AdminInvoiceStatusSelect } from "@/components/admin-invoice-status-select"
@@ -67,6 +68,17 @@ function SupplierAllocations({ order }: { order: AdminOrderListRow }) {
         </p>
       ))}
     </div>
+  )
+}
+
+function OrderReferenceLink({ order }: { order: AdminOrderListRow }) {
+  const href = adminOrderDealPath(order.deal_id)
+  const classes = "font-mono text-xs leading-snug break-all"
+  if (!href) return <span className={classes}>{order.reference}</span>
+  return (
+    <Link href={href} className={`${classes} text-primary hover:underline`}>
+      {order.reference}
+    </Link>
   )
 }
 
@@ -210,7 +222,7 @@ function AdminOrderMobileCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-mono text-xs text-foreground break-all">{o.reference}</p>
+          <OrderReferenceLink order={o} />
           {o.status === "cancelled" ? (
             <span className="mt-1 inline-flex rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               Cancelled
@@ -608,7 +620,7 @@ export function OrdersAdminClient({
                   >
                     <td className="px-4 py-3 align-top overflow-hidden">
                       <div className="flex min-w-0 flex-col gap-1">
-                        <span className="font-mono text-xs leading-snug break-all">{o.reference}</span>
+                        <OrderReferenceLink order={o} />
                         {o.status === "cancelled" ? (
                           <span className="inline-flex w-fit shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                             Cancelled

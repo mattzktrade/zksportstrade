@@ -3,6 +3,7 @@ export type OrderRow = {
   reference: string
   agent_profile_id: string
   package_id: string
+  deal_id: string | null
   status: "pending" | "confirmed" | "cancelled"
   guests: number
   unit_price: number

@@ -1,18 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { resolveSoldByCostLayer } from "@/lib/inventory/sold-by-cost-layer"
+import { DEAL_SOLD_STAGES } from "@/lib/crm/deal-types"
 import {
   packageIdsOnSharedThreeDayLedger,
   resolveLinkedStockLedger,
-  isLinkedSplitDuration,
 } from "@/lib/inventory/linked-stock-ledger"
 
-export const SOLD_DEAL_STAGES = new Set([
-  "awaiting_payment",
-  "paid_confirmed",
-  "in_fulfilment",
-  "fulfilled",
-])
+export const SOLD_DEAL_STAGES = new Set<string>(DEAL_SOLD_STAGES)
 
 function asInt(value: unknown): number {
   return Math.max(0, Math.floor(Number(value) || 0))
@@ -26,14 +20,33 @@ export async function loadFulfilmentSoldByCostLayer(
   const ids = [...new Set(packageIds.map((id) => id.trim()).filter(Boolean))]
   if (ids.length === 0) return out
 
-  const { data, error } = await supabase
+  const { data: allocations, error: allocationError } = await supabase
+    .from("inventory_allocations")
+    .select("cost_layer_id, quantity, deal_line_item_id")
+    .in("package_id", ids)
+    .eq("state", "committed")
+    .not("cost_layer_id", "is", null)
+  if (allocationError) throw new Error(allocationError.message)
+
+  const allocatedLineIds = new Set<string>()
+  for (const row of allocations ?? []) {
+    const layerId = typeof row.cost_layer_id === "string" ? row.cost_layer_id.trim() : ""
+    if (!layerId) continue
+    out.set(layerId, (out.get(layerId) ?? 0) + asInt(row.quantity))
+    if (typeof row.deal_line_item_id === "string" && row.deal_line_item_id) {
+      allocatedLineIds.add(row.deal_line_item_id)
+    }
+  }
+
+  const { data: lines, error } = await supabase
     .from("deal_line_items")
-    .select("quantity, fulfilment_cost_layer_id, deals!inner(stage)")
+    .select("id, quantity, fulfilment_cost_layer_id, deals!inner(stage)")
     .in("package_id", ids)
     .not("fulfilment_cost_layer_id", "is", null)
   if (error) throw new Error(error.message)
 
-  for (const row of data ?? []) {
+  for (const row of lines ?? []) {
+    if (typeof row.id === "string" && allocatedLineIds.has(row.id)) continue
     const deal = Array.isArray(row.deals) ? row.deals[0] : row.deals
     const stage = typeof deal?.stage === "string" ? deal.stage : ""
     if (!SOLD_DEAL_STAGES.has(stage)) continue
@@ -106,24 +119,6 @@ export async function applyFulfilmentSoldToLayerRemaining(
   const ledger = await resolveLinkedStockLedger(admin, packageId)
   const ledgerPackageId = ledger.ledgerPackageId
 
-  const siblingIds = [packageId.trim(), ledgerPackageId]
-  const linkedGroup =
-    !!ledger.groupId &&
-    (ledger.usedParentLedger ||
-      ledger.duration === "3_day" ||
-      ledger.duration === "2_day" ||
-      isLinkedSplitDuration(ledger.duration))
-  if (linkedGroup && ledger.groupId) {
-    const { data: siblings, error } = await admin
-      .from("packages")
-      .select("id")
-      .eq("inventory_group_id", ledger.groupId)
-      .is("shell_parent_package_id", null)
-    if (error) throw new Error(error.message)
-    siblingIds.push(...(siblings ?? []).map((row) => String(row.id)))
-  }
-  const packageIds = [...new Set(siblingIds.filter(Boolean))]
-
   const { data: layers, error: layerErr } = await admin
     .from("package_cost_layers")
     .select("id, package_id, quantity, quantity_remaining, received_at")
@@ -140,29 +135,28 @@ export async function applyFulfilmentSoldToLayerRemaining(
     return { ledgerPackageId, layersUpdated: 0, inventoryAligned: false }
   }
 
-  const fulfilmentSoldByLayer = await loadFulfilmentSoldByCostLayer(admin, packageIds)
-  let totalPackageSold = 0
-  for (const id of packageIds) {
-    totalPackageSold += await loadClosedWonAndPortalSold(admin, id)
+  const reconcileTargets = [...new Set([packageId.trim(), ledgerPackageId].filter(Boolean))]
+  for (const target of reconcileTargets) {
+    const { error: reconcileError } = await admin.rpc(
+      "inventory_reconcile_candidate_layers",
+      { p_package_id: target },
+    )
+    if (reconcileError) throw new Error(reconcileError.message)
   }
 
-  const soldByLayer = resolveSoldByCostLayer({
-    layers: pkgLayers,
-    fulfilmentSoldByLayer,
-    totalPackageSold,
-  })
-
+  const { data: refreshed, error: refreshErr } = await admin
+    .from("package_cost_layers")
+    .select("id, quantity_remaining")
+    .eq("package_id", ledgerPackageId)
+  if (refreshErr) throw new Error(refreshErr.message)
+  const remainingById = new Map(
+    (refreshed ?? []).map((row) => [String(row.id), asInt(row.quantity_remaining)]),
+  )
   let layersUpdated = 0
   for (const layer of pkgLayers) {
-    const nextRemaining = Math.max(0, layer.quantity - (soldByLayer.get(layer.id) ?? 0))
-    if (nextRemaining === layer.quantity_remaining) continue
-    const { error } = await admin
-      .from("package_cost_layers")
-      .update({ quantity_remaining: nextRemaining })
-      .eq("id", layer.id)
-    if (error) throw new Error(error.message)
+    const nextRemaining = remainingById.get(layer.id) ?? layer.quantity_remaining
+    if (nextRemaining !== layer.quantity_remaining) layersUpdated += 1
     layer.quantity_remaining = nextRemaining
-    layersUpdated += 1
   }
 
   const splitIds = await packageIdsOnSharedThreeDayLedger(admin, [ledgerPackageId])

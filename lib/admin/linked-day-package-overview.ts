@@ -5,6 +5,7 @@ import {
   SHELL_SINGLE_TICKET_FAMILY,
   type ShellDayDuration,
 } from "@/lib/catalog/shell-single-tickets"
+import { isCostDaySlot, type CostDaySlot } from "@/lib/inventory/day-cost-allocation"
 
 /** A sellable (non-shell) portal package that shares inventory with the parent. */
 export type LinkedDaySibling = {
@@ -53,6 +54,31 @@ export type LinkedDayPackageOverview = {
    * When the current package is the 3-day itself, this is that package.
    */
   parentPreset: LinkedDayPackagePreset | null
+  /** Saved group policy when linked-day costing tables are available. */
+  costPolicy: LinkedDayCostPolicy | null
+  /** Immutable day splits captured against existing purchase layers. */
+  frozenPurchaseSplits: LinkedDayFrozenPurchaseSplit[]
+}
+
+export type LinkedDayCostPolicy = {
+  mode: "derived" | "manual"
+  weights: Partial<Record<CostDaySlot, number>>
+  sourcePrices: Partial<Record<CostDaySlot, number>>
+  validationStatus: string | null
+}
+
+export type LinkedDayFrozenPurchaseSplit = {
+  costLayerId: string
+  sourcePackageId: string | null
+  sourceOrigin: string | null
+  receivedAt: string | null
+  unitCost: number
+  currency: string
+  components: Array<{
+    day: CostDaySlot
+    weight: number
+    unitCost: number
+  }>
 }
 
 /** Values the quick-add dialog uses to populate a new linked day package. */
@@ -93,6 +119,131 @@ function toStringArray(value: unknown): string[] {
   return value.filter((x): x is string => typeof x === "string")
 }
 
+function numberRecord(value: unknown): Partial<Record<CostDaySlot, number>> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  const output: Partial<Record<CostDaySlot, number>> = {}
+  for (const [key, raw] of Object.entries(value)) {
+    const amount = Number(raw)
+    const day = databaseDaySlot(key)
+    if (day && Number.isFinite(amount)) output[day] = amount
+  }
+  return output
+}
+
+function databaseDaySlot(value: string): CostDaySlot | null {
+  if (isCostDaySlot(value)) return value
+  const candidate = `${value}_only`
+  return isCostDaySlot(candidate) ? candidate : null
+}
+
+function finiteNumber(value: unknown, fallback = 0): number {
+  const amount = Number(value)
+  return Number.isFinite(amount) ? amount : fallback
+}
+
+async function loadLinkedDayCosting(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  groupId: string | null,
+  packageIds: string[],
+): Promise<{
+  costPolicy: LinkedDayCostPolicy | null
+  frozenPurchaseSplits: LinkedDayFrozenPurchaseSplit[]
+}> {
+  if (!groupId || packageIds.length === 0) {
+    return { costPolicy: null, frozenPurchaseSplits: [] }
+  }
+
+  // These tables are introduced by the linked-day costing migration. Treat a
+  // missing table as "not enabled" so the application remains deployable first.
+  const [{ data: policyData }, { data: layerData }] = await Promise.all([
+    supabase
+      .from("inventory_group_cost_policies")
+      .select("*")
+      .eq("inventory_group_id", groupId)
+      .maybeSingle(),
+    supabase
+      .from("package_cost_layers")
+      .select("*")
+      .in("package_id", packageIds)
+      .order("received_at", { ascending: true }),
+  ])
+
+  const rawPolicy = policyData as Record<string, unknown> | null
+  const rawMode = String(
+    rawPolicy?.allocation_method ?? rawPolicy?.mode ?? rawPolicy?.policy_mode ?? "",
+  ).trim()
+  const mode =
+    rawMode === "manual"
+      ? "manual"
+      : rawMode === "normalized_trade_price" || rawMode === "derived"
+        ? "derived"
+        : null
+  const costPolicy: LinkedDayCostPolicy | null =
+    rawPolicy && mode
+      ? {
+          mode,
+          weights: numberRecord(
+            rawPolicy.weights ?? rawPolicy.manual_weights ?? rawPolicy.day_weights,
+          ),
+          sourcePrices: numberRecord(
+            rawPolicy.source_prices ?? rawPolicy.trade_prices ?? rawPolicy.price_snapshot,
+          ),
+          validationStatus:
+            rawPolicy.setup_required === true
+              ? String(rawPolicy.setup_reason ?? "setup_required")
+              : "ready",
+        }
+      : null
+
+  const layers = (layerData ?? []) as Array<Record<string, unknown>>
+  const layerIds = layers.map((layer) => String(layer.id ?? "")).filter(Boolean)
+  if (layerIds.length === 0) return { costPolicy, frozenPurchaseSplits: [] }
+
+  const { data: componentData } = await supabase
+    .from("package_cost_layer_day_components")
+    .select("*")
+    .in("cost_layer_id", layerIds)
+    .order("cost_layer_id")
+
+  const componentsByLayer = new Map<
+    string,
+    LinkedDayFrozenPurchaseSplit["components"]
+  >()
+  for (const raw of (componentData ?? []) as Array<Record<string, unknown>>) {
+    const layerId = String(raw.cost_layer_id ?? "")
+    const day = databaseDaySlot(String(raw.day_slot ?? raw.day_duration ?? raw.day ?? ""))
+    if (!layerId || !day) continue
+    const list = componentsByLayer.get(layerId) ?? []
+    list.push({
+      day,
+      weight: finiteNumber(raw.weight ?? raw.cost_weight ?? raw.weight_snapshot),
+      unitCost: finiteNumber(
+        raw.unit_cost_component ?? raw.component_unit_cost ?? raw.unit_cost_snapshot,
+      ),
+    })
+    componentsByLayer.set(layerId, list)
+  }
+
+  const frozenPurchaseSplits = layers.flatMap((layer) => {
+    const costLayerId = String(layer.id ?? "")
+    const components = componentsByLayer.get(costLayerId) ?? []
+    if (components.length === 0) return []
+    return [{
+      costLayerId,
+      sourcePackageId:
+        typeof layer.source_package_id === "string" ? layer.source_package_id : null,
+      sourceOrigin:
+        typeof layer.source_package_origin === "string" ? layer.source_package_origin : null,
+      receivedAt: typeof layer.received_at === "string" ? layer.received_at : null,
+      unitCost: finiteNumber(layer.unit_cost),
+      currency: String(layer.currency ?? "USD").trim() || "USD",
+      components,
+    }]
+  })
+
+  return { costPolicy, frozenPurchaseSplits }
+}
+
 export async function getLinkedDayPackageOverview(packageId: string): Promise<LinkedDayPackageOverview> {
   const empty: LinkedDayPackageOverview = {
     inventoryGroupId: null,
@@ -104,6 +255,8 @@ export async function getLinkedDayPackageOverview(packageId: string): Promise<Li
     missingDayDurations: [],
     missingTwoDay: false,
     parentPreset: null,
+    costPolicy: null,
+    frozenPurchaseSplits: [],
   }
 
   const id = packageId.trim()
@@ -305,6 +458,12 @@ export async function getLinkedDayPackageOverview(packageId: string): Promise<Li
     }
   }
 
+  const { costPolicy, frozenPurchaseSplits } = await loadLinkedDayCosting(
+    supabase,
+    groupId,
+    packageIds,
+  )
+
   return {
     inventoryGroupId: groupId,
     threeDayParentId,
@@ -315,5 +474,7 @@ export async function getLinkedDayPackageOverview(packageId: string): Promise<Li
     missingDayDurations,
     missingTwoDay,
     parentPreset,
+    costPolicy,
+    frozenPurchaseSplits,
   }
 }

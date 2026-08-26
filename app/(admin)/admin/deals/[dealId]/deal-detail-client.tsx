@@ -209,7 +209,7 @@ function AddressInputs({
         <input
           value={value.postcode}
           onChange={(event) => set("postcode", event.target.value)}
-          placeholder="Postcode"
+          placeholder="Postcode (optional)"
           className="h-9 rounded-md border px-3 text-[11px]"
         />
         <input

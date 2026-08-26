@@ -1347,7 +1347,37 @@ async function loadOperationsStock(
     ledgerByPackage.set(String(pkg.id), parentByGroup.get(group) ?? String(pkg.id))
   }
 
-  const consumptions = await getConsumptionsForOrders(orderIds)
+  const [consumptions, fulfilmentRows, operationRows] = await Promise.all([
+    getConsumptionsForOrders(orderIds),
+    orderIds.length
+      ? fetchInChunks(orderIds, async (chunk) => {
+          const { data } = await supabase
+            .from("order_supplier_fulfilments")
+            .select("order_id, package_id, status")
+            .in("order_id", chunk)
+            .in("status", ["confirmed", "tickets_received"])
+          return (data ?? []) as Array<{ order_id: string; package_id: string; status: string }>
+        })
+      : Promise.resolve([]),
+    orderIds.length
+      ? fetchInChunks(orderIds, async (chunk) => {
+          const { data } = await supabase
+            .from("order_operations")
+            .select("order_id, delivery_status")
+            .in("order_id", chunk)
+            .eq("delivery_status", "delivered")
+          return (data ?? []) as Array<{ order_id: string; delivery_status: string }>
+        })
+      : Promise.resolve([]),
+  ])
+  const deliveredOrders = new Set(operationRows.map((row) => String(row.order_id)))
+  const lockByOrderPackage = new Map<string, string>()
+  for (const row of fulfilmentRows) {
+    lockByOrderPackage.set(
+      `${row.order_id}:${row.package_id}`,
+      row.status === "tickets_received" ? "Tickets received" : "Supplier confirmed",
+    )
+  }
   const knownLayerIds = new Set(layerRows.map((row) => String(row.id)))
   const missingLayerIds = [
     ...new Set(
@@ -1405,7 +1435,7 @@ async function loadOperationsStock(
 
   const stockLayers: OperationsStockLayer[] = layerRows.map((row) => {
     const po = row.purchase_order_id ? poById.get(row.purchase_order_id) : null
-    const supplierId = row.supplier_id ?? po?.supplier_id ?? null
+    const supplierId = po?.supplier_id ?? row.supplier_id ?? null
     const supplierName =
       (supplierId ? supplierById.get(supplierId) : null) ||
       po?.supplier?.trim() ||
@@ -1449,6 +1479,13 @@ async function loadOperationsStock(
           }),
         supplierName: layer?.supplierName || row.supplier_source_snapshot || "Unassigned",
         supplierId: layer?.supplierId ?? null,
+        locked:
+          deliveredOrders.has(orderId) ||
+          lockByOrderPackage.has(`${orderId}:${String(row.package_id)}`),
+        lockReason:
+          deliveredOrders.has(orderId)
+            ? "Delivered"
+            : lockByOrderPackage.get(`${orderId}:${String(row.package_id)}`) ?? null,
       })
     }
   }

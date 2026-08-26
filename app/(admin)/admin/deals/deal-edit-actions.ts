@@ -2,9 +2,9 @@
 
 import { revalidatePath } from "next/cache"
 import { hasCmsPermission } from "@/lib/auth/permissions"
+import { dealStageHoldsPurchasedStock } from "@/lib/crm/deal-types"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { createClient } from "@/lib/supabase/server"
-import { applyFulfilmentSoldToLayerRemaining } from "@/lib/inventory/fulfilment-layer-sold"
 
 type Result = { ok: true; message: string } | { ok: false; message: string }
 
@@ -74,6 +74,29 @@ export async function updateDealCommercials(input: {
     }
     if (detail.includes("deal_with_order_is_locked")) {
       return { ok: false, message: "Products cannot be changed after an order has been created." }
+    }
+    if (
+      detail.includes("insufficient_purchased_stock") ||
+      detail.includes("insufficient_purchased_day_capacity") ||
+      detail.includes("allocation_incomplete")
+    ) {
+      return {
+        ok: false,
+        message: "The replacement product does not have enough purchased stock for this confirmed deal.",
+      }
+    }
+    if (detail.includes("allocation_fulfilment_locked")) {
+      return {
+        ok: false,
+        message: "This product cannot be changed because supplier fulfilment has already started.",
+      }
+    }
+    if (detail.includes("statement timeout") || detail.includes("canceling statement")) {
+      return {
+        ok: false,
+        message:
+          "Saving these products took too long. Apply the latest inventory migration, then try again.",
+      }
     }
     return { ok: false, message: error.message }
   }
@@ -274,13 +297,45 @@ export async function updateDealLineSupplier(input: {
 
   const { data: line, error: lineError } = await supabase
     .from("deal_line_items")
-    .select("id, deal_id, package_id, quantity")
+    .select("id, deal_id, package_id, quantity, sourcing_mode")
     .eq("id", lineId)
     .eq("deal_id", dealId)
     .maybeSingle()
   if (lineError || !line) return { ok: false, message: "Deal product was not found." }
 
   const clear = !input.supplierKey.trim() || input.supplierKey === "unassigned"
+  if (line.sourcing_mode !== "brokered") {
+    const { error } = await supabase.rpc("inventory_reassign_deal_line", {
+      p_deal_line_item_id: lineId,
+      p_preferred_cost_layer_id: clear ? null : input.costLayerId?.trim() || null,
+    })
+    if (error) {
+      const message = error.message.toLowerCase()
+      if (
+        message.includes("insufficient_supplier_stock") ||
+        message.includes("insufficient_purchased_stock")
+      ) {
+        return {
+          ok: false,
+          message: "That supplier no longer has enough unallocated stock for this order.",
+        }
+      }
+      if (message.includes("allocation_fulfilment_locked")) {
+        return {
+          ok: false,
+          message: "This supplier is locked because fulfilment has already started.",
+        }
+      }
+      return { ok: false, message: error.message }
+    }
+
+    revalidatePath("/admin/deals", "layout")
+    revalidatePath("/admin/catalog", "layout")
+    revalidatePath("/admin/purchase-orders")
+    revalidatePath("/admin")
+    return { ok: true, message: "Supplier allocation updated." }
+  }
+
   let supplierId = clear ? null : input.supplierId?.trim() || null
   let costLayerId = clear ? null : input.costLayerId?.trim() || null
   let expectedUnitCost: number | null = null
@@ -335,12 +390,115 @@ export async function updateDealLineSupplier(input: {
       .eq("package_id", line.package_id)
   }
 
-  try {
-    await applyFulfilmentSoldToLayerRemaining(supabase, String(line.package_id ?? ""))
-  } catch (e) {
+  revalidatePath("/admin/deals", "layout")
+  revalidatePath("/admin/catalog", "layout")
+  revalidatePath("/admin/purchase-orders")
+  revalidatePath("/admin")
+  return { ok: true, message: "Supplier updated." }
+}
+
+export async function swapDealLineSuppliers(input: {
+  assignments: Array<{ lineId: string; supplierKey: string }>
+}): Promise<Result> {
+  const [profile, supabase] = await Promise.all([getPortalProfile(), createClient()])
+  if (!profile || !hasCmsPermission(profile, "deals.manage")) {
+    return { ok: false, message: "Sales permission is required." }
+  }
+  if (
+    input.assignments.length === 0 ||
+    input.assignments.some(
+      (assignment) => !assignment.lineId.trim() || !assignment.supplierKey.trim(),
+    )
+  ) {
+    return { ok: false, message: "Choose a supplier for every changed order." }
+  }
+
+  const lineIds = [...new Set(input.assignments.map((assignment) => assignment.lineId.trim()))]
+  const { data: lineRows, error: lineError } = await supabase
+    .from("deal_line_items")
+    .select("id, package_id, deals!inner(stage)")
+    .in("id", lineIds)
+  if (lineError) return { ok: false, message: lineError.message }
+
+  const confirmedLineIds = new Set(
+    (lineRows ?? [])
+      .filter((row) => {
+        const deal = Array.isArray(row.deals) ? row.deals[0] : row.deals
+        const stage = deal && typeof deal === "object" && "stage" in deal ? String(deal.stage ?? "") : ""
+        return dealStageHoldsPurchasedStock(stage)
+      })
+      .map((row) => String(row.id)),
+  )
+  const confirmedAssignments = input.assignments.filter((assignment) =>
+    confirmedLineIds.has(assignment.lineId.trim()),
+  )
+  if (confirmedAssignments.length === 0) {
     return {
       ok: false,
-      message: e instanceof Error ? e.message : "Supplier saved, but remaining stock could not be updated.",
+      message:
+        "Supplier can only be assigned once a deal is signed. Proposal and unsigned deals do not take purchased stock yet.",
+    }
+  }
+
+  const { error } = await supabase.rpc("inventory_swap_deal_line_suppliers", {
+    p_assignments: confirmedAssignments.map((assignment) => ({
+      lineId: assignment.lineId.trim(),
+      supplierKey: assignment.supplierKey.trim(),
+    })),
+  })
+  if (error) {
+    const message = error.message.toLowerCase()
+    if (
+      message.includes("insufficient_supplier_stock") ||
+      message.includes("insufficient_purchased_stock")
+    ) {
+      return {
+        ok: false,
+        message: "Those supplier changes do not balance against the purchased stock available.",
+      }
+    }
+    if (message.includes("allocation_fulfilment_locked")) {
+      return {
+        ok: false,
+        message: "One of these suppliers is locked because fulfilment has already started.",
+      }
+    }
+    if (message.includes("invalid_deal_line_assignment")) {
+      return {
+        ok: false,
+        message:
+          "Supplier can only be assigned once a deal is signed. Proposal and unsigned deals do not take purchased stock yet.",
+      }
+    }
+    if (message.includes("duplicate_deal_line_assignment")) {
+      return { ok: false, message: "One of the selected order lines is not valid." }
+    }
+    return { ok: false, message: error.message }
+  }
+
+  const packageIds = [
+    ...new Set(
+      (lineRows ?? [])
+        .filter((row) => confirmedLineIds.has(String(row.id)))
+        .map((row) => String(row.package_id ?? "").trim())
+        .filter(Boolean),
+    ),
+  ]
+  for (const packageId of packageIds) {
+    const { error: reconcileError } = await supabase.rpc(
+      "inventory_reconcile_candidate_layers",
+      { p_package_id: packageId },
+    )
+    if (reconcileError) {
+      revalidatePath("/admin/deals", "layout")
+      revalidatePath("/admin/catalog", "layout")
+      revalidatePath("/admin/purchase-orders")
+      revalidatePath("/admin")
+      return {
+        ok: true,
+        message:
+          "Supplier assignments updated. Apply the latest inventory migration and refresh if leftover sold remains on the old purchase.",
+      }
     }
   }
 
@@ -348,7 +506,7 @@ export async function updateDealLineSupplier(input: {
   revalidatePath("/admin/catalog", "layout")
   revalidatePath("/admin/purchase-orders")
   revalidatePath("/admin")
-  return { ok: true, message: "Supplier updated." }
+  return { ok: true, message: "Supplier assignments updated." }
 }
 
 export async function addDealNote(input: { dealId: string; note: string }): Promise<Result> {

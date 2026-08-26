@@ -18,9 +18,12 @@ import {
   loadFulfilmentSoldByCostLayer,
 } from "@/lib/inventory/fulfilment-layer-sold"
 import { recordFromSoldMap } from "@/lib/inventory/sold-by-cost-layer"
+import { getNativePackageAvailability } from "@/lib/inventory/ledger"
 import {
   emptyPackageSalesBreakdown,
+  linkedPoolSellableForPackage,
   type PackageSalesBreakdown,
+  type LinkedSellableMember,
 } from "@/lib/admin/package-sales-breakdown"
 import type { LinkedInventoryPackage, LinkedInventoryShellPackage } from "@/lib/admin/linked-inventory"
 import { getSalesforceConfig, isSalesforceConfigured } from "@/lib/integrations/salesforce/config"
@@ -49,6 +52,39 @@ export type AdminPackageRow = DbPackage & {
   salesforce_inventory: SfInventorySnapshot | null
   effective_website_price?: number | null
   fulfilment_sold_by_layer?: Record<string, number>
+  canonical_availability?: {
+    bought: number
+    available: number
+    net?: number
+    reserved: number
+    committed: number
+    shortage: number
+    historicalShortage: number
+    brokeredShortage: number
+  }
+  /** Unified admin display balance, including linked-day sibling demand. */
+  effective_sellable?: number
+  effective_net?: number
+}
+
+function attachCanonicalAvailability(
+  row: AdminPackageRow,
+  availability: Awaited<ReturnType<typeof getNativePackageAvailability>>[number] | undefined,
+): AdminPackageRow {
+  if (!availability) return row
+  return {
+    ...row,
+    canonical_availability: {
+      bought: availability.layer_original_quantity ?? row.layer_units_purchased ?? 0,
+      available: availability.legacy_sellable,
+      net: availability.net_quantity ?? availability.legacy_sellable,
+      reserved: availability.active_reservations,
+      committed: availability.committed_quantity ?? row.sales_breakdown.total,
+      shortage: availability.open_shortage_qty,
+      historicalShortage: availability.historical_shortage_quantity ?? 0,
+      brokeredShortage: availability.brokered_shortage_quantity ?? 0,
+    },
+  }
 }
 
 export type LinkedInventorySibling = LinkedInventoryPackage
@@ -379,12 +415,24 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
 
   const row = pkg as DbPackage
 
-  const [{ data: race }, layersByPkg, salesByPkg, sfInventoryByProduct, fulfilmentSold] = await Promise.all([
+  const [
+    { data: race },
+    layersByPkg,
+    salesByPkg,
+    sfInventoryByProduct,
+    fulfilmentSold,
+    { data: canonical },
+  ] = await Promise.all([
     supabase.from("races").select("id,name,season").eq("id", row.race_id).maybeSingle(),
     getCostLayersByPackage([id]),
     getPackageSalesBreakdownByPackage([id]),
     getSalesforceInventorySnapshotsForPackages([row]),
     loadFulfilmentSoldByCostLayer(supabase, [id]),
+    supabase
+      .from("inventory_availability")
+      .select("*")
+      .eq("package_id", id)
+      .maybeSingle(),
   ])
   const layers = layersByPkg.get(id) ?? []
   const summary = summarizePackageCost(row.currency || "USD", layers)
@@ -401,6 +449,20 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
     cost_summary: summary,
     sales_breakdown: salesByPkg.get(id) ?? emptyPackageSalesBreakdown(id),
     fulfilment_sold_by_layer: recordFromSoldMap(fulfilmentSold),
+    canonical_availability: canonical
+      ? {
+          bought: Number(canonical.layer_original_quantity ?? 0),
+          available: Number(canonical.available_quantity ?? 0),
+          net: Number(canonical.net_quantity ?? canonical.available_quantity ?? 0),
+          reserved: Number(canonical.reserved_quantity ?? 0),
+          committed: Number(canonical.committed_quantity ?? 0),
+          shortage:
+            Number(canonical.historical_shortage_quantity ?? 0) +
+            Number(canonical.brokered_shortage_quantity ?? 0),
+          historicalShortage: Number(canonical.historical_shortage_quantity ?? 0),
+          brokeredShortage: Number(canonical.brokered_shortage_quantity ?? 0),
+        }
+      : undefined,
     salesforce_inventory:
       row.salesforce_product_id?.trim()
         ? sfInventoryByProduct.get(row.salesforce_product_id.trim()) ?? null
@@ -416,7 +478,11 @@ export async function getAdminCatalogListRows(options?: {
   includeSalesforceInventory?: boolean
 }): Promise<AdminPackageRow[]> {
   const supabase = await createClient()
-  const [{ data: races, error: re }, { data: packages, error: pe }, { data: inv, error: ie }] =
+  const [
+    { data: races, error: re },
+    { data: packages, error: pe },
+    { data: inv, error: ie },
+  ] =
     await Promise.all([
       supabase.from("races").select("id,name,season").order("event_date"),
       supabase.from("packages").select(CATALOG_LIST_PACKAGE_COLUMNS).order("sort_order"),
@@ -438,8 +504,13 @@ export async function getAdminCatalogListRows(options?: {
       ? getSalesforceInventorySnapshotsForPackages(packages as DbPackage[])
       : Promise.resolve(new Map<string, SfInventorySnapshot>()),
   ])
-  return (packages as DbPackage[]).map((p) => ({
-    ...p,
+  const rows = (packages as DbPackage[]).map((p) => {
+    const inventory = invBy.get(p.id) ?? null
+    const layerTotals = layerTotalsByPkg.get(p.id)
+    const sales = salesByPkg.get(p.id) ?? emptyPackageSalesBreakdown(p.id)
+    const bought = layerTotals?.quantity_purchased ?? 0
+    const packageRow = {
+      ...p,
     total_capacity: 0,
     requires_booking_approval: false,
     image: p.image ?? null,
@@ -467,17 +538,79 @@ export async function getAdminCatalogListRows(options?: {
     integration_sync_status: "idle",
     integration_synced_at: null,
     integration_sync_error: null,
-    inventory: invBy.get(p.id) ?? null,
+    inventory,
     race_name: raceName.get(p.race_id) ?? p.race_id,
     cost_layers: [],
     cost_summary: null,
-    layer_units_purchased: layerTotalsByPkg.get(p.id)?.quantity_purchased ?? 0,
-    sales_breakdown: salesByPkg.get(p.id) ?? emptyPackageSalesBreakdown(p.id),
+    layer_units_purchased: bought,
+    sales_breakdown: sales,
     salesforce_inventory:
       p.salesforce_product_id?.trim()
         ? (sfInventoryByProduct.get(p.salesforce_product_id.trim()) ?? null)
         : null,
-  }))
+    }
+    return packageRow as AdminPackageRow
+  })
+  const linkedGroups = new Map<string, AdminPackageRow[]>()
+  for (const row of rows) {
+    const groupId = row.inventory_group_id?.trim()
+    if (!groupId || row.shell_parent_package_id) continue
+    const members = linkedGroups.get(groupId) ?? []
+    members.push(row)
+    linkedGroups.set(groupId, members)
+  }
+  for (const row of rows) {
+    const groupId = row.inventory_group_id?.trim()
+    const groupMembers = groupId ? linkedGroups.get(groupId) ?? [] : []
+    const stockSource = groupMembers.length > 1 ? groupMembers : [row]
+    const purchasedStock = Math.max(
+      ...stockSource.map((member) => Number(member.layer_units_purchased ?? 0)),
+      0,
+    )
+    const stock =
+      purchasedStock > 0
+        ? purchasedStock
+        : Math.max(0, Number(row.inventory?.qty_available ?? 0))
+    if (groupMembers.length > 1) {
+      const members: LinkedSellableMember[] = groupMembers.map((member) => ({
+        id: member.id,
+        duration: member.duration ?? null,
+        breakdown: member.sales_breakdown,
+      }))
+      row.effective_sellable = Math.max(
+        0,
+        linkedPoolSellableForPackage({
+          stock,
+          targetId: row.id,
+          targetDuration: row.duration ?? null,
+          members,
+        }),
+      )
+      row.effective_net = linkedPoolSellableForPackage({
+        stock,
+        targetId: row.id,
+        targetDuration: row.duration ?? null,
+        members: members.map((member) => ({
+          ...member,
+          breakdown: {
+            ...member.breakdown,
+            salesforceOpenPipeline: 0,
+          },
+        })),
+      })
+    } else {
+      row.effective_sellable = Math.max(
+        0,
+        Math.floor(
+          stock -
+            Number(row.sales_breakdown.total ?? 0) -
+            Number(row.sales_breakdown.salesforceOpenPipeline ?? 0),
+        ),
+      )
+      row.effective_net = Math.floor(stock - Number(row.sales_breakdown.total ?? 0))
+    }
+  }
+  return rows
 }
 
 /**
@@ -510,20 +643,24 @@ export async function getAdminPackageRows(
   const invBy = new Map((inv ?? []).map((i: DbInventory) => [i.package_id, i]))
   const packageIds = (packages as DbPackage[]).map((p) => p.id)
   const includeCostLayers = options?.includeCostLayers === true
-  const [layersByPkg, layerTotalsByPkg, salesByPkg, sfInventoryByProduct] = await Promise.all([
+  const [layersByPkg, layerTotalsByPkg, salesByPkg, sfInventoryByProduct, availabilityRows] = await Promise.all([
     includeCostLayers ? getCostLayersByPackage(packageIds) : Promise.resolve(new Map<string, CostLayerRow[]>()),
     includeCostLayers ? Promise.resolve(new Map<string, { quantity_purchased: number; quantity_remaining: number }>()) : getCostLayerQuantityTotalsByPackage(packageIds),
     getPackageSalesBreakdownByPackage(packageIds),
     options?.includeSalesforceInventory
       ? getSalesforceInventorySnapshotsForPackages(packages as DbPackage[])
       : Promise.resolve(new Map<string, SfInventorySnapshot>()),
+    getNativePackageAvailability(packageIds),
   ])
+  const availabilityByPackage = new Map(
+    availabilityRows.map((availability) => [availability.package_id, availability]),
+  )
   return (packages as DbPackage[]).map((p) => {
     const layers = layersByPkg.get(p.id) ?? []
     const totals = layerTotalsByPkg.get(p.id)
     const summary = includeCostLayers ? summarizePackageCost(p.currency || "USD", layers) : null
     if (summary) summary.package_id = p.id
-    return {
+    const packageRow: AdminPackageRow = {
       ...p,
       inventory: invBy.get(p.id) ?? null,
       race_name: raceName.get(p.race_id) ?? p.race_id,
@@ -539,6 +676,7 @@ export async function getAdminPackageRows(
       salesforce_inventory:
         p.salesforce_product_id?.trim() ? (sfInventoryByProduct.get(p.salesforce_product_id.trim()) ?? null) : null,
     }
+    return attachCanonicalAvailability(packageRow, availabilityByPackage.get(p.id))
   })
 }
 

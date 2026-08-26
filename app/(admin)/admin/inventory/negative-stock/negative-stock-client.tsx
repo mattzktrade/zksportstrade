@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState, useTransition } from "react"
 import Link from "next/link"
 import { AlertTriangle, ArrowUpDown, CalendarClock, CircleDollarSign, Download, PackageSearch, Search } from "lucide-react"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
@@ -11,11 +11,13 @@ import {
   formatDate,
   hasActiveNegativeStockFilters,
   money,
+  reasonLabel,
   sortNegativeStockRows,
   statusLabel,
   summarizeNegativeStock,
   urgencyForEvent,
   type NegativeStockFilters,
+  type NegativeStockReason,
   type NegativeStockRow,
   type NegativeStockSortKey,
   type NegativeStockStatus,
@@ -23,11 +25,17 @@ import {
 } from "@/lib/admin/negative-stock"
 import { cn } from "@/lib/utils"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import { toast } from "sonner"
+import {
+  reconcileHistoricalInventory,
+  type HistoricalInventoryReconciliationResult,
+} from "./actions"
 
 const EMPTY_FILTERS: NegativeStockFilters = {
   search: "",
   eventNames: [],
   supplierName: "",
+  reason: "",
   urgency: "",
   assignedTo: "",
   status: "",
@@ -62,6 +70,7 @@ function downloadCsv(rows: NegativeStockRow[]) {
     "Deal ref",
     "Agent",
     "Assigned to",
+    "Shortage type",
     "Status",
     "Quote at",
     "Quote fresh",
@@ -81,6 +90,7 @@ function downloadCsv(rows: NegativeStockRow[]) {
       row.dealReference ?? "",
       row.accountName ?? "",
       row.ownerName ?? "Unassigned",
+      reasonLabel(row.reason),
       statusLabel(row.status),
       row.supplierQuoteAt ?? "",
       row.supplierQuoteAt ? (row.quoteFresh ? "Fresh" : "Stale") : "No quote",
@@ -99,6 +109,8 @@ function downloadCsv(rows: NegativeStockRow[]) {
 }
 
 export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
+  const [reconciling, startReconciliation] = useTransition()
+  const [reconciliation, setReconciliation] = useState<HistoricalInventoryReconciliationResult | null>(null)
   const [listState, setListState] = usePersistedAdminFilters(
     "zk-admin-negative-stock-filters-v1",
     DEFAULT_NEGATIVE_STOCK_LIST,
@@ -130,13 +142,61 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
     [filters, rows, sortDescending, sortKey],
   )
   const filtersActive = hasActiveNegativeStockFilters(filters)
+  const canApplyReconciliation = Boolean(
+    reconciliation?.ok && !reconciliation.applied,
+  )
+
+  function runHistoricalReconciliation(apply: boolean) {
+    if (
+      apply &&
+      !window.confirm(
+        "Apply the preview? Covered quantities will be assigned to recorded purchase layers and uncovered quantities will be flagged as historical shortages.",
+      )
+    ) return
+    startReconciliation(async () => {
+      const result = await reconcileHistoricalInventory(apply)
+      setReconciliation(result)
+      if (result.ok) toast.success(result.message)
+      else toast.error(result.message)
+    })
+  }
 
   return (
     <div className="mx-auto max-w-[1540px] space-y-3 p-3 sm:p-4 lg:p-5">
       <AdminPageHeader
         title="Inventory / Negative stock list"
-        description="Sold stock that has not been purchased yet. Purchase from the agreed supplier to fulfil the deal."
+        description="Uncovered sold stock. Brokered sales need purchasing; historical gaps need the missing purchase order added."
+        action={
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={reconciling}
+              onClick={() => runHistoricalReconciliation(false)}
+              className="h-9 rounded-md border border-[#e4e6ea] bg-white px-3 text-[9px] font-medium disabled:opacity-50"
+            >
+              Preview historical reconciliation
+            </button>
+            <button
+              type="button"
+              disabled={reconciling || !canApplyReconciliation}
+              onClick={() => runHistoricalReconciliation(true)}
+              title={canApplyReconciliation ? "Apply the preview" : "Preview first"}
+              className="h-9 rounded-md bg-primary px-3 text-[9px] font-semibold text-white disabled:opacity-50"
+            >
+              Apply reconciliation
+            </button>
+          </div>
+        }
       />
+
+      {reconciliation ? (
+        <div className={cn(
+          "rounded-md border px-3 py-2 text-[9px]",
+          reconciliation.ok ? "border-blue-200 bg-blue-50 text-blue-800" : "border-red-200 bg-red-50 text-red-700",
+        )}>
+          {reconciliation.message}
+        </div>
+      ) : null}
 
       <AdminStats className="sm:grid-cols-2 xl:grid-cols-4">
         <AdminStatCard icon={PackageSearch} value={stats.count} label="Deals to purchase" hint="Open sourcing shortages" />
@@ -192,6 +252,20 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
                 {supplier}
               </option>
             ))}
+          </select>
+          <select
+            value={filters.reason}
+            onChange={(event) =>
+              setListState((current) => ({
+                ...current,
+                reason: event.target.value as "" | NegativeStockReason,
+              }))
+            }
+            className="h-8 rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]"
+          >
+            <option value="">All shortage types</option>
+            <option value="historical_reconciliation">Missing historical purchase</option>
+            <option value="brokered">Brokered stock</option>
           </select>
           <select
             value={filters.urgency}
@@ -301,6 +375,7 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
                 <th className="px-3 py-2 font-medium">Event date</th>
                 <th className="px-3 py-2 font-medium">Ref / deal ID</th>
                 <th className="px-3 py-2 font-medium">Assigned to</th>
+                <th className="px-3 py-2 font-medium">Shortage type</th>
                 <th className="px-3 py-2 font-medium">Status</th>
                 <th className="px-3 py-2 font-medium">Actions</th>
               </tr>
@@ -359,6 +434,7 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
                       <p className="mt-0.5 text-[8px] text-[#9a9ea5]"><AccountNameLink accountId={row.accountId} name={row.accountName ?? "No account"} /></p>
                     </td>
                     <td className="px-3 py-3 text-[#5f636b]">{row.ownerName ?? "Unassigned"}</td>
+                    <td className="px-3 py-3 text-[#5f636b]">{reasonLabel(row.reason)}</td>
                     <td className="px-3 py-3">
                       <StatusPill tone={statusTone(row.status)}>{statusLabel(row.status)}</StatusPill>
                     </td>
@@ -385,7 +461,7 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
               })}
               {visible.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-14 text-center">
+                  <td colSpan={13} className="px-4 py-14 text-center">
                     <AlertTriangle className="mx-auto h-6 w-6 text-slate-300" />
                     <p className="mt-2 text-[10px] text-slate-400">
                       {rows.length === 0
@@ -411,7 +487,7 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
                     <p className="font-semibold text-slate-800">{row.eventName}</p>
                     <p className="mt-0.5 text-[10px] text-slate-600">{row.packageName}</p>
                     <p className="mt-0.5 text-[8px] text-slate-400">
-                      {row.dealReference ?? "—"} · {row.quantity} units
+                      {row.dealReference ?? "—"} · {row.quantity} units · {reasonLabel(row.reason)}
                     </p>
                   </div>
                   <StatusPill tone={statusTone(row.status)}>{statusLabel(row.status)}</StatusPill>

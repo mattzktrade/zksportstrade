@@ -1,5 +1,6 @@
 import { parseAccountKinds } from "@/lib/crm/account-kinds"
 import { unstable_noStore as noStore } from "next/cache"
+import { chunkList, fetchAllRows } from "@/lib/supabase/fetch-all-rows"
 import { createClient } from "@/lib/supabase/server"
 import type {
   AccountSource,
@@ -88,43 +89,118 @@ export async function getLeadListRows(): Promise<LeadListRow[]> {
   })
 }
 
+type DirectoryAccountRow = {
+  id: string
+  name: string
+  account_type: string
+  account_types: unknown
+  email: string | null
+  phone: string | null
+  owner_profile_id: string | null
+  portal_profile_id: string | null
+  source: string | null
+  created_at: string
+  updated_at: string
+}
+
+type DirectoryContactRow = {
+  id: string
+  account_id: string
+  full_name: string
+  email: string | null
+  phone: string | null
+  job_title: string | null
+  is_primary: boolean
+  active: boolean
+}
+
+type DirectoryDealRow = {
+  account_id: string
+  total_amount: number
+  updated_at: string
+  stage: string
+  order_id: string | null
+}
+
+type DirectoryOrderRow = {
+  agent_profile_id: string
+  total_amount: number
+  status: string
+  created_at: string
+}
+
 export async function getClientDirectoryRows(): Promise<ClientDirectoryRow[]> {
   noStore()
   const supabase = await createClient()
-  const { data, error } = await supabase
-    .from("crm_accounts")
-    .select(`
-      id, name, account_type, account_types, email, phone, owner_profile_id, portal_profile_id, source, created_at, updated_at,
-      crm_contacts(id, full_name, email, phone, job_title, is_primary, active),
-      deals(total_amount, updated_at, stage, order_id)
-    `)
-    .eq("active", true)
+  const [accountsRes, contactsRes, dealsRes] = await Promise.all([
+    fetchAllRows<DirectoryAccountRow>((from, to) =>
+      supabase
+        .from("crm_accounts")
+        .select(
+          "id, name, account_type, account_types, email, phone, owner_profile_id, portal_profile_id, source, created_at, updated_at",
+        )
+        .eq("active", true)
+        .order("id")
+        .range(from, to),
+    ),
+    fetchAllRows<DirectoryContactRow>((from, to) =>
+      supabase
+        .from("crm_contacts")
+        .select("id, account_id, full_name, email, phone, job_title, is_primary, active")
+        .eq("active", true)
+        .order("id")
+        .range(from, to),
+    ),
+    fetchAllRows<DirectoryDealRow>((from, to) =>
+      supabase
+        .from("deals")
+        .select("account_id, total_amount, updated_at, stage, order_id")
+        .order("id")
+        .range(from, to),
+    ),
+  ])
 
-  if (error || !data) return []
+  if (accountsRes.error || contactsRes.error || dealsRes.error) return []
+  const data = accountsRes.data
+
+  const contactsByAccount = new Map<string, DirectoryContactRow[]>()
+  for (const contact of contactsRes.data) {
+    const list = contactsByAccount.get(contact.account_id) ?? []
+    list.push(contact)
+    contactsByAccount.set(contact.account_id, list)
+  }
+
+  const dealsByAccount = new Map<string, DirectoryDealRow[]>()
+  for (const deal of dealsRes.data) {
+    if (!deal.account_id) continue
+    const list = dealsByAccount.get(deal.account_id) ?? []
+    list.push(deal)
+    dealsByAccount.set(deal.account_id, list)
+  }
 
   const ownerIds = [...new Set(data.map((row) => row.owner_profile_id).filter(Boolean))] as string[]
   const portalProfileIds = [
     ...new Set(data.map((row) => row.portal_profile_id).filter(Boolean)),
   ] as string[]
-  const [{ data: owners }, { data: historicalOrders }] = await Promise.all([
-    ownerIds.length
-      ? supabase.from("profiles").select("id, full_name, email").in("id", ownerIds)
-      : Promise.resolve({
-          data: [] as Array<{ id: string; full_name: string | null; email: string }>,
-        }),
-    portalProfileIds.length
-      ? supabase
+
+  const owners: Array<{ id: string; full_name: string | null; email: string }> = []
+  const historicalOrders: DirectoryOrderRow[] = []
+  await Promise.all([
+    ...chunkList(ownerIds).map(async (chunk) => {
+      const { data: rows } = await supabase.from("profiles").select("id, full_name, email").in("id", chunk)
+      owners.push(...(rows ?? []))
+    }),
+    ...chunkList(portalProfileIds).map(async (chunk) => {
+      const { data: rows } = await fetchAllRows<DirectoryOrderRow>((from, to) =>
+        supabase
           .from("orders")
           .select("agent_profile_id, total_amount, status, created_at")
-          .in("agent_profile_id", portalProfileIds)
-      : Promise.resolve({
-          data: [] as Array<{
-            agent_profile_id: string
-            total_amount: number
-            status: string
-            created_at: string
-          }>,
-        }),
+          .in("agent_profile_id", chunk)
+          .order("id")
+          .range(from, to),
+      )
+      historicalOrders.push(...rows)
+    }),
   ])
   const ownerName = new Map(
     (owners ?? []).map((row) => [row.id, row.full_name?.trim() || row.email]),
@@ -140,28 +216,12 @@ export async function getClientDirectoryRows(): Promise<ClientDirectoryRow[]> {
   }
 
   return data.map((account) => {
-    const deals = (account.deals ?? []) as Array<{
-      total_amount: number
-      updated_at: string
-      stage: string
-      order_id: string | null
-    }>
+    const deals = dealsByAccount.get(account.id) ?? []
     const orders = account.portal_profile_id
       ? ordersByProfile.get(account.portal_profile_id) ?? []
       : []
-    const contacts = (
-      (account.crm_contacts ?? []) as Array<{
-        id: string
-        full_name: string
-        email: string | null
-        phone: string | null
-        job_title: string | null
-        is_primary: boolean
-        active: boolean
-      }>
-    )
-      .filter((contact) => contact.active)
-      .map(({ active: _active, ...contact }) => contact)
+    const contacts = (contactsByAccount.get(account.id) ?? [])
+      .map(({ active: _active, account_id: _accountId, ...contact }) => contact)
       .sort((a, b) => Number(b.is_primary) - Number(a.is_primary) || a.full_name.localeCompare(b.full_name))
     const wonStages = new Set(["paid_confirmed", "in_fulfilment", "fulfilled"])
     const standaloneWonDeals = deals.filter(

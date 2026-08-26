@@ -2,10 +2,11 @@ import { unstable_noStore as noStore } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import { getCostLayerQuantityTotalsByPackage } from "@/lib/admin/cost-layers"
 import { adminPackagePath } from "@/lib/admin/package-link"
+import { unsignedPipelinePlaces } from "@/lib/admin/package-sales-breakdown"
 import { getPackageSalesBreakdownByPackage } from "@/lib/admin/package-sales-breakdown-queries"
 import { isEventCategory, type EventCategory } from "@/lib/catalog/event-categories"
 import { packageDurationLabel } from "@/lib/catalog/package-duration"
-import { adminDealPath } from "@/lib/admin/deal-link"
+import { adminDealPath, adminOrderDealPath } from "@/lib/admin/deal-link"
 import { getDealsForPackages } from "@/lib/crm/deals"
 import { DEAL_STAGE_LABELS, dealSourceLabel, type DealStage } from "@/lib/crm/deal-types"
 import { invoiceDisplayLabel } from "@/lib/invoices/status"
@@ -145,7 +146,7 @@ export async function getNativeEventDetail(eventId: string): Promise<NativeEvent
       hidden: Boolean(pkg.is_hidden),
       bought: boughtByPkg.get(pkgId)?.quantity_purchased ?? 0,
       sold: breakdown?.total ?? 0,
-      pipeline: breakdown?.salesforceOpenPipeline ?? 0,
+      pipeline: breakdown ? unsignedPipelinePlaces(breakdown) : 0,
       available: Number(inventory?.qty_available ?? 0),
       held: Number(inventory?.qty_held ?? 0),
     }
@@ -180,7 +181,7 @@ export async function getNativeEventDetail(eventId: string): Promise<NativeEvent
       sales.push({
         id: `order:${orderId}:${String(row.package_id)}`,
         kind: "order",
-        href: order.deal_id ? adminDealPath(String(order.deal_id)) : adminPackagePath(String(row.package_id), "orders"),
+        href: adminOrderDealPath(order.deal_id ? String(order.deal_id) : null) ?? adminPackagePath(String(row.package_id), "orders"),
         reference: String(order.reference ?? ""),
         date: String(order.created_at ?? ""),
         clientName: String(order.client_name || "—"),
@@ -228,7 +229,7 @@ export async function getNativeEventDetail(eventId: string): Promise<NativeEvent
       sales.push({
         id: `order:${orderId}`,
         kind: "order",
-        href: order.deal_id ? adminDealPath(String(order.deal_id)) : adminPackagePath(String(order.package_id), "orders"),
+        href: adminOrderDealPath(order.deal_id ? String(order.deal_id) : null) ?? adminPackagePath(String(order.package_id), "orders"),
         reference: String(order.reference ?? ""),
         date: String(order.created_at ?? ""),
         clientName: String(order.client_name || "—"),

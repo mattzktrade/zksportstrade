@@ -17,6 +17,11 @@ import { adminPackagePath, type AdminPackageTab } from "@/lib/admin/package-link
 import { fetchAdminPackageForCatalogExpand } from "@/app/(admin)/actions"
 import { PackageAdminPanel } from "@/components/admin/package-admin-panel"
 import { PackageOrdersTable } from "@/components/admin/package-orders-table"
+import {
+  commitmentSellable,
+  linkedPoolSellableForPackage,
+  type LinkedSellableMember,
+} from "@/lib/admin/package-sales-breakdown"
 
 const TABS: { id: AdminPackageTab; label: string }[] = [
   { id: "details", label: "Details" },
@@ -25,9 +30,49 @@ const TABS: { id: AdminPackageTab; label: string }[] = [
   { id: "orders", label: "Orders" },
 ]
 
-function sellableQty(pkg: AdminPackageRow): number | null {
+function sellableQty(
+  pkg: AdminPackageRow,
+  linkedPackages: LinkedInventoryPackage[],
+): number | null {
   if (!pkg.inventory) return null
-  return Math.max(0, pkg.inventory.qty_available - pkg.inventory.qty_held)
+  const layerStock = (pkg.cost_layers ?? []).reduce(
+    (sum, layer) => sum + Math.max(0, Math.floor(Number(layer.quantity) || 0)),
+    0,
+  )
+  const stock = Math.max(
+    layerStock,
+    ...linkedPackages.map((linked) =>
+      (linked.cost_layers ?? []).reduce(
+        (sum, layer) => sum + Math.max(0, Math.floor(Number(layer.quantity) || 0)),
+        0,
+      ),
+    ),
+  )
+  const members: LinkedSellableMember[] =
+    linkedPackages.length > 1
+      ? linkedPackages.map((linked) => ({
+          id: linked.id,
+          duration: linked.duration,
+          breakdown:
+            linked.id === pkg.id ? pkg.sales_breakdown : linked.sales_breakdown,
+        }))
+      : []
+  const committedSellable =
+    members.length > 0
+      ? linkedPoolSellableForPackage({
+          stock,
+          targetId: pkg.id,
+          targetDuration: pkg.duration ?? null,
+          members,
+        })
+      : commitmentSellable({ stock, breakdown: pkg.sales_breakdown })
+  const held = Math.max(
+    0,
+    Math.floor(
+      Number(pkg.canonical_availability?.reserved ?? pkg.inventory.qty_held) || 0,
+    ),
+  )
+  return Math.max(0, committedSellable - held)
 }
 
 export function PackageDetailClient({
@@ -91,7 +136,7 @@ export function PackageDetailClient({
 
   const raceMatch = races.find((r) => r.id === livePkg.race_id)
   const displayTitle = adminCatalogProductTitleFromPackage(livePkg, raceMatch)
-  const sellable = sellableQty(livePkg)
+  const sellable = sellableQty(livePkg, liveLinkedPackages)
   const saleCount = orders.length + deals.length
 
   return (
@@ -182,7 +227,19 @@ export function PackageDetailClient({
             orders={orders}
             deals={deals}
             purchaseOrders={purchaseOrders}
+            linkedPackages={liveLinkedPackages}
+            currentPackageDuration={livePkg.duration}
+            eventDate={livePkg.event_date}
             costLayers={(() => {
+              if (liveLinkedPackages.length > 1) {
+                return [
+                  ...new Map(
+                    liveLinkedPackages
+                      .flatMap((linked) => linked.cost_layers ?? [])
+                      .map((layer) => [layer.id, layer]),
+                  ).values(),
+                ]
+              }
               const duration = livePkg.duration?.trim() ?? ""
               const isLinkedDay =
                 duration === "thursday_only" ||

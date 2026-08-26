@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import test from "node:test"
 import { PDFDocument } from "pdf-lib"
 import { generateBookingFormPdf } from "../lib/booking-forms/pdf"
@@ -161,5 +162,23 @@ test("booking form edits can rename parties, products and terms without changing
   assert.equal(next.lines[0].description, "Custom hospitality description")
   assert.equal(next.terms[0].heading, "Special introduction")
   assert.equal(next.terms[0].paragraphs.length, 2)
+})
+
+test("new accounts can omit postcode and booking forms still render the rest of the address", () => {
+  const dealsClient = readFileSync("app/(admin)/admin/deals/deals-client.tsx", "utf8")
+  assert.match(dealsClient, /Postcode \(optional\)/)
+  assert.match(
+    dealsClient,
+    /newBillingLine1\.trim\(\) && newBillingCity\.trim\(\) && newBillingCountry\.trim\(\)/,
+  )
+  assert.doesNotMatch(
+    dealsClient,
+    /newBillingLine1\.trim\(\) && newBillingCity\.trim\(\) && newBillingPostcode\.trim\(\) && newBillingCountry\.trim\(\)/,
+  )
+  const snapshot = readFileSync("lib/booking-forms/snapshot.ts", "utf8")
+  assert.match(snapshot, /account\.billing_postcode/)
+  assert.match(snapshot, /\.filter\(Boolean\)/)
+  const xero = readFileSync("lib/integrations/xero/invoices.ts", "utf8")
+  assert.match(xero, /PostalCode: postcode/)
 })
 

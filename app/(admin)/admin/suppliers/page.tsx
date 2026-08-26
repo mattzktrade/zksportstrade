@@ -21,7 +21,8 @@ export default async function SuppliersPage() {
     supabase.from("purchase_orders").select("id, supplier_id"),
     supabase
       .from("package_cost_layers")
-      .select("supplier_id, quantity, unit_cost, currency, packages(name)"),
+      // Dual FK to packages (package_id + source_package_id) requires this hint.
+      .select("supplier_id, quantity, unit_cost, currency, packages!package_id(name)"),
   ])
 
   const poCount = new Map<string, number>()
