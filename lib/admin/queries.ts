@@ -20,10 +20,9 @@ import {
 import { recordFromSoldMap } from "@/lib/inventory/sold-by-cost-layer"
 import { getNativePackageAvailability } from "@/lib/inventory/ledger"
 import {
+  applyEffectiveSellable,
   emptyPackageSalesBreakdown,
-  linkedPoolSellableForPackage,
   type PackageSalesBreakdown,
-  type LinkedSellableMember,
 } from "@/lib/admin/package-sales-breakdown"
 import type { LinkedInventoryPackage, LinkedInventoryShellPackage } from "@/lib/admin/linked-inventory"
 import { getSalesforceConfig, isSalesforceConfigured } from "@/lib/integrations/salesforce/config"
@@ -551,65 +550,7 @@ export async function getAdminCatalogListRows(options?: {
     }
     return packageRow as AdminPackageRow
   })
-  const linkedGroups = new Map<string, AdminPackageRow[]>()
-  for (const row of rows) {
-    const groupId = row.inventory_group_id?.trim()
-    if (!groupId || row.shell_parent_package_id) continue
-    const members = linkedGroups.get(groupId) ?? []
-    members.push(row)
-    linkedGroups.set(groupId, members)
-  }
-  for (const row of rows) {
-    const groupId = row.inventory_group_id?.trim()
-    const groupMembers = groupId ? linkedGroups.get(groupId) ?? [] : []
-    const stockSource = groupMembers.length > 1 ? groupMembers : [row]
-    const purchasedStock = Math.max(
-      ...stockSource.map((member) => Number(member.layer_units_purchased ?? 0)),
-      0,
-    )
-    const stock =
-      purchasedStock > 0
-        ? purchasedStock
-        : Math.max(0, Number(row.inventory?.qty_available ?? 0))
-    if (groupMembers.length > 1) {
-      const members: LinkedSellableMember[] = groupMembers.map((member) => ({
-        id: member.id,
-        duration: member.duration ?? null,
-        breakdown: member.sales_breakdown,
-      }))
-      row.effective_sellable = Math.max(
-        0,
-        linkedPoolSellableForPackage({
-          stock,
-          targetId: row.id,
-          targetDuration: row.duration ?? null,
-          members,
-        }),
-      )
-      row.effective_net = linkedPoolSellableForPackage({
-        stock,
-        targetId: row.id,
-        targetDuration: row.duration ?? null,
-        members: members.map((member) => ({
-          ...member,
-          breakdown: {
-            ...member.breakdown,
-            salesforceOpenPipeline: 0,
-          },
-        })),
-      })
-    } else {
-      row.effective_sellable = Math.max(
-        0,
-        Math.floor(
-          stock -
-            Number(row.sales_breakdown.total ?? 0) -
-            Number(row.sales_breakdown.salesforceOpenPipeline ?? 0),
-        ),
-      )
-      row.effective_net = Math.floor(stock - Number(row.sales_breakdown.total ?? 0))
-    }
-  }
+  applyEffectiveSellable(rows)
   return rows
 }
 

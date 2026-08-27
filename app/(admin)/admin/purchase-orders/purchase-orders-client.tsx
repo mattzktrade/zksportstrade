@@ -22,6 +22,7 @@ import { CompanySupplierSelect } from "@/components/admin/company-supplier-selec
 import { AdminDesktopTable, AdminMobileList } from "@/components/admin/admin-page-kit"
 import type { CrmCompanyOption } from "@/lib/crm/deals"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
 
 const STOCK_PREVIEW_LIMIT = 3
 
@@ -342,6 +343,7 @@ export function PurchaseOrdersClient({
       <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] p-3">
         <input
           type="search"
+          {...pageSearchProps}
           placeholder="Search internal PO, contract/invoice, supplier, product…"
           value={filters.search}
           onChange={(e) => setListState((current) => ({ ...current, search: e.target.value }))}

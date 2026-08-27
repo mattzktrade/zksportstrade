@@ -1,8 +1,8 @@
 import { unstable_noStore as noStore } from "next/cache"
 import { fetchAllRows } from "@/lib/supabase/fetch-all-rows"
 import { createClient } from "@/lib/supabase/server"
-import type { CrmAccountOption, DealListRow, DealStage, PackageDealSaleRow } from "@/lib/crm/deal-types"
-import { dealStageCountsAsSold } from "@/lib/crm/deal-types"
+import type { CrmAccountOption, DealListRow, PackageDealSaleRow } from "@/lib/crm/deal-types"
+import { canonicalDealStage, dealStageCountsAsSold } from "@/lib/crm/deal-types"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { costLayerSupplierPoolKey } from "@/lib/inventory/supplier-pool"
 
@@ -319,7 +319,7 @@ export async function getDealListRows(options?: { ids?: string[] }): Promise<Dea
       primary_contact_id: row.primary_contact_id,
       race_id: effectiveRaceId,
       reference: row.reference,
-      stage: row.stage as DealStage,
+      stage: canonicalDealStage(row.stage),
       source: row.source,
       currency: row.currency,
       total_amount: Number(row.total_amount ?? 0),
@@ -705,7 +705,7 @@ export async function getDealsForPackages(packageIds: readonly string[]): Promis
       quantity,
       totalAmount: lineTotal,
       currency: deal.currency || "USD",
-      stage: deal.stage as DealStage,
+      stage: canonicalDealStage(deal.stage),
       source: deal.source || "offline",
       createdAt: deal.created_at,
       updatedAt: deal.updated_at,

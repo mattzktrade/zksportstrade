@@ -8,6 +8,7 @@ import type { AdminAgentWithStats } from "@/lib/admin/queries"
 import { AdminInvoiceStatusSelect } from "@/components/admin-invoice-status-select"
 import { formatMoney } from "@/lib/format/money"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
 
 export function AgentsAdminClient({
   rows,
@@ -36,6 +37,7 @@ export function AgentsAdminClient({
       <div className="flex flex-wrap gap-2 items-center">
         <input
           type="search"
+          {...pageSearchProps}
           value={filters.query}
           onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
           placeholder="Search name, company, email, order ref, or package"

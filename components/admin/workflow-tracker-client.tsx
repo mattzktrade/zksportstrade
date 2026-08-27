@@ -37,6 +37,8 @@ import { AccountNameLink, ContactNameLink } from "@/components/admin/profile-nam
 import { markFinanceRowPaid, markFinanceRowUnpaid, replaceFinanceInvoice } from "@/app/(admin)/admin/deals/deal-finance-actions"
 import { dealSourceLabel } from "@/lib/crm/deal-types"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import { cn } from "@/lib/utils"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
 
 type SortKey = "eventDate" | "reference" | "client" | "event"
 
@@ -89,16 +91,18 @@ function SortTh({
   sortKey,
   sortDir,
   onSort,
+  className,
 }: {
   heading: string
   column: SortKey
   sortKey: SortKey
   sortDir: "asc" | "desc"
   onSort: (key: SortKey) => void
+  className?: string
 }) {
   const active = sortKey === column
   return (
-    <th className="px-4 py-2.5 font-medium">
+    <th className={cn("px-4 py-2.5 font-medium", className)}>
       <button
         type="button"
         onClick={() => onSort(column)}
@@ -418,13 +422,14 @@ export function WorkflowTrackerClient({
           </div>
         ) : null}
         <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] p-3">
-          <label className="relative min-w-0 w-full flex-1 sm:min-w-[240px]">
+          <label className="relative min-w-0 w-full sm:w-[280px] sm:max-w-[280px] sm:flex-none">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
+              {...pageSearchProps}
               value={search}
               onChange={(event) => setListState((current) => ({ ...current, search: event.target.value }))}
               placeholder="Search order, account, event, owner or invoice..."
-              className="h-9 w-full rounded-md border border-[#e2e4e8] bg-white pl-9 pr-3 text-[10px] outline-none focus:border-primary"
+              className="h-9 w-full min-w-0 rounded-md border border-[#e2e4e8] bg-white pl-9 pr-3 text-[10px] outline-none focus:border-primary"
             />
           </label>
           <select
@@ -432,7 +437,7 @@ export function WorkflowTrackerClient({
             onChange={(event) =>
               setListState((current) => ({ ...current, eventScope: event.target.value as "future" | "all" }))
             }
-            className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto"
+            className="h-9 w-full shrink-0 rounded-md border bg-white px-3 text-[10px] sm:w-auto"
           >
             <option value="future">Future events</option>
             <option value="all">All dates</option>
@@ -440,19 +445,19 @@ export function WorkflowTrackerClient({
           <select
             value={activeEventKey}
             onChange={(event) => setListState((current) => ({ ...current, eventKey: event.target.value }))}
-            className="h-9 w-full max-w-none rounded-md border bg-white px-3 text-[10px] sm:w-auto sm:max-w-[280px]"
+            className="h-9 w-full max-w-full shrink-0 rounded-md border bg-white px-3 text-[10px] sm:w-auto sm:max-w-[220px]"
           >
             <option value="all">Any event</option>
             {eventOptions.map((option) => (
               <option key={option.key} value={option.key}>{option.label}</option>
             ))}
           </select>
-          <select value={period} onChange={(event) => setListState((current) => ({ ...current, period: event.target.value }))} className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto">
+          <select value={period} onChange={(event) => setListState((current) => ({ ...current, period: event.target.value }))} className="h-9 w-full shrink-0 rounded-md border bg-white px-3 text-[10px] sm:w-auto">
             <option value="all">All time</option>
             <option value="month">This month</option>
             <option value="quarter">This quarter</option>
           </select>
-          <select value={channel} onChange={(event) => setListState((current) => ({ ...current, channel: event.target.value }))} className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto">
+          <select value={channel} onChange={(event) => setListState((current) => ({ ...current, channel: event.target.value }))} className="h-9 w-full shrink-0 rounded-md border bg-white px-3 text-[10px] sm:w-auto">
             <option value="all">All sources</option>
             <option value="offline">Offline</option>
             <option value="trade_portal">Portal</option>
@@ -462,21 +467,21 @@ export function WorkflowTrackerClient({
             <option value="admin">Admin</option>
             <option value="salesforce_import">Salesforce</option>
           </select>
-          <select value={owner} onChange={(event) => setListState((current) => ({ ...current, owner: event.target.value }))} className="h-9 w-full rounded-md border bg-white px-3 text-[10px] sm:w-auto">
+          <select value={owner} onChange={(event) => setListState((current) => ({ ...current, owner: event.target.value }))} className="h-9 w-full shrink-0 rounded-md border bg-white px-3 text-[10px] sm:w-auto">
             <option value="all">All owners</option>
             {owners.map((name) => <option key={name}>{name}</option>)}
           </select>
         </div>
 
         <AdminDesktopTable>
-          <table className="w-full text-left">
+          <table className="w-full table-fixed text-left">
             <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
               <tr>
-                <SortTh heading="Deal" column="reference" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                <SortTh heading="Account" column="client" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                <SortTh heading="Event" column="event" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                <SortTh heading="Event date" column="eventDate" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                <th className="px-4 py-2.5 font-medium">Owner / source</th>
+                <SortTh heading="Deal" column="reference" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} className="w-[11%]" />
+                <SortTh heading="Account" column="client" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} className="w-[14%]" />
+                <SortTh heading="Event" column="event" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} className="w-[22%]" />
+                <SortTh heading="Event date" column="eventDate" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} className="w-[11%]" />
+                <th className="w-[12%] px-4 py-2.5 font-medium">Owner / source</th>
                 {mode === "finance" ? (
                   <>
                     <th className="px-4 py-2.5 font-medium">Booking form</th>
@@ -502,7 +507,7 @@ export function WorkflowTrackerClient({
                 const paid = isPaid(row)
                 return (
                   <tr key={row.id} className="align-top hover:bg-slate-50">
-                    <td className="px-4 py-3">
+                    <td className="min-w-0 px-4 py-3">
                       {row.dealId ? (
                         <a href={`/admin/deals/${row.dealId}`} className="font-semibold text-primary hover:underline">
                           {row.dealReference || row.reference}
@@ -514,11 +519,11 @@ export function WorkflowTrackerClient({
                         <p className="mt-0.5 text-[8px] text-slate-400">{row.reference}</p>
                       ) : null}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="min-w-0 px-4 py-3">
                       <AccountNameLink accountId={row.accountId} name={row.accountName} className="font-medium" />
                       <ContactNameLink accountId={row.accountId} contactId={row.contactId} name={row.contactName} className="mt-0.5 block text-[8px] text-slate-400" />
                     </td>
-                    <td className="min-w-[240px] max-w-[420px] px-4 py-3">
+                    <td className="min-w-0 px-4 py-3">
                       <p className="whitespace-normal break-words font-medium leading-snug">{row.eventPackage}</p>
                       <p className="mt-0.5 text-[8px] text-slate-400">{row.quantity} unit{row.quantity === 1 ? "" : "s"}</p>
                     </td>

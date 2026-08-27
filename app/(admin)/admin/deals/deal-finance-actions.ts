@@ -14,6 +14,15 @@ import {
 import { enqueueInvoiceCreateServer, enqueueInvoiceReplaceServer } from "@/lib/integrations/enqueue-server"
 import { scheduleOutboxDrain } from "@/lib/integrations/schedule-drain"
 import { syncBookingFormDealInventory } from "@/lib/booking-forms/inventory-sync"
+import { prepareOrderCancelRelease } from "@/lib/inventory/prepare-order-cancel-release"
+import {
+  assertOrderCanBeCancelled,
+  finalizeNativeDealOrderCancel,
+  orderCancelMustSkipCogsDelete,
+  postgresErrorText,
+  releaseOrderStockSkippingRestatedCogs,
+  shouldUseRestatementSafeOrderCancel,
+} from "@/lib/inventory/cancel-order-stock"
 
 type Result = { ok: true; message: string } | { ok: false; message: string }
 
@@ -25,6 +34,19 @@ async function financeGate() {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : "Unexpected finance automation error."
+}
+
+function cancelOrderErrorMessage(detail: string): string {
+  if (detail.includes("tickets_or_delivery_block_cancellation")) {
+    return "This order cannot be cancelled because tickets have already been received or delivered."
+  }
+  if (detail.includes("paid_or_delivered_order_cannot_be_cancelled")) {
+    return "A paid or delivered order cannot be cancelled."
+  }
+  if (detail.includes("allocation_fulfilment_locked")) {
+    return "Stock cannot be restored because supplier fulfilment has already started."
+  }
+  return detail
 }
 
 export async function retryNativeDealInvoice(dealId: string): Promise<Result> {
@@ -92,18 +114,46 @@ export async function cancelNativeDealOrder(input: {
   if (!input.reason.trim()) return { ok: false, message: "A cancellation reason is required." }
   try {
     await voidXeroInvoiceForOrder(input.orderId)
-    const { error } = await gate.supabase.rpc("admin_cancel_native_deal_order", {
-      p_order_id: input.orderId,
-      p_reason: input.reason.trim(),
-      p_xero_void_confirmed: true,
+    const cancellable = await assertOrderCanBeCancelled(input.orderId)
+    if (cancellable.alreadyCancelled) {
+      revalidatePath("/admin/deals")
+      revalidatePath("/admin/orders")
+      return { ok: true, message: "This order is already cancelled." }
+    }
+    await prepareOrderCancelRelease(input.orderId)
+    const skipCogsDelete = await orderCancelMustSkipCogsDelete(input.orderId)
+    if (!skipCogsDelete) {
+      const { error } = await gate.supabase.rpc("admin_cancel_native_deal_order", {
+        p_order_id: input.orderId,
+        p_reason: input.reason.trim(),
+        p_xero_void_confirmed: true,
+      })
+      if (error) {
+        if (!shouldUseRestatementSafeOrderCancel(postgresErrorText(error))) {
+          throw new Error(error.message)
+        }
+      } else {
+        await syncBookingFormDealInventory(input.dealId, "native_deal_order_cancelled")
+        revalidatePath("/admin/deals")
+        revalidatePath("/admin/orders")
+        return { ok: true, message: "Xero invoice voided, order cancelled, and stock restored." }
+      }
+    }
+    await releaseOrderStockSkippingRestatedCogs(
+      input.orderId,
+      `Native deal order cancelled: ${input.reason.trim()}`,
+    )
+    await finalizeNativeDealOrderCancel({
+      dealId: input.dealId,
+      orderId: input.orderId,
+      reason: input.reason.trim(),
     })
-    if (error) throw new Error(error.message)
     await syncBookingFormDealInventory(input.dealId, "native_deal_order_cancelled")
     revalidatePath("/admin/deals")
     revalidatePath("/admin/orders")
     return { ok: true, message: "Xero invoice voided, order cancelled, and stock restored." }
   } catch (error) {
-    return { ok: false, message: message(error) }
+    return { ok: false, message: cancelOrderErrorMessage(message(error)) }
   }
 }
 

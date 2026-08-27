@@ -11,15 +11,16 @@ const OrdersAdminClient = nextDynamic(
   { loading: () => <PageLoadingSpinner /> },
 )
 
-type Props = { searchParams: Promise<{ payment?: string }> }
+type Props = { searchParams: Promise<{ payment?: string; q?: string }> }
 
 export default async function AdminOrdersPage({ searchParams }: Props) {
   await requireAdmin()
-  const { payment } = await searchParams
+  const { payment, q } = await searchParams
   const orders = await getAllOrdersForAdmin()
 
   const initialPaymentFilter =
     payment === "awaiting_payment" || payment === "paid" || payment === "delivered" ? payment : undefined
+  const initialSearch = q?.trim() || undefined
 
   return (
     <div className="p-3 sm:p-6 lg:p-8 max-w-[1600px] space-y-6">
@@ -31,7 +32,11 @@ export default async function AdminOrdersPage({ searchParams }: Props) {
         </p>
       </div>
 
-      <OrdersAdminClient orders={orders} initialPaymentFilter={initialPaymentFilter} />
+      <OrdersAdminClient
+        orders={orders}
+        initialPaymentFilter={initialPaymentFilter}
+        initialSearch={initialSearch}
+      />
 
       <Link href="/admin" className="text-sm text-primary hover:underline">
         ← Back to dashboard

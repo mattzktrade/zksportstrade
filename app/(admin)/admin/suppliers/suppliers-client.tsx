@@ -7,9 +7,12 @@ import { CheckCircle2, Download, Package, Plus, Search, Sparkles, UsersRound } f
 import { toast } from "sonner"
 import { ensureSupplier } from "@/app/(admin)/actions"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
+import { AdminListPreview } from "@/components/admin/admin-list-preview"
 import { adminSupplierPath } from "@/lib/crm/profile-links"
 import { cn } from "@/lib/utils"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
+import { useAdminListSelection } from "@/lib/admin/use-admin-list-selection"
 
 export type SupplierDirectoryRow = {
   id: string
@@ -39,7 +42,13 @@ export function SuppliersClient({ rows }: { rows: SupplierDirectoryRow[] }) {
   const [pending, startTransition] = useTransition()
   const [listState, setListState] = usePersistedAdminFilters("zk-admin-suppliers-filters-v1", { search: "" })
   const { search } = listState
-  const [selectedId, setSelectedId] = useState<string | null>(rows[0]?.id ?? null)
+  const {
+    isDesktop,
+    selectedId,
+    selectRow,
+    closePreview,
+    showPreview,
+  } = useAdminListSelection({ firstId: rows[0]?.id ?? null })
   const [showAdd, setShowAdd] = useState(false)
   const [name, setName] = useState("")
   const [code, setCode] = useState("")
@@ -105,6 +114,7 @@ export function SuppliersClient({ rows }: { rows: SupplierDirectoryRow[] }) {
           <div className="relative min-w-0 w-full flex-1 sm:min-w-[250px] sm:max-w-[380px]">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
+              {...pageSearchProps}
               value={search}
               onChange={(event) => setListState((current) => ({ ...current, search: event.target.value }))}
               placeholder="Search supplier, event or location..."
@@ -158,7 +168,7 @@ export function SuppliersClient({ rows }: { rows: SupplierDirectoryRow[] }) {
                 {filtered.map((row) => (
                   <tr
                     key={row.id}
-                    onClick={() => setSelectedId(row.id)}
+                    onClick={() => selectRow(row.id)}
                     className={cn("cursor-pointer hover:bg-slate-50", selected?.id === row.id && "bg-red-50/60")}
                   >
                     <td className="px-3 py-3">
@@ -194,7 +204,7 @@ export function SuppliersClient({ rows }: { rows: SupplierDirectoryRow[] }) {
                 <button
                   type="button"
                   key={row.id}
-                  onClick={() => setSelectedId(row.id)}
+                  onClick={() => selectRow(row.id)}
                   className={cn(
                     "flex w-full items-start justify-between gap-3 px-4 py-3 text-left",
                     selected?.id === row.id && "bg-red-50/60",
@@ -217,8 +227,8 @@ export function SuppliersClient({ rows }: { rows: SupplierDirectoryRow[] }) {
             </AdminMobileList>
           </div>
 
-          {selected ? (
-            <aside className="p-4 max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:top-14 max-md:z-40 max-md:overflow-y-auto max-md:bg-white">
+          {selected && showPreview ? (
+            <AdminListPreview isDesktop={isDesktop} onClose={closePreview} className="p-4">
               <div className="space-y-4">
                 <div className="flex items-start justify-between">
                   <div>
@@ -228,7 +238,7 @@ export function SuppliersClient({ rows }: { rows: SupplierDirectoryRow[] }) {
                     </div>
                     <p className="mt-1 text-[9px] text-[#8e9299]">{selected.code || "Structured supplier"}</p>
                   </div>
-                  <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-xl text-slate-400 md:h-auto md:w-auto md:text-base" onClick={() => setSelectedId(null)}>×</button>
+                  <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-xl text-slate-400 md:h-auto md:w-auto md:text-base" onClick={closePreview}>×</button>
                 </div>
 
                 <dl className="grid grid-cols-[95px_1fr] gap-y-2 border-y border-[#eceef1] py-3 text-[9px]">
@@ -261,7 +271,7 @@ export function SuppliersClient({ rows }: { rows: SupplierDirectoryRow[] }) {
                   <button type="button" className="h-9 rounded-md bg-primary text-[9px] font-semibold text-white">Create sourcing request</button>
                 </div>
               </div>
-            </aside>
+            </AdminListPreview>
           ) : null}
         </div>
 

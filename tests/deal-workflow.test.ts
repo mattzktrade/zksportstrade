@@ -5,6 +5,9 @@ import {
   canTransitionDeal,
 } from "../lib/crm/deal-workflow"
 import {
+  canonicalDealStage,
+  DEAL_STAGE_LABELS,
+  DEAL_STAGES,
   dealConfirmedOffPlatform,
   dealStageCountsAsSold,
   dealStageHoldsPurchasedStock,
@@ -30,6 +33,19 @@ test("open deals can close and closed deals can be reopened", () => {
   assert.ok(allowedDealTransitions("proposal").includes("paid_confirmed"))
   assert.ok(allowedDealTransitions("closed_lost").includes("draft"))
   assert.ok(allowedDealTransitions("fulfilled").includes("paid_confirmed"))
+})
+
+test("deal stage labels match the sales pipeline language", () => {
+  assert.equal(DEAL_STAGE_LABELS.proposal, "Price sent")
+  assert.equal(DEAL_STAGE_LABELS.booking_form_sent, "Awaiting client signature")
+  assert.equal(DEAL_STAGE_LABELS.awaiting_client_signature, "Awaiting client signature")
+  assert.equal(DEAL_STAGES.includes("booking_form_sent"), false)
+  assert.ok(DEAL_STAGES.includes("awaiting_client_signature"))
+  assert.equal(canonicalDealStage("booking_form_sent"), "awaiting_client_signature")
+  assert.equal(canonicalDealStage("proposal"), "proposal")
+  assert.equal(canTransitionDeal("proposal", "booking_form_sent"), false)
+  assert.equal(canTransitionDeal("proposal", "awaiting_client_signature"), true)
+  assert.ok(!allowedDealTransitions("proposal").includes("booking_form_sent"))
 })
 
 test("unsigned deals do not reserve sellable stock", () => {

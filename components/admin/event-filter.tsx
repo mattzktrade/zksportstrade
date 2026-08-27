@@ -74,7 +74,7 @@ export function EventFilter({
   }, [])
 
   return (
-    <div ref={rootRef} className={cn("relative min-w-[200px] max-w-[280px]", className)}>
+    <div ref={rootRef} className={cn("relative w-full min-w-0 sm:min-w-[200px] sm:max-w-[280px]", className)}>
       <div className="relative">
         <input
           value={open ? query : summary}

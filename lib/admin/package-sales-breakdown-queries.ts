@@ -1,4 +1,5 @@
 import { unstable_noStore as noStore } from "next/cache"
+import type { SupabaseClient } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
 import {
   emptyPackageSalesBreakdown,
@@ -32,6 +33,7 @@ export async function getPackageSalesBreakdown(packageId: string): Promise<Packa
 
 export async function getPackageSalesBreakdownByPackage(
   packageIds: readonly string[],
+  supabaseClient?: SupabaseClient,
 ): Promise<Map<string, PackageSalesBreakdown>> {
   noStore()
   const out = new Map<string, PackageSalesBreakdown>()
@@ -42,7 +44,7 @@ export async function getPackageSalesBreakdownByPackage(
     out.set(id, emptyPackageSalesBreakdown(id))
   }
 
-  const supabase = await createClient()
+  const supabase = supabaseClient ?? (await createClient())
   const IN_FILTER_BATCH = 80
   const ordersWithLines = new Set<string>()
   const batches: string[][] = []

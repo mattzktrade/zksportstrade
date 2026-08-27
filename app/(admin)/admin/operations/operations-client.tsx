@@ -44,6 +44,7 @@ import { OperationsSupplierEditor } from "@/app/(admin)/admin/operations/supplie
 import type { OperationsEmailKind } from "@/lib/operations/emails"
 import { orderStockSummaries } from "@/lib/operations/stock"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
 import {
   deleteOrderGuest,
   reassignDealPackageStock,
@@ -464,6 +465,7 @@ export function OperationsClient({
           <label className="relative min-w-0 w-full flex-1 sm:min-w-[220px]">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
+              {...pageSearchProps}
               value={search}
               onChange={(event) => setListState((current) => ({ ...current, search: event.target.value }))}
               placeholder="Search deals, clients or events..."

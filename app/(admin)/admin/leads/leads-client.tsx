@@ -38,6 +38,7 @@ import {
 } from "@/lib/crm/lead-types"
 import { cn } from "@/lib/utils"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import { isModifiedClick, openInNewTab, pageSearchProps } from "@/lib/browser/laptop-qol"
 
 type View = "accounts" | "contacts"
 
@@ -294,6 +295,7 @@ export function LeadsClient({
           <div className="relative w-full min-w-0 sm:ml-auto sm:min-w-[240px] sm:max-w-sm sm:flex-1">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
+              {...pageSearchProps}
               value={query}
               onChange={(e) => setListState((current) => ({ ...current, query: e.target.value }))}
               placeholder="Search companies, contacts, email..."
@@ -304,7 +306,7 @@ export function LeadsClient({
 
         {view === "accounts" ? (
           <>
-          <AdminDesktopTable className="no-scrollbar">
+          <AdminDesktopTable>
             <table className="w-full min-w-[1040px] text-left">
               <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
                 <tr>
@@ -325,6 +327,11 @@ export function LeadsClient({
                     <tr
                       key={client.id}
                       className={cn("hover:bg-slate-50", unassigned && "bg-amber-50/70")}
+                      onClick={(event) => {
+                        if ((event.target as HTMLElement).closest("a,button,input,select,textarea,label")) return
+                        if (!isModifiedClick(event)) return
+                        openInNewTab(adminAccountPath(client.id))
+                      }}
                     >
                       <td className="px-4 py-3">
                         <Link href={adminAccountPath(client.id)} className="font-semibold text-primary hover:underline">
@@ -422,7 +429,7 @@ export function LeadsClient({
           </>
         ) : (
           <>
-          <AdminDesktopTable className="no-scrollbar">
+          <AdminDesktopTable>
             <table className="w-full min-w-[980px] text-left">
               <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
                 <tr>
@@ -438,6 +445,11 @@ export function LeadsClient({
                   <tr
                     key={contact.id}
                     className={cn("hover:bg-slate-50", !client.owner_profile_id && "bg-amber-50/70")}
+                    onClick={(event) => {
+                      if ((event.target as HTMLElement).closest("a,button,input,select,textarea,label")) return
+                      if (!isModifiedClick(event)) return
+                      openInNewTab(adminContactPath(client.id, contact.id))
+                    }}
                   >
                     <td className="px-4 py-3">
                       <Link
@@ -525,6 +537,7 @@ export function LeadsClient({
       {showCreate ? (
         <div
           className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4"
+          data-escape-close=""
           onClick={resetCreate}
         >
           <div

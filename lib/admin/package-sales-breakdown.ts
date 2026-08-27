@@ -239,3 +239,84 @@ export function linkedPoolSellableForPackage(input: {
   const self = input.members.find((m) => m.id === input.targetId)
   return self ? commitmentSellable({ stock, breakdown: self.breakdown }) : stock
 }
+
+export type EffectiveSellablePackage = {
+  id: string
+  duration?: string | null
+  inventory_group_id?: string | null
+  shell_parent_package_id?: string | null
+  inventory?: { qty_available?: number | null; qty_held?: number | null } | null
+  layer_units_purchased?: number
+  sales_breakdown: PackageSalesBreakdown
+  effective_sellable?: number
+  effective_net?: number
+}
+
+/**
+ * Remaining after purchased stock minus committed sales.
+ * Linked 3-day / 2-day / day SKUs share one purchase pool, so sibling sales
+ * reduce every row. This is the number admin Live qty uses and what storefronts
+ * must show — not raw package_inventory.qty_available.
+ */
+export function applyEffectiveSellable<T extends EffectiveSellablePackage>(rows: T[]): T[] {
+  const linkedGroups = new Map<string, T[]>()
+  for (const row of rows) {
+    const groupId = row.inventory_group_id?.trim()
+    if (!groupId || row.shell_parent_package_id) continue
+    const members = linkedGroups.get(groupId) ?? []
+    members.push(row)
+    linkedGroups.set(groupId, members)
+  }
+  for (const row of rows) {
+    const groupId = row.inventory_group_id?.trim()
+    const groupMembers = groupId ? linkedGroups.get(groupId) ?? [] : []
+    const stockSource = groupMembers.length > 1 ? groupMembers : [row]
+    const purchasedStock = Math.max(
+      ...stockSource.map((member) => Number(member.layer_units_purchased ?? 0)),
+      0,
+    )
+    const stock =
+      purchasedStock > 0
+        ? purchasedStock
+        : Math.max(0, Number(row.inventory?.qty_available ?? 0))
+    if (groupMembers.length > 1) {
+      const members: LinkedSellableMember[] = groupMembers.map((member) => ({
+        id: member.id,
+        duration: member.duration ?? null,
+        breakdown: member.sales_breakdown,
+      }))
+      row.effective_sellable = Math.max(
+        0,
+        linkedPoolSellableForPackage({
+          stock,
+          targetId: row.id,
+          targetDuration: row.duration ?? null,
+          members,
+        }),
+      )
+      row.effective_net = linkedPoolSellableForPackage({
+        stock,
+        targetId: row.id,
+        targetDuration: row.duration ?? null,
+        members: members.map((member) => ({
+          ...member,
+          breakdown: {
+            ...member.breakdown,
+            salesforceOpenPipeline: 0,
+          },
+        })),
+      })
+    } else {
+      row.effective_sellable = Math.max(
+        0,
+        Math.floor(
+          stock -
+            Number(row.sales_breakdown.total ?? 0) -
+            Number(row.sales_breakdown.salesforceOpenPipeline ?? 0),
+        ),
+      )
+      row.effective_net = Math.floor(stock - Number(row.sales_breakdown.total ?? 0))
+    }
+  }
+  return rows
+}

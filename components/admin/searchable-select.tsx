@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { ChevronsUpDown } from "lucide-react"
 import { adminSearchTextMatches } from "@/lib/admin/option-search"
+import { searchMatchScore } from "@/lib/admin/ranked-search"
 import { cn } from "@/lib/utils"
 
 const MENU_GAP = 4
@@ -49,6 +50,7 @@ export function SearchableSelect({
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState(selected?.label ?? "")
   const [menuBox, setMenuBox] = useState<MenuBox | null>(null)
+  const [highlight, setHighlight] = useState(0)
 
   useEffect(() => {
     if (!open) setQuery(selected?.label ?? "")
@@ -121,8 +123,31 @@ export function SearchableSelect({
   const matches = useMemo(() => {
     const q = query.trim()
     if (!q || query === selected?.label) return options
-    return options.filter((option) => adminSearchTextMatches(option.label, q))
+    return options
+      .filter((option) => adminSearchTextMatches(option.label, q))
+      .sort(
+        (a, b) =>
+          searchMatchScore(b.label, q) - searchMatchScore(a.label, q) || a.label.localeCompare(b.label),
+      )
   }, [options, query, selected?.label])
+
+  const activeIndex = matches.length === 0 ? 0 : Math.min(highlight, matches.length - 1)
+
+  useEffect(() => {
+    setHighlight(0)
+  }, [query])
+
+  useEffect(() => {
+    if (!open) return
+    const node = menuRef.current?.querySelector("[data-active='true']")
+    if (node instanceof HTMLElement) node.scrollIntoView({ block: "nearest" })
+  }, [open, activeIndex])
+
+  function choose(option: SearchableSelectOption) {
+    onChange(option.value)
+    setQuery(option.label)
+    setOpen(false)
+  }
 
   const menu =
     open && menuBox ? (
@@ -140,19 +165,17 @@ export function SearchableSelect({
         {matches.length === 0 ? (
           <p className="px-3 py-2 text-[10px] text-slate-400">{emptyLabel}</p>
         ) : (
-          matches.map((option) => (
+          matches.map((option, index) => (
             <button
               key={option.value}
               type="button"
+              data-active={index === activeIndex ? "true" : undefined}
+              onMouseEnter={() => setHighlight(index)}
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                onChange(option.value)
-                setQuery(option.label)
-                setOpen(false)
-              }}
+              onClick={() => choose(option)}
               className={cn(
                 "block w-full px-3 py-1.5 text-left text-[10px] hover:bg-slate-50",
-                option.value === value && "bg-red-50 text-primary",
+                (index === activeIndex || option.value === value) && "bg-red-50 text-primary",
               )}
             >
               {option.label}
@@ -178,6 +201,8 @@ export function SearchableSelect({
           }}
           onFocus={(event) => {
             setOpen(true)
+            const selectedIndex = matches.findIndex((option) => option.value === value)
+            setHighlight(selectedIndex >= 0 ? selectedIndex : 0)
             event.target.select()
           }}
           onKeyDown={(event) => {
@@ -185,6 +210,25 @@ export function SearchableSelect({
               setOpen(false)
               setQuery(selected?.label ?? "")
               event.currentTarget.blur()
+              return
+            }
+            if (event.key === "ArrowDown") {
+              event.preventDefault()
+              setOpen(true)
+              setHighlight((current) => Math.min(current + 1, Math.max(matches.length - 1, 0)))
+              return
+            }
+            if (event.key === "ArrowUp") {
+              event.preventDefault()
+              setHighlight((current) => Math.max(current - 1, 0))
+              return
+            }
+            if (event.key === "Enter") {
+              const match = matches[activeIndex]
+              if (open && match) {
+                event.preventDefault()
+                choose(match)
+              }
             }
           }}
           placeholder={placeholder}

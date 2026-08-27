@@ -79,7 +79,7 @@ export function nativeStageForSalesforce(
   }
   if (stage.includes("invoice") || stage.includes("payment")) return "awaiting_payment"
   if (stage.includes("sign")) return "awaiting_client_signature"
-  if (stage.includes("booking") || stage.includes("form")) return "booking_form_sent"
+  if (stage.includes("booking") || stage.includes("form")) return "awaiting_client_signature"
   if (
     stage.includes("proposal") ||
     stage.includes("quote") ||

@@ -1,21 +1,24 @@
 "use client"
 
-import { useState, useTransition, type ReactNode } from "react"
+import { useMemo, useState, useTransition, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Mail, Pencil, Plus, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { updateNativeDealWorkflow } from "@/app/(admin)/actions"
 import { ActionCombobox } from "@/components/admin/action-combobox"
+import { CrmPartySelect } from "@/components/admin/crm-party-select"
 import { SearchableSelect } from "@/components/admin/searchable-select"
 import { AdminPageHeader, AdminPanel, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
+import { AdminModalScrim } from "@/components/admin/admin-list-preview"
 import type { DealBasketSupplier } from "@/components/admin/deal-line-basket"
-import { DEAL_NEXT_ACTION_OPTIONS, DEAL_SOURCE_LABELS, DEAL_SOURCES, DEAL_STAGES, DEAL_STAGE_LABELS, dealConfirmedOffPlatform, dealSourceLabel, friendlyDealActivitySummary, type CrmAccountOption, type DealPackageOption, type DealStage } from "@/lib/crm/deal-types"
+import { DEAL_NEXT_ACTION_OPTIONS, DEAL_SOURCE_LABELS, DEAL_SOURCES, DEAL_STAGES, DEAL_STAGE_LABELS, canonicalDealStage, dealConfirmedOffPlatform, dealSourceLabel, friendlyDealActivitySummary, type CrmAccountOption, type DealPackageOption, type DealStage } from "@/lib/crm/deal-types"
 import type { DealAddressDraft, DealDetailPageData, DealFulfilmentClient } from "@/lib/crm/deal-detail"
 import type { StaffOption } from "@/lib/crm/lead-types"
 import { formatMoney } from "@/lib/format/money"
 import { adminPackagePath } from "@/lib/admin/package-link"
 import { adminAccountPath, adminContactPath, adminSupplierPath } from "@/lib/crm/profile-links"
+import { mergeCrmAccountOptions } from "@/lib/crm/party-search"
 import { deleteOrderGuest, saveOrderGuests } from "@/app/(admin)/admin/operations/actions"
 import { OperationsGuestEditor, type GuestDraft } from "@/app/(admin)/admin/operations/guest-editor"
 import { updateDealClientDetails, updateDealCommercials, updateDealLineSupplier, addDealNote, deleteDeal } from "../deal-edit-actions"
@@ -255,7 +258,7 @@ export function DealDetailClient({
   const [editingClient, setEditingClient] = useState(false)
   const [clientForm, setClientForm] = useState<ClientDraft>(() => clientDraftFrom(client))
   const [editingWorkflow, setEditingWorkflow] = useState(false)
-  const [workflowStage, setWorkflowStage] = useState<DealStage>(deal.stage)
+  const [workflowStage, setWorkflowStage] = useState<DealStage>(canonicalDealStage(deal.stage))
   const [workflowOwner, setWorkflowOwner] = useState(deal.owner_profile_id ?? "")
   const [workflowAction, setWorkflowAction] = useState(deal.next_action ?? "")
   const [workflowDueAt, setWorkflowDueAt] = useState(localDateTimeInput(deal.next_action_due_at))
@@ -264,6 +267,12 @@ export function DealDetailClient({
   const [showCommercial, setShowCommercial] = useState(false)
   const [editAccountId, setEditAccountId] = useState(deal.account_id ?? "")
   const [editContactId, setEditContactId] = useState(deal.primary_contact_id ?? "")
+  const [knownAccounts, setKnownAccounts] = useState<CrmAccountOption[]>([])
+  const clientAccounts = useMemo(
+    () => mergeCrmAccountOptions([...accountOptions, ...knownAccounts]),
+    [accountOptions, knownAccounts],
+  )
+  const editAccount = clientAccounts.find((account) => account.id === editAccountId) ?? null
   const [editSource, setEditSource] = useState(deal.source)
   const [editNotes, setEditNotes] = useState(deal.notes ?? "")
   const [editLines, setEditLines] = useState<EditLineState[]>([])
@@ -275,7 +284,6 @@ export function DealDetailClient({
         ["sent", "viewed", "awaiting_zk_signature", "zk_signed", "completed"].includes(bookingForm.status),
     )
   const confirmedOffPlatform = dealConfirmedOffPlatform(deal)
-  const editAccount = accountOptions.find((account) => account.id === editAccountId) ?? null
   const guestQty = deal.lines.reduce((sum, line) => sum + line.quantity, 0)
 
   function run(
@@ -329,7 +337,7 @@ export function DealDetailClient({
   }
 
   function openWorkflowEditor() {
-    setWorkflowStage(deal.stage)
+    setWorkflowStage(canonicalDealStage(deal.stage))
     setWorkflowOwner(deal.owner_profile_id ?? "")
     setWorkflowAction(deal.next_action ?? "")
     setWorkflowDueAt(localDateTimeInput(deal.next_action_due_at))
@@ -1246,14 +1254,7 @@ export function DealDetailClient({
       </section>
 
       {showCommercial ? (
-        <div
-          className="fixed inset-0 z-[85] flex items-center justify-center bg-black/40 p-3 sm:p-4"
-          onClick={() => setShowCommercial(false)}
-        >
-          <div
-            className="max-h-[92dvh] w-full max-w-5xl overflow-y-auto rounded-xl bg-white p-4 sm:p-6 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
+        <AdminModalScrim onClose={() => setShowCommercial(false)} panelClassName="overflow-y-auto p-4 sm:p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold">Edit {deal.reference}</h2>
@@ -1279,15 +1280,21 @@ export function DealDetailClient({
             <div className="mt-5 grid gap-4 rounded-lg border p-4 md:grid-cols-2">
               <label className="text-sm">
                 <span className="mb-1 block font-medium">Account / company</span>
-                <SearchableSelect
-                  value={editAccountId}
-                  onChange={(next) => {
-                    setEditAccountId(next)
-                    setEditContactId("")
+                <CrmPartySelect
+                  accountId={editAccountId}
+                  localAccounts={clientAccounts}
+                  onSelect={(account, nextContactId) => {
+                    if (!account.id) {
+                      setEditAccountId("")
+                      setEditContactId("")
+                      return
+                    }
+                    setKnownAccounts((current) => mergeCrmAccountOptions([...current, account]))
+                    setEditAccountId(account.id)
+                    setEditContactId(nextContactId ?? "")
                   }}
-                  options={accountOptions.map((account) => ({ value: account.id, label: account.name }))}
-                  placeholder="Search account…"
-                  emptyLabel="No accounts match"
+                  placeholder="Search accounts and contacts…"
+                  emptyLabel="No accounts or contacts match"
                   className="h-11 w-full rounded-md border bg-white px-3 text-sm outline-none focus:border-primary/50"
                 />
               </label>
@@ -1527,8 +1534,7 @@ export function DealDetailClient({
                 Save deal
               </button>
             </div>
-          </div>
-        </div>
+        </AdminModalScrim>
       ) : null}
 
       {guestManagerOpen ? (

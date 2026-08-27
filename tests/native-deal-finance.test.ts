@@ -5,6 +5,7 @@ import {
   daysOverdue,
   paymentReminderIsDue,
 } from "../lib/crm/deal-finance"
+import { DEFAULT_FINANCE_CC, getInvoiceFinanceCc } from "../lib/email/config"
 
 test("native invoice cancellation becomes eligible 28 days after due date", () => {
   assert.equal(cancellationEligibleDate("2026-08-01"), "2026-08-29")
@@ -31,5 +32,22 @@ test("payment reminders run weekly and stop after five sends", () => {
     true,
   )
   assert.equal(paymentReminderIsDue({ reminderCount: 5, lastReminderAt: null, now }), false)
+})
+
+test("invoice and reminder emails always CC finance", () => {
+  const previous = process.env.XERO_INVOICE_CC
+  delete process.env.XERO_INVOICE_CC
+  try {
+    assert.deepEqual(getInvoiceFinanceCc("agent@example.com"), [DEFAULT_FINANCE_CC])
+    assert.deepEqual(getInvoiceFinanceCc(DEFAULT_FINANCE_CC), [])
+    process.env.XERO_INVOICE_CC = "accounts@zk-sports.com, finance@zk-sports.com"
+    assert.deepEqual(getInvoiceFinanceCc("agent@example.com"), [
+      DEFAULT_FINANCE_CC,
+      "accounts@zk-sports.com",
+    ])
+  } finally {
+    if (previous === undefined) delete process.env.XERO_INVOICE_CC
+    else process.env.XERO_INVOICE_CC = previous
+  }
 })
 

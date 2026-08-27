@@ -13,6 +13,7 @@ import type { AdminOrderListRow } from "@/lib/orders/queries"
 import { AdminInvoiceStatusSelect } from "@/components/admin-invoice-status-select"
 import { InvoicePdfDownloadLink } from "@/components/invoice-pdf-download-link"
 import { invoiceDisplayStatus, invoiceWorkflowStatusLabels } from "@/lib/invoices/status"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
 import { formatMoney } from "@/lib/format/money"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 
@@ -350,19 +351,28 @@ const invoiceFilterTabs: { value: InvoiceFilter; label: string }[] = [
 export function OrdersAdminClient({
   orders,
   initialPaymentFilter,
+  initialSearch,
 }: {
   orders: AdminOrderListRow[]
   initialPaymentFilter?: InvoiceFilter
+  initialSearch?: string
 }) {
   const router = useRouter()
   const [pending, start] = useTransition()
+  const override =
+    initialPaymentFilter || initialSearch
+      ? {
+          ...(initialPaymentFilter ? { invoiceFilter: initialPaymentFilter } : {}),
+          ...(initialSearch ? { search: initialSearch } : {}),
+        }
+      : null
   const [filters, setFilters] = usePersistedAdminFilters(
     ORDERS_FILTER_STORAGE_KEY,
     {
       ...DEFAULT_ORDERS_FILTERS,
       invoiceFilter: initialPaymentFilter ?? "all",
     },
-    { override: initialPaymentFilter ? { invoiceFilter: initialPaymentFilter } : null },
+    { override },
   )
   const { search, invoiceFilter, sortKey, sortDir } = filters
 
@@ -461,6 +471,7 @@ export function OrdersAdminClient({
           <input
             id="orders-search"
             type="search"
+            {...pageSearchProps}
             placeholder="Search booking reference, package, agent…"
             value={search}
             onChange={(e) => setFilters((current) => ({ ...current, search: e.target.value }))}

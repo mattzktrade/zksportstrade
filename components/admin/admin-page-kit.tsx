@@ -45,7 +45,7 @@ export function AdminDesktopTable({
   children: React.ReactNode
   className?: string
 }) {
-  return <div className={cn("hidden overflow-x-auto md:block", className)}>{children}</div>
+  return <div className={cn("hidden overflow-x-auto overscroll-x-contain md:block", className)}>{children}</div>
 }
 
 export function AdminMobileList({

@@ -12,6 +12,7 @@ import {
 import { Search, Calendar, Users, Filter, ArrowUpDown, ChevronDown } from "lucide-react"
 import { InvoicePdfDownloadLink } from "@/components/invoice-pdf-download-link"
 import { cn } from "@/lib/utils"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
 
 const paymentStatusConfig: Record<
   InvoiceWorkflowStatus,
@@ -134,6 +135,7 @@ export function BookingsPageClient({ initialBookings }: { initialBookings: Booki
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
             type="text"
+            {...pageSearchProps}
             placeholder="Search by reference, package, or client..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}

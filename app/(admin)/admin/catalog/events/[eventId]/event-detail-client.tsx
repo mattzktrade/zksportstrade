@@ -27,6 +27,7 @@ import type { NativeEventDetail } from "@/lib/admin/event-detail"
 import { EVENT_CATEGORY_LABELS } from "@/lib/catalog/event-categories"
 import { formatMoney } from "@/lib/format/money"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
 
 function formatDate(value: string): string {
   if (!value) return "—"
@@ -42,7 +43,7 @@ function formatDate(value: string): string {
 function saleStatusTone(sale: NativeEventDetail["sales"][number]): "green" | "amber" | "blue" | "gray" {
   if (sale.kind === "order" || sale.confirmed) return "green"
   if (/awaiting|signed|booking/i.test(sale.status)) return "amber"
-  if (/proposal|draft|sourcing/i.test(sale.status)) return "blue"
+  if (/price sent|proposal|draft|sourcing/i.test(sale.status)) return "blue"
   return "gray"
 }
 
@@ -201,18 +202,19 @@ export function EventDetailClient({ detail }: { detail: NativeEventDetail }) {
       </AdminPanel>
 
       <AdminPanel>
-        <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
-          <h2 className="text-[13px] font-semibold">Sales</h2>
-          <div className="relative min-w-0 w-full flex-1 sm:min-w-[220px]">
+        <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center">
+          <h2 className="shrink-0 text-[13px] font-semibold">Sales</h2>
+          <div className="relative w-full min-w-0 sm:min-w-[220px] sm:flex-1 sm:max-w-sm">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
+              {...pageSearchProps}
               value={saleQuery}
               onChange={(event) => setListState((current) => ({ ...current, saleQuery: event.target.value }))}
               placeholder="Search client, product, reference..."
-              className="h-9 w-full rounded-md border pl-9 pr-3 text-[11px] outline-none focus:border-primary/50"
+              className="h-9 w-full min-w-0 rounded-md border pl-9 pr-3 text-[11px] outline-none focus:border-primary/50"
             />
           </div>
-          <div className="flex rounded-md border bg-slate-50 p-0.5 text-[10px] font-medium">
+          <div className="flex w-full min-w-0 overflow-x-auto rounded-md border bg-slate-50 p-0.5 text-[10px] font-medium sm:w-auto">
             {([
               ["all", `All (${sales.length})`],
               ["confirmed", `Sold (${sales.filter((sale) => sale.confirmed).length})`],
@@ -222,7 +224,7 @@ export function EventDetailClient({ detail }: { detail: NativeEventDetail }) {
                 key={value}
                 type="button"
                 onClick={() => setListState((current) => ({ ...current, saleFilter: value }))}
-                className={`h-8 rounded px-3 ${saleFilter === value ? "bg-white shadow-sm" : "text-slate-500"}`}
+                className={`h-8 shrink-0 rounded px-3 ${saleFilter === value ? "bg-white shadow-sm" : "text-slate-500"}`}
               >
                 {label}
               </button>

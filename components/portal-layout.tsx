@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/client"
 import { usePortalUser } from "@/components/portal-user-provider"
 import { LOGO_MAIN } from "@/lib/branding"
 import { ContactWidget } from "@/components/contact-widget"
+import { escapeCloseProps } from "@/lib/browser/laptop-qol"
 
 export function PortalLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -39,12 +40,16 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-muted/30">
       {sidebarOpen && (
-        <div className="fixed inset-0 bg-zk-black/50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
+        <div
+          className="fixed inset-0 bg-zk-black/50 z-40 lg:hidden"
+          {...escapeCloseProps}
+          onClick={() => setSidebarOpen(false)}
+        />
       )}
 
       <aside
         className={cn(
-          "fixed top-0 left-0 z-50 h-full bg-white border-r border-border flex flex-col transition-all duration-300 lg:translate-x-0 w-56",
+          "fixed top-0 left-0 z-50 h-full overscroll-contain bg-white border-r border-border flex flex-col transition-transform duration-300 lg:translate-x-0 w-56",
           sidebarOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
@@ -63,7 +68,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
 
-        <nav className="flex-1 p-3 space-y-0.5">
+        <nav className="flex-1 overflow-y-auto overscroll-contain p-3 space-y-0.5">
           {navigation.map((item) => {
             const isActive =
               item.href === "/admin"
@@ -120,7 +125,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      <div className="lg:pl-56 transition-all duration-300">
+      <div className="lg:pl-56">
         <header className="sticky top-0 z-30 bg-white border-b border-border lg:hidden">
           <div className="flex items-center justify-between h-14 px-4">
             <button
@@ -152,7 +157,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="min-h-[calc(100vh-56px)] lg:min-h-screen">{children}</main>
+        <main className="min-h-[calc(100dvh-56px)] lg:min-h-dvh">{children}</main>
       </div>
       <ContactWidget />
     </div>

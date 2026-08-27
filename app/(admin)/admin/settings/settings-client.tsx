@@ -34,6 +34,7 @@ import {
   updateStaffRole,
 } from "./settings-actions"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
 
 export type SettingsIntegrationCard = {
   href: string
@@ -157,6 +158,7 @@ export function SettingsClient({
                 <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
                 <input
                   type="search"
+                  {...pageSearchProps}
                   value={search}
                   onChange={(e) => setListState((current) => ({ ...current, search: e.target.value }))}
                   placeholder="Search name, email or role..."
@@ -455,7 +457,7 @@ function CreateUserModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" data-escape-close="" onClick={onClose}>
       <div
         className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -578,7 +580,7 @@ function PasswordModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" data-escape-close="" onClick={onClose}>
       <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between">
           <div>
@@ -642,7 +644,7 @@ function DeleteModal({
   onConfirm: () => void
 }) {
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" data-escape-close="" onClick={onClose}>
       <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-semibold">Delete {user.fullName}?</h2>
         <p className="mt-2 text-sm text-slate-500">

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
+import { useEscapeToClose } from "@/hooks/use-escape-to-close"
 import {
   addDeliveryProofAndMarkDelivered,
   getDeliveryProofDownloadUrl,
@@ -40,6 +41,7 @@ export function AdminInvoiceStatusSelect({
   const [proofOpen, setProofOpen] = useState(false)
   const [proofNote, setProofNote] = useState("")
   const [proofFile, setProofFile] = useState<File | null>(null)
+  useEscapeToClose(proofOpen, () => setProofOpen(false))
   const proofs = deliveryProofs ?? []
   const latestProof = proofs[0]
 
@@ -142,7 +144,7 @@ export function AdminInvoiceStatusSelect({
         </p>
       ) : null}
       {proofOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-xl space-y-4">
             <div>
               <h2 className="text-base font-semibold text-foreground">Proof of delivery</h2>

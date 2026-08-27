@@ -436,7 +436,7 @@ export async function swapDealLineSuppliers(input: {
     return {
       ok: false,
       message:
-        "Supplier can only be assigned once a deal is signed. Proposal and unsigned deals do not take purchased stock yet.",
+        "Supplier can only be assigned once a deal is signed. Price sent and unsigned deals do not take purchased stock yet.",
     }
   }
 
@@ -467,7 +467,7 @@ export async function swapDealLineSuppliers(input: {
       return {
         ok: false,
         message:
-          "Supplier can only be assigned once a deal is signed. Proposal and unsigned deals do not take purchased stock yet.",
+          "Supplier can only be assigned once a deal is signed. Price sent and unsigned deals do not take purchased stock yet.",
       }
     }
     if (message.includes("duplicate_deal_line_assignment")) {

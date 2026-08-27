@@ -18,7 +18,6 @@ export const DEAL_STAGES: readonly DealStage[] = [
   "draft",
   "sourcing",
   "proposal",
-  "booking_form_sent",
   "awaiting_client_signature",
   "awaiting_zk_signature",
   "signed",
@@ -30,6 +29,12 @@ export const DEAL_STAGES: readonly DealStage[] = [
   "closed_lost",
   "cancelled",
 ]
+
+/** Sending a booking form is the same workflow state as waiting for the client to sign. */
+export function canonicalDealStage(stage: string): DealStage {
+  if (stage === "booking_form_sent") return "awaiting_client_signature"
+  return stage as DealStage
+}
 
 /** Paid stages that are ready to fulfil. Payment status is independent of stock hold. */
 export const DEAL_CONFIRMED_STAGES: readonly DealStage[] = [
@@ -263,8 +268,8 @@ export type DealPackageOption = {
 export const DEAL_STAGE_LABELS: Record<DealStage, string> = {
   draft: "Draft",
   sourcing: "Sourcing",
-  proposal: "Proposal",
-  booking_form_sent: "Booking form sent",
+  proposal: "Price sent",
+  booking_form_sent: "Awaiting client signature",
   awaiting_client_signature: "Awaiting client signature",
   awaiting_zk_signature: "Awaiting ZK signature",
   signed: "Signed",

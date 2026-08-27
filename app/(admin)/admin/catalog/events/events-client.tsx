@@ -19,6 +19,7 @@ import {
   type EventCategory,
 } from "@/lib/catalog/event-categories"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
 import { CatalogImageField } from "@/components/admin/catalog-image-field"
 
 export type NativeEventRow = {
@@ -248,7 +249,7 @@ export function EventsClient({ events }: { events: NativeEventRow[] }) {
         <div className="flex flex-wrap items-center gap-3 border-b p-4">
           <div className="relative min-w-0 w-full flex-1 sm:min-w-[280px]">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input value={query} onChange={(event) => setListState((current) => ({ ...current, query: event.target.value }))} placeholder="Search event, circuit, country or season..." className="h-10 w-full rounded-md border pl-10 pr-3 text-sm outline-none focus:border-primary/50" />
+            <input {...pageSearchProps} value={query} onChange={(event) => setListState((current) => ({ ...current, query: event.target.value }))} placeholder="Search event, circuit, country or season..." className="h-10 w-full rounded-md border pl-10 pr-3 text-sm outline-none focus:border-primary/50" />
           </div>
           <select value={eventTimingFilter} onChange={(event) => setListState((current) => ({ ...current, eventTimingFilter: event.target.value as "future" | "all" }))} className="h-10 rounded-md border bg-white px-3 text-sm">
             <option value="future">Future events</option>

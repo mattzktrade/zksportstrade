@@ -121,7 +121,7 @@ export async function syncPackageCatalogToWix(packageId: string): Promise<WixCat
 
   const { data: pkg } = await admin
     .from("packages")
-    .select("sell_on_wix, is_hidden")
+    .select("sell_on_wix, is_hidden, duration, inventory_group_id, shell_parent_package_id")
     .eq("id", packageId)
     .maybeSingle()
 
@@ -143,7 +143,20 @@ export async function syncPackageCatalogToWix(packageId: string): Promise<WixCat
     .eq("package_id", packageId)
     .maybeSingle()
 
-  const portalSellable = Math.max(0, Number(inv?.available_quantity ?? 0))
+  const { effectiveSellableByPackageId } = await import("@/lib/catalog/storefront-availability")
+  const overlayById = await effectiveSellableByPackageId(admin, [
+    {
+      id: packageId,
+      duration: typeof pkg?.duration === "string" ? pkg.duration : null,
+      inventory_group_id:
+        typeof pkg?.inventory_group_id === "string" ? pkg.inventory_group_id : null,
+      shell_parent_package_id:
+        typeof pkg?.shell_parent_package_id === "string" ? pkg.shell_parent_package_id : null,
+    },
+  ])
+  const salesRemaining = overlayById.get(packageId)
+  const canonicalAvailable = Math.max(0, Number(inv?.available_quantity ?? 0))
+  const portalSellable = salesRemaining ?? canonicalAvailable
   // Wix has no suite-split warning — cap storefront stock at the largest single
   // supplier/block remaining so online shoppers can't book a party that must split.
   // Portal agents still see the full pool sum. If there is only one source (or no

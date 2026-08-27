@@ -25,6 +25,7 @@ import {
 } from "@/lib/admin/negative-stock"
 import { cn } from "@/lib/utils"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
 import { toast } from "sonner"
 import {
   reconcileHistoricalInventory,
@@ -229,6 +230,7 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               type="search"
+              {...pageSearchProps}
               value={filters.search}
               onChange={(event) => setListState((current) => ({ ...current, search: event.target.value }))}
               placeholder="Search event, agent, supplier, ref..."

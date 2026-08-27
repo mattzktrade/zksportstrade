@@ -42,7 +42,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     nav: "Getting started",
     title: "Getting started",
     summary: "A short first-day guide. You do not need to learn every screen.",
-    keywords: ["start", "onboarding", "login", "dashboard", "first day", "team", "how to", "begin"],
+    keywords: ["start", "onboarding", "login", "dashboard", "first day", "team", "how to", "begin", "search"],
     blocks: [
       {
         type: "p",
@@ -61,6 +61,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           "Log in with the email and password you were given. You should land on Dashboard.",
           "Look at the coloured cards at the top. They are jobs waiting: new portal users, forms to sign, overdue invoices, and similar.",
           "Check “My tasks” if you have any. Those are deals assigned to you.",
+          "Use the search bar at the top to jump to an order, client, contact, deal, or event. Click the result to open it.",
           "Use the left menu to move around. On a phone, open it with the menu button at the top left.",
           "Come back to Help whenever you need. Search at the top of this page for words like deal, hold, or invoice.",
         ],
@@ -379,7 +380,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         title: "Create an offline deal",
         items: [
           "Open Sales list and click the product.",
-          "Choose Create deal. Search for the company — only create a new one if it is not there.",
+          "Choose Create deal. Search for the company or a person — companies that start with what you typed appear first, and you can pick a contact in the same list. Only create a new account if it is not there.",
           "Add the contact, quantity, and sale price. You can add more than one product, including from different events.",
           "Optional: tick Reserve stock for 7 days if you need to lock places before the form goes out.",
           "Save, then open the deal from Sales → Deals to send the booking form.",

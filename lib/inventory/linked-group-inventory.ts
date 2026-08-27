@@ -18,6 +18,13 @@ import {
 import { pushLinkedGroupAvailabilityToSalesforce } from "@/lib/inventory/linked-group-sf-push"
 import { resolveShellInventorySource } from "@/lib/catalog/ensure-shell-single-tickets"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getCostLayerQuantityTotalsByPackage } from "@/lib/admin/cost-layers"
+import {
+  applyEffectiveSellable,
+  emptyPackageSalesBreakdown,
+  type EffectiveSellablePackage,
+} from "@/lib/admin/package-sales-breakdown"
+import { getPackageSalesBreakdownByPackage } from "@/lib/admin/package-sales-breakdown-queries"
 
 type GroupMember = {
   id: string
@@ -1147,8 +1154,8 @@ export async function healLinkedGroupInBackground(groupId: string): Promise<bool
 }
 
 /**
- * Set linked-group sellables from cost-layer pool − portal/offline sold only.
- * Ignores Salesforce (open pipeline is applied later by the SF heal).
+ * Set linked-group sellables from purchased stock minus committed sales
+ * (portal, Wix, and native/offline deals), including 2-day weekend take.
  * Returns true when any package_inventory row changed.
  */
 export async function reconcileLinkedGroupFromPortalSales(
@@ -1171,33 +1178,45 @@ export async function reconcileLinkedGroupFromPortalSales(
   ) as GroupMember[]
   if (members.length === 0) return false
 
-  const threeDay = members.find((m) => m.duration === "3_day")
-  const dayMembers = members.filter((m) => DAY_DURATIONS.has(m.duration ?? ""))
-  if (!threeDay?.id || dayMembers.length === 0) return false
+  const ids = members.map((member) => member.id)
+  const [salesByPkg, layerTotals] = await Promise.all([
+    getPackageSalesBreakdownByPackage(ids, admin),
+    getCostLayerQuantityTotalsByPackage(ids, admin),
+  ])
 
-  const costLayerPool = await readCostLayerPoolQuantity(admin, threeDay.id)
-  if (costLayerPool == null || costLayerPool <= 0) return false
-
-  const portalSold = await loadPortalOrderSoldByPackageIds(
-    admin,
-    members.map((m) => m.id),
+  const sellableRows: EffectiveSellablePackage[] = members.map((member) => ({
+    id: member.id,
+    duration: member.duration,
+    inventory_group_id: groupId,
+    shell_parent_package_id: null,
+    inventory: inventoryRow(member.package_inventory),
+    layer_units_purchased: layerTotals.get(member.id)?.quantity_purchased ?? 0,
+    sales_breakdown: salesByPkg.get(member.id) ?? emptyPackageSalesBreakdown(member.id),
+  }))
+  applyEffectiveSellable(sellableRows)
+  const sellableById = new Map(
+    sellableRows.map((row) => [
+      row.id,
+      Math.max(0, Math.floor(Number(row.effective_sellable) || 0)),
+    ]),
   )
-  const threeSold = portalSold.get(threeDay.id) ?? 0
 
   const targets: InventoryTarget[] = []
   const daySellables = new Map<string, number>()
   let changed = false
 
-  for (const member of dayMembers) {
-    const daySold = portalSold.get(member.id) ?? 0
-    const sellable = Math.max(0, costLayerPool - threeSold - daySold)
-    const held = Math.max(0, Math.floor(Number(inventoryRow(member.package_inventory)?.qty_held) || 0))
+  for (const member of members) {
+    const sellable = sellableById.get(member.id) ?? 0
+    const held = Math.max(
+      0,
+      Math.floor(Number(inventoryRow(member.package_inventory)?.qty_held) || 0),
+    )
     const current = portalSellable(
       inventoryRow(member.package_inventory)?.qty_available,
       inventoryRow(member.package_inventory)?.qty_held,
     )
-    daySellables.set(member.id, sellable)
     if (current !== sellable) changed = true
+    daySellables.set(member.id, sellable)
     targets.push({
       package_id: member.id,
       qty_available: sellable + held,
@@ -1207,30 +1226,39 @@ export async function reconcileLinkedGroupFromPortalSales(
     })
   }
 
-  const threeSellable = Math.min(...[...daySellables.values()])
-  const threeHeld = Math.max(
-    0,
-    Math.floor(Number(inventoryRow(threeDay.package_inventory)?.qty_held) || 0),
-  )
-  const threeCurrent = portalSellable(
-    inventoryRow(threeDay.package_inventory)?.qty_available,
-    inventoryRow(threeDay.package_inventory)?.qty_held,
-  )
-  if (threeCurrent !== threeSellable) changed = true
-  targets.push({
-    package_id: threeDay.id,
-    qty_available: threeSellable + threeHeld,
-    sellable: threeSellable,
-    name: threeDay.name,
-    duration: threeDay.duration,
-  })
-  daySellables.set(threeDay.id, threeSellable)
-
   if (!changed) return false
 
   await applyLinkedGroupInventoryTargets(admin, groupId, targets)
-  await mirrorShellPortalInventory(admin, threeDay.id, daySellables)
+  const threeDay = members.find((member) => member.duration === "3_day")
+  if (threeDay?.id) {
+    await mirrorShellPortalInventory(admin, threeDay.id, daySellables)
+  }
   return true
+}
+
+export async function reconcileLinkedGroupsForPackageIds(
+  admin: SupabaseClient,
+  packageIds: readonly string[],
+): Promise<void> {
+  const ids = [...new Set(packageIds.map((id) => id.trim()).filter(Boolean))]
+  if (ids.length === 0) return
+  const { data: groupRows, error } = await admin
+    .from("packages")
+    .select("inventory_group_id")
+    .in("id", ids)
+  if (error) throw new Error(error.message)
+  const groupIds = [
+    ...new Set(
+      (groupRows ?? [])
+        .map((row) =>
+          typeof row.inventory_group_id === "string" ? row.inventory_group_id.trim() : "",
+        )
+        .filter(Boolean),
+    ),
+  ]
+  for (const gid of groupIds) {
+    await reconcileLinkedGroupFromPortalSales(admin, gid)
+  }
 }
 
 /**

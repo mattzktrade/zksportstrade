@@ -20,6 +20,13 @@ import { hasCmsPermission, isCmsStaff, type CmsPermission } from "@/lib/auth/per
 import { isInvoiceWorkflowStatus, normalizeInvoiceStatus, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
 import { enqueuePackageInventoryChannelSync, enqueueProductUpsert } from "@/lib/integrations/enqueue"
 import { repairLinkedGroupInventory } from "@/lib/inventory/repair-linked-group"
+import { prepareOrderCancelRelease } from "@/lib/inventory/prepare-order-cancel-release"
+import {
+  orderCancelMustSkipCogsDelete,
+  postgresErrorText,
+  releaseOrderStockSkippingRestatedCogs,
+  shouldUseRestatementSafeOrderCancel,
+} from "@/lib/inventory/cancel-order-stock"
 import { recordPurchaseLedgerForLatestLayer } from "@/lib/inventory/ledger"
 import {
   ensureSupplierForAccount,
@@ -521,11 +528,82 @@ export async function cancelAdminOrder(orderId: string): Promise<ActionResult> {
     .eq("id", id)
     .maybeSingle()
 
-  const { data, error } = await gate.supabase.rpc("admin_cancel_order", { p_order_id: id })
+  try {
+    await prepareOrderCancelRelease(id)
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Could not prepare order cancellation."
+    if (msg.includes("tickets_or_delivery_block_cancellation")) {
+      return {
+        ok: false,
+        message: "This order cannot be cancelled because tickets have already been received or delivered.",
+      }
+    }
+    return { ok: false, message: msg }
+  }
+
+  const skipCogsDelete = await orderCancelMustSkipCogsDelete(id)
+  const { data, error } = skipCogsDelete
+    ? { data: null, error: { message: "inventory_component_audit_rows_are_append_only" } }
+    : await gate.supabase.rpc("admin_cancel_order", { p_order_id: id })
   if (error) {
-    const msg = error.message
+    const msg = postgresErrorText(error)
     if (msg.includes("already_cancelled")) return { ok: false, message: "This order is already cancelled." }
     if (msg.includes("order_not_found")) return { ok: false, message: "Order not found." }
+    if (msg.includes("tickets_or_delivery_block_cancellation")) {
+      return {
+        ok: false,
+        message: "This order cannot be cancelled because tickets have already been received or delivered.",
+      }
+    }
+    if (msg.includes("allocation_fulfilment_locked")) {
+      return {
+        ok: false,
+        message: "Stock cannot be restored because supplier fulfilment has already started.",
+      }
+    }
+    if (shouldUseRestatementSafeOrderCancel(msg)) {
+      try {
+        const admin = createAdminClient()
+        if (!admin) return { ok: false, message: "Supabase service role is not configured." }
+        await releaseOrderStockSkippingRestatedCogs(id, "Order cancelled")
+        const { data: order } = await admin
+          .from("orders")
+          .select("package_id, guests, reference")
+          .eq("id", id)
+          .maybeSingle()
+        if (order?.package_id && Number(order.guests) > 0) {
+          const { error: availableError } = await admin.rpc("adjust_linked_inventory_available", {
+            p_package_id: order.package_id,
+            p_delta: Number(order.guests),
+          })
+          if (availableError) return { ok: false, message: availableError.message }
+        }
+        const { error: statusError } = await admin.from("orders").update({ status: "cancelled" }).eq("id", id)
+        if (statusError) return { ok: false, message: statusError.message }
+        if (orderBefore?.id) {
+          await enqueueOpportunityOutcomeServer(String(orderBefore.id), "lost")
+        }
+        const packageId = order?.package_id?.trim()
+        if (packageId) {
+          await enqueuePackageInventoryChannelSync(gate.supabase, packageId)
+        }
+        revalidatePath("/admin/orders")
+        revalidatePath("/admin/catalog")
+        revalidatePath("/admin/inventory")
+        revalidatePath("/packages")
+        revalidatePath("/bookings")
+        revalidateAdminProfitPaths()
+        const ref = order?.reference?.trim()
+        return {
+          ok: true,
+          message: ref ? `Cancelled ${ref} and restored stock.` : "Order cancelled and stock restored.",
+        }
+      } catch (fallbackError) {
+        const fallback =
+          fallbackError instanceof Error ? fallbackError.message : "Could not cancel this order."
+        return { ok: false, message: fallback }
+      }
+    }
     return { ok: false, message: msg }
   }
 
@@ -4436,6 +4514,7 @@ export async function updateNativeDealWorkflow(input: {
   if (!NATIVE_DEAL_STAGES.has(input.stage)) {
     return { ok: false, message: "Selected deal stage is not valid." }
   }
+  const stage = input.stage === "booking_form_sent" ? "awaiting_client_signature" : input.stage
   const ownerProfileId = input.ownerProfileId?.trim() || null
   if (ownerProfileId && !UUID_RE.test(ownerProfileId)) {
     return { ok: false, message: "Selected owner is not valid." }
@@ -4456,7 +4535,7 @@ export async function updateNativeDealWorkflow(input: {
 
   const { error } = await gate.supabase.rpc("admin_update_deal_workflow", {
     p_deal_id: dealId,
-    p_stage: input.stage,
+    p_stage: stage,
     p_owner_profile_id: ownerProfileId,
     p_next_action: input.nextAction?.trim() || null,
     p_next_action_due_at: nextActionDueAt,

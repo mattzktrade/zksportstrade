@@ -17,6 +17,7 @@ import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
 import { formatMoneyCompact } from "@/lib/format/money"
 import { cn } from "@/lib/utils"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
 
 const CATALOG_FILTER_STORAGE_KEY = "zk-admin-catalog-filters-v2"
 
@@ -191,6 +192,7 @@ export function CatalogAdminTable({
           />
           <input
             type="search"
+            {...pageSearchProps}
             value={search}
             onChange={(e) => setFilters((current) => ({ ...current, search: e.target.value }))}
             placeholder="Search by name, circuit, race, id…"

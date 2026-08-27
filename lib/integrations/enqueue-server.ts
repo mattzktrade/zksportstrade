@@ -123,6 +123,18 @@ export async function enqueuePackageInventoryChannelSyncServer(
     return { ok: false, message: "Package id is missing." }
   }
 
+  try {
+    const { reconcileLinkedGroupsForPackageIds } = await import(
+      "@/lib/inventory/linked-group-inventory"
+    )
+    await reconcileLinkedGroupsForPackageIds(admin, packageIds)
+  } catch (error) {
+    console.warn(
+      "[inventory] native linked-group reconcile failed:",
+      error instanceof Error ? error.message : error,
+    )
+  }
+
   for (const id of packageIds) {
     const enq = await enqueuePackageInventorySyncServer(id, {
       trigger: options?.trigger,

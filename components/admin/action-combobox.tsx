@@ -19,6 +19,7 @@ export function ActionCombobox({
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
+  const [highlight, setHighlight] = useState(0)
   const matches = useMemo(() => {
     const q = value.trim().toLowerCase()
     const filtered = q
@@ -29,6 +30,11 @@ export function ActionCombobox({
     }
     return filtered
   }, [options, value])
+  const activeIndex = matches.length === 0 ? 0 : Math.min(highlight, matches.length - 1)
+
+  useEffect(() => {
+    setHighlight(0)
+  }, [value])
 
   useEffect(() => {
     function onPointerDown(event: PointerEvent) {
@@ -48,6 +54,32 @@ export function ActionCombobox({
             setOpen(true)
           }}
           onFocus={() => setOpen(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              setOpen(false)
+              event.currentTarget.blur()
+              return
+            }
+            if (event.key === "ArrowDown") {
+              event.preventDefault()
+              setOpen(true)
+              setHighlight((current) => Math.min(current + 1, Math.max(matches.length - 1, 0)))
+              return
+            }
+            if (event.key === "ArrowUp") {
+              event.preventDefault()
+              setHighlight((current) => Math.max(current - 1, 0))
+              return
+            }
+            if (event.key === "Enter") {
+              const match = matches[activeIndex]
+              if (open && match) {
+                event.preventDefault()
+                onChange(match)
+                setOpen(false)
+              }
+            }
+          }}
           placeholder={placeholder}
           className={cn("pr-8", inputClassName)}
         />
@@ -62,10 +94,11 @@ export function ActionCombobox({
       </div>
       {open && matches.length > 0 ? (
         <div className="absolute z-30 mt-1 max-h-48 w-full overflow-y-auto rounded-md border bg-white py-1 shadow-lg [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {matches.map((option) => (
+          {matches.map((option, index) => (
             <button
               key={option}
               type="button"
+              onMouseEnter={() => setHighlight(index)}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
                 onChange(option)
@@ -73,7 +106,7 @@ export function ActionCombobox({
               }}
               className={cn(
                 "block w-full px-3 py-1.5 text-left text-[9px] hover:bg-slate-50",
-                option === value && "bg-red-50 text-primary",
+                (index === activeIndex || option === value) && "bg-red-50 text-primary",
               )}
             >
               {option}

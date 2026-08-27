@@ -1,5 +1,6 @@
 import { packageIdsForInventoryChannelSync } from "@/lib/integrations/inventory-sync-packages"
 import { scheduleOutboxDrain } from "@/lib/integrations/schedule-drain"
+import { createAdminClient } from "@/lib/supabase/admin"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { ProductUpsertPayload } from "@/lib/integrations/types"
 
@@ -46,6 +47,20 @@ export async function enqueuePackageInventoryChannelSync(
   packageId: string,
 ): Promise<void> {
   const packageIds = await packageIdsForInventoryChannelSync(supabase, packageId)
+  const admin = createAdminClient()
+  if (admin) {
+    try {
+      const { reconcileLinkedGroupsForPackageIds } = await import(
+        "@/lib/inventory/linked-group-inventory"
+      )
+      await reconcileLinkedGroupsForPackageIds(admin, packageIds)
+    } catch (error) {
+      console.warn(
+        "[inventory] native linked-group reconcile failed:",
+        error instanceof Error ? error.message : error,
+      )
+    }
+  }
   for (const pkgId of packageIds) {
     const enq = await enqueueProductUpsert(supabase, pkgId)
     if (!enq.ok) console.warn(`[inventory] product sync not queued for ${pkgId}:`, enq.message)

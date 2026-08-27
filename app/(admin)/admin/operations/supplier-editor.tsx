@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { Plus, X } from "lucide-react"
+import { useEscapeToClose } from "@/hooks/use-escape-to-close"
 import type { OperationsLineOption } from "@/lib/admin/workflow-views"
 import {
   buildSupplierDrafts,
@@ -38,9 +39,10 @@ export function OperationsSupplierEditor({
   onSave: (packageId: string, takes: LayerTake[]) => void
 }) {
   const products = groupOrderPackages(lines)
+  useEscapeToClose(true, onClose)
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true">
       <div className="flex max-h-[92dvh] w-full max-w-lg min-h-0 flex-col overflow-hidden rounded-xl bg-white shadow-xl">
         <div className="flex shrink-0 items-start justify-between gap-4 border-b px-5 py-4">
           <div>

@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Plus, X } from "lucide-react"
 import type { OperationsGuest } from "@/lib/admin/workflow-views"
+import { useEscapeToClose } from "@/hooks/use-escape-to-close"
 
 export type GuestDraft = {
   key: string
@@ -80,6 +81,7 @@ export function OperationsGuestEditor({
   onDelete: (guestId: string) => void
 }) {
   const [drafts, setDrafts] = useState(() => buildGuestDrafts(existing, expectedCount))
+  useEscapeToClose(true, onClose)
 
   function update(key: string, patch: Partial<GuestDraft>) {
     setDrafts((current) =>
@@ -96,7 +98,7 @@ export function OperationsGuestEditor({
   const needed = Math.max(0, expectedCount - namedCount)
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true">
       <div className="flex max-h-[92dvh] w-full max-w-3xl min-h-0 flex-col overflow-hidden rounded-xl bg-white shadow-xl">
         <div className="flex shrink-0 items-start justify-between gap-4 border-b px-5 py-4">
           <div>

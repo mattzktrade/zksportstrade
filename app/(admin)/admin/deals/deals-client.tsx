@@ -30,9 +30,12 @@ import {
 } from "@/app/(admin)/actions"
 import { AccountKindPills } from "@/components/admin/account-kind-pills"
 import { ActionCombobox } from "@/components/admin/action-combobox"
+import { CrmPartySelect } from "@/components/admin/crm-party-select"
 import { SearchableSelect } from "@/components/admin/searchable-select"
 import { EventFilter, uniqueEventFilterOptions } from "@/components/admin/event-filter"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
+import { AdminListPreview, AdminModalScrim } from "@/components/admin/admin-list-preview"
+import { useAdminListSelection } from "@/lib/admin/use-admin-list-selection"
 import {
   DealLineBasket,
   isPricedDealBasketLine,
@@ -46,6 +49,7 @@ import {
   DEAL_SOURCES,
   DEAL_STAGES,
   DEAL_STAGE_LABELS,
+  canonicalDealStage,
   dealConfirmedOffPlatform,
   dealSourceLabel,
   friendlyDealActivitySummary,
@@ -60,6 +64,7 @@ import type { BookingFormAdminRow, BookingFormEventRow } from "@/lib/booking-for
 import { cn } from "@/lib/utils"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 import { adminDealPath } from "@/lib/admin/deal-link"
+import { isModifiedClick, openInNewTab, pageSearchProps } from "@/lib/browser/laptop-qol"
 import { adminAccountPath, adminContactPath } from "@/lib/crm/profile-links"
 import Link from "next/link"
 import { BookingFormPanel } from "./booking-form-panel"
@@ -299,13 +304,16 @@ export function DealsClient({
     sortDir: "desc" as "asc" | "desc",
   })
   const { view, query, pipelineFilter, sourceFilter, eventFilter, sortKey, sortDir } = listState
-  const [selectedId, setSelectedId] = useState<string | null>(
-    initialSelectedId && deals.some((deal) => deal.id === initialSelectedId)
-      ? initialSelectedId
-      : initialSelectedId
-        ? initialSelectedId
-        : (deals[0]?.id ?? null),
-  )
+  const {
+    isDesktop,
+    selectedId,
+    selectRow,
+    closePreview,
+    showPreview,
+  } = useAdminListSelection({
+    initialId: initialSelectedId ?? null,
+    firstId: deals[0]?.id ?? null,
+  })
   const previewRef = useRef<HTMLElement>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [accountId, setAccountId] = useState("")
@@ -343,7 +351,7 @@ export function DealsClient({
   const [editNotes, setEditNotes] = useState("")
   const [editLines, setEditLines] = useState<EditLineState[]>([])
 
-  const filtered = useMemo(() => {
+  const scoped = useMemo(() => {
     const q = query.trim().toLowerCase()
     return deals.filter((deal) => {
       if (view === "mine" && deal.owner_profile_id !== currentProfileId) return false
@@ -353,7 +361,6 @@ export function DealsClient({
       ) {
         return false
       }
-      if (pipelineFilter && pipelineStageFor(deal.stage).id !== pipelineFilter) return false
       if (sourceFilter && deal.source !== sourceFilter) return false
       if (eventFilter.length > 0) {
         const selected = new Set(eventFilter)
@@ -371,7 +378,12 @@ export function DealsClient({
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q))
     })
-  }, [currentProfileId, deals, eventFilter, pipelineFilter, query, sourceFilter, view])
+  }, [currentProfileId, deals, eventFilter, query, sourceFilter, view])
+
+  const filtered = useMemo(() => {
+    if (!pipelineFilter) return scoped
+    return scoped.filter((deal) => pipelineStageFor(deal.stage).id === pipelineFilter)
+  }, [pipelineFilter, scoped])
 
   const sorted = useMemo(() => {
     const rows = [...filtered]
@@ -400,13 +412,6 @@ export function DealsClient({
   }
 
   const selected = selectedId ? deals.find((deal) => deal.id === selectedId) ?? null : null
-
-  useEffect(() => {
-    if (!initialSelectedId) return
-    if (deals.some((deal) => deal.id === initialSelectedId)) {
-      setSelectedId(initialSelectedId)
-    }
-  }, [deals, initialSelectedId])
 
   useEffect(() => {
     if (!initialSelectedId) return
@@ -445,7 +450,7 @@ export function DealsClient({
     )
   useEffect(() => {
     if (!selected) return
-    setWorkflowStage(selected.stage)
+    setWorkflowStage(canonicalDealStage(selected.stage))
     setWorkflowOwner(selected.owner_profile_id ?? "")
     setWorkflowAction(selected.next_action ?? "")
     setWorkflowDueAt(selected.next_action_due_at?.slice(0, 16) ?? "")
@@ -495,7 +500,7 @@ export function DealsClient({
     return [...byId.values()]
   }, [accountOptions, createdAccounts])
   const selectedAccount = clientAccounts.find((account) => account.id === accountId) ?? null
-  const editAccount = accountOptions.find((account) => account.id === editAccountId) ?? null
+  const editAccount = clientAccounts.find((account) => account.id === editAccountId) ?? null
   const addingNewContact =
     newAccountMode || newContactMode || Boolean(selectedAccount && selectedAccount.contacts.length === 0)
   const hasNewContactDetails = Boolean(newContactName.trim() && newContactEmail.trim())
@@ -841,7 +846,7 @@ export function DealsClient({
         return
       }
       toast.success(result.message)
-      setSelectedId(null)
+      closePreview()
       router.refresh()
     })
   }
@@ -920,6 +925,7 @@ export function DealsClient({
           <div className="relative w-full min-w-0 sm:ml-auto sm:min-w-[260px] sm:w-auto sm:flex-1 sm:max-w-sm">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
+              {...pageSearchProps}
               value={query}
               onChange={(e) => setListState((current) => ({ ...current, query: e.target.value }))}
               placeholder="Search deals, clients, events..."
@@ -930,7 +936,7 @@ export function DealsClient({
 
         <div className="grid grid-cols-2 gap-2 border-b border-[#eceef1] p-3 md:grid-cols-3 xl:grid-cols-6">
           {PIPELINE_COLUMNS.map((column) => {
-            const columnDeals = filtered.filter((deal) => column.stages.includes(deal.stage))
+            const columnDeals = scoped.filter((deal) => column.stages.includes(deal.stage))
             const value = columnDeals.reduce((sum, deal) => sum + deal.total_amount, 0)
             return (
               <button
@@ -960,7 +966,7 @@ export function DealsClient({
           "grid min-h-[540px] items-start",
           selected && "xl:grid-cols-[minmax(0,1fr)_340px]",
         )}>
-          <div className={cn("hidden min-w-0 overflow-x-auto no-scrollbar md:block", selected && "border-r border-[#eceef1]")}>
+          <div className={cn("hidden min-w-0 overflow-x-auto overscroll-x-contain md:block", selected && "border-r border-[#eceef1]")}>
             <div className="px-4 py-2.5 text-[8px] text-slate-500">
               Showing {filtered.length} of {deals.length} deals
             </div>
@@ -987,7 +993,14 @@ export function DealsClient({
                     <tr
                       id={`deal-${deal.id}`}
                       key={deal.id}
-                      onClick={() => setSelectedId(deal.id)}
+                      onClick={(event) => {
+                        if ((event.target as HTMLElement).closest("a,button,input,select,textarea,label")) return
+                        if (isModifiedClick(event)) {
+                          openInNewTab(adminDealPath(deal.id))
+                          return
+                        }
+                        selectRow(deal.id)
+                      }}
                       className={cn(
                         "cursor-pointer hover:bg-slate-50",
                         selected?.id === deal.id && "bg-red-50/60 outline outline-1 outline-primary/30",
@@ -1053,7 +1066,7 @@ export function DealsClient({
                 <button
                   type="button"
                   key={deal.id}
-                  onClick={() => setSelectedId(deal.id)}
+                  onClick={() => selectRow(deal.id)}
                   className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left"
                 >
                   <div className="min-w-0">
@@ -1074,10 +1087,11 @@ export function DealsClient({
             ) : null}
           </AdminMobileList>
 
-          {selected ? (
-            <aside
-              ref={previewRef}
-              className="min-w-0 overflow-x-hidden bg-white max-xl:fixed max-xl:inset-x-0 max-xl:bottom-0 max-xl:top-14 max-xl:z-40 max-xl:overflow-y-auto xl:sticky xl:top-16 xl:z-20 xl:max-h-[calc(100vh-4rem)] xl:overflow-y-auto"
+          {selected && showPreview ? (
+            <AdminListPreview
+              isDesktop={isDesktop}
+              onClose={closePreview}
+              previewRef={previewRef}
             >
               <div className="space-y-4 p-5">
                 <div className="flex min-w-0 flex-col gap-3">
@@ -1101,7 +1115,7 @@ export function DealsClient({
                     </div>
                     <button
                       type="button"
-                      onClick={() => setSelectedId(null)}
+                      onClick={closePreview}
                       className="shrink-0 p-0.5 text-slate-400 hover:text-slate-700"
                       aria-label="Close deal preview"
                     >
@@ -1344,14 +1358,13 @@ export function DealsClient({
                   canManageFinance={currentCanManageFinance}
                 />
               </div>
-            </aside>
+            </AdminListPreview>
           ) : null}
         </div>
       </AdminPanel>
 
       {showEdit && selected ? (
-        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/40 p-4" onClick={() => setShowEdit(false)}>
-          <div className="max-h-[92dvh] w-full max-w-5xl overflow-y-auto rounded-xl bg-white p-4 sm:p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <AdminModalScrim onClose={() => setShowEdit(false)} panelClassName="overflow-y-auto p-4 sm:p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold">Edit {selected.reference}</h2>
@@ -1372,15 +1385,21 @@ export function DealsClient({
             <div className="mt-5 grid gap-4 rounded-lg border p-4 md:grid-cols-2">
               <label className="text-sm">
                 <span className="mb-1 block font-medium">Account / company</span>
-                <SearchableSelect
-                  value={editAccountId}
-                  onChange={(next) => {
-                    setEditAccountId(next)
-                    setEditContactId("")
+                <CrmPartySelect
+                  accountId={editAccountId}
+                  localAccounts={clientAccounts}
+                  onSelect={(account, nextContactId) => {
+                    if (!account.id) {
+                      setEditAccountId("")
+                      setEditContactId("")
+                      return
+                    }
+                    rememberCreatedClient(account)
+                    setEditAccountId(account.id)
+                    setEditContactId(nextContactId ?? "")
                   }}
-                  options={accountOptions.map((account) => ({ value: account.id, label: account.name }))}
-                  placeholder="Search account…"
-                  emptyLabel="No accounts match"
+                  placeholder="Search accounts and contacts…"
+                  emptyLabel="No accounts or contacts match"
                   className="h-11 w-full rounded-md border bg-white px-3 text-sm outline-none focus:border-primary/50"
                 />
               </label>
@@ -1492,16 +1511,11 @@ export function DealsClient({
               <button type="button" onClick={() => setShowEdit(false)} className="h-10 rounded-md border px-4 text-[10px] font-semibold">Cancel</button>
               <button type="button" disabled={pending || selected.reserved_qty > 0} onClick={saveDealEditor} className="h-10 rounded-md bg-primary px-5 text-[10px] font-semibold text-white disabled:opacity-50">Save deal</button>
             </div>
-          </div>
-        </div>
+        </AdminModalScrim>
       ) : null}
 
       {showCreate ? (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" onClick={resetCreateForm}>
-          <div
-            className="flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <AdminModalScrim onClose={resetCreateForm} zClassName="z-[80]" panelClassName="max-w-4xl overflow-hidden">
             <div className="flex shrink-0 items-start justify-between px-4 pt-4 sm:px-6 sm:pt-6">
               <div>
                 <h2 className="text-lg font-semibold">Create new deal</h2>
@@ -1635,19 +1649,25 @@ export function DealsClient({
                   <div className="mt-4 space-y-4">
                     <label className="block text-sm">
                       <span className="mb-1 block font-medium">Account / company</span>
-                      <SearchableSelect
-                        value={accountId}
-                        onChange={(next) => {
-                          setAccountId(next)
-                          setContactId("")
+                      <CrmPartySelect
+                        accountId={accountId}
+                        localAccounts={clientAccounts}
+                        onSelect={(account, nextContactId) => {
+                          if (!account.id) {
+                            setAccountId("")
+                            setContactId("")
+                            return
+                          }
+                          rememberCreatedClient(account)
+                          setAccountId(account.id)
+                          setContactId(nextContactId ?? "")
                           setNewContactMode(false)
                           setNewContactName("")
                           setNewContactEmail("")
                           setNewContactPhone("")
                         }}
-                        options={clientAccounts.map((account) => ({ value: account.id, label: account.name }))}
-                        placeholder="Search account…"
-                        emptyLabel="No accounts match"
+                        placeholder="Search accounts and contacts…"
+                        emptyLabel="No accounts or contacts match"
                         className="h-11 w-full rounded-md border bg-white px-3 text-sm outline-none focus:border-primary/50"
                       />
                     </label>
@@ -1800,8 +1820,7 @@ export function DealsClient({
                 {pending ? "Creating…" : "Create deal"}
               </button>
             </div>
-          </div>
-        </div>
+        </AdminModalScrim>
       ) : null}
     </div>
   )

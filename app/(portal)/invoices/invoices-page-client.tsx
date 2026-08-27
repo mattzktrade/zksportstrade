@@ -11,6 +11,7 @@ import {
 import { Search, Filter, CheckCircle2, Clock, FileText } from "lucide-react"
 import { InvoicePdfDownloadLink } from "@/components/invoice-pdf-download-link"
 import { cn, formatMoney } from "@/lib/utils"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
 
 const statusConfig: Record<
   InvoiceWorkflowStatus,
@@ -127,6 +128,7 @@ export function InvoicesPageClient({
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
             type="text"
+            {...pageSearchProps}
             placeholder="Search invoices..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -155,7 +157,7 @@ export function InvoicesPageClient({
       </div>
 
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overscroll-x-contain">
           <table className="w-full">
             <thead>
               <tr className="bg-muted/30 border-b border-border">

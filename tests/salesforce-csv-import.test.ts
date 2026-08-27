@@ -71,6 +71,7 @@ test("requires stable opportunity and account identifiers", () => {
 test("maps common Salesforce stages into simplified native stages", () => {
   assert.equal(nativeStageForSalesforce("Qualification", false, false), "draft")
   assert.equal(nativeStageForSalesforce("Proposal / Price Quote", false, false), "proposal")
+  assert.equal(nativeStageForSalesforce("Booking Form Sent", false, false), "awaiting_client_signature")
   assert.equal(nativeStageForSalesforce("Closed Lost", false, true), "closed_lost")
   assert.equal(nativeStageForSalesforce("Closed Won", true, true), "paid_confirmed")
 })

@@ -34,11 +34,15 @@ import {
   adminPackageSellable,
   adminPackageSoldQuantity,
 } from "@/lib/inventory/effective-availability"
+import { CrmPartySelect } from "@/components/admin/crm-party-select"
 import type { CrmAccountOption } from "@/lib/crm/deal-types"
+import { mergeCrmAccountOptions } from "@/lib/crm/party-search"
 import { cn } from "@/lib/utils"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
+import { AdminListPreview } from "@/components/admin/admin-list-preview"
 import { EventFilter, uniqueEventFilterOptions } from "@/components/admin/event-filter"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import { useAdminListSelection } from "@/lib/admin/use-admin-list-selection"
 import {
   createDealBasketLine,
   DealLineBasket,
@@ -51,6 +55,7 @@ import { CatalogImage } from "@/components/catalog-image"
 import { PackageGallery } from "@/components/package-gallery"
 import { sanitizeHttpsUrl, sanitizeHttpsUrlList } from "@/lib/auth/safe-url"
 import { adminPackagePath } from "@/lib/admin/package-link"
+import { isModifiedClick, openInNewTab, pageSearchProps } from "@/lib/browser/laptop-qol"
 
 type Mode = "sales" | "manage"
 
@@ -216,9 +221,15 @@ export function InventoryWorkspace({
     sortKey,
     sortDescending,
   } = listState
-  const [selectedId, setSelectedId] = useState<string | null>(
-    initialRows.find((row) => !row.shell_parent_package_id && isCurrentOrFutureEvent(row))?.id ?? null,
-  )
+  const firstPreviewId =
+    initialRows.find((row) => !row.shell_parent_package_id && isCurrentOrFutureEvent(row))?.id ?? null
+  const {
+    isDesktop,
+    selectedId,
+    selectRow,
+    closePreview,
+    showPreview,
+  } = useAdminListSelection({ firstId: firstPreviewId })
   const [galleryIndex, setGalleryIndex] = useState(0)
   const [isHidden, setIsHidden] = useState(false)
   const [sellOnPortal, setSellOnPortal] = useState(true)
@@ -226,8 +237,8 @@ export function InventoryWorkspace({
   const [websitePrice, setWebsitePrice] = useState("")
   const [dealOpen, setDealOpen] = useState(false)
   const [dealMode, setDealMode] = useState<"deal" | "hold">("deal")
-  const [dealAccountSearch, setDealAccountSearch] = useState("")
   const [dealAccountId, setDealAccountId] = useState("")
+  const [extraDealAccounts, setExtraDealAccounts] = useState<CrmAccountOption[]>([])
   const [dealCreatingCompany, setDealCreatingCompany] = useState(false)
   const [dealCompanyName, setDealCompanyName] = useState("")
   const [dealContactId, setDealContactId] = useState("")
@@ -298,19 +309,11 @@ export function InventoryWorkspace({
         .reverse() as string[],
     [eventScopeRows],
   )
-  const selectedDealAccount =
-    accountOptions.find((account) => account.id === dealAccountId) ?? null
-  const dealAccountResults = useMemo(() => {
-    const query = dealAccountSearch.trim().toLowerCase()
-    if (!query || dealAccountId) return []
-    return accountOptions
-      .filter((account) =>
-        [account.name, ...account.contacts.flatMap((contact) => [contact.full_name, contact.email, contact.phone])]
-          .filter(Boolean)
-          .some((value) => String(value).toLowerCase().includes(query)),
-      )
-      .slice(0, 8)
-  }, [accountOptions, dealAccountId, dealAccountSearch])
+  const dealAccounts = useMemo(
+    () => mergeCrmAccountOptions([...(accountOptions ?? []), ...extraDealAccounts]),
+    [accountOptions, extraDealAccounts],
+  )
+  const selectedDealAccount = dealAccounts.find((account) => account.id === dealAccountId) ?? null
   const rows = useMemo(() => {
     const query = search.trim().toLowerCase()
     const filtered = catalogRows.filter((row) => {
@@ -519,8 +522,8 @@ export function InventoryWorkspace({
       toast.success(result.message)
       setDealOpen(false)
       setDealMode("deal")
-      setDealAccountSearch("")
       setDealAccountId("")
+      setExtraDealAccounts([])
       setDealCreatingCompany(false)
       setDealCompanyName("")
       setDealContactId("")
@@ -543,19 +546,24 @@ export function InventoryWorkspace({
     setDealOpen(true)
   }
 
-  function chooseDealAccount(account: CrmAccountOption) {
+  function chooseDealAccount(account: CrmAccountOption, contactId?: string) {
+    setExtraDealAccounts((current) => mergeCrmAccountOptions([...current, account]))
     setDealAccountId(account.id)
     setDealCreatingCompany(false)
-    setDealAccountSearch("")
     setDealCompanyName(account.name)
-    if (account.contacts.length === 1) {
-      chooseDealContact(account.contacts[0])
-    } else {
-      setDealContactId("")
-      setDealContactName("")
-      setDealContactEmail("")
-      setDealContactPhone("")
+    const chosen = contactId
+      ? account.contacts.find((contact) => contact.id === contactId)
+      : account.contacts.length === 1
+        ? account.contacts[0]
+        : null
+    if (chosen) {
+      chooseDealContact(chosen)
+      return
     }
+    setDealContactId("")
+    setDealContactName("")
+    setDealContactEmail("")
+    setDealContactPhone("")
   }
 
   function chooseDealContact(contact: CrmAccountOption["contacts"][number]) {
@@ -565,16 +573,15 @@ export function InventoryWorkspace({
     setDealContactPhone(contact.phone ?? "")
   }
 
-  function startNewDealCompany() {
-    const name = dealAccountSearch.trim()
-    if (!name) {
+  function startNewDealCompany(name: string) {
+    const trimmed = name.trim()
+    if (!trimmed) {
       toast.error("Enter the new company name.")
       return
     }
     setDealAccountId("")
     setDealCreatingCompany(true)
-    setDealCompanyName(name)
-    setDealAccountSearch("")
+    setDealCompanyName(trimmed)
     setDealContactId("")
     setDealContactName("")
     setDealContactEmail("")
@@ -595,7 +602,7 @@ export function InventoryWorkspace({
         return
       }
       toast.success(result.message)
-      setSelectedId(null)
+      closePreview()
       onDataChanged?.()
       router.refresh()
     })
@@ -645,6 +652,7 @@ export function InventoryWorkspace({
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               type="search"
+              {...pageSearchProps}
               value={search}
               onChange={(event) => setListState((current) => ({ ...current, search: event.target.value }))}
               placeholder="Search event, product, circuit or package..."
@@ -776,8 +784,13 @@ export function InventoryWorkspace({
                   return (
                     <tr
                       key={row.id}
-                      onClick={() => {
-                        setSelectedId(row.id)
+                      onClick={(event) => {
+                        if ((event.target as HTMLElement).closest("a,button,input,select,textarea,label")) return
+                        if (isModifiedClick(event)) {
+                          openInNewTab(adminPackagePath(row.id))
+                          return
+                        }
+                        selectRow(row.id)
                       }}
                       className={cn("cursor-pointer hover:bg-slate-50", selectedRow && "bg-red-50/60")}
                     >
@@ -860,7 +873,7 @@ export function InventoryWorkspace({
                   <button
                     type="button"
                     key={row.id}
-                    onClick={() => setSelectedId(row.id)}
+                    onClick={() => selectRow(row.id)}
                     className={cn(
                       "flex w-full items-start justify-between gap-3 px-4 py-3 text-left",
                       selected?.id === row.id && "bg-red-50/60",
@@ -886,15 +899,15 @@ export function InventoryWorkspace({
             </AdminMobileList>
           </div>
 
-          {selected ? (
-            <aside className="bg-white p-4 sm:p-5 max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:top-14 max-md:z-40 max-md:overflow-y-auto">
+          {selected && showPreview ? (
+            <AdminListPreview isDesktop={isDesktop} onClose={closePreview} className="p-4 sm:p-5">
               <div className="space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className="text-[12px] font-semibold text-[#292b30]">{selected.name} — {selected.race_name}</h2>
                     <p className="mt-0.5 text-[9px] text-[#8b8f97]">{selected.product_code || selected.id}</p>
                   </div>
-                  <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-xl text-slate-400 md:h-auto md:w-auto md:text-base" onClick={() => setSelectedId(null)}>×</button>
+                  <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-xl text-slate-400 md:h-auto md:w-auto md:text-base" onClick={closePreview}>×</button>
                 </div>
                 <div className="space-y-2">
                   <PackageGallery
@@ -902,7 +915,7 @@ export function InventoryWorkspace({
                     alt={`${selected.name} at ${selected.race_name}`}
                     selectedIndex={Math.min(galleryIndex, Math.max(0, selectedImages.length - 1))}
                     onSelectIndex={setGalleryIndex}
-                    warmCache
+                    warmCache={isDesktop}
                     className="aspect-[16/10]"
                   />
                   {selectedImages.length > 1 ? (
@@ -1114,27 +1127,23 @@ export function InventoryWorkspace({
                           {dealMode === "hold" ? "Place a 7-day stock hold" : "Create offline deal"}
                         </h3>
                         {!selectedDealAccount && !dealCreatingCompany ? (
-                          <div className="relative">
-                            <input
-                              value={dealAccountSearch}
-                              onChange={(event) => setDealAccountSearch(event.target.value)}
-                              placeholder="Search CRM accounts, contacts or emails…"
-                              className="h-9 w-full rounded-md border bg-white px-2 text-[9px]"
-                            />
-                            {dealAccountSearch.trim() ? (
-                              <div className="absolute z-20 mt-1 max-h-52 w-full overflow-y-auto rounded-md border bg-white p-1 shadow-lg">
-                                {dealAccountResults.map((account) => (
-                                  <button key={account.id} type="button" onClick={() => chooseDealAccount(account)} className="block w-full rounded px-2 py-2 text-left hover:bg-slate-50">
-                                    <span className="block text-[9px] font-medium">{account.name}</span>
-                                    <span className="text-[8px] text-slate-400">{account.contacts.length} contact{account.contacts.length === 1 ? "" : "s"}</span>
-                                  </button>
-                                ))}
-                                <button type="button" onClick={startNewDealCompany} className="block w-full rounded border-t px-2 py-2 text-left text-[9px] font-medium text-primary hover:bg-red-50">
-                                  + Create “{dealAccountSearch.trim()}” as a new company
-                                </button>
-                              </div>
-                            ) : null}
-                          </div>
+                          <CrmPartySelect
+                            accountId={dealAccountId}
+                            localAccounts={dealAccounts}
+                            onSelect={(account, contactId) => {
+                              if (!account.id) {
+                                setDealAccountId("")
+                                setDealContactId("")
+                                return
+                              }
+                              chooseDealAccount(account, contactId)
+                            }}
+                            placeholder="Search accounts and contacts…"
+                            emptyLabel="No accounts or contacts match"
+                            createLabel={(name) => `+ Create “${name}” as a new company`}
+                            onCreate={startNewDealCompany}
+                            className="h-9 w-full rounded-md border bg-white px-2 text-[9px]"
+                          />
                         ) : (
                           <>
                             <div className="flex items-center justify-between gap-2">
@@ -1243,7 +1252,7 @@ export function InventoryWorkspace({
                   </>
                 )}
               </div>
-            </aside>
+            </AdminListPreview>
           ) : null}
         </div>
       </AdminPanel>

@@ -4,7 +4,6 @@ export const HAPPY_PATH_STAGES: readonly DealStage[] = [
   "draft",
   "sourcing",
   "proposal",
-  "booking_form_sent",
   "awaiting_client_signature",
   "awaiting_zk_signature",
   "signed",

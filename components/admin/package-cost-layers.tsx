@@ -758,7 +758,7 @@ export function PackageCostLayers({
         ) : (
           <p className="text-[10px] text-muted-foreground">
             Sold is portal, website, and signed offline deals (including unpaid). Left follows
-            those held units so it matches Sellable. Proposal and unsigned deals do not reduce
+            those held units so it matches Sellable. Price sent and unsigned deals do not reduce
             Sellable — use a hold if the client asks you to keep stock.
           </p>
         )}

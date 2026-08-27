@@ -1,5 +1,5 @@
 import { Resend } from "resend"
-import { getResendApiKey, getResendFromAddress } from "@/lib/email/config"
+import { getInvoiceFinanceCc, getResendApiKey, getResendFromAddress } from "@/lib/email/config"
 import { xeroFetchInvoicePdf } from "@/lib/integrations/xero/client"
 
 function escapeHtml(value: string): string {
@@ -41,10 +41,12 @@ export async function sendNativeInvoicePaymentReminder(input: {
     style: "currency",
     currency: input.currency,
   }).format(input.amount)
+  const cc = getInvoiceFinanceCc(input.recipientEmail)
   const resend = new Resend(apiKey)
   const { error } = await resend.emails.send({
     from,
     to: [input.recipientEmail],
+    ...(cc.length > 0 ? { cc } : {}),
     subject: `Payment reminder: invoice ${invoiceLabel} is overdue`,
     html: [
       `<p>Hi ${escapeHtml(input.recipientName)},</p>`,

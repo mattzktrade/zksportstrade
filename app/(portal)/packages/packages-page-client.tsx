@@ -2,18 +2,32 @@
 
 import { useState, useMemo } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { CatalogImage } from "@/components/catalog-image"
 import type { Race } from "@/lib/types/catalog"
 import type { PortalCatalog, PortalCatalogSeasonYear } from "@/lib/catalog/portal-catalog"
 import { getSeasonSlice } from "@/lib/catalog/portal-catalog"
 import { CatalogSeasonTabs } from "@/components/catalog/catalog-season-tabs"
 import { Search, MapPin, Calendar, ArrowRight } from "lucide-react"
+import { isModifiedClick, openInNewTab, pageSearchProps } from "@/lib/browser/laptop-qol"
 
 type RaceRow = Race & { packageCount: number; lowestPrice: number }
 
 function RaceTableRow({ race }: { race: RaceRow }) {
+  const router = useRouter()
+  const href = `/packages/race/${race.id}`
   return (
-    <tr className="hover:bg-muted/30 transition-colors">
+    <tr
+      className="hover:bg-muted/30 transition-colors cursor-pointer"
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest("a,button")) return
+        if (isModifiedClick(event)) {
+          openInNewTab(href)
+          return
+        }
+        router.push(href)
+      }}
+    >
       <td className="px-4 sm:px-6 py-3 sm:py-4">
         <div className="flex items-center gap-2 sm:gap-3">
           <div className="relative w-10 h-10 sm:w-12 sm:h-12 rounded-lg overflow-hidden flex-shrink-0">
@@ -153,6 +167,7 @@ export function PackagesPageClient({ catalog }: { catalog: PortalCatalog }) {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
+              {...pageSearchProps}
               placeholder={`Search ${seasonYear} races...`}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -179,7 +194,7 @@ export function PackagesPageClient({ catalog }: { catalog: PortalCatalog }) {
       ) : (
         <>
           <div className="hidden lg:block bg-card rounded-2xl border border-border overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto overscroll-x-contain">
               <table className="w-full">
                 <thead>
                   <tr className="bg-muted/30 border-b border-border">

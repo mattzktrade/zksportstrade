@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Mail, MessageCircle, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -10,6 +10,15 @@ const SUPPORT_EMAIL = "matt@zk-sports.com"
 
 export function ContactWidget() {
   const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [open])
 
   return (
     <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-3 sm:bottom-6 sm:right-6">

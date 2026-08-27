@@ -69,6 +69,26 @@ const incrementalDealLineMigration = readFileSync(
   "supabase/migrations/20260826160000_incremental_signed_deal_line_allocation.sql",
   "utf8",
 ).toLowerCase()
+const cancelFulfilmentLockMigration = readFileSync(
+  "supabase/migrations/20260827120000_cancel_order_releases_fulfilment_locked_stock.sql",
+  "utf8",
+).toLowerCase()
+const cancelPrepareHelper = readFileSync(
+  "lib/inventory/prepare-order-cancel-release.ts",
+  "utf8",
+)
+const cancelRestatementDetachMigration = readFileSync(
+  "supabase/migrations/20260827130000_cancel_order_detaches_restatement_cogs_fk.sql",
+  "utf8",
+).toLowerCase()
+const cancelOrderStockHelper = readFileSync(
+  "lib/inventory/cancel-order-stock.ts",
+  "utf8",
+)
+const dealFinanceActions = readFileSync(
+  "app/(admin)/admin/deals/deal-finance-actions.ts",
+  "utf8",
+)
 const allocationEngine = readFileSync("lib/inventory/allocation-engine.ts", "utf8")
 
 test("supplier fulfilment is projected only from fully allocated purchased stock", () => {
@@ -222,6 +242,69 @@ test("automatic allocation reshuffles earlier deals to keep one supplier", () =>
     allocationEngine,
     /Later parties in the input \(newer deals\) win ties/,
   )
+})
+
+test("unpaid order cancellation unlocks assigned stock but not tickets received", () => {
+  assert.match(
+    cancelFulfilmentLockMigration,
+    /create or replace function public\.inventory_prepare_order_cancel_release/,
+  )
+  assert.match(
+    cancelFulfilmentLockMigration,
+    /tickets_or_delivery_block_cancellation/,
+  )
+  assert.match(
+    cancelFulfilmentLockMigration,
+    /lock_state = 'mutable'/,
+  )
+  assert.match(
+    cancelFulfilmentLockMigration,
+    /perform public\.inventory_prepare_order_cancel_release/,
+  )
+  assert.match(
+    cancelFulfilmentLockMigration,
+    /create or replace function public\.admin_cancel_native_deal_order/,
+  )
+  assert.match(
+    cancelFulfilmentLockMigration,
+    /create or replace function public\.admin_cancel_order/,
+  )
+  assert.match(cancelPrepareHelper, /tickets_or_delivery_block_cancellation/)
+  assert.match(cancelPrepareHelper, /lock_state: "mutable"/)
+})
+
+test("order cancel may detach restatement events from deleted COGS without rewriting costs", () => {
+  assert.match(
+    cancelRestatementDetachMigration,
+    /create or replace function public\.prevent_inventory_component_audit_mutation/,
+  )
+  assert.match(
+    cancelRestatementDetachMigration,
+    /new\.order_cost_consumption_id is null/,
+  )
+  assert.match(
+    cancelRestatementDetachMigration,
+    /new\.old_unit_cost is not distinct from old\.old_unit_cost/,
+  )
+  assert.match(
+    cancelRestatementDetachMigration,
+    /raise exception 'inventory_component_audit_rows_are_append_only'/,
+  )
+  assert.match(cancelOrderStockHelper, /releaseOrderStockSkippingRestatedCogs/)
+  assert.match(cancelOrderStockHelper, /order_cost_consumption_id: null/)
+  assert.match(cancelOrderStockHelper, /recomputeDayRemainingFromCommittedHold/)
+  assert.match(cancelOrderStockHelper, /inventory_recompute_layer_remaining/)
+  assert.doesNotMatch(cancelOrderStockHelper, /inventory_release_allocations/)
+  assert.match(
+    cancelRestatementDetachMigration,
+    /update public\.inventory_cost_restatement_events/,
+  )
+  assert.match(
+    cancelRestatementDetachMigration,
+    /create or replace function public\.inventory_release_allocations/,
+  )
+  assert.match(dealFinanceActions, /orderCancelMustSkipCogsDelete/)
+  assert.match(dealFinanceActions, /releaseOrderStockSkippingRestatedCogs/)
 })
 
 test("signed deal line edits allocate the changed line without a package reshuffle", () => {

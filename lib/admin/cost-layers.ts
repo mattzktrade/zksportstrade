@@ -1,4 +1,5 @@
 import { unstable_noStore as noStore } from "next/cache"
+import type { SupabaseClient } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
 
 export type CostLayerRow = {
@@ -110,11 +111,12 @@ const IN_FILTER_BATCH = 80
 /** Lightweight totals for catalog list / CSV without loading full layer rows. */
 export async function getCostLayerQuantityTotalsByPackage(
   packageIds: readonly string[],
+  supabaseClient?: SupabaseClient,
 ): Promise<Map<string, { quantity_purchased: number; quantity_remaining: number }>> {
   const out = new Map<string, { quantity_purchased: number; quantity_remaining: number }>()
   const ids = [...new Set(packageIds.map((id) => id.trim()).filter(Boolean))]
   if (ids.length === 0) return out
-  const supabase = await createClient()
+  const supabase = supabaseClient ?? (await createClient())
   const batches: string[][] = []
   for (let i = 0; i < ids.length; i += IN_FILTER_BATCH) {
     batches.push(ids.slice(i, i + IN_FILTER_BATCH))

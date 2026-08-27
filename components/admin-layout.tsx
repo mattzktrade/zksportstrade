@@ -15,7 +15,6 @@ import {
   ArrowLeft,
   ShoppingCart,
   ShieldCheck,
-  Plug,
   FileText,
   PackageSearch,
   ChevronDown,
@@ -24,7 +23,6 @@ import {
   Megaphone,
   Wrench,
   BriefcaseBusiness,
-  Search,
   Building2,
   AlertTriangle,
   Warehouse,
@@ -36,6 +34,8 @@ import { cn } from "@/lib/utils"
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { LOGO_WHITE } from "@/lib/branding"
+import { AdminJumpSearch, type AdminJumpItem } from "@/components/admin/admin-jump-search"
+import { escapeCloseProps } from "@/lib/browser/laptop-qol"
 
 type NavItem = {
   name: string
@@ -86,6 +86,30 @@ const navigation: NavItem[] = [
   { name: "Help", href: "/admin/help", icon: CircleHelp },
   { name: "Settings", href: "/admin/settings", icon: Settings },
 ]
+
+const JUMP_KEYWORDS: Record<string, string> = {
+  "/admin/leads": "leads clients companies contacts people",
+  "/admin/deals": "pipeline crm sales",
+  "/admin/catalog/events": "races calendar",
+  "/admin/orders": "bookings invoices portal",
+  "/admin/finance": "invoices payments xero",
+}
+
+const adminJumpDestinations: AdminJumpItem[] = [
+  ...navigation.flatMap((item): AdminJumpItem[] => {
+    if (item.disabled) return []
+    const self: AdminJumpItem[] = item.href ? [{ label: item.name, href: item.href }] : []
+    const children: AdminJumpItem[] = (item.children ?? []).map((child) => ({
+      label: child.name,
+      href: child.href,
+    }))
+    return [...self, ...children]
+  }),
+  { label: "Trade portal", href: "/", keywords: "home packages bookings" },
+  { label: "Orders", href: "/admin/orders", keywords: JUMP_KEYWORDS["/admin/orders"] },
+].map((item) =>
+  JUMP_KEYWORDS[item.href] && !item.keywords ? { ...item, keywords: JUMP_KEYWORDS[item.href] } : item,
+)
 
 function adminPageTitle(pathname: string): string {
   if (pathname === "/admin") return "Dashboard"
@@ -161,12 +185,16 @@ export function AdminLayout({
   return (
     <div className="admin-shell min-h-dvh bg-[#f7f8fa]">
       {sidebarOpen && (
-        <div className="fixed inset-0 bg-zk-black/50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
+        <div
+          className="fixed inset-0 bg-zk-black/50 z-40 lg:hidden"
+          {...escapeCloseProps}
+          onClick={() => setSidebarOpen(false)}
+        />
       )}
 
       <aside
         className={cn(
-          "fixed top-0 left-0 z-50 h-dvh bg-[#070707] text-slate-100 border-r border-white/10 flex flex-col transition-all duration-300 lg:translate-x-0 w-[min(224px,86vw)] lg:w-[224px] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]",
+          "fixed top-0 left-0 z-50 h-dvh overscroll-contain bg-[#070707] text-slate-100 border-r border-white/10 flex flex-col transition-transform duration-300 lg:translate-x-0 w-[min(224px,86vw)] lg:w-[224px] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]",
           sidebarOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
@@ -192,7 +220,7 @@ export function AdminLayout({
           </button>
         </div>
 
-        <nav className="no-scrollbar flex-1 overflow-y-auto p-2.5 space-y-1">
+        <nav className="no-scrollbar flex-1 overflow-y-auto overscroll-contain p-2.5 space-y-1">
           {navigation.map((item) => {
             const isActive = item.href ? itemIsActive(pathname, item.href) : false
             const childActive = item.children?.some((child) => itemIsActive(pathname, child.href)) ?? false
@@ -296,7 +324,7 @@ export function AdminLayout({
         </div>
       </aside>
 
-      <div className="lg:pl-[224px] transition-all duration-300">
+      <div className="lg:pl-[224px]">
         <header className="sticky top-0 z-30 border-b border-[#e9eaee] bg-white pt-[env(safe-area-inset-top)]">
           <div className="flex h-14 items-center justify-between gap-3 px-3 sm:h-16 sm:px-4 lg:px-7">
             <button
@@ -307,18 +335,10 @@ export function AdminLayout({
             >
               <Menu className="h-5 w-5" />
             </button>
-            <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-800 lg:hidden">
+            <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-800 md:hidden">
               {adminPageTitle(pathname)}
             </p>
-            <div className="relative ml-auto hidden w-full max-w-[420px] lg:block">
-              <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-              <input
-                type="search"
-                placeholder="Search orders, leads, clients, events..."
-                className="h-9 w-full rounded-md border border-[#e3e5e9] bg-white pl-9 pr-14 text-[11px] text-slate-700 outline-none focus:border-primary/40"
-              />
-              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-slate-400">⌘ K</span>
-            </div>
+            <AdminJumpSearch destinations={adminJumpDestinations} />
             <div className="flex items-center gap-2 border-l border-slate-200 pl-3">
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-[10px] font-semibold text-white">
                 {profileName.trim().charAt(0).toUpperCase() || "A"}
@@ -330,7 +350,7 @@ export function AdminLayout({
           </div>
         </header>
 
-        <main className="min-h-[calc(100vh-64px)] min-w-0">{children}</main>
+        <main className="min-h-[calc(100dvh-64px)] min-w-0">{children}</main>
       </div>
     </div>
   )

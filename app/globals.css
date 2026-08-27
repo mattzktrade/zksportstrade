@@ -124,28 +124,61 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    overscroll-behavior-x: none;
+    scroll-padding-top: 5rem;
+  }
   body {
     @apply bg-background text-foreground;
   }
+  a,
+  button,
+  [role="button"],
+  [type="button"],
+  [type="submit"] {
+    touch-action: manipulation;
+  }
 }
 
-/* Custom scrollbar for the portal */
-::-webkit-scrollbar {
+/*
+ * Custom scrollbars on Windows/Linux only. Styling ::-webkit-scrollbar on
+ * Chrome/Safari for macOS disables native overlay scrollbars, which is the
+ * trackpad behaviour MacBook users expect.
+ */
+html:not([data-platform="mac"]) ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-::-webkit-scrollbar-track {
+html:not([data-platform="mac"]) ::-webkit-scrollbar-track {
   background: var(--muted);
 }
 
-::-webkit-scrollbar-thumb {
+html:not([data-platform="mac"]) ::-webkit-scrollbar-thumb {
   background: var(--muted-foreground);
   border-radius: 4px;
 }
 
-::-webkit-scrollbar-thumb:hover {
+html:not([data-platform="mac"]) ::-webkit-scrollbar-thumb:hover {
   background: var(--foreground);
+}
+
+/* Default to ⌘K; swap after the platform script marks non-Apple machines. */
+.shortcut-ctrl {
+  display: none;
+}
+html[data-platform="other"] .shortcut-meta {
+  display: none;
+}
+html[data-platform="other"] .shortcut-ctrl {
+  display: inline;
+}
+
+/* Safari adds extra padding inside type=search fields. */
+input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
 }
 
 /*
@@ -228,11 +261,11 @@
   }
 
   .admin-shell {
-    overflow-x: hidden;
+    overflow-x: clip;
   }
 
   .admin-shell main {
-    overflow-x: hidden;
+    overflow-x: clip;
     padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
@@ -241,5 +274,32 @@
   .admin-shell textarea,
   .admin-shell button {
     max-width: 100%;
+  }
+}
+
+/* iOS Safari zooms focused fields under 16px, which shoves the page off-centre.
+   These selectors must beat `.admin-shell .text-[9px]` (0,2,0).
+   Limit to coarse pointers so a MacBook split-window stays at designed sizes. */
+@media (max-width: 1023px) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]),
+  select,
+  textarea,
+  .admin-shell input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]),
+  .admin-shell select,
+  .admin-shell textarea,
+  .admin-shell input.text-\[8px\],
+  .admin-shell input.text-\[9px\],
+  .admin-shell input.text-\[10px\],
+  .admin-shell input.text-\[11px\],
+  .admin-shell input.text-\[12px\],
+  .admin-shell select.text-\[8px\],
+  .admin-shell select.text-\[9px\],
+  .admin-shell select.text-\[10px\],
+  .admin-shell select.text-\[11px\],
+  .admin-shell textarea.text-\[8px\],
+  .admin-shell textarea.text-\[9px\],
+  .admin-shell textarea.text-\[10px\] {
+    font-size: 16px !important;
+    line-height: 1.25 !important;
   }
 }

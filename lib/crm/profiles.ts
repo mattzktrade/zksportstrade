@@ -2,7 +2,7 @@ import { unstable_noStore as noStore } from "next/cache"
 import { parseAccountKinds, type AccountKind } from "@/lib/crm/account-kinds"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { createClient } from "@/lib/supabase/server"
-import type { DealStage } from "@/lib/crm/deal-types"
+import { canonicalDealStage, type DealStage } from "@/lib/crm/deal-types"
 import type { AccountSource, LeadStatus } from "@/lib/crm/lead-types"
 
 function one<T>(value: T | T[] | null | undefined): T | null {
@@ -290,7 +290,7 @@ export async function getCrmEntityProfile(
       reference: raw.reference,
       contactId: raw.primary_contact_id,
       contactName: contact?.full_name ?? null,
-      stage: raw.stage as DealStage,
+      stage: canonicalDealStage(raw.stage),
       totalAmount: Number(raw.total_amount ?? 0),
       currency: raw.currency,
       source: raw.source,

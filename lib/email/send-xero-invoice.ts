@@ -1,8 +1,6 @@
 import { Resend } from "resend"
-import { getResendApiKey, getResendFromAddress, stripSurroundingQuotes } from "@/lib/email/config"
+import { getInvoiceFinanceCc, getResendApiKey, getResendFromAddress } from "@/lib/email/config"
 import { xeroFetchInvoicePdf } from "@/lib/integrations/xero/client"
-
-const DEFAULT_INVOICE_CC = "finance@zk-sports.com"
 
 export type XeroInvoiceEmailPayload = {
   agentEmail: string
@@ -34,24 +32,6 @@ function formatMoney(amount: number, currency: string): string {
   }
 }
 
-function parseInvoiceCc(agentEmail: string): string[] {
-  const raw = process.env.XERO_INVOICE_CC?.trim() || DEFAULT_INVOICE_CC
-  const agentKey = agentEmail.trim().toLowerCase()
-  const seen = new Set<string>()
-  const out: string[] = []
-
-  for (const part of raw.split(/[,;]/g)) {
-    const email = stripSurroundingQuotes(part.trim())
-    if (!email) continue
-    const key = email.toLowerCase()
-    if (key === agentKey || seen.has(key)) continue
-    seen.add(key)
-    out.push(email)
-  }
-
-  return out
-}
-
 function buildHtml(p: XeroInvoiceEmailPayload): string {
   const invLabel = p.xeroInvoiceNumber ? escapeHtml(p.xeroInvoiceNumber) : "attached"
   return [
@@ -77,7 +57,7 @@ export async function sendXeroInvoiceEmail(
     return { ok: false, skipped: "RESEND_API_KEY or ORDER_EMAIL_FROM not configured" }
   }
 
-  const cc = parseInvoiceCc(p.agentEmail)
+  const cc = getInvoiceFinanceCc(p.agentEmail)
   let pdf: ArrayBuffer
   try {
     pdf = await xeroFetchInvoicePdf(p.xeroInvoiceId)

@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { test } from "node:test"
 import {
+  applyEffectiveSellable,
   commitmentSellable,
   emptyPackageSalesBreakdown,
   formatPackageSalesBreakdown,
@@ -9,6 +10,7 @@ import {
   linkedPoolAttributedSold,
   linkedPoolSellableForPackage,
   unsignedPipelinePlaces,
+  type EffectiveSellablePackage,
   type LinkedSellableMember,
   type PackageSalesBreakdown,
 } from "../lib/admin/package-sales-breakdown"
@@ -170,6 +172,12 @@ test("places sold pipeline column shows unsigned open deals", () => {
   assert.match(eventDetail, /unsignedPipelinePlaces/)
 })
 
+test("event remaining uses product-page sellable, not stale qty_available", () => {
+  const eventDetail = readFileSync("lib/admin/event-detail.ts", "utf8")
+  assert.match(eventDetail, /effectiveSellableByPackageId/)
+  assert.doesNotMatch(eventDetail, /available:\s*Number\(inventory\?\.qty_available/)
+})
+
 test("signed contracts hold sellable as sold; unsigned demand does not", () => {
   const stock = 95
   const unsigned = emptyPackageSalesBreakdown("pkg")
@@ -187,4 +195,45 @@ test("signed contracts hold sellable as sold; unsigned demand does not", () => {
   const sfPipeline = emptyPackageSalesBreakdown("pkg")
   sfPipeline.salesforceOpenPipeline = 4
   assert.equal(commitmentSellable({ stock, breakdown: sfPipeline }), 91)
+})
+
+test("stale package_inventory is ignored when purchased stock and sibling sales are known", () => {
+  const three = emptyPackageSalesBreakdown("three")
+  three.salesforceOffline = 10
+  three.total = 10
+  const weekend = emptyPackageSalesBreakdown("two")
+  weekend.salesforceOffline = 100
+  weekend.total = 100
+  const rows: EffectiveSellablePackage[] = [
+    {
+      id: "three",
+      duration: "3_day",
+      inventory_group_id: "singapore-velocity",
+      inventory: { qty_available: 130, qty_held: 0 },
+      layer_units_purchased: 130,
+      sales_breakdown: three,
+    },
+    {
+      id: "two",
+      duration: "2_day",
+      inventory_group_id: "singapore-velocity",
+      inventory: { qty_available: 130, qty_held: 0 },
+      layer_units_purchased: 0,
+      sales_breakdown: weekend,
+    },
+  ]
+  applyEffectiveSellable(rows)
+  assert.equal(rows[0].effective_sellable, 20)
+  assert.equal(rows[1].effective_sellable, 20)
+})
+
+test("linked weekend sales reduce 3-day remaining even without single-day SKUs", () => {
+  const queries = readFileSync("lib/catalog/queries.ts", "utf8")
+  assert.match(queries, /attachStorefrontAvailability/)
+  const reconcile = readFileSync("lib/inventory/linked-group-inventory.ts", "utf8")
+  assert.match(reconcile, /applyEffectiveSellable/)
+  assert.doesNotMatch(
+    reconcile,
+    /if \(!threeDay\?\.id \|\| dayMembers\.length === 0\) return false/,
+  )
 })

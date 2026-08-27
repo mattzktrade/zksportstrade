@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { ChevronDown, Search, MessageCircle, Mail } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
 
 const WHATSAPP_NUMBER = "+44 7426 610346"
 const WHATSAPP_LINK = "https://wa.me/447426610346"
@@ -133,6 +134,7 @@ export default function FAQsPage() {
           <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground" />
           <input
             type="text"
+            {...pageSearchProps}
             placeholder="Search for answers..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}

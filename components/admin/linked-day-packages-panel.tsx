@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation"
 import { useMemo, useState, useTransition } from "react"
 import { toast } from "sonner"
 import { createPackage } from "@/app/(admin)/actions"
+import { useEscapeToClose } from "@/hooks/use-escape-to-close"
 import type { LinkedDayPackageOverview, LinkedDayPackagePreset } from "@/lib/admin/linked-day-package-overview"
 import type { ShellDayDuration } from "@/lib/catalog/shell-single-tickets"
 
@@ -126,6 +127,7 @@ function QuickAddDialog({
   const [sellOnWix, setSellOnWix] = useState(false)
   const [wixMultiplier, setWixMultiplier] = useState("")
   const [wixManualPrice, setWixManualPrice] = useState("")
+  useEscapeToClose(true, onClose)
 
   function submit() {
     if (pending) return
@@ -222,7 +224,7 @@ function QuickAddDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/50 p-4 sm:p-6 overflow-y-auto">
+    <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/50 p-4 sm:p-6 overflow-y-auto" role="dialog" aria-modal="true">
       <div className="mt-8 w-full max-w-lg rounded-xl border border-border bg-card shadow-lg p-5 sm:p-6 space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>

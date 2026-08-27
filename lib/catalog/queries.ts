@@ -17,6 +17,7 @@ import {
   type DbRace,
 } from "@/lib/catalog/map-rows"
 import { attachLargestSameSuiteRemaining } from "@/lib/catalog/same-suite-remaining"
+import { attachStorefrontAvailability } from "@/lib/catalog/storefront-availability"
 
 type HoldAgg = { qty: number; expiresAtMin: string }
 
@@ -113,16 +114,14 @@ async function fetchFullCatalogBase(
       !pkg.shell_parent_package_id,
   )
   const built = buildCatalog(allRaces as DbRace[], visiblePackageRows, (inventory ?? []) as DbInventory[])
-  const packages = await attachLargestSameSuiteRemaining(
-    supabase,
-    built.packages,
-    visiblePackageRows.map((p) => ({
-      id: p.id,
-      inventory_group_id: p.inventory_group_id,
-      duration: p.duration,
-      shell_parent_package_id: p.shell_parent_package_id,
-    })),
-  )
+  const packageMeta = visiblePackageRows.map((p) => ({
+    id: p.id,
+    inventory_group_id: p.inventory_group_id,
+    duration: p.duration,
+    shell_parent_package_id: p.shell_parent_package_id,
+  }))
+  const withSalesRemaining = await attachStorefrontAvailability(supabase, built.packages, packageMeta)
+  const packages = await attachLargestSameSuiteRemaining(supabase, withSalesRemaining, packageMeta)
   return { races: built.races, packages }
 }
 
@@ -189,17 +188,15 @@ export async function getRaceCatalog(
   const inventoryRows = await fetchInventoryForPackages(supabase, packageIds)
   const invByPackage = new Map(inventoryRows.map((i) => [i.package_id, i]))
 
+  const packageMeta = visiblePackageRows.map((p) => ({
+    id: p.id,
+    inventory_group_id: p.inventory_group_id,
+    duration: p.duration,
+    shell_parent_package_id: p.shell_parent_package_id,
+  }))
   let packages = visiblePackageRows.map((p) => mapPackageRow(p, invByPackage.get(p.id)))
-  packages = await attachLargestSameSuiteRemaining(
-    supabase,
-    packages,
-    visiblePackageRows.map((p) => ({
-      id: p.id,
-      inventory_group_id: p.inventory_group_id,
-      duration: p.duration,
-      shell_parent_package_id: p.shell_parent_package_id,
-    })),
-  )
+  packages = await attachStorefrontAvailability(supabase, packages, packageMeta)
+  packages = await attachLargestSameSuiteRemaining(supabase, packages, packageMeta)
   const race = mapRaceRow(raceRow as DbRace, packages)
 
   if (agentProfileId && packages.length > 0) {
@@ -240,14 +237,16 @@ export async function getPackageById(
 
   const { data: inv } = await supabase.from("package_inventory").select(INVENTORY_COLUMNS).eq("package_id", id).maybeSingle()
   let pkg = mapPackageRow(dbPkg, inv as DbInventory | undefined)
-  ;[pkg] = await attachLargestSameSuiteRemaining(supabase, [pkg], [
+  const packageMeta = [
     {
       id: dbPkg.id,
       inventory_group_id: dbPkg.inventory_group_id,
       duration: dbPkg.duration,
       shell_parent_package_id: dbPkg.shell_parent_package_id,
     },
-  ])
+  ]
+  ;[pkg] = await attachStorefrontAvailability(supabase, [pkg], packageMeta)
+  ;[pkg] = await attachLargestSameSuiteRemaining(supabase, [pkg], packageMeta)
 
   if (agentProfileId && typeof pkg.availability === "number") {
     const holdAgg = await fetchAgentHoldAggregates(supabase, agentProfileId, [id])

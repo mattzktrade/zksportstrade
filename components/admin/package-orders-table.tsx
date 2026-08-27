@@ -8,6 +8,7 @@ import { toast } from "sonner"
 import { updateOrderSupplierAllocations } from "@/app/(admin)/actions"
 import { swapDealLineSuppliers } from "@/app/(admin)/admin/deals/deal-edit-actions"
 import { cn } from "@/lib/utils"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
 import type { CostLayerRow } from "@/lib/admin/cost-layers"
 import type { PurchaseOrderRow } from "@/lib/admin/purchase-orders"
 import {
@@ -57,6 +58,23 @@ function dealReferenceLabel(deal: PackageDealSaleRow): string {
     return deal.orderReference.trim()
   }
   return deal.reference
+}
+
+function saleQtyLabel(quantity: number, productName: string | null | undefined): string {
+  const name = productName?.trim()
+  if (!name) return `${quantity}x`
+  return `${quantity}x ${name}`
+}
+
+function dealProductLabel(deal: PackageDealSaleRow): string {
+  const names = [
+    ...new Set(
+      deal.lines
+        .map((line) => line.packageName?.trim())
+        .filter((name): name is string => Boolean(name)),
+    ),
+  ]
+  return saleQtyLabel(deal.quantity, names.join(" · ") || deal.lineSummary)
 }
 
 function orderPaymentLabel(order: AdminOrderListRow, deal: PackageDealSaleRow | null): string {
@@ -717,17 +735,19 @@ export function PackageOrdersTable({
           be fulfilled until paid.
         </div>
       ) : null}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-0 w-full sm:w-64">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="relative w-full min-w-0 sm:w-64">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             type="search"
+            {...pageSearchProps}
             value={saleQuery}
             onChange={(event) => setSaleQuery(event.target.value)}
             placeholder="Search company, contact or reference…"
-            className="h-8 w-full rounded-md border border-border bg-background pl-8 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:border-primary/40"
+            className="h-8 w-full min-w-0 rounded-md border border-border bg-background pl-8 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:border-primary/40"
           />
         </div>
+        <div className="flex flex-wrap gap-2">
         {(
           [
             ["all", "Show all"],
@@ -740,7 +760,7 @@ export function PackageOrdersTable({
             type="button"
             onClick={() => setSaleFilter(id)}
             className={cn(
-              "h-8 rounded-md border px-2.5 text-xs font-medium",
+              "h-8 shrink-0 rounded-md border px-2.5 text-xs font-medium",
               saleFilter === id
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border bg-background text-muted-foreground hover:text-foreground",
@@ -749,6 +769,7 @@ export function PackageOrdersTable({
             {label}
           </button>
         ))}
+        </div>
       </div>
       {deals.some((deal) => dealStageHoldsPurchasedStock(deal.stage)) ? (
         <div className="space-y-2.5 rounded-lg border border-border bg-muted/20 px-3 py-2.5">
@@ -895,13 +916,23 @@ export function PackageOrdersTable({
             const body = (
               <>
                 <div className="min-w-0">
-                  <p className={cn("font-mono text-xs font-semibold", href && "text-primary")}>{o.reference}</p>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">{o.agent?.company_name || o.agent?.full_name || o.agent?.email || "Portal order"}</p>
+                  <p className={cn("font-semibold", href && "text-primary")}>{o.reference}</p>
+                  <p className="mt-0.5 text-[10px] text-slate-600">
+                    {o.agent?.company_name || o.agent?.full_name || o.client_name || "Portal order"}
+                  </p>
+                  <p className="mt-0.5 text-[8px] text-slate-400">
+                    {saleQtyLabel(o.guests, o.packages?.name)}
+                  </p>
                   {incomplete ? (
                     <p className="mt-1 text-[10px] font-semibold text-amber-800">Not complete — do not fulfil</p>
                   ) : null}
                 </div>
-                <p className="shrink-0 text-xs font-semibold">{formatMoney(o.currency, Number(o.total_amount))}</p>
+                <div className="shrink-0 text-right">
+                  <p className="font-semibold">{formatMoney(o.currency, Number(o.total_amount))}</p>
+                  <div className="mt-1">
+                    <StatusPill tone={paymentTone(linkedDeal, o)}>{orderPaymentLabel(o, linkedDeal)}</StatusPill>
+                  </div>
+                </div>
               </>
             )
             if (href) {
@@ -943,15 +974,21 @@ export function PackageOrdersTable({
             >
               <div className="min-w-0">
                 <p className="font-semibold text-primary">{dealReferenceLabel(deal)}</p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                <p className="mt-0.5 text-[10px] text-slate-600">
                   {dealChannelLabel(deal)}
                   {deal.accountName ? ` · ${deal.accountName}` : ""}
                 </p>
+                <p className="mt-0.5 text-[8px] text-slate-400">{dealProductLabel(deal)}</p>
                 {incomplete ? (
                   <p className="mt-1 text-[10px] font-semibold text-amber-800">Not complete — do not fulfil</p>
                 ) : null}
               </div>
-              <StatusPill tone={paymentTone(deal)}>{DEAL_STAGE_LABELS[deal.stage] ?? deal.stage}</StatusPill>
+              <div className="shrink-0 text-right">
+                <p className="font-semibold">{formatMoney(deal.currency, deal.totalAmount)}</p>
+                <div className="mt-1">
+                  <StatusPill tone={paymentTone(deal)}>{DEAL_STAGE_LABELS[deal.stage] ?? deal.stage}</StatusPill>
+                </div>
+              </div>
             </Link>
             )
           })}
