@@ -48,7 +48,7 @@ export function SuppliersClient({ rows }: { rows: SupplierDirectoryRow[] }) {
     selectRow,
     closePreview,
     showPreview,
-  } = useAdminListSelection({ firstId: rows[0]?.id ?? null })
+  } = useAdminListSelection()
   const [showAdd, setShowAdd] = useState(false)
   const [name, setName] = useState("")
   const [code, setCode] = useState("")

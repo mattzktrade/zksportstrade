@@ -312,7 +312,6 @@ export function DealsClient({
     showPreview,
   } = useAdminListSelection({
     initialId: initialSelectedId ?? null,
-    firstId: deals[0]?.id ?? null,
   })
   const previewRef = useRef<HTMLElement>(null)
   const [showCreate, setShowCreate] = useState(false)

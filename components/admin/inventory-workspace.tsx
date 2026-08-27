@@ -221,15 +221,13 @@ export function InventoryWorkspace({
     sortKey,
     sortDescending,
   } = listState
-  const firstPreviewId =
-    initialRows.find((row) => !row.shell_parent_package_id && isCurrentOrFutureEvent(row))?.id ?? null
   const {
     isDesktop,
     selectedId,
     selectRow,
     closePreview,
     showPreview,
-  } = useAdminListSelection({ firstId: firstPreviewId })
+  } = useAdminListSelection()
   const [galleryIndex, setGalleryIndex] = useState(0)
   const [isHidden, setIsHidden] = useState(false)
   const [sellOnPortal, setSellOnPortal] = useState(true)
