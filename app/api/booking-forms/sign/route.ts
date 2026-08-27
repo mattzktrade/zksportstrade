@@ -127,30 +127,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    let ownerEmail: string | undefined
-    if (form.deal_id) {
-      const { data: deal } = await admin
-        .from("deals")
-        .select("owner_profile_id")
-        .eq("id", form.deal_id)
-        .maybeSingle()
-      if (deal?.owner_profile_id) {
-        const { data: owner } = await admin
-          .from("profiles")
-          .select("email")
-          .eq("id", deal.owner_profile_id)
-          .maybeSingle()
-        ownerEmail = owner?.email ?? undefined
-      }
-    }
-
     const notification = await sendClientSignedBookingFormNotification({
       documentRef: String(form.document_ref),
       clientName: signerName,
       accountName: snapshot.billTo.accountName,
       eventName: snapshot.deal.title,
       dealsUrl: `${getServerSiteOrigin()}/admin/deals`,
-      extraEmails: ownerEmail ? [ownerEmail] : [],
     })
     await admin
       .from("booking_forms")

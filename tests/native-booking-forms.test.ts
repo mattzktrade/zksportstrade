@@ -19,6 +19,10 @@ import {
   BOOKING_SELLER,
   BOOKING_TERMS,
 } from "../lib/booking-forms/template"
+import {
+  clientSignedNotificationRecipients,
+  DEFAULT_CLIENT_SIGNED_NOTIFY_EMAILS,
+} from "../lib/email/send-booking-form"
 import type { BookingFormSnapshot } from "../lib/booking-forms/types"
 
 test("secure signer tokens are random and only hashes need persistence", () => {
@@ -180,5 +184,101 @@ test("new accounts can omit postcode and booking forms still render the rest of 
   assert.match(snapshot, /\.filter\(Boolean\)/)
   const xero = readFileSync("lib/integrations/xero/invoices.ts", "utf8")
   assert.match(xero, /PostalCode: postcode/)
+})
+
+function testSnapshot(overrides: Partial<BookingFormSnapshot> = {}): BookingFormSnapshot {
+  return {
+    schemaVersion: 1,
+    template: {
+      key: "zk-standard-booking-form",
+      version: 1,
+      legalContentVersion: "2026-08-11",
+    },
+    documentRef: "ZK-TEST-0001",
+    createdAt: "2026-08-11T12:00:00.000Z",
+    deal: { id: "deal-1", title: "Singapore F1 GP 2026" },
+    seller: BOOKING_SELLER,
+    billTo: {
+      accountId: "account-1",
+      accountName: "Example Agent",
+      contactId: "contact-1",
+      contactName: "Example Signer",
+      contactEmail: "signer@example.com",
+      addressLines: ["Dubai", "UAE"],
+    },
+    lines: [
+      {
+        dealLineItemId: "line-1",
+        packageId: "package-1",
+        eventName: "Singapore F1 GP 2026",
+        packageName: "Sky Suite",
+        description: "Sky Suite - 3 day / 2026 Singapore F1 GP",
+        quantity: 4,
+        unitPrice: 11500,
+        lineTotal: 46000,
+        currency: "USD",
+      },
+    ],
+    currency: "USD",
+    subtotal: 46000,
+    taxRate: 0,
+    taxAmountIncluded: 0,
+    total: 46000,
+    paymentTerms: "USD 46000.00 (100.00%) due upon signing, all tax included.",
+    paymentMethod: "Wire Transfer",
+    bankDetails: BOOKING_BANK_DETAILS,
+    acknowledgement: BOOKING_ACKNOWLEDGEMENT,
+    terms: BOOKING_TERMS,
+    ...overrides,
+  }
+}
+
+test("no-VAT is the default edit and 5% included VAT does not change the total", async () => {
+  const snapshot = testSnapshot()
+  const edits = snapshotToEdits(snapshot)
+  assert.equal(edits.noVat, true)
+  const withVat = applyBookingFormEdits(snapshot, { ...edits, noVat: false })
+  assert.equal(withVat.total, 46000)
+  assert.equal(withVat.subtotal, 46000)
+  assert.equal(withVat.taxRate, 0.05)
+  assert.equal(withVat.taxAmountIncluded, 2190.48)
+  assert.equal(withVat.taxDescription, "VAT included (5%)")
+  assert.equal(withVat.lines[0].taxRate, 0.05)
+  const withoutVat = applyBookingFormEdits(snapshot, { ...edits, noVat: true })
+  assert.equal(withoutVat.total, 46000)
+  assert.equal(withoutVat.taxRate, 0)
+  assert.equal(withoutVat.taxAmountIncluded, 0)
+  assert.equal(withoutVat.taxDescription, undefined)
+  const vatPdf = await generateBookingFormPdf(withVat)
+  const noVatPdf = await generateBookingFormPdf(withoutVat)
+  assert.equal(Buffer.from(vatPdf).subarray(0, 4).toString(), "%PDF")
+  assert.equal(Buffer.from(noVatPdf).subarray(0, 4).toString(), "%PDF")
+})
+
+test("client-signed booking form alerts go only to Ollie and Michel by default", () => {
+  assert.deepEqual(clientSignedNotificationRecipients(""), [...DEFAULT_CLIENT_SIGNED_NOTIFY_EMAILS])
+  assert.deepEqual(DEFAULT_CLIENT_SIGNED_NOTIFY_EMAILS, [
+    "michel@zk-sports.com",
+    "oliver@zk-sports.com",
+  ])
+  assert.deepEqual(clientSignedNotificationRecipients("ops@zk-sports.com"), ["ops@zk-sports.com"])
+  const notifySource = readFileSync("lib/email/send-booking-form.ts", "utf8")
+  assert.match(notifySource, /BOOKING_FORM_ADMIN_EMAILS/)
+  assert.doesNotMatch(notifySource, /eq\("role", "admin"\)/)
+  assert.doesNotMatch(notifySource, /FINANCE_NOTIFICATION_EMAILS/)
+})
+
+test("booking form signing page uses a product table, colour logo, and client signature near the total", () => {
+  const signing = readFileSync("app/sign/booking/[token]/signing-client.tsx", "utf8")
+  assert.match(signing, /LOGO_MAIN/)
+  assert.match(signing, />Product<\/th>/)
+  assert.match(signing, /Client signature/)
+  assert.doesNotMatch(signing, /emerald/)
+  const editor = readFileSync("app/(admin)/admin/deals/booking-form-editor.tsx", "utf8")
+  assert.match(editor, /No VAT/)
+  assert.match(editor, /noVat/)
+  const panel = readFileSync("app/(admin)/admin/deals/booking-form-panel.tsx", "utf8")
+  assert.match(panel, /Copy signing link/)
+  assert.match(panel, /getNativeBookingFormSigningUrl/)
 })
 

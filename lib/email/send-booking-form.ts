@@ -1,7 +1,6 @@
 import { Resend } from "resend"
 import { getResendApiKey, getResendFromAddress } from "@/lib/email/config"
 import { stripSurroundingQuotes } from "@/lib/email/config"
-import { createAdminClient } from "@/lib/supabase/admin"
 
 type BookingFormEmail = {
   recipientEmail: string
@@ -61,7 +60,7 @@ function signingEmailHtml(input: BookingFormEmail, reminder: boolean): string {
     `<p><strong>${escapeHtml(input.eventName)}</strong><br/>`,
     `Reference: ${escapeHtml(input.documentRef)}<br/>`,
     `Total: ${escapeHtml(input.totalLabel)}</p>`,
-    `<p><a href="${escapeHtml(input.signingUrl)}" style="display:inline-block;background:#12a66f;color:#fff;text-decoration:none;padding:12px 20px;border-radius:6px;font-weight:700">Review and sign booking form</a></p>`,
+    `<p><a href="${escapeHtml(input.signingUrl)}" style="display:inline-block;background:#F90202;color:#fff;text-decoration:none;padding:12px 20px;border-radius:6px;font-weight:700">Review and sign booking form</a></p>`,
     `<p>This secure link expires on ${escapeHtml(expiry)} UTC. Stock is held until then; if the form is not signed in time, the hold and form will expire automatically.</p>`,
     "<p>If you were not expecting this email, please contact ZK Sports directly and do not forward the signing link.</p>",
     "<p>Thank you,<br/>ZK Sports &amp; Entertainment</p>",
@@ -91,7 +90,7 @@ function manualBookingEmailHtml(input: BookingFormEmail): string {
     `Reference: ${escapeHtml(input.documentRef)}<br/>`,
     `Total: ${escapeHtml(input.totalLabel)}</p>`,
     "<p>Review the attached PDF and reply if any names, products, or terms need changing. When you are ready to sign electronically, use the secure link below.</p>",
-    `<p><a href="${escapeHtml(input.signingUrl)}" style="display:inline-block;background:#12a66f;color:#fff;text-decoration:none;padding:12px 20px;border-radius:6px;font-weight:700">Review and sign booking form</a></p>`,
+    `<p><a href="${escapeHtml(input.signingUrl)}" style="display:inline-block;background:#F90202;color:#fff;text-decoration:none;padding:12px 20px;border-radius:6px;font-weight:700">Review and sign booking form</a></p>`,
     `<p>This secure link expires on ${escapeHtml(expiry)} UTC. Stock is held until then.</p>`,
     "<p>Thank you,<br/>ZK Sports &amp; Entertainment</p>",
   ].join("")
@@ -149,47 +148,28 @@ export function sendCompletedBookingFormEmail(input: {
   })
 }
 
-function parseNotifyEmails(raw: string): string[] {
+export const DEFAULT_CLIENT_SIGNED_NOTIFY_EMAILS = [
+  "michel@zk-sports.com",
+  "oliver@zk-sports.com",
+] as const
+
+export function parseNotifyEmails(raw: string): string[] {
   return [
     ...new Set(
       raw
         .split(/[,;]/)
         .map((value) => stripSurroundingQuotes(value.trim()).toLowerCase())
-        .filter(Boolean),
+        .filter((value) => value.includes("@")),
     ),
   ]
 }
 
-async function resolveBookingFormAdminEmails(extra: string[] = []): Promise<string[]> {
-  const fromEnv = parseNotifyEmails(
-    [
-      process.env.BOOKING_FORM_ADMIN_EMAILS,
-      process.env.BOOKING_APPROVAL_NOTIFICATION_EMAILS,
-      process.env.FINANCE_NOTIFICATION_EMAILS,
-      process.env.FINANCE_TEAM_EMAIL,
-    ]
-      .filter(Boolean)
-      .join(","),
-  )
-  const fromStaff: string[] = []
-  const admin = createAdminClient()
-  if (admin) {
-    const { data } = await admin
-      .from("profiles")
-      .select("email, role")
-      .eq("role", "admin")
-    for (const row of data ?? []) {
-      const email = String(row.email ?? "").trim().toLowerCase()
-      if (email.includes("@")) fromStaff.push(email)
-    }
-  }
-  return [
-    ...new Set([
-      ...fromEnv,
-      ...fromStaff,
-      ...extra.map((value) => value.trim().toLowerCase()).filter((value) => value.includes("@")),
-    ]),
-  ]
+/** Client-signed alerts go only to Ollie and Michel, unless BOOKING_FORM_ADMIN_EMAILS overrides. */
+export function clientSignedNotificationRecipients(
+  envValue = process.env.BOOKING_FORM_ADMIN_EMAILS ?? "",
+): string[] {
+  const fromEnv = parseNotifyEmails(envValue)
+  return fromEnv.length ? fromEnv : [...DEFAULT_CLIENT_SIGNED_NOTIFY_EMAILS]
 }
 
 export async function sendClientSignedBookingFormNotification(input: {
@@ -198,9 +178,8 @@ export async function sendClientSignedBookingFormNotification(input: {
   accountName: string
   eventName: string
   dealsUrl: string
-  extraEmails?: string[]
 }): Promise<EmailResult> {
-  const recipients = await resolveBookingFormAdminEmails(input.extraEmails)
+  const recipients = clientSignedNotificationRecipients()
   if (!recipients.length) {
     return { ok: false, skipped: "No admin email addresses were found to notify." }
   }

@@ -1,4 +1,4 @@
-import { bookingLineTax } from "@/lib/booking-forms/line-tax"
+import { applyInclusiveVat, defaultNoVat } from "@/lib/booking-forms/line-tax"
 import { BOOKING_TERMS } from "@/lib/booking-forms/template"
 import type { BookingFormSnapshot } from "@/lib/booking-forms/types"
 
@@ -38,6 +38,8 @@ export type BookingFormEdits = {
   bankDetails: BookingFormBankEdit[]
   acknowledgement: string
   terms: BookingFormTermEdit[]
+  /** When true, the form shows no VAT. Untick to display 5% VAT included without changing the total. */
+  noVat: boolean
 }
 
 export type BookingFormSendMode = "signing_link" | "manual_pdf"
@@ -105,6 +107,7 @@ export function snapshotToEdits(snapshot: BookingFormSnapshot): BookingFormEdits
       heading: section.heading,
       body: section.paragraphs.join("\n\n"),
     })),
+    noVat: snapshot.taxAmountIncluded <= 0,
   }
 }
 
@@ -137,7 +140,6 @@ export function applyBookingFormEdits(
           }
           const eventName = clean(edit.eventName, 240, "Event name")
           const lineTotal = roundMoney(quantity * unitPrice)
-          const tax = bookingLineTax(eventName, lineTotal)
           return {
             ...line,
             eventName,
@@ -146,18 +148,25 @@ export function applyBookingFormEdits(
             quantity,
             unitPrice: roundMoney(unitPrice),
             lineTotal,
-            taxRate: tax.taxRate,
-            taxAmountIncluded: roundMoney(tax.taxAmountIncluded),
           }
         })
       : base.lines
 
   if (!nextLines.length) throw new Error("The booking form needs at least one product.")
 
-  const subtotal = roundMoney(nextLines.reduce((sum, line) => sum + line.lineTotal, 0))
-  const taxedLines = nextLines.filter((line) => (line.taxRate ?? 0) > 0)
+  const includeVat = !(edits.noVat ?? defaultNoVat(nextLines))
+  const taxedLines = nextLines.map((line) => {
+    const tax = applyInclusiveVat(line.lineTotal, includeVat)
+    return {
+      ...line,
+      taxRate: tax.taxRate,
+      taxAmountIncluded: tax.taxAmountIncluded,
+    }
+  })
+  const nextLinesWithTax = taxedLines
+  const subtotal = roundMoney(nextLinesWithTax.reduce((sum, line) => sum + line.lineTotal, 0))
   const taxAmountIncluded = roundMoney(
-    taxedLines.reduce((sum, line) => sum + (line.taxAmountIncluded ?? 0), 0),
+    nextLinesWithTax.reduce((sum, line) => sum + (line.taxAmountIncluded ?? 0), 0),
   )
 
   if (!edits.bankDetails.length) throw new Error("Add at least one bank account.")
@@ -183,16 +192,11 @@ export function applyBookingFormEdits(
       contactEmail,
       addressLines: optionalLines(edits.billToAddress, 200, 8, "Billing address"),
     },
-    lines: nextLines,
+    lines: nextLinesWithTax,
     subtotal,
-    taxRate: taxedLines.length === nextLines.length && nextLines.length > 0 ? 0.05 : 0,
+    taxRate: includeVat ? 0.05 : 0,
     taxAmountIncluded,
-    taxDescription:
-      taxedLines.length === 0
-        ? undefined
-        : taxedLines.length === nextLines.length
-          ? "VAT included (5%)"
-          : "VAT included (5% on Abu Dhabi products only)",
+    taxDescription: includeVat ? "VAT included (5%)" : undefined,
     total: subtotal,
     paymentTerms: clean(edits.paymentTerms, 4000, "Payment terms"),
     paymentMethod: clean(edits.paymentMethod, 120, "Payment method"),

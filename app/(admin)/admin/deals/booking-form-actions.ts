@@ -25,6 +25,10 @@ import {
 } from "@/lib/booking-forms/storage"
 import { writeClientSignedBookingPdf } from "@/lib/booking-forms/signed-document"
 import {
+  readBookingFormSigningToken,
+  saveBookingFormSigningToken,
+} from "@/lib/booking-forms/signing-token"
+import {
   BOOKING_SIGNATURE_CONSENT,
   BOOKING_TEMPLATE_ID,
 } from "@/lib/booking-forms/template"
@@ -230,6 +234,14 @@ export async function createAndSendNativeBookingForm(input: {
     })
     if (sendStateError) throw new Error(sendStateError.message)
     await syncBookingFormDealInventory(id, "booking_form_sent")
+    const persistAdmin = createAdminClient()
+    if (persistAdmin) {
+      try {
+        await saveBookingFormSigningToken(persistAdmin, String(formId), token)
+      } catch (tokenError) {
+        console.warn("[booking-forms] could not store signing token:", tokenError)
+      }
+    }
 
     const emailInput = {
       recipientEmail: snapshot.billTo.contactEmail,
@@ -253,7 +265,7 @@ export async function createAndSendNativeBookingForm(input: {
       revalidatePath("/admin/deals")
       return {
         ok: true,
-        message: `Booking form created and stock reserved, but email was not sent: ${detail}. Use the local signer preview or resend after email is configured.`,
+        message: `Booking form created and stock reserved, but email was not sent: ${detail}. Copy the signing link to send it on WhatsApp, or resend after email is configured.`,
         previewUrl: signingUrl(token),
       }
     }
@@ -265,6 +277,7 @@ export async function createAndSendNativeBookingForm(input: {
         sendMode === "manual_pdf"
           ? "Booking form PDF emailed. Stock is reserved for seven days and a signing link is included."
           : "Booking form sent. Stock is reserved for seven days.",
+      previewUrl: signingUrl(token),
     }
   } catch (error) {
     return { ok: false, message: errorMessage(error) }
@@ -288,14 +301,14 @@ export async function resendNativeBookingForm(bookingFormId: string): Promise<Re
       throw new Error("This booking form has expired. Create a new revision.")
     }
     const snapshot = form.snapshot_data as BookingFormSnapshot
+    const previousToken = await readBookingFormSigningToken(gate.supabase, form.id)
     const { token, tokenHash } = generateSigningToken()
     const admin = createAdminClient()
     if (!admin) throw new Error("Supabase service role is not configured.")
-    const { error: tokenError } = await admin
-      .from("booking_forms")
-      .update({ client_token_hash: tokenHash, last_error: null })
-      .eq("id", form.id)
-    if (tokenError) throw new Error(tokenError.message)
+    await saveBookingFormSigningToken(admin, form.id, token, {
+      client_token_hash: tokenHash,
+      last_error: null,
+    })
 
     const email = await sendNativeBookingFormEmail({
       recipientEmail: snapshot.billTo.contactEmail,
@@ -309,14 +322,20 @@ export async function resendNativeBookingForm(bookingFormId: string): Promise<Re
     })
     if (!email.ok) {
       const detail = email.error ?? email.skipped ?? "Email delivery failed."
-      await admin
-        .from("booking_forms")
-        .update({ client_token_hash: form.client_token_hash, last_error: detail })
-        .eq("id", form.id)
+      await saveBookingFormSigningToken(
+        admin,
+        form.id,
+        previousToken ?? "",
+        { client_token_hash: form.client_token_hash, last_error: detail },
+      )
       throw new Error(detail)
     }
     revalidatePath("/admin/deals")
-    return { ok: true, message: "A new secure signing link was emailed to the client." }
+    return {
+      ok: true,
+      message: "A new secure signing link was emailed to the client.",
+      previewUrl: signingUrl(token),
+    }
   } catch (error) {
     return { ok: false, message: errorMessage(error) }
   }
@@ -495,6 +514,41 @@ export async function signNativeBookingFormAsAdmin(input: {
           ? "Booking form completed, order created, and Xero invoice queued."
           : "Booking form and order completed; the agreement email could not be sent.",
     }
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) }
+  }
+}
+
+export async function getNativeBookingFormSigningUrl(bookingFormId: string): Promise<
+  | { ok: true; url: string; rotated: boolean }
+  | { ok: false; message: string }
+> {
+  const gate = await bookingFormGate()
+  if (!gate) return { ok: false, message: "You do not have permission to manage deals." }
+  const id = bookingFormId.trim()
+  if (!id) return { ok: false, message: "Booking form not found." }
+  try {
+    const { data: form, error } = await gate.supabase
+      .from("booking_forms")
+      .select("id, status, client_token_expires_at")
+      .eq("id", id)
+      .maybeSingle()
+    if (error || !form) throw new Error(error?.message ?? "Booking form not found.")
+    if (!["sent", "viewed"].includes(String(form.status))) {
+      throw new Error("A signing link is only available while the form is waiting for the client.")
+    }
+    if (new Date(form.client_token_expires_at).getTime() <= Date.now()) {
+      throw new Error("This booking form has expired. Create a new revision.")
+    }
+    const existing = await readBookingFormSigningToken(gate.supabase, form.id)
+    if (existing) {
+      return { ok: true, url: signingUrl(existing), rotated: false }
+    }
+    const { token, tokenHash } = generateSigningToken()
+    const admin = createAdminClient()
+    if (!admin) throw new Error("Supabase service role is not configured.")
+    await saveBookingFormSigningToken(admin, form.id, token, { client_token_hash: tokenHash })
+    return { ok: true, url: signingUrl(token), rotated: true }
   } catch (error) {
     return { ok: false, message: errorMessage(error) }
   }

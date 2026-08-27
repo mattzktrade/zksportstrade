@@ -184,6 +184,21 @@ export function BookingFormEditor({
                 title="Products"
                 hint="Names and descriptions appear on the PDF. Changing quantity or price here only changes this document, not the deal."
               >
+                <label className="flex items-start gap-3 rounded-md border border-slate-200 p-3">
+                  <input
+                    type="checkbox"
+                    checked={edits.noVat}
+                    onChange={(event) => update("noVat", event.target.checked)}
+                    className="mt-1 h-4 w-4 accent-[#F90202]"
+                  />
+                  <span>
+                    <span className="text-sm font-semibold">No VAT</span>
+                    <span className="mt-1 block text-xs leading-5 text-slate-500">
+                      Leave ticked for most events. Untick for Abu Dhabi to show 5% VAT included
+                      in the price breakdown. The total does not change.
+                    </span>
+                  </span>
+                </label>
                 {edits.lines.map((line, index) => (
                   <div key={index} className="rounded-md bg-slate-50 p-3">
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -339,7 +354,7 @@ export function BookingFormEditor({
                         { currency: "USD", recipient: "", bank: "", iban: "", swift: "" },
                       ])
                     }
-                    className="inline-flex items-center gap-1 text-sm font-semibold text-emerald-700"
+                    className="inline-flex items-center gap-1 text-sm font-semibold text-[#F90202]"
                   >
                     <Plus className="h-4 w-4" /> Add bank account
                   </button>
@@ -451,7 +466,7 @@ export function BookingFormEditor({
                       { heading: "Special terms / amendments for this booking", body: "Add the deal-specific wording here." },
                     ])
                   }
-                  className="inline-flex items-center gap-1 text-sm font-semibold text-emerald-700"
+                  className="inline-flex items-center gap-1 text-sm font-semibold text-[#F90202]"
                 >
                   <Plus className="h-4 w-4" /> Add terms section
                 </button>
@@ -496,7 +511,7 @@ export function BookingFormEditor({
               type="button"
               disabled={pending || !edits}
               onClick={() => edits && onSend(edits, "signing_link")}
-              className="ml-auto h-11 rounded-md bg-emerald-600 px-4 font-bold text-white disabled:opacity-50"
+              className="ml-auto h-11 rounded-md bg-[#010101] px-4 font-bold text-white disabled:opacity-50"
             >
               {pending ? "Creating and sending…" : reissueFromId ? "Reissue signing link" : "Confirm, reserve & send"}
             </button>

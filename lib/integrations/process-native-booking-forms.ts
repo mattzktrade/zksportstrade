@@ -1,6 +1,10 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getServerSiteOrigin } from "@/lib/auth/site-origin"
 import { generateSigningToken } from "@/lib/booking-forms/snapshot"
+import {
+  readBookingFormSigningToken,
+  saveBookingFormSigningToken,
+} from "@/lib/booking-forms/signing-token"
 import type { BookingFormSnapshot } from "@/lib/booking-forms/types"
 import { sendNativeBookingFormReminder } from "@/lib/email/send-booking-form"
 import { packageIdsForInventoryChannelSync } from "@/lib/integrations/inventory-sync-packages"
@@ -90,6 +94,7 @@ export async function processNativeBookingForms(): Promise<NativeBookingFormAuto
     const due = (count === 0 && form.sent_at <= thirdDay) || (count === 1 && form.sent_at <= sixthDay)
     if (!due || count >= 2) continue
     const snapshot = form.snapshot_data as BookingFormSnapshot
+    const previousToken = await readBookingFormSigningToken(admin, form.id)
     const { token, tokenHash } = generateSigningToken()
     const { error: rotateError } = await admin
       .from("booking_forms")
@@ -99,6 +104,11 @@ export async function processNativeBookingForms(): Promise<NativeBookingFormAuto
     if (rotateError) {
       reminderFailures += 1
       continue
+    }
+    try {
+      await saveBookingFormSigningToken(admin, form.id, token)
+    } catch (tokenError) {
+      console.warn("[booking-forms] could not store reminder signing token:", tokenError)
     }
     const email = await sendNativeBookingFormReminder({
       recipientEmail: snapshot.billTo.contactEmail,
@@ -112,13 +122,10 @@ export async function processNativeBookingForms(): Promise<NativeBookingFormAuto
     })
     if (!email.ok) {
       reminderFailures += 1
-      await admin
-        .from("booking_forms")
-        .update({
-          client_token_hash: form.client_token_hash,
-          last_error: email.error ?? email.skipped ?? "Reminder email failed.",
-        })
-        .eq("id", form.id)
+      await saveBookingFormSigningToken(admin, form.id, previousToken ?? "", {
+        client_token_hash: form.client_token_hash,
+        last_error: email.error ?? email.skipped ?? "Reminder email failed.",
+      })
       continue
     }
     remindersSent += 1

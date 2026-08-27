@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises"
+import { join } from "node:path"
 import { PDFDocument, PDFImage, PDFFont, PDFPage, StandardFonts, rgb } from "pdf-lib"
 import type {
   BookingFormSignatureEvidence,
@@ -8,10 +10,12 @@ const A4: [number, number] = [595.28, 841.89]
 const MARGIN = 48
 const FOOTER_Y = 24
 const CONTENT_BOTTOM = 48
-const BLACK = rgb(0.08, 0.1, 0.13)
-const MUTED = rgb(0.38, 0.42, 0.48)
-const ACCENT = rgb(0.1, 0.65, 0.43)
-const LINE = rgb(0.85, 0.87, 0.9)
+const BLACK = rgb(0.004, 0.004, 0.004)
+const MUTED = rgb(0.38, 0.38, 0.4)
+const RED = rgb(249 / 255, 2 / 255, 2 / 255)
+const LINE = rgb(0.85, 0.85, 0.86)
+const HEADER_BG = rgb(0.94, 0.94, 0.94)
+const TABLE_HEADER = rgb(0.45, 0.45, 0.47)
 
 export type PdfSignature = BookingFormSignatureEvidence & {
   pngBytes: Uint8Array
@@ -27,6 +31,14 @@ function money(amount: number, currency: string): string {
   } catch {
     return `${currency} ${amount.toFixed(2)}`
   }
+}
+
+function isoDate(value: string): string {
+  return value.slice(0, 10)
+}
+
+function snapshotShowsVat(snapshot: BookingFormSnapshot): boolean {
+  return snapshot.taxAmountIncluded > 0
 }
 
 function safeText(value: string): string {
@@ -143,6 +155,33 @@ class Writer {
   }
 }
 
+function drawRight(
+  page: PDFPage,
+  text: string,
+  y: number,
+  font: PDFFont,
+  size: number,
+  color: ReturnType<typeof rgb>,
+) {
+  const width = font.widthOfTextAtSize(text, size)
+  page.drawText(text, {
+    x: A4[0] - MARGIN - width,
+    y,
+    size,
+    font,
+    color,
+  })
+}
+
+async function embedBrandLogo(pdf: PDFDocument): Promise<PDFImage | null> {
+  try {
+    const bytes = await readFile(join(process.cwd(), "public", "images", "image.png"))
+    return await pdf.embedPng(bytes)
+  } catch {
+    return null
+  }
+}
+
 async function embedSignature(
   pdf: PDFDocument,
   signature: PdfSignature | undefined,
@@ -153,6 +192,313 @@ async function embedSignature(
   } catch {
     return null
   }
+}
+
+function drawLetterhead(writer: Writer, snapshot: BookingFormSnapshot, logo: PDFImage | null) {
+  const top = writer.y
+  let logoBottom = top
+  if (logo) {
+    const maxHeight = 36
+    const scale = Math.min(maxHeight / logo.height, 180 / logo.width)
+    const width = logo.width * scale
+    const height = logo.height * scale
+    writer.page.drawImage(logo, {
+      x: MARGIN,
+      y: top - height,
+      width,
+      height,
+    })
+    logoBottom = top - height
+  } else {
+    writer.page.drawText(safeText(snapshot.seller.legalName), {
+      x: MARGIN,
+      y: top - 14,
+      size: 16,
+      font: writer.bold,
+      color: RED,
+    })
+    logoBottom = top - 22
+  }
+
+  const address = [...snapshot.seller.addressLines, `TRN ${snapshot.seller.trn}`]
+  let addressY = top - 8
+  for (const line of address) {
+    drawRight(writer.page, safeText(line), addressY, writer.regular, 8, BLACK)
+    addressY -= 11
+  }
+
+  writer.y = Math.min(logoBottom, addressY) - 28
+  writer.page.drawText(`Quote No ${safeText(snapshot.documentRef)}`, {
+    x: MARGIN,
+    y: writer.y,
+    size: 16,
+    font: writer.bold,
+    color: RED,
+  })
+  writer.y -= 28
+}
+
+function drawDateAndBillTo(writer: Writer, snapshot: BookingFormSnapshot) {
+  const dateLabel = `Date : ${isoDate(snapshot.createdAt)}`
+  writer.page.drawText(dateLabel, {
+    x: MARGIN,
+    y: writer.y,
+    size: 10,
+    font: writer.regular,
+    color: BLACK,
+  })
+
+  const billLines = [
+    snapshot.billTo.accountName,
+    snapshot.billTo.contactName,
+    snapshot.billTo.contactEmail,
+    ...snapshot.billTo.addressLines,
+  ].map(safeText)
+  const billX = 330
+  const billWidth = A4[0] - MARGIN - billX
+  writer.page.drawText("BILL TO:", {
+    x: billX,
+    y: writer.y,
+    size: 10,
+    font: writer.bold,
+    color: RED,
+  })
+  let billY = writer.y - 16
+  for (const line of billLines) {
+    const wrapped = wrap(line, writer.regular, 9, billWidth)
+    for (const part of wrapped) {
+      writer.page.drawText(part, {
+        x: billX,
+        y: billY,
+        size: 9,
+        font: writer.regular,
+        color: BLACK,
+      })
+      billY -= 13
+    }
+  }
+  writer.y = Math.min(writer.y - 32, billY) - 28
+}
+
+function drawCenteredTitle(writer: Writer, title: string) {
+  const size = 12
+  const lines = wrap(title, writer.bold, size, A4[0] - MARGIN * 2)
+  writer.ensure(lines.length * 18 + 24)
+  for (const line of lines) {
+    const width = writer.bold.widthOfTextAtSize(line, size)
+    const x = (A4[0] - width) / 2
+    writer.page.drawText(line, { x, y: writer.y, size, font: writer.bold, color: BLACK })
+    writer.page.drawLine({
+      start: { x, y: writer.y - 3 },
+      end: { x: x + width, y: writer.y - 3 },
+      thickness: 0.7,
+      color: BLACK,
+    })
+    writer.y -= 18
+  }
+  writer.y -= 22
+}
+
+function drawProductTable(writer: Writer, snapshot: BookingFormSnapshot) {
+  const tableX = MARGIN
+  const tableW = A4[0] - MARGIN * 2
+  const cols = [
+    { label: "Product", width: tableW * 0.46, align: "left" as const },
+    { label: "Price", width: tableW * 0.2, align: "right" as const },
+    { label: "Quantity", width: tableW * 0.14, align: "right" as const },
+    { label: "Total", width: tableW * 0.2, align: "right" as const },
+  ]
+  const headerH = 26
+  const pad = 10
+  const includeVat = snapshotShowsVat(snapshot)
+  if (includeVat) {
+    writer.text("Prices include 5% VAT", { size: 8, color: MUTED, gapAfter: 10 })
+  }
+
+  const drawHeader = () => {
+    writer.ensure(headerH + 28)
+    writer.page.drawRectangle({
+      x: tableX,
+      y: writer.y - headerH,
+      width: tableW,
+      height: headerH,
+      color: HEADER_BG,
+      borderColor: LINE,
+      borderWidth: 0.8,
+    })
+    let x = tableX
+    for (const col of cols) {
+      const labelWidth = writer.bold.widthOfTextAtSize(col.label, 8)
+      const textX = col.align === "right" ? x + col.width - pad - labelWidth : x + pad
+      writer.page.drawText(col.label, {
+        x: textX,
+        y: writer.y - 16,
+        size: 8,
+        font: writer.bold,
+        color: TABLE_HEADER,
+      })
+      x += col.width
+      if (x < tableX + tableW - 1) {
+        writer.page.drawLine({
+          start: { x, y: writer.y },
+          end: { x, y: writer.y - headerH },
+          thickness: 0.6,
+          color: LINE,
+        })
+      }
+    }
+    writer.y -= headerH
+  }
+
+  drawHeader()
+
+  for (const line of snapshot.lines) {
+    const productLines = wrap(line.description, writer.regular, 9, cols[0].width - pad * 2)
+    const rowH = Math.max(34, productLines.length * 13 + 18)
+    if (writer.y - rowH < CONTENT_BOTTOM) {
+      writer.newPage()
+      drawHeader()
+    }
+    writer.page.drawRectangle({
+      x: tableX,
+      y: writer.y - rowH,
+      width: tableW,
+      height: rowH,
+      borderColor: LINE,
+      borderWidth: 0.8,
+    })
+    let x = tableX
+    const values = [
+      productLines,
+      [money(line.unitPrice, line.currency)],
+      [String(line.quantity)],
+      [money(line.lineTotal, line.currency)],
+    ]
+    cols.forEach((col, index) => {
+      const cellLines = values[index]
+      const font = index === 0 ? writer.regular : writer.bold
+      cellLines.forEach((value, lineIndex) => {
+        const labelWidth = font.widthOfTextAtSize(value, 9)
+        const textX = col.align === "right" ? x + col.width - pad - labelWidth : x + pad
+        writer.page.drawText(value, {
+          x: textX,
+          y: writer.y - 21 - lineIndex * 13,
+          size: 9,
+          font,
+          color: BLACK,
+        })
+      })
+      x += col.width
+      if (x < tableX + tableW - 1) {
+        writer.page.drawLine({
+          start: { x, y: writer.y },
+          end: { x, y: writer.y - rowH },
+          thickness: 0.6,
+          color: LINE,
+        })
+      }
+    })
+    writer.y -= rowH
+  }
+  writer.y -= 22
+}
+
+function drawTotals(writer: Writer, snapshot: BookingFormSnapshot) {
+  const boxWidth = 220
+  const x = A4[0] - MARGIN - boxWidth
+  const rows: Array<{ label: string; value: string; bold?: boolean; size?: number }> = [
+    { label: "Section total", value: money(snapshot.subtotal, snapshot.currency) },
+  ]
+  if (snapshotShowsVat(snapshot)) {
+    rows.push({
+      label: snapshot.taxDescription ?? "VAT included (5%)",
+      value: money(snapshot.taxAmountIncluded, snapshot.currency),
+    })
+  }
+  rows.push({
+    label: "Total",
+    value: money(snapshot.total, snapshot.currency),
+    bold: true,
+    size: 12,
+  })
+  writer.ensure(rows.length * 20 + 16)
+  for (const row of rows) {
+    const font = row.bold ? writer.bold : writer.regular
+    const size = row.size ?? 9
+    writer.page.drawText(row.label, {
+      x,
+      y: writer.y,
+      size,
+      font,
+      color: BLACK,
+    })
+    const valueWidth = font.widthOfTextAtSize(row.value, size)
+    writer.page.drawText(row.value, {
+      x: A4[0] - MARGIN - valueWidth,
+      y: writer.y,
+      size,
+      font,
+      color: BLACK,
+    })
+    writer.y -= 20
+  }
+  writer.y -= 28
+}
+
+function drawAcknowledgementAndClientSignature(
+  writer: Writer,
+  snapshot: BookingFormSnapshot,
+  signature: PdfSignature | undefined,
+  image: PDFImage | null,
+) {
+  const gap = 28
+  const leftWidth = 270
+  const boxWidth = A4[0] - MARGIN * 2 - leftWidth - gap
+  const ackLines = wrap(snapshot.acknowledgement, writer.bold, 8.5, leftWidth)
+  const boxHeight = Math.max(92, ackLines.length * 13 + 16)
+  writer.ensure(boxHeight + 16)
+  const yTop = writer.y
+  ackLines.forEach((line, index) => {
+    writer.page.drawText(line, {
+      x: MARGIN,
+      y: yTop - 12 - index * 13,
+      size: 8.5,
+      font: writer.bold,
+      color: BLACK,
+    })
+  })
+  const boxX = MARGIN + leftWidth + gap
+  const boxY = yTop - boxHeight
+  if (signature && image) {
+    const scaled = image.scaleToFit(boxWidth - 8, Math.max(28, boxHeight - 36))
+    writer.page.drawImage(image, {
+      x: boxX,
+      y: boxY + 28,
+      width: scaled.width,
+      height: scaled.height,
+    })
+  }
+  writer.page.drawLine({
+    start: { x: boxX, y: boxY + 22 },
+    end: { x: boxX + boxWidth, y: boxY + 22 },
+    thickness: 0.8,
+    color: BLACK,
+  })
+  writer.page.drawText(signature ? safeText(signature.signerName) : "Client signature", {
+    x: boxX,
+    y: boxY + 12,
+    size: 8,
+    font: signature ? writer.bold : writer.regular,
+    color: signature ? BLACK : MUTED,
+  })
+  writer.page.drawText(`Date : ${isoDate(signature?.signedAt ?? snapshot.createdAt)}`, {
+    x: boxX,
+    y: boxY + 1,
+    size: 8,
+    font: writer.regular,
+    color: MUTED,
+  })
+  writer.y = boxY - 18
 }
 
 function drawSignatureBlock(
@@ -231,63 +577,18 @@ export async function generateBookingFormPdf(
   const regular = await pdf.embedFont(StandardFonts.Helvetica)
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold)
   const writer = new Writer(pdf, regular, bold)
+  const [clientImage, adminImage, logo] = await Promise.all([
+    embedSignature(pdf, signatures.client),
+    embedSignature(pdf, signatures.zkAdmin),
+    embedBrandLogo(pdf),
+  ])
 
-  writer.text(snapshot.seller.legalName, { size: 18, font: bold, color: ACCENT, gapAfter: 4 })
-  writer.text(snapshot.seller.addressLines.join("\n"), { size: 8, color: MUTED, gapAfter: 1 })
-  writer.text(`TRN ${snapshot.seller.trn}`, { size: 8, color: MUTED, gapAfter: 14 })
-  writer.heading("BOOKING FORM", 16)
-  writer.text(`Reference: ${snapshot.documentRef}`, { font: bold })
-  writer.text(
-    `Date: ${new Date(snapshot.createdAt).toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-      timeZone: "UTC",
-    })}`,
-  )
-  writer.rule()
-  writer.heading("BILL TO", 10)
-  writer.text(snapshot.billTo.accountName, { font: bold, gapAfter: 1 })
-  writer.text(snapshot.billTo.contactName, { gapAfter: 1 })
-  writer.text(snapshot.billTo.contactEmail, {
-    gapAfter: snapshot.billTo.addressLines.length ? 1 : 12,
-  })
-  if (snapshot.billTo.addressLines.length) {
-    writer.text(snapshot.billTo.addressLines.join("\n"), { gapAfter: 12 })
-  }
-
-  for (const line of snapshot.lines) {
-    writer.ensure(44)
-    writer.text(line.description, { font: bold, width: 310, gapAfter: 1 })
-    writer.text(
-      `${money(line.unitPrice, line.currency)} × ${line.quantity}    ${money(line.lineTotal, line.currency)}`,
-      { size: 9, color: MUTED, gapAfter: 10 },
-    )
-  }
-  writer.rule()
-  writer.text(`Subtotal: ${money(snapshot.subtotal, snapshot.currency)}`, {
-    font: bold,
-    x: 310,
-    width: 235,
-  })
-  if (snapshot.taxAmountIncluded > 0) {
-    writer.text(
-      `${snapshot.taxDescription ?? `VAT included (${(snapshot.taxRate * 100).toFixed(0)}%)`}: ${money(
-        snapshot.taxAmountIncluded,
-        snapshot.currency,
-      )}`,
-      { x: 310, width: 235 },
-    )
-  }
-  writer.text(`Total: ${money(snapshot.total, snapshot.currency)}`, {
-    size: 13,
-    font: bold,
-    color: ACCENT,
-    x: 310,
-    width: 235,
-    gapAfter: 18,
-  })
-  writer.text(snapshot.acknowledgement, { size: 10, font: bold, lineHeight: 14 })
+  drawLetterhead(writer, snapshot, logo)
+  drawDateAndBillTo(writer, snapshot)
+  drawCenteredTitle(writer, snapshot.deal.title)
+  drawProductTable(writer, snapshot)
+  drawTotals(writer, snapshot)
+  drawAcknowledgementAndClientSignature(writer, snapshot, signatures.client, clientImage)
 
   writer.newPage()
   writer.heading("PAYMENT TERMS (ALL AMOUNTS IN USD)", 12)
@@ -327,10 +628,6 @@ export async function generateBookingFormPdf(
     "I ACKNOWLEDGE THAT I HAVE READ AND UNDERSTAND THE TERMS AND CONDITIONS AND I AM IN AGREEMENT.",
     { size: 10, font: bold, lineHeight: 14, gapAfter: 18 },
   )
-  const [clientImage, adminImage] = await Promise.all([
-    embedSignature(pdf, signatures.client),
-    embedSignature(pdf, signatures.zkAdmin),
-  ])
   writer.ensure(145)
   const blockWidth = (A4[0] - MARGIN * 2 - 18) / 2
   const yTop = writer.y
@@ -399,4 +696,3 @@ export async function generateBookingFormPdf(
 
   return pdf.save()
 }
-

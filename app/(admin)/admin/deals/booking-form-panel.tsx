@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import {
   CheckCircle2,
+  Copy,
   Download,
   FileSignature,
   Mail,
@@ -15,6 +16,7 @@ import { toast } from "sonner"
 import {
   createAndSendNativeBookingForm,
   getNativeBookingFormDownloadUrl,
+  getNativeBookingFormSigningUrl,
   resendNativeBookingForm,
   signNativeBookingFormAsAdmin,
   voidNativeBookingForm,
@@ -119,10 +121,10 @@ function AdminSignatureModal({
           className="mt-2 h-40 w-full rounded-lg border-2 border-dashed border-slate-300"
         />
         <label className="mt-4 flex items-start gap-3 text-sm leading-6 text-slate-600">
-          <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="mt-1 accent-emerald-600" />
+          <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="mt-1 accent-[#F90202]" />
           <span>{BOOKING_SIGNATURE_CONSENT}</span>
         </label>
-        <button type="button" disabled={pending} onClick={submit} className="mt-5 h-11 w-full rounded-md bg-emerald-600 font-bold text-white disabled:opacity-50">
+        <button type="button" disabled={pending} onClick={submit} className="mt-5 h-11 w-full rounded-md bg-[#010101] font-bold text-white disabled:opacity-50">
           {pending ? "Completing agreement…" : "Sign and complete agreement"}
         </button>
       </div>
@@ -182,6 +184,33 @@ export function BookingFormPanel({
     window.open(result.url, "_blank", "noopener,noreferrer")
   }
 
+  async function copySigningLink() {
+    const copy = async (url: string, rotated = false) => {
+      try {
+        await navigator.clipboard.writeText(url)
+        toast.success(
+          rotated
+            ? "A new signing link was copied. The previous emailed link will no longer work."
+            : "Signing link copied. You can send it on WhatsApp.",
+        )
+      } catch {
+        toast.error("Could not copy the signing link.")
+      }
+    }
+    if (localPreviewUrl) {
+      await copy(localPreviewUrl)
+      return
+    }
+    if (!form) return
+    const result = await getNativeBookingFormSigningUrl(form.id)
+    if (!result.ok) {
+      toast.error(result.message)
+      return
+    }
+    setLocalPreviewUrl(result.url)
+    await copy(result.url, result.rotated)
+  }
+
   function voidForm() {
     if (!form) return
     const reason = window.prompt("Why is this booking form being voided?")
@@ -207,7 +236,7 @@ export function BookingFormPanel({
   return (
     <div className="rounded-lg border border-slate-200 p-3">
       <div className="flex items-center gap-2">
-        <FileSignature className="h-4 w-4 text-emerald-600" />
+        <FileSignature className="h-4 w-4 text-[#F90202]" />
         <h3 className="text-[9px] font-semibold">Native booking form</h3>
       </div>
 
@@ -234,7 +263,7 @@ export function BookingFormPanel({
             type="button"
             disabled={pending || dealClosed || orderAlreadyConfirmed}
             onClick={() => setEditorMode("create")}
-            className="h-10 w-full rounded-md bg-emerald-600 text-[9px] font-semibold text-white disabled:opacity-50"
+            className="h-10 w-full rounded-md bg-[#010101] text-[9px] font-semibold text-white disabled:opacity-50"
           >
             <span className="inline-flex items-center gap-1.5">
               <Mail className="h-3.5 w-3.5" />
@@ -254,10 +283,10 @@ export function BookingFormPanel({
               </div>
               <span className={`rounded-full px-2 py-1 text-[8px] font-semibold ${
                 form.status === "completed"
-                  ? "bg-emerald-100 text-emerald-800"
+                  ? "bg-slate-900 text-white"
                   : form.status === "awaiting_zk_signature"
                     ? "bg-amber-100 text-amber-900"
-                    : "bg-blue-100 text-blue-800"
+                    : "bg-slate-100 text-slate-800"
               }`}>
                 {STATUS_LABELS[form.status]}
               </span>
@@ -279,8 +308,13 @@ export function BookingFormPanel({
               <span className="inline-flex items-center gap-1"><Download className="h-3.5 w-3.5" /> View PDF</span>
             </button>
             {["sent", "viewed"].includes(form.status) ? (
+              <button type="button" disabled={pending} onClick={() => void copySigningLink()} className="h-9 rounded-md border text-[9px] font-semibold disabled:opacity-50">
+                <span className="inline-flex items-center gap-1"><Copy className="h-3.5 w-3.5" /> Copy signing link</span>
+              </button>
+            ) : null}
+            {["sent", "viewed"].includes(form.status) ? (
               <button type="button" disabled={pending} onClick={() => run(() => resendNativeBookingForm(form.id))} className="h-9 rounded-md border text-[9px] font-semibold disabled:opacity-50">
-                Resend link
+                Resend email
               </button>
             ) : null}
             {["draft", "sent", "viewed"].includes(form.status) ? (
@@ -289,7 +323,7 @@ export function BookingFormPanel({
               </button>
             ) : null}
             {form.status === "awaiting_zk_signature" && currentIsAdmin ? (
-              <button type="button" onClick={() => setShowSignature(true)} className="h-9 rounded-md bg-emerald-600 text-[9px] font-semibold text-white">
+              <button type="button" onClick={() => setShowSignature(true)} className="h-9 rounded-md bg-[#010101] text-[9px] font-semibold text-white">
                 <span className="inline-flex items-center gap-1"><PenLine className="h-3.5 w-3.5" /> Review &amp; sign</span>
               </button>
             ) : null}
@@ -300,7 +334,7 @@ export function BookingFormPanel({
             ) : null}
           </div>
           {form.status === "completed" ? (
-            <p className="flex items-center gap-1.5 text-[8px] font-semibold text-emerald-700">
+            <p className="flex items-center gap-1.5 text-[8px] font-semibold text-slate-700">
               <CheckCircle2 className="h-3.5 w-3.5" /> Final signed PDF is immutable and stored privately.
             </p>
           ) : null}
@@ -308,7 +342,10 @@ export function BookingFormPanel({
             <div>
               <p className="text-[8px] font-semibold text-slate-500">Audit trail</p>
               <div className="mt-1 space-y-1 text-[8px] text-slate-500">
-                {events.slice(0, 5).map((event) => (
+                {events
+                  .filter((event) => event.event_type !== "signing_token_issued")
+                  .slice(0, 5)
+                  .map((event) => (
                   <p key={event.id}>{event.event_type.replaceAll("_", " ")} · {dateTime(event.created_at)}</p>
                 ))}
               </div>
@@ -329,15 +366,14 @@ export function BookingFormPanel({
           onSend={sendForm}
         />
       ) : null}
-      {localPreviewUrl ? (
-        <a
-          href={localPreviewUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-3 block rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-center text-[9px] font-semibold text-amber-900"
+      {localPreviewUrl && form && ["sent", "viewed"].includes(form.status) ? (
+        <button
+          type="button"
+          onClick={() => void copySigningLink()}
+          className="mt-3 block w-full rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-center text-[9px] font-semibold text-slate-800"
         >
-          Open local signer preview
-        </a>
+          Copy WhatsApp signing link
+        </button>
       ) : null}
     </div>
   )
