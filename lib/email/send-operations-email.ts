@@ -1,5 +1,5 @@
 import { Resend } from "resend"
-import { getResendApiKey, getResendFromAddress } from "@/lib/email/config"
+import { getOperationsEmailCc, getResendApiKey, getResendFromAddress } from "@/lib/email/config"
 import { operationsEmailHtml } from "@/lib/operations/emails"
 
 export async function sendOperationsClientEmail(input: {
@@ -12,10 +12,12 @@ export async function sendOperationsClientEmail(input: {
   if (!apiKey || !from) {
     return { ok: false, skipped: "RESEND_API_KEY or email sender is not configured." }
   }
+  const cc = getOperationsEmailCc(input.to)
   const resend = new Resend(apiKey)
   const { error } = await resend.emails.send({
     from,
     to: [input.to],
+    ...(cc.length > 0 ? { cc } : {}),
     subject: input.subject,
     html: operationsEmailHtml(input.body),
     text: input.body,

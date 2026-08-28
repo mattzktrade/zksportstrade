@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { buildGuestDrafts } from "../app/(admin)/admin/operations/guest-editor"
 import type { OperationsGuest } from "../lib/admin/workflow-views"
+import { guestDetailsStatusFromNamedCount } from "../lib/operations/guest-status"
 
 function guest(overrides: Partial<OperationsGuest> = {}): OperationsGuest {
   return {
@@ -39,4 +40,14 @@ test("keeps existing guests and fills the remaining slots", () => {
   assert.equal(drafts[0]?.fullName, "Alex Reed")
   assert.equal(drafts[0]?.isLeadGuest, true)
   assert.equal(drafts.filter((row) => !row.id).length, 3)
+})
+
+test("guest details status becomes complete when every name is in", () => {
+  assert.equal(guestDetailsStatusFromNamedCount(2, 2, "requested"), "complete")
+  assert.equal(guestDetailsStatusFromNamedCount(2, 2, "not_requested"), "complete")
+  assert.equal(guestDetailsStatusFromNamedCount(2, 2, "partial"), "complete")
+  assert.equal(guestDetailsStatusFromNamedCount(1, 2, "requested"), "partial")
+  assert.equal(guestDetailsStatusFromNamedCount(0, 2, "complete"), "requested")
+  assert.equal(guestDetailsStatusFromNamedCount(0, 2, "not_requested"), "not_requested")
+  assert.equal(guestDetailsStatusFromNamedCount(2, 2, "not_required"), "not_required")
 })

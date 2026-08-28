@@ -8,8 +8,6 @@ export type OperationsEmailDraftInput = {
   accountName: string
   eventLabel: string
   quantity: number
-  dealReference: string
-  senderName: string
 }
 
 export type OperationsEmailDraft = {
@@ -51,11 +49,11 @@ function guestWord(quantity: number): string {
   return `${count} guest${count === 1 ? "" : "s"}`
 }
 
+const JENNY_SIGN_OFF = ["Kind regards,", "Jenny Kent", "ZK Sports & Entertainment"] as const
+
 export function buildOperationsEmailDraft(input: OperationsEmailDraftInput): Omit<OperationsEmailDraft, "toEmail"> {
   const greeting = firstName(input.contactName)
   const event = input.eventLabel.trim() || "your upcoming event"
-  const reference = input.dealReference.trim() || "your booking"
-  const sender = input.senderName.trim() || "ZK Sports"
   const guests = guestWord(input.quantity)
   const account = input.accountName.trim() || "your company"
 
@@ -63,13 +61,13 @@ export function buildOperationsEmailDraft(input: OperationsEmailDraftInput): Omi
     return {
       kind: input.kind,
       toName: input.contactName.trim() || account,
-      subject: `Guest details needed — ${event} (${reference})`,
+      subject: `Guest details needed — ${event}`,
       body: [
         `Hi ${greeting},`,
         "",
-        `Thank you for confirming the ${account} booking with ZK Sports & Entertainment.`,
+        "I'm Jenny from ZK Sports & Entertainment. Thank you for confirming this booking with us.",
         "",
-        `To get tickets and delivery organised for ${event}, we now need guest details for the ${guests} on this booking (${reference}).`,
+        `To get tickets and delivery organised for ${event}, I now need guest details for the ${guests} on this booking.`,
         "",
         "Please reply to this email with the following for each guest:",
         "• Full name, as it appears on their passport or photo ID",
@@ -78,14 +76,11 @@ export function buildOperationsEmailDraft(input: OperationsEmailDraftInput): Omi
         "• Email and mobile number",
         "• Any dietary requirements, accessibility needs, or other notes we should know",
         "",
-        "Once we have this, our operations team can prepare the tickets and send them across ahead of the event.",
+        "Once I have this, I can prepare the tickets and send them across ahead of the event.",
         "",
-        "If anything has changed on the booking, or you would rather we collect the names another way, just reply and we will help.",
+        "If anything has changed on the booking, or you would rather we collect the names another way, just reply and I will help.",
         "",
-        "Kind regards,",
-        sender,
-        "ZK Sports & Entertainment",
-        "Operations",
+        ...JENNY_SIGN_OFF,
       ].join("\n"),
     }
   }
@@ -93,27 +88,21 @@ export function buildOperationsEmailDraft(input: OperationsEmailDraftInput): Omi
   return {
     kind: input.kind,
     toName: input.contactName.trim() || account,
-    subject: `Next steps for ${event} — introducing operations (${reference})`,
+    subject: `Next steps for ${event}`,
     body: [
       `Hi ${greeting},`,
       "",
-      `I hope you are well. Now that the ${account} booking for ${event} is confirmed (${reference}), I wanted to introduce you to our operations team.`,
-      "",
-      "From this point they will look after guest names, tickets, and delivery, so you have one place to go with any practical questions.",
+      `I'm Jenny from ZK Sports & Entertainment. I hope you are well. Now that the ${account} booking for ${event} is confirmed, I wanted to introduce myself — I will look after guest names, tickets, and delivery from here, so you have one place to go with any practical questions.`,
       "",
       "What happens next:",
       "1. We collect guest details for each place on the booking",
-      "2. We receive the tickets from the supplier",
-      "3. We send the tickets to you (or the named guests) ahead of the event",
+      "2. We send the tickets to you (or the named guests) ahead of the event",
       "",
       "Please reply to this email if you need anything on seating, hospitality, delivery timing, or guest names. Your sales contact remains available for anything commercial.",
       "",
-      "We will be in touch again once tickets are in hand.",
+      "I will be in touch again once tickets are ready to send.",
       "",
-      "Kind regards,",
-      sender,
-      "ZK Sports & Entertainment",
-      "Operations",
+      ...JENNY_SIGN_OFF,
     ].join("\n"),
   }
 }

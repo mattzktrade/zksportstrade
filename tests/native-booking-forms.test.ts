@@ -20,7 +20,9 @@ import {
   BOOKING_TERMS,
 } from "../lib/booking-forms/template"
 import {
+  bookingFormCc,
   clientSignedNotificationRecipients,
+  DEFAULT_BOOKINGS_CC,
   DEFAULT_CLIENT_SIGNED_NOTIFY_EMAILS,
 } from "../lib/email/send-booking-form"
 import type { BookingFormSnapshot } from "../lib/booking-forms/types"
@@ -253,6 +255,22 @@ test("no-VAT is the default edit and 5% included VAT does not change the total",
   const noVatPdf = await generateBookingFormPdf(withoutVat)
   assert.equal(Buffer.from(vatPdf).subarray(0, 4).toString(), "%PDF")
   assert.equal(Buffer.from(noVatPdf).subarray(0, 4).toString(), "%PDF")
+})
+
+test("sent and completed booking form emails CC bookings", () => {
+  assert.equal(DEFAULT_BOOKINGS_CC, "bookings@zk-sports.com")
+  assert.deepEqual(bookingFormCc(["client@example.com"]), [DEFAULT_BOOKINGS_CC])
+  assert.deepEqual(bookingFormCc(["client@example.com", DEFAULT_BOOKINGS_CC]), [])
+  const source = readFileSync("lib/email/send-booking-form.ts", "utf8")
+  const functionSource = (name: string) => {
+    const start = source.indexOf(`export function ${name}`)
+    const next = source.indexOf("export function ", start + 1)
+    return source.slice(start, next === -1 ? undefined : next)
+  }
+  assert.match(functionSource("sendNativeBookingFormEmail"), /cc: bookingFormCc\(to\)/)
+  assert.match(functionSource("sendManualNativeBookingFormEmail"), /cc: bookingFormCc\(to\)/)
+  assert.match(functionSource("sendCompletedBookingFormEmail"), /cc: bookingFormCc\(to\)/)
+  assert.doesNotMatch(functionSource("sendNativeBookingFormReminder"), /cc: bookingFormCc/)
 })
 
 test("client-signed booking form alerts go only to Ollie and Michel by default", () => {

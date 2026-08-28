@@ -11,33 +11,43 @@ const base = {
   accountName: "Apex Hospitality",
   eventLabel: "2026 Singapore Grand Prix",
   quantity: 4,
-  dealReference: "DL0401",
-  senderName: "Matt",
 }
 
 test("guest details request uses first name, guest count, and a reply-with-details body", () => {
   const draft = buildOperationsEmailDraft({ ...base, kind: "guest_details" })
-  assert.equal(draft.subject, "Guest details needed — 2026 Singapore Grand Prix (DL0401)")
+  assert.equal(draft.subject, "Guest details needed — 2026 Singapore Grand Prix")
   assert.match(draft.body, /^Hi Sarah,/)
+  assert.match(draft.body, /I'm Jenny from ZK Sports & Entertainment/)
   assert.match(draft.body, /4 guests/)
   assert.match(draft.body, /Full name, as it appears on their passport/)
   assert.match(draft.body, /Date of birth/)
   assert.match(draft.body, /Nationality/)
   assert.match(draft.body, /Please reply to this email/)
-  assert.match(draft.body, /Matt/)
+  assert.match(draft.body, /Jenny Kent/)
+  assert.doesNotMatch(draft.body, /Matt Johnson/)
+  assert.doesNotMatch(draft.body, /Operations\s*$/m)
+  assert.doesNotMatch(draft.body, /DL0401/)
+  assert.doesNotMatch(draft.body, /ZK-2026/)
+  assert.doesNotMatch(draft.subject, /DL0401/)
 })
 
-test("operations intro covers next steps and keeps sales for commercial questions", () => {
+test("operations intro introduces Jenny and omits supplier ticket receipt", () => {
   const draft = buildOperationsEmailDraft({ ...base, kind: "operations_intro" })
-  assert.equal(
-    draft.subject,
-    "Next steps for 2026 Singapore Grand Prix — introducing operations (DL0401)",
-  )
+  assert.equal(draft.subject, "Next steps for 2026 Singapore Grand Prix")
   assert.match(draft.body, /^Hi Sarah,/)
-  assert.match(draft.body, /introduce you to our operations team/)
+  assert.match(draft.body, /I'm Jenny from ZK Sports & Entertainment/)
+  assert.match(draft.body, /I wanted to introduce myself/)
   assert.match(draft.body, /guest details/)
-  assert.match(draft.body, /tickets from the supplier/)
+  assert.match(draft.body, /1\. We collect guest details/)
+  assert.match(draft.body, /2\. We send the tickets/)
+  assert.doesNotMatch(draft.body, /tickets from the supplier/)
+  assert.doesNotMatch(draft.body, /3\. /)
   assert.match(draft.body, /sales contact remains available/)
+  assert.match(draft.body, /Jenny Kent/)
+  assert.doesNotMatch(draft.body, /Matt Johnson/)
+  assert.doesNotMatch(draft.subject, /DL0401/)
+  assert.doesNotMatch(draft.body, /DL0401/)
+  assert.doesNotMatch(draft.body, /ZK-2026/)
 })
 
 test("single guest wording and missing name fall back cleanly", () => {

@@ -668,7 +668,13 @@ export function CheckoutClient({
                     <div>
                       <p className="text-sm sm:text-base font-medium text-foreground">
                         I accept the{" "}
-                        <Link href="/terms" className="text-primary underline underline-offset-2 hover:no-underline">
+                        <Link
+                          href="/terms"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(event) => event.stopPropagation()}
+                          className="text-primary underline underline-offset-2 hover:no-underline"
+                        >
                           terms and conditions
                         </Link>
                       </p>
@@ -774,7 +780,13 @@ export function CheckoutClient({
                     <div>
                       <p className="text-sm sm:text-base font-medium text-foreground">
                         I accept the{" "}
-                        <Link href="/terms" className="text-primary underline underline-offset-2 hover:no-underline">
+                        <Link
+                          href="/terms"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(event) => event.stopPropagation()}
+                          className="text-primary underline underline-offset-2 hover:no-underline"
+                        >
                           terms and conditions
                         </Link>
                       </p>

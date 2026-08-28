@@ -267,7 +267,7 @@ export function OperationsClient({
         if (time != null && time < today) return false
       }
       if (!q) return true
-      return [row.reference, row.dealReference, row.accountName, row.contactName, row.eventPackage, row.ownerName]
+      return [row.reference, row.dealReference, row.accountName, row.contactName, row.eventPackage]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
@@ -505,7 +505,6 @@ export function OperationsClient({
                 <th className="px-4 py-2.5 font-medium">Guests</th>
                 <th className="px-4 py-2.5 font-medium">Supplier</th>
                 <th className="px-4 py-2.5 font-medium">Delivery</th>
-                <th className="px-4 py-2.5 font-medium">Owner</th>
               </tr>
             </thead>
             <tbody className="divide-y text-[10px]">
@@ -649,15 +648,12 @@ export function OperationsClient({
                         <StatusPill tone={tone(ticket)}>{label(ticket)}</StatusPill>
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      <p>{row.operationsOwnerName || row.ownerName || "Unassigned"}</p>
-                    </td>
                   </tr>
                 )
               })}
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-10 text-center text-slate-400">
+                  <td colSpan={8} className="p-10 text-center text-slate-400">
                     No matching deals{eventScope === "future" ? " for future events" : ""}.
                   </td>
                 </tr>

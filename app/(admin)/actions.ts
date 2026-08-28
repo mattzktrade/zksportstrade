@@ -381,12 +381,23 @@ export async function updateInvoiceStatus(
   if (error) return { ok: false, message: error.message }
 
   const orderId = current.order_id
+  if (orderId && status === "delivered") {
+    await supabase
+      .from("order_operations")
+      .update({
+        delivery_status: "delivered",
+        fulfilment_status: "delivered",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("order_id", orderId)
+  }
   if (orderId && status === "paid") {
     const enq = await enqueueOpportunityOutcomeServer(String(orderId), "won")
     if (!enq.ok) {
       revalidatePath("/admin/agents")
       revalidatePath("/admin/orders")
       revalidatePath("/bookings")
+      revalidatePath("/invoices")
       return {
         ok: true,
         message: `Invoice marked paid. Outcome sync was not queued (${enq.message}). Process the sync queue from Settings → Integrations if needed.`,
@@ -397,6 +408,7 @@ export async function updateInvoiceStatus(
   revalidatePath("/admin/agents")
   revalidatePath("/admin/orders")
   revalidatePath("/bookings")
+  revalidatePath("/invoices")
   revalidatePath("/admin/integrations/salesforce")
   return { ok: true }
 }

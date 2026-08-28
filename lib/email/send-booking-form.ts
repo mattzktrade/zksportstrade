@@ -1,6 +1,12 @@
 import { Resend } from "resend"
-import { getResendApiKey, getResendFromAddress } from "@/lib/email/config"
-import { stripSurroundingQuotes } from "@/lib/email/config"
+import {
+  DEFAULT_BOOKINGS_CC,
+  getResendApiKey,
+  getResendFromAddress,
+  stripSurroundingQuotes,
+} from "@/lib/email/config"
+
+export { DEFAULT_BOOKINGS_CC }
 
 type BookingFormEmail = {
   recipientEmail: string
@@ -24,8 +30,15 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;")
 }
 
+export function bookingFormCc(to: string[]): string[] {
+  const exclude = new Set(to.map((email) => email.trim().toLowerCase()))
+  if (exclude.has(DEFAULT_BOOKINGS_CC)) return []
+  return [DEFAULT_BOOKINGS_CC]
+}
+
 async function send(input: {
   to: string[]
+  cc?: string[]
   subject: string
   html: string
   attachments?: Array<{ filename: string; content: Buffer }>
@@ -36,9 +49,11 @@ async function send(input: {
     return { ok: false, skipped: "RESEND_API_KEY or email sender is not configured" }
   }
   const resend = new Resend(apiKey)
+  const cc = input.cc?.filter(Boolean) ?? []
   const { error } = await resend.emails.send({
     from,
     to: input.to,
+    ...(cc.length > 0 ? { cc } : {}),
     subject: input.subject,
     html: input.html,
     attachments: input.attachments,
@@ -97,8 +112,10 @@ function manualBookingEmailHtml(input: BookingFormEmail): string {
 }
 
 export function sendNativeBookingFormEmail(input: BookingFormEmail) {
+  const to = [input.recipientEmail]
   return send({
-    to: [input.recipientEmail],
+    to,
+    cc: bookingFormCc(to),
     subject: `Signature requested: ${input.eventName} — ${input.documentRef}`,
     html: signingEmailHtml(input, false),
     attachments: bookingPdfAttachment(input),
@@ -106,8 +123,10 @@ export function sendNativeBookingFormEmail(input: BookingFormEmail) {
 }
 
 export function sendManualNativeBookingFormEmail(input: BookingFormEmail) {
+  const to = [input.recipientEmail]
   return send({
-    to: [input.recipientEmail],
+    to,
+    cc: bookingFormCc(to),
     subject: `Booking form: ${input.eventName} — ${input.documentRef}`,
     html: manualBookingEmailHtml(input),
     attachments: bookingPdfAttachment(input),
@@ -130,8 +149,10 @@ export function sendCompletedBookingFormEmail(input: {
   eventName: string
   pdf: Uint8Array
 }) {
+  const to = [...new Set([input.clientEmail.toLowerCase(), input.adminEmail.toLowerCase()])]
   return send({
-    to: [...new Set([input.clientEmail.toLowerCase(), input.adminEmail.toLowerCase()])],
+    to,
+    cc: bookingFormCc(to),
     subject: `Completed booking form — ${input.documentRef}`,
     html: [
       `<p>Hi ${escapeHtml(input.clientName)},</p>`,

@@ -3,6 +3,7 @@ import test from "node:test"
 import {
   allowedDealTransitions,
   canTransitionDeal,
+  dealStageFromOperations,
 } from "../lib/crm/deal-workflow"
 import {
   canonicalDealStage,
@@ -96,5 +97,64 @@ test("only paid stages are ready to fulfil; unpaid signed deals stay awaiting pa
   assert.equal(
     dealConfirmedOffPlatform({ order_id: null, stage: "proposal" }),
     false,
+  )
+})
+
+test("operations guest request and delivery advance a won deal", () => {
+  assert.equal(
+    dealStageFromOperations({
+      currentStage: "paid_confirmed",
+      guestDetailsStatus: "requested",
+      deliveryStatus: "not_ready",
+    }),
+    "in_fulfilment",
+  )
+  assert.equal(
+    dealStageFromOperations({
+      currentStage: "paid_confirmed",
+      guestDetailsStatus: "complete",
+      deliveryStatus: "not_ready",
+    }),
+    "in_fulfilment",
+  )
+  assert.equal(
+    dealStageFromOperations({
+      currentStage: "in_fulfilment",
+      guestDetailsStatus: "requested",
+      deliveryStatus: "delivered",
+    }),
+    "fulfilled",
+  )
+  assert.equal(
+    dealStageFromOperations({
+      currentStage: "paid_confirmed",
+      guestDetailsStatus: "requested",
+      deliveryStatus: "delivered",
+    }),
+    "fulfilled",
+  )
+  assert.equal(
+    dealStageFromOperations({
+      currentStage: "awaiting_payment",
+      guestDetailsStatus: "requested",
+      deliveryStatus: "not_ready",
+    }),
+    null,
+  )
+  assert.equal(
+    dealStageFromOperations({
+      currentStage: "fulfilled",
+      guestDetailsStatus: "complete",
+      deliveryStatus: "delivered",
+    }),
+    null,
+  )
+  assert.equal(
+    dealStageFromOperations({
+      currentStage: "in_fulfilment",
+      guestDetailsStatus: "requested",
+      deliveryStatus: "not_ready",
+    }),
+    null,
   )
 })

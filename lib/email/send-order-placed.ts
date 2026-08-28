@@ -1,4 +1,5 @@
 import { Resend } from "resend"
+import { getBookingConfirmationCc, stripSurroundingQuotes } from "@/lib/email/config"
 
 export type OrderEmailPayload = {
   agentEmail: string
@@ -105,28 +106,6 @@ function buildHtml(p: OrderEmailPayload): string {
   return lines.join("")
 }
 
-import { stripSurroundingQuotes } from "@/lib/email/config"
-
-function parseConfirmationCc(): string[] {
-  const raw = [
-    process.env.FINANCE_NOTIFICATION_EMAILS ?? "",
-    process.env.FINANCE_TEAM_EMAIL ?? "",
-    process.env.ORDER_CONFIRMATION_CC ?? "",
-  ].join(",")
-
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const part of raw.split(/[,;]/g)) {
-    const email = stripSurroundingQuotes(part.trim())
-    if (!email) continue
-    const key = email.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(email)
-  }
-  return out
-}
-
 export async function sendOrderPlacedEmail(p: OrderEmailPayload): Promise<{ ok: boolean; skipped?: string; error?: string }> {
   const apiKey = process.env.RESEND_API_KEY?.trim()
   const from = stripSurroundingQuotes(process.env.ORDER_EMAIL_FROM?.trim() ?? "") ||
@@ -135,15 +114,11 @@ export async function sendOrderPlacedEmail(p: OrderEmailPayload): Promise<{ ok: 
     return { ok: false, skipped: "RESEND_API_KEY or ORDER_EMAIL_FROM not configured" }
   }
 
-  const cc = parseConfirmationCc()
+  const cc = getBookingConfirmationCc(p.agentEmail)
   const resend = new Resend(apiKey)
   const subject = `Booking Confirmation ${p.orderReference} — ${p.circuit}`
 
-  let body = buildHtml(p)
-  if (cc.length === 0) {
-    body +=
-      "<p><strong>Note:</strong> Finance notification emails are not configured on the server yet. Please forward this confirmation internally.</p>"
-  }
+  const body = buildHtml(p)
 
   const { error } = await resend.emails.send({
     from,
@@ -155,9 +130,6 @@ export async function sendOrderPlacedEmail(p: OrderEmailPayload): Promise<{ ok: 
 
   if (error) {
     return { ok: false, error: error.message }
-  }
-  if (cc.length === 0) {
-    console.warn("[email] FINANCE_NOTIFICATION_EMAILS is empty — agent was emailed without finance CC")
   }
   return { ok: true }
 }

@@ -7,8 +7,13 @@ import { getPortalProfile } from "@/lib/supabase/profile"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 import { applyFulfilmentSoldToLayerRemaining } from "@/lib/inventory/fulfilment-layer-sold"
+import { guestDetailsStatusFromNamedCount } from "@/lib/operations/guest-status"
+import { syncDealWorkflowFromOperations } from "@/lib/operations/sync-deal-workflow"
 
 type Result = { ok: true; message: string } | { ok: false; message: string }
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 async function operationsGate() {
   const profile = await getPortalProfile()
@@ -50,8 +55,26 @@ export async function updateOrderOperations(input: {
       p_internal_notes: input.internalNotes ?? null,
     })
     if (error) throw new Error(error.message)
+    if (input.deliveryStatus === "delivered") {
+      if (!gate.admin) {
+        throw new Error("Service role is required to mark the agent booking as delivered.")
+      }
+      await markOrderInvoicesDelivered(gate.admin, input.orderId)
+    }
+    if (gate.admin) {
+      await syncDealWorkflowFromOperations(gate.admin, {
+        actorProfileId: gate.profile.id,
+        orderId: input.orderId,
+        guestDetailsStatus: input.guestDetailsStatus,
+        deliveryStatus: input.deliveryStatus,
+        fulfilmentStatus: input.fulfilmentStatus,
+      })
+    }
     revalidatePath("/admin/operations")
     revalidatePath("/admin")
+    revalidatePath("/admin/deals", "layout")
+    revalidatePath("/bookings")
+    revalidatePath("/invoices")
     return { ok: true, message: "Operations workflow updated." }
   } catch (error) {
     return { ok: false, message: errorMessage(error) }
@@ -85,16 +108,30 @@ export async function updateDealOperations(input: {
       { onConflict: "deal_id" },
     )
     if (error) throw new Error(error.message)
+    if (input.deliveryStatus === "delivered") {
+      const { data: deal } = await gate.admin.from("deals").select("order_id").eq("id", dealId).maybeSingle()
+      const orderId = deal?.order_id ? String(deal.order_id) : ""
+      if (UUID_RE.test(orderId)) {
+        await markOrderInvoicesDelivered(gate.admin, orderId)
+      }
+    }
+    await syncDealWorkflowFromOperations(gate.admin, {
+      actorProfileId: gate.profile.id,
+      dealId,
+      guestDetailsStatus: input.guestDetailsStatus,
+      deliveryStatus: input.deliveryStatus,
+      fulfilmentStatus: input.fulfilmentStatus,
+    })
     revalidatePath("/admin/operations")
     revalidatePath("/admin")
+    revalidatePath("/admin/deals", "layout")
+    revalidatePath("/bookings")
+    revalidatePath("/invoices")
     return { ok: true, message: "Operations workflow updated." }
   } catch (error) {
     return { ok: false, message: errorMessage(error) }
   }
 }
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function blank(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? ""
@@ -134,53 +171,135 @@ function guestPayload(input: GuestWrite) {
   }
 }
 
-async function bumpGuestStatusInProgress(
-  admin: NonNullable<ReturnType<typeof createAdminClient>>,
+function missingGuestsTable(message: string): boolean {
+  return /deal_guests/i.test(message) || message.includes("42P01") || message.includes("PGRST205")
+}
+
+type OperationsDb = NonNullable<ReturnType<typeof createAdminClient>>
+
+async function markOrderInvoicesDelivered(db: OperationsDb, orderId: string) {
+  if (!UUID_RE.test(orderId)) return
+  const { error } = await db
+    .from("invoices")
+    .update({ status: "delivered" })
+    .eq("order_id", orderId)
+    .in("status", ["paid", "delivered"])
+  if (error) throw new Error(error.message)
+}
+
+async function bookingGuestQuantity(
+  admin: OperationsDb,
+  target: { orderId: string | null; dealId: string | null },
+): Promise<number> {
+  if (target.orderId) {
+    const { data } = await admin.from("orders").select("guests").eq("id", target.orderId).maybeSingle()
+    return Math.max(1, Math.floor(Number(data?.guests) || 1))
+  }
+  if (!target.dealId) return 1
+  const { data: lines } = await admin.from("deal_line_items").select("quantity").eq("deal_id", target.dealId)
+  const sum = (lines ?? []).reduce((total, line) => total + Math.max(0, Math.floor(Number(line.quantity) || 0)), 0)
+  return Math.max(1, sum || 1)
+}
+
+async function namedGuestCount(
+  admin: OperationsDb,
+  target: { orderId: string | null; dealId: string | null },
+): Promise<number> {
+  if (target.orderId) {
+    const { data } = await admin.from("order_guests").select("full_name").eq("order_id", target.orderId)
+    return (data ?? []).filter((row) => blank(row.full_name)).length
+  }
+  if (!target.dealId) return 0
+  const { data } = await admin.from("deal_guests").select("full_name").eq("deal_id", target.dealId)
+  return (data ?? []).filter((row) => blank(row.full_name)).length
+}
+
+async function syncGuestDetailsStatus(
+  admin: OperationsDb,
   profileId: string,
   target: { orderId: string | null; dealId: string | null },
 ) {
+  const [quantity, named] = await Promise.all([
+    bookingGuestQuantity(admin, target),
+    namedGuestCount(admin, target),
+  ])
+  const now = new Date().toISOString()
+  let guestDetailsStatus = guestDetailsStatusFromNamedCount(named, quantity, "not_requested")
+  let deliveryStatus = "not_ready"
+  let fulfilmentStatus = "confirmed"
+
   if (target.orderId) {
-    const { data } = await admin
+    const { data, error: readError } = await admin
       .from("order_operations")
-      .select("guest_details_status")
+      .select("guest_details_status, delivery_status, fulfilment_status")
       .eq("order_id", target.orderId)
       .maybeSingle()
-    if ((data?.guest_details_status ?? "not_requested") === "not_requested") {
-      await admin
+    if (readError) throw new Error(readError.message)
+    guestDetailsStatus = guestDetailsStatusFromNamedCount(
+      named,
+      quantity,
+      String(data?.guest_details_status ?? "not_requested"),
+    )
+    deliveryStatus = String(data?.delivery_status ?? "not_ready")
+    fulfilmentStatus = String(data?.fulfilment_status ?? "confirmed")
+    if (data) {
+      const { error } = await admin
         .from("order_operations")
         .update({
-          guest_details_status: "partial",
+          guest_details_status: guestDetailsStatus,
           updated_by: profileId,
-          updated_at: new Date().toISOString(),
+          updated_at: now,
         })
         .eq("order_id", target.orderId)
+      if (error) throw new Error(error.message)
+    } else {
+      const { error } = await admin.from("order_operations").insert({
+        order_id: target.orderId,
+        guest_details_status: guestDetailsStatus,
+        updated_by: profileId,
+      })
+      if (error) throw new Error(error.message)
     }
-    return
   }
-  if (!target.dealId) return
-  const { data } = await admin
-    .from("deal_operations")
-    .select("guest_details_status, fulfilment_status, communication_status, supplier_status, delivery_status")
-    .eq("deal_id", target.dealId)
-    .maybeSingle()
-  if ((data?.guest_details_status ?? "not_requested") !== "not_requested") return
-  await admin.from("deal_operations").upsert(
-    {
-      deal_id: target.dealId,
-      fulfilment_status: data?.fulfilment_status ?? "confirmed",
-      guest_details_status: "partial",
-      communication_status: data?.communication_status ?? "not_started",
-      supplier_status: data?.supplier_status ?? "unassigned",
-      delivery_status: data?.delivery_status ?? "not_ready",
-      updated_by: profileId,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "deal_id" },
-  )
-}
 
-function missingGuestsTable(message: string): boolean {
-  return /deal_guests/i.test(message) || message.includes("42P01") || message.includes("PGRST205")
+  if (target.dealId) {
+    const { data, error: readError } = await admin
+      .from("deal_operations")
+      .select("guest_details_status, fulfilment_status, communication_status, supplier_status, delivery_status")
+      .eq("deal_id", target.dealId)
+      .maybeSingle()
+    if (readError) throw new Error(readError.message)
+    guestDetailsStatus = guestDetailsStatusFromNamedCount(
+      named,
+      quantity,
+      String(data?.guest_details_status ?? guestDetailsStatus),
+    )
+    deliveryStatus = String(data?.delivery_status ?? deliveryStatus)
+    fulfilmentStatus = String(data?.fulfilment_status ?? fulfilmentStatus)
+    const { error } = await admin.from("deal_operations").upsert(
+      {
+        deal_id: target.dealId,
+        fulfilment_status: data?.fulfilment_status ?? "confirmed",
+        guest_details_status: guestDetailsStatus,
+        communication_status: data?.communication_status ?? "not_started",
+        supplier_status: data?.supplier_status ?? "unassigned",
+        delivery_status: data?.delivery_status ?? "not_ready",
+        updated_by: profileId,
+        updated_at: now,
+      },
+      { onConflict: "deal_id" },
+    )
+    if (error) throw new Error(error.message)
+  }
+
+  await syncDealWorkflowFromOperations(admin, {
+    actorProfileId: profileId,
+    orderId: target.orderId,
+    dealId: target.dealId,
+    guestDetailsStatus,
+    deliveryStatus,
+    fulfilmentStatus,
+  })
 }
 
 export async function saveOrderGuests(input: {
@@ -241,7 +360,7 @@ export async function saveOrderGuests(input: {
       if (error) throw new Error(error.message)
     }
 
-    await bumpGuestStatusInProgress(gate.admin, gate.profile.id, { orderId, dealId })
+    await syncGuestDetailsStatus(gate.admin, gate.profile.id, { orderId, dealId })
     revalidatePath("/admin/operations")
     revalidatePath("/admin/deals", "layout")
     if (dealId) revalidatePath(`/admin/deals/${dealId}`)
@@ -287,6 +406,7 @@ export async function deleteOrderGuest(input: {
       ? await del.eq("order_id", orderId)
       : await del.eq("deal_id", dealId!)
     if (error) throw new Error(error.message)
+    await syncGuestDetailsStatus(gate.admin, gate.profile.id, { orderId, dealId })
     revalidatePath("/admin/operations")
     revalidatePath("/admin/deals", "layout")
     if (dealId) revalidatePath(`/admin/deals/${dealId}`)

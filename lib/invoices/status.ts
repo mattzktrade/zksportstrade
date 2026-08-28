@@ -54,3 +54,24 @@ export function isOutstandingInvoiceStatus(status: string | null | undefined): b
   const n = normalizeInvoiceStatus(status)
   return n !== "paid" && n !== "delivered"
 }
+
+const INVOICE_STATUS_RANK: Record<InvoiceWorkflowStatus, number> = {
+  delivered: 5,
+  paid: 4,
+  awaiting_payment: 3,
+  awaiting_invoice: 2,
+}
+
+/** Prefer delivered over paid when an order has more than one invoice row. */
+export function pickPreferredInvoice<T extends { status: string }>(
+  invoices: T | T[] | null | undefined,
+): T | null {
+  const list = Array.isArray(invoices) ? invoices : invoices ? [invoices] : []
+  return (
+    [...list].sort(
+      (a, b) =>
+        (INVOICE_STATUS_RANK[normalizeInvoiceStatus(b.status)] ?? 1) -
+        (INVOICE_STATUS_RANK[normalizeInvoiceStatus(a.status)] ?? 1),
+    )[0] ?? null
+  )
+}

@@ -11,27 +11,32 @@ export function stripSurroundingQuotes(value: string): string {
 }
 
 export const DEFAULT_FINANCE_CC = "finance@zk-sports.com"
+export const DEFAULT_BOOKINGS_CC = "bookings@zk-sports.com"
+export const DEFAULT_OPERATIONS_CC = "jenny@zk-sports.com"
+export const OPERATIONS_EMAIL_SENDER_NAME = "Jenny Kent"
+
+function exclusiveCc(address: string, excludeEmail: string): string[] {
+  const email = address.trim()
+  if (!email) return []
+  if (email.toLowerCase() === excludeEmail.trim().toLowerCase()) return []
+  return [email]
+}
+
+/** CC for portal booking confirmations: bookings@ only. */
+export function getBookingConfirmationCc(excludeEmail: string): string[] {
+  return exclusiveCc(DEFAULT_BOOKINGS_CC, excludeEmail)
+}
 
 /**
- * CC list for invoice and payment-reminder emails.
- * Always includes finance@zk-sports.com, plus any extra addresses in XERO_INVOICE_CC.
+ * CC for invoice and payment-reminder emails: finance@ only.
  */
 export function getInvoiceFinanceCc(excludeEmail: string): string[] {
-  const exclude = excludeEmail.trim().toLowerCase()
-  const seen = new Set<string>()
-  const out: string[] = []
-  const raw = [DEFAULT_FINANCE_CC, process.env.XERO_INVOICE_CC ?? ""].join(",")
+  return exclusiveCc(DEFAULT_FINANCE_CC, excludeEmail)
+}
 
-  for (const part of raw.split(/[,;]/g)) {
-    const email = stripSurroundingQuotes(part.trim())
-    if (!email) continue
-    const key = email.toLowerCase()
-    if (key === exclude || seen.has(key)) continue
-    seen.add(key)
-    out.push(email)
-  }
-
-  return out
+/** CC for operations introduction and guest-details emails: jenny@ only. */
+export function getOperationsEmailCc(excludeEmail: string): string[] {
+  return exclusiveCc(DEFAULT_OPERATIONS_CC, excludeEmail)
 }
 
 export function getResendFromAddress(): string | null {

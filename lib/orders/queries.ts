@@ -1,7 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import type { Booking } from "@/lib/types/catalog"
-import { normalizeInvoiceStatus } from "@/lib/invoices/status"
+import { normalizeInvoiceStatus, pickPreferredInvoice } from "@/lib/invoices/status"
 import type { BookingApprovalRequestRow } from "@/lib/booking-approval/types"
 import type { OrderRow, PackageSnippet } from "@/lib/orders/types"
 import { computeOrderProfit, getConsumptionsForOrders, type OrderProfit } from "@/lib/admin/cost-layers"
@@ -65,7 +65,7 @@ function one<T>(value: T | T[] | null | undefined): T | null {
 
 function mapOrderToBooking(row: OrderWithPackage): Booking {
   const pkg = row.packages
-  const invoice = one(row.invoices)
+  const invoice = pickPreferredInvoice(row.invoices)
   return {
     id: row.id,
     orderReference: row.reference,
@@ -114,6 +114,7 @@ function mapApprovalRequestToBooking(
 }
 
 export async function getMyBookings(): Promise<Booking[]> {
+  noStore()
   const supabase = await createClient()
 
   const { data: requestRows } = await supabase
@@ -185,7 +186,7 @@ export async function getMyBookings(): Promise<Booking[]> {
     const normalized: OrderWithPackage = {
       ...(row as OrderRow),
       packages: one(row.packages),
-      invoices: one(row.invoices),
+      invoices: row.invoices,
     }
     return mapOrderToBooking(normalized)
   })

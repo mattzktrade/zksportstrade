@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { hasCmsPermission } from "@/lib/auth/permissions"
 import { sendOperationsClientEmail } from "@/lib/email/send-operations-email"
+import { syncDealWorkflowFromOperations } from "@/lib/operations/sync-deal-workflow"
 import {
   buildOperationsEmailDraft,
   isOperationsEmailKind,
@@ -162,8 +163,6 @@ export async function previewOperationsEmail(input: {
     accountName: context.accountName,
     eventLabel: context.eventLabel,
     quantity: context.quantity,
-    dealReference: context.reference,
-    senderName: gate.profile.full_name || "ZK Sports",
   })
   const history = await loadHistory(gate.supabase, input.dealId, input.kind)
   return {
@@ -246,17 +245,22 @@ async function markOperationsAfterSend(
   kind: OperationsEmailKind,
 ) {
   if (!gate.admin) return
+  let nextGuest = "not_requested"
+  let deliveryStatus = "not_ready"
+  let fulfilmentStatus = "confirmed"
   if (orderId) {
     const { data: current } = await gate.admin
       .from("order_operations")
-      .select("guest_details_status, communication_status")
+      .select("guest_details_status, communication_status, delivery_status, fulfilment_status")
       .eq("order_id", orderId)
       .maybeSingle()
     const guestStatus = current?.guest_details_status ?? "not_requested"
-    const nextGuest =
+    nextGuest =
       kind === "guest_details" && ["not_requested", "not_required"].includes(String(guestStatus))
         ? "requested"
-        : guestStatus
+        : String(guestStatus)
+    deliveryStatus = String(current?.delivery_status ?? "not_ready")
+    fulfilmentStatus = String(current?.fulfilment_status ?? "confirmed")
     const communication =
       kind === "guest_details"
         ? "guest_request_sent"
@@ -291,36 +295,46 @@ async function markOperationsAfterSend(
           : "Sent operations introduction email",
       metadata: { kind },
     })
-    return
+  } else {
+    const { data: current } = await gate.admin
+      .from("deal_operations")
+      .select("guest_details_status, communication_status, fulfilment_status, supplier_status, delivery_status")
+      .eq("deal_id", dealId)
+      .maybeSingle()
+    const guestStatus = current?.guest_details_status ?? "not_requested"
+    nextGuest =
+      kind === "guest_details" && ["not_requested", "not_required"].includes(String(guestStatus))
+        ? "requested"
+        : String(guestStatus)
+    deliveryStatus = String(current?.delivery_status ?? "not_ready")
+    fulfilmentStatus = String(current?.fulfilment_status ?? "confirmed")
+    const communication =
+      kind === "guest_details"
+        ? "guest_request_sent"
+        : current?.communication_status && current.communication_status !== "not_started"
+          ? current.communication_status
+          : "booking_confirmation_sent"
+    await gate.admin.from("deal_operations").upsert(
+      {
+        deal_id: dealId,
+        fulfilment_status: current?.fulfilment_status ?? "confirmed",
+        guest_details_status: nextGuest,
+        communication_status: communication,
+        supplier_status: current?.supplier_status ?? "unassigned",
+        delivery_status: current?.delivery_status ?? "not_ready",
+        updated_by: gate.profile.id,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "deal_id" },
+    )
   }
 
-  const { data: current } = await gate.admin
-    .from("deal_operations")
-    .select("guest_details_status, communication_status, fulfilment_status, supplier_status, delivery_status")
-    .eq("deal_id", dealId)
-    .maybeSingle()
-  const guestStatus = current?.guest_details_status ?? "not_requested"
-  const nextGuest =
-    kind === "guest_details" && ["not_requested", "not_required"].includes(String(guestStatus))
-      ? "requested"
-      : guestStatus
-  const communication =
-    kind === "guest_details"
-      ? "guest_request_sent"
-      : current?.communication_status && current.communication_status !== "not_started"
-        ? current.communication_status
-        : "booking_confirmation_sent"
-  await gate.admin.from("deal_operations").upsert(
-    {
-      deal_id: dealId,
-      fulfilment_status: current?.fulfilment_status ?? "confirmed",
-      guest_details_status: nextGuest,
-      communication_status: communication,
-      supplier_status: current?.supplier_status ?? "unassigned",
-      delivery_status: current?.delivery_status ?? "not_ready",
-      updated_by: gate.profile.id,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "deal_id" },
-  )
+  await syncDealWorkflowFromOperations(gate.admin, {
+    actorProfileId: gate.profile.id,
+    dealId,
+    orderId,
+    guestDetailsStatus: nextGuest,
+    deliveryStatus,
+    fulfilmentStatus,
+  })
 }
