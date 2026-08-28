@@ -105,15 +105,24 @@ function isPortalVisiblePackage(pkg: DbPackage): boolean {
   return !pkg.is_hidden && pkg.sell_on_trade_portal !== false && !pkg.shell_parent_package_id
 }
 
+function asRows<T>(data: unknown): T[] {
+  return Array.isArray(data) ? (data as T[]) : []
+}
+
+type PackageColumnSet = typeof PACKAGE_COLUMNS | typeof PORTAL_HOME_PACKAGE_COLUMNS
+
 async function fetchCatalogBuilt(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  options?: { includeInventory?: boolean; packageColumns?: string },
+  options?: { includeInventory?: boolean; packageColumns?: PackageColumnSet },
 ): Promise<{ races: Race[]; packages: Package[]; packageMeta: PackageMeta[] } | null> {
   const includeInventory = options?.includeInventory !== false
-  const packageColumns = options?.packageColumns ?? PACKAGE_COLUMNS
+  const packagesQuery =
+    options?.packageColumns === PORTAL_HOME_PACKAGE_COLUMNS
+      ? supabase.from("packages").select(PORTAL_HOME_PACKAGE_COLUMNS).order("sort_order")
+      : supabase.from("packages").select(PACKAGE_COLUMNS).order("sort_order")
   const [racesRes, packagesRes, inventoryRes] = await Promise.all([
     supabase.from("races").select(RACE_COLUMNS).order("event_date"),
-    supabase.from("packages").select(packageColumns).order("sort_order"),
+    packagesQuery,
     includeInventory
       ? supabase.from("package_inventory").select(INVENTORY_COLUMNS)
       : Promise.resolve({ data: [] as DbInventory[], error: null }),
@@ -137,8 +146,8 @@ async function fetchCatalogBuilt(
     )
   }
 
-  const visiblePackageRows = (allPackages as DbPackage[]).filter(isPortalVisiblePackage)
-  const built = buildCatalog(allRaces as DbRace[], visiblePackageRows, (inventory ?? []) as DbInventory[])
+  const visiblePackageRows = asRows<DbPackage>(allPackages).filter(isPortalVisiblePackage)
+  const built = buildCatalog(asRows<DbRace>(allRaces), visiblePackageRows, asRows<DbInventory>(inventory))
   const packageMeta = visiblePackageRows.map((p) => ({
     id: p.id,
     inventory_group_id: p.inventory_group_id,
@@ -162,8 +171,8 @@ async function fetchHomeCatalog(
   }
   if (!racesRes.data || !packagesRes.data) return null
 
-  const visiblePackageRows = (packagesRes.data as DbPackage[]).filter(isPortalVisiblePackage)
-  const built = buildCatalog(racesRes.data as DbRace[], visiblePackageRows, [])
+  const visiblePackageRows = asRows<DbPackage>(packagesRes.data).filter(isPortalVisiblePackage)
+  const built = buildCatalog(asRows<DbRace>(racesRes.data), visiblePackageRows, [])
   const packageMeta = visiblePackageRows.map((p) => ({
     id: p.id,
     inventory_group_id: p.inventory_group_id,
@@ -286,7 +295,7 @@ export async function getRaceCatalog(
 
   if (pkgError || !packageRows) return null
 
-  const visiblePackageRows = (packageRows as DbPackage[]).filter(
+  const visiblePackageRows = asRows<DbPackage>(packageRows).filter(
     (pkg) =>
       !pkg.is_hidden &&
       pkg.sell_on_trade_portal !== false &&

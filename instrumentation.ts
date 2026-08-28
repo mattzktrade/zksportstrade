@@ -15,7 +15,6 @@ export async function register() {
   // does not trace it; Node still starts the existing tsx cron loop.
   const { spawn } = (await new Function("return import('node:child_process')")()) as typeof import("node:child_process")
   spawn("npx", ["tsx", "scripts/run-local-cron-loop.ts"], {
-    cwd: process.cwd(),
     env: process.env,
     stdio: "inherit",
     shell: true,

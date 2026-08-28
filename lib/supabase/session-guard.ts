@@ -81,7 +81,7 @@ export function hasSupabaseAuthCookie(cookieNames: readonly string[]): boolean {
 }
 
 export async function withTimeout<T>(
-  promise: Promise<T>,
+  promise: PromiseLike<T>,
   ms: number,
 ): Promise<{ ok: true; value: T } | { ok: false }> {
   let timer: ReturnType<typeof setTimeout> | undefined
