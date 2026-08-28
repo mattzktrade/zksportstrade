@@ -2,6 +2,13 @@
 export function mapPlaceOrderError(message: string): string {
   const m = message.toLowerCase()
   if (m.includes("insufficient_stock")) return "Not enough capacity left for this package. Try fewer guests or another date."
+  if (
+    m.includes("insufficient_purchased") ||
+    m.includes("insufficient_canonical_day_capacity") ||
+    m.includes("allocation_incomplete")
+  ) {
+    return "Not enough purchased stock is available for this package. Try fewer guests or another date."
+  }
   if (m.includes("leaves_one_remaining")) {
     return "This quantity would leave a single place unsold. When only a few places remain, book all remaining places together or choose a smaller group."
   }
