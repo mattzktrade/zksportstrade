@@ -5,6 +5,9 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   Building2,
+  Clock3,
+  MessageSquare,
+  Phone,
   Plus,
   Search,
   Upload,
@@ -14,7 +17,11 @@ import {
   X,
 } from "lucide-react"
 import { toast } from "sonner"
-import { assignAccountOwner, createCrmAccount } from "@/app/(admin)/admin/clients/profile-actions"
+import {
+  assignAccountOwner,
+  createCrmAccount,
+  updateCrmAccountLeadStage,
+} from "@/app/(admin)/admin/clients/profile-actions"
 import { AccountBulkUploadModal } from "@/app/(admin)/admin/leads/bulk-upload-modal"
 import { AccountKindPills } from "@/components/admin/account-kind-pills"
 import { EventMultiSelect } from "@/components/admin/crm-profile-editors"
@@ -29,6 +36,20 @@ import {
 } from "@/components/admin/admin-page-kit"
 import type { AdminRaceOption } from "@/lib/admin/queries"
 import { accountKindLabels, type AccountKind } from "@/lib/crm/account-kinds"
+import {
+  ACCOUNT_LEAD_STAGE_LABELS,
+  ACCOUNT_LEAD_STAGES,
+  ACCOUNT_LIFECYCLE_LABELS,
+  DEFAULT_LEAD_STAGE_FILTER,
+  LEAD_KPI_STAGES,
+  LEAD_STAGE_FILTER_LABELS,
+  compareLeadQueueRows,
+  isLeadWorkQueueAccount,
+  leadStageMatchesFilter,
+  leadStageTone,
+  lifecycleTone,
+  type LeadStageFilter,
+} from "@/lib/crm/account-lifecycle"
 import { adminAccountPath, adminContactPath } from "@/lib/crm/profile-links"
 import {
   ACCOUNT_SOURCE_LABELS,
@@ -40,7 +61,7 @@ import { cn } from "@/lib/utils"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 import { isModifiedClick, openInNewTab, pageSearchProps } from "@/lib/browser/laptop-qol"
 
-type View = "accounts" | "contacts"
+type View = "leads" | "accounts" | "contacts"
 
 type DraftContact = {
   id: number
@@ -112,13 +133,14 @@ export function LeadsClient({
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [listState, setListState] = usePersistedAdminFilters("zk-admin-leads-filters-v1", {
-    view: "accounts" as View,
+  const [listState, setListState] = usePersistedAdminFilters("zk-admin-leads-filters-v2", {
+    view: "leads" as View,
     query: "",
     ownerFilter: "all",
     sourceFilter: "",
+    stageFilter: DEFAULT_LEAD_STAGE_FILTER as LeadStageFilter,
   })
-  const { view, query, ownerFilter, sourceFilter } = listState
+  const { view, query, ownerFilter, sourceFilter, stageFilter } = listState
   const [showCreate, setShowCreate] = useState(false)
   const [showBulkUpload, setShowBulkUpload] = useState(false)
   const [companyName, setCompanyName] = useState("")
@@ -138,6 +160,12 @@ export function LeadsClient({
   const unassignedCount = clients.filter((client) => !client.owner_profile_id).length
   const myCount = clients.filter((client) => client.owner_profile_id === currentProfileId).length
   const contactCount = clients.reduce((sum, client) => sum + client.contacts.length, 0)
+  const leadStageFilter: LeadStageFilter =
+    stageFilter === "work" ||
+    stageFilter === "all" ||
+    (ACCOUNT_LEAD_STAGES as readonly string[]).includes(stageFilter)
+      ? stageFilter
+      : DEFAULT_LEAD_STAGE_FILTER
 
   const filteredClients = useMemo(() => {
     return clients.filter((client) => {
@@ -150,6 +178,28 @@ export function LeadsClient({
       return matchesQuery(client, q)
     })
   }, [clients, currentProfileId, ownerFilter, q, sourceFilter])
+
+  const leadAccounts = useMemo(() => {
+    return filteredClients.filter(isLeadWorkQueueAccount).sort(compareLeadQueueRows)
+  }, [filteredClients])
+
+  const leadRows = useMemo(() => {
+    return leadAccounts.filter((client) => leadStageMatchesFilter(client.lead_stage, leadStageFilter))
+  }, [leadAccounts, leadStageFilter])
+
+  const leadStageCounts = useMemo(() => {
+    const counts = {
+      new: 0,
+      reach_out: 0,
+      talking: 0,
+      later: 0,
+      not_a_fit: 0,
+    }
+    for (const client of leadAccounts) {
+      counts[client.lead_stage] += 1
+    }
+    return counts
+  }, [leadAccounts])
 
   const contactRows = useMemo(() => {
     return filteredClients.flatMap((client) =>
@@ -218,23 +268,62 @@ export function LeadsClient({
     })
   }
 
+  function changeLeadStage(accountId: string, leadStage: string) {
+    startTransition(async () => {
+      const result = await updateCrmAccountLeadStage({ accountId, leadStage })
+      if (!result.ok) {
+        toast.error(result.message)
+        return
+      }
+      toast.success(result.message)
+      router.refresh()
+    })
+  }
+
   return (
     <div className="space-y-3">
       <AdminPageHeader
         title="Accounts"
-        description="Companies and people in one directory. Unassigned accounts stay at the top until someone owns them. Start a deal when there is something to sell."
+        description="Companies and people in one directory. Use Leads for new prospects to contact. A signed booking or order marks them as a client."
       />
 
-      <AdminStats className="sm:grid-cols-2 xl:grid-cols-4">
-        <AdminStatCard icon={Building2} value={clients.length} label="Accounts" tone="blue" />
-        <AdminStatCard icon={UsersRound} value={contactCount} label="Contacts" tone="purple" />
-        <AdminStatCard icon={UserRoundPlus} value={unassignedCount} label="Unassigned" tone="amber" />
-        <AdminStatCard icon={UserRoundCheck} value={myCount} label="My accounts" tone="green" />
-      </AdminStats>
+      {view === "leads" ? (
+        <AdminStats className="sm:grid-cols-2 xl:grid-cols-4">
+          {LEAD_KPI_STAGES.map((stage) => (
+            <button
+              key={stage}
+              type="button"
+              onClick={() =>
+                setListState((current) => ({
+                  ...current,
+                  stageFilter: current.stageFilter === stage ? "work" : stage,
+                }))
+              }
+              className={cn("w-full text-left", leadStageFilter === stage && "rounded-lg ring-2 ring-primary/20")}
+            >
+              <AdminStatCard
+                icon={stage === "new" ? UserRoundPlus : stage === "reach_out" ? Phone : stage === "talking" ? MessageSquare : Clock3}
+                value={leadStageCounts[stage]}
+                label={ACCOUNT_LEAD_STAGE_LABELS[stage]}
+                tone={
+                  stage === "new" ? "amber" : stage === "reach_out" ? "blue" : stage === "talking" ? "purple" : "green"
+                }
+              />
+            </button>
+          ))}
+        </AdminStats>
+      ) : (
+        <AdminStats className="sm:grid-cols-2 xl:grid-cols-4">
+          <AdminStatCard icon={Building2} value={clients.length} label="Accounts" tone="blue" />
+          <AdminStatCard icon={UsersRound} value={contactCount} label="Contacts" tone="purple" />
+          <AdminStatCard icon={UserRoundPlus} value={unassignedCount} label="Unassigned" tone="amber" />
+          <AdminStatCard icon={UserRoundCheck} value={myCount} label="My accounts" tone="green" />
+        </AdminStats>
+      )}
 
       <AdminPanel>
         <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] px-4 pt-3">
-          {(["accounts", "contacts"] as const).map((item) => (
+          {(["leads", "accounts", "contacts"] as const).map((item) => (
             <button
               key={item}
               type="button"
@@ -244,7 +333,7 @@ export function LeadsClient({
                 view === item ? "border-primary text-primary" : "border-transparent text-slate-500",
               )}
             >
-              {item === "accounts" ? "Accounts" : "Contacts"}
+              {item === "leads" ? "Leads" : item === "accounts" ? "Accounts" : "Contacts"}
             </button>
           ))}
           <div className="mb-3 flex w-full flex-col gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:items-center">
@@ -266,6 +355,21 @@ export function LeadsClient({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] p-3">
+          {view === "leads" ? (
+            <select
+              value={leadStageFilter}
+              onChange={(e) =>
+                setListState((current) => ({ ...current, stageFilter: e.target.value as LeadStageFilter }))
+              }
+              className="h-9 rounded-md border bg-white px-3 text-[9px]"
+            >
+              {(Object.keys(LEAD_STAGE_FILTER_LABELS) as LeadStageFilter[]).map((id) => (
+                <option key={id} value={id}>
+                  {LEAD_STAGE_FILTER_LABELS[id]}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <select
             value={ownerFilter}
             onChange={(e) => setListState((current) => ({ ...current, ownerFilter: e.target.value }))}
@@ -304,7 +408,7 @@ export function LeadsClient({
           </div>
         </div>
 
-        {view === "accounts" ? (
+        {view === "leads" ? (
           <>
           <AdminDesktopTable>
             <table className="w-full min-w-[1040px] text-left">
@@ -314,19 +418,19 @@ export function LeadsClient({
                   <th className="px-4 py-2 font-medium">Primary contact</th>
                   <th className="px-4 py-2 font-medium">Source</th>
                   <th className="px-4 py-2 font-medium">Owner</th>
-                  <th className="px-4 py-2 font-medium">Deals</th>
-                  <th className="px-4 py-2 font-medium">Lifetime value</th>
+                  <th className="px-4 py-2 font-medium">Stage</th>
                   <th className="px-4 py-2 font-medium">Last activity</th>
                 </tr>
               </thead>
               <tbody className="divide-y text-[9px]">
-                {filteredClients.map((client) => {
+                {leadRows.map((client) => {
                   const primary = client.contacts.find((contact) => contact.is_primary) ?? client.contacts[0]
+                  const isNew = client.lead_stage === "new"
                   const unassigned = !client.owner_profile_id
                   return (
                     <tr
                       key={client.id}
-                      className={cn("hover:bg-slate-50", unassigned && "bg-amber-50/70")}
+                      className={cn("hover:bg-slate-50", isNew && "bg-amber-50/70")}
                       onClick={(event) => {
                         if ((event.target as HTMLElement).closest("a,button,input,select,textarea,label")) return
                         if (!isModifiedClick(event)) return
@@ -378,6 +482,147 @@ export function LeadsClient({
                           ))}
                         </select>
                       </td>
+                      <td className="px-4 py-3">
+                        <select
+                          value={client.lead_stage}
+                          disabled={pending}
+                          onChange={(e) => changeLeadStage(client.id, e.target.value)}
+                          className="h-8 max-w-[160px] rounded-md border bg-white px-2 text-[9px] disabled:opacity-50"
+                        >
+                          {ACCOUNT_LEAD_STAGES.map((stage) => (
+                            <option key={stage} value={stage}>
+                              {ACCOUNT_LEAD_STAGE_LABELS[stage]}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-4 py-3">{dateTime(client.last_activity_at)}</td>
+                    </tr>
+                  )
+                })}
+                {leadRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-14 text-center text-[10px] text-slate-400">
+                      No leads in this view. New accounts and bulk uploads land here as New.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </AdminDesktopTable>
+          <AdminMobileList>
+            {leadRows.map((client) => {
+              const primary = client.contacts.find((contact) => contact.is_primary) ?? client.contacts[0]
+              const isNew = client.lead_stage === "new"
+              const unassigned = !client.owner_profile_id
+              return (
+                <div key={client.id} className={cn("space-y-2 px-4 py-3", isNew && "bg-amber-50/70")}>
+                  <Link href={adminAccountPath(client.id)} className="font-semibold text-primary">
+                    {client.name}
+                  </Link>
+                  <p className="text-[8px] text-slate-400">
+                    {accountKindLabels(client.account_types)}
+                    {unassigned ? " · needs owner" : ""}
+                  </p>
+                  {primary ? (
+                    <p className="text-[10px] text-slate-600">
+                      {primary.full_name}
+                      {primary.email ? ` · ${primary.email}` : ""}
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusPill tone={leadStageTone(client.lead_stage)}>
+                      {ACCOUNT_LEAD_STAGE_LABELS[client.lead_stage]}
+                    </StatusPill>
+                    <StatusPill tone={sourceTone(client.source)}>
+                      {ACCOUNT_SOURCE_LABELS[client.source]}
+                    </StatusPill>
+                  </div>
+                </div>
+              )
+            })}
+            {leadRows.length === 0 ? (
+              <p className="px-4 py-14 text-center text-[10px] text-slate-400">
+                No leads in this view. New accounts and bulk uploads land here as New.
+              </p>
+            ) : null}
+          </AdminMobileList>
+          </>
+        ) : view === "accounts" ? (
+          <>
+          <AdminDesktopTable>
+            <table className="w-full min-w-[1040px] text-left">
+              <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Company</th>
+                  <th className="px-4 py-2 font-medium">Primary contact</th>
+                  <th className="px-4 py-2 font-medium">Source</th>
+                  <th className="px-4 py-2 font-medium">Owner</th>
+                  <th className="px-4 py-2 font-medium">Deals</th>
+                  <th className="px-4 py-2 font-medium">Lifetime value</th>
+                  <th className="px-4 py-2 font-medium">Last activity</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y text-[9px]">
+                {filteredClients.map((client) => {
+                  const primary = client.contacts.find((contact) => contact.is_primary) ?? client.contacts[0]
+                  return (
+                    <tr
+                      key={client.id}
+                      className="hover:bg-slate-50"
+                      onClick={(event) => {
+                        if ((event.target as HTMLElement).closest("a,button,input,select,textarea,label")) return
+                        if (!isModifiedClick(event)) return
+                        openInNewTab(adminAccountPath(client.id))
+                      }}
+                    >
+                      <td className="px-4 py-3">
+                        <Link href={adminAccountPath(client.id)} className="font-semibold text-primary hover:underline">
+                          {client.name}
+                        </Link>
+                        <p className="text-[8px] text-slate-400">{accountKindLabels(client.account_types)}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                        {primary ? (
+                          <Link
+                            href={adminContactPath(client.id, primary.id)}
+                            className="hover:text-primary hover:underline"
+                          >
+                            {primary.full_name}
+                          </Link>
+                        ) : (
+                          "—"
+                        )}
+                        <p className="text-[8px] text-slate-400">
+                          {primary?.email || client.email || "No email"}
+                          {` · ${client.contacts.length} contact${client.contacts.length === 1 ? "" : "s"}`}
+                        </p>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap items-center gap-1">
+                          <StatusPill tone={lifecycleTone(client.lifecycle)}>
+                            {ACCOUNT_LIFECYCLE_LABELS[client.lifecycle]}
+                          </StatusPill>
+                          <StatusPill tone={sourceTone(client.source)}>
+                            {ACCOUNT_SOURCE_LABELS[client.source]}
+                          </StatusPill>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <select
+                          value={client.owner_profile_id ?? ""}
+                          disabled={pending}
+                          onChange={(e) => changeOwner(client.id, e.target.value)}
+                          className="h-8 max-w-[180px] rounded-md border bg-white px-2 text-[9px] disabled:opacity-50"
+                        >
+                          <option value="">Unassigned</option>
+                          {staffOptions.map((owner) => (
+                            <option key={owner.id} value={owner.id}>
+                              {owner.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
                       <td className="px-4 py-3">{client.deal_count}</td>
                       <td className="px-4 py-3 font-semibold">{money(client.lifetime_spend)}</td>
                       <td className="px-4 py-3">{dateTime(client.last_activity_at)}</td>
@@ -397,16 +642,12 @@ export function LeadsClient({
           <AdminMobileList>
             {filteredClients.map((client) => {
               const primary = client.contacts.find((contact) => contact.is_primary) ?? client.contacts[0]
-              const unassigned = !client.owner_profile_id
               return (
-                <div key={client.id} className={cn("space-y-2 px-4 py-3", unassigned && "bg-amber-50/70")}>
+                <div key={client.id} className="space-y-2 px-4 py-3">
                   <Link href={adminAccountPath(client.id)} className="font-semibold text-primary">
                     {client.name}
                   </Link>
-                  <p className="text-[8px] text-slate-400">
-                    {accountKindLabels(client.account_types)}
-                    {unassigned ? " · needs owner" : ""}
-                  </p>
+                  <p className="text-[8px] text-slate-400">{accountKindLabels(client.account_types)}</p>
                   {primary ? (
                     <p className="text-[10px] text-slate-600">
                       {primary.full_name}
@@ -414,6 +655,9 @@ export function LeadsClient({
                     </p>
                   ) : null}
                   <div className="flex flex-wrap items-center gap-2">
+                    <StatusPill tone={lifecycleTone(client.lifecycle)}>
+                      {ACCOUNT_LIFECYCLE_LABELS[client.lifecycle]}
+                    </StatusPill>
                     <StatusPill tone={sourceTone(client.source)}>
                       {ACCOUNT_SOURCE_LABELS[client.source]}
                     </StatusPill>
@@ -444,7 +688,7 @@ export function LeadsClient({
                 {contactRows.map(({ client, contact }) => (
                   <tr
                     key={contact.id}
-                    className={cn("hover:bg-slate-50", !client.owner_profile_id && "bg-amber-50/70")}
+                    className="hover:bg-slate-50"
                     onClick={(event) => {
                       if ((event.target as HTMLElement).closest("a,button,input,select,textarea,label")) return
                       if (!isModifiedClick(event)) return
@@ -508,7 +752,7 @@ export function LeadsClient({
               <Link
                 key={contact.id}
                 href={adminContactPath(client.id, contact.id)}
-                className={cn("block space-y-1 px-4 py-3", !client.owner_profile_id && "bg-amber-50/70")}
+                className="block space-y-1 px-4 py-3"
               >
                 <p className="font-semibold text-primary">{contact.full_name}</p>
                 <p className="text-[10px] text-slate-600">{client.name}</p>

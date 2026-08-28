@@ -34,6 +34,9 @@ describe("admin help guide", () => {
 
     const questions = searchHelp("password")
     assert.ok(questions.questions.some((item) => item.q.toLowerCase().includes("password")))
+
+    const leads = searchHelp("leads")
+    assert.ok(leads.topics.some((topic) => topic.id === "sales"))
   })
 
   it("ignores unknown hashes", () => {

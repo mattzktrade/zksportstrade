@@ -1,7 +1,6 @@
 "use client"
 
-import Image from "next/image"
-import Link from "next/link"
+import { NavLink } from "@/components/nav-link"
 import { CatalogImage } from "@/components/catalog-image"
 import { ArrowRight } from "lucide-react"
 import type { PortalCatalog } from "@/lib/catalog/portal-catalog"
@@ -32,55 +31,6 @@ export function RacesGrid({ catalog }: { catalog: PortalCatalog }) {
 
   return (
     <section>
-      <div className="mb-10">
-        <div className="group relative rounded-2xl overflow-hidden bg-foreground">
-          <div className="absolute inset-0">
-            <Image
-              src="/dashboardheader.jpg"
-              alt="Dashboard Header"
-              fill
-              className="object-cover opacity-50 group-hover:opacity-55 group-hover:scale-105 transition-all duration-700"
-              priority
-            />
-          </div>
-          <div className="absolute inset-0 bg-gradient-to-b from-zk-black/70 via-zk-black/65 to-zk-black/75" />
-
-          <div className="relative flex flex-col min-h-[240px] sm:min-h-[280px] p-6 sm:p-8 md:p-10">
-            <div className="flex-1 flex flex-col justify-center items-start max-w-2xl">
-              <div className="mb-6 sm:mb-8">
-                <div className="inline-flex items-center gap-2 mb-3 sm:mb-4">
-                  <div className="h-px w-6 sm:w-8 bg-primary" />
-                  <span className="text-primary text-[9px] sm:text-[10px] font-semibold uppercase tracking-[0.25em]">Trade Portal</span>
-                </div>
-                <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-2 tracking-tight">
-                  Welcome to ZK Sports & Entertainment
-                </h1>
-                <p className="text-white/70 text-xs sm:text-sm md:text-base">
-                  Access exclusive F1 hospitality packages and manage your bookings
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2 sm:gap-2.5">
-              <Link
-                href="/packages"
-                className="group inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md bg-white/10 backdrop-blur-sm text-white text-xs sm:text-sm font-medium hover:bg-primary hover:text-white border border-white/20 hover:border-primary/50 transition-all duration-200"
-              >
-                <span>Packages</span>
-                <ArrowRight className="h-3 w-3 sm:h-3.5 sm:w-3.5 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
-              </Link>
-              <Link
-                href="/bookings"
-                className="group inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md bg-white/10 backdrop-blur-sm text-white text-xs sm:text-sm font-medium hover:bg-primary hover:text-white border border-white/20 hover:border-primary/50 transition-all duration-200"
-              >
-                <span>Bookings</span>
-                <ArrowRight className="h-3 w-3 sm:h-3.5 sm:w-3.5 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
-              </Link>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {featuredPackages.length > 0 ? <FeaturedPackages packages={featuredPackages} /> : null}
 
       <div className="flex flex-col gap-4 mb-5 sm:mb-6">
@@ -132,7 +82,7 @@ export function RacesGrid({ catalog }: { catalog: PortalCatalog }) {
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
         {filteredRaces.map((race) => (
-          <Link
+          <NavLink
             key={race.id}
             href={`/packages/race/${race.id}`}
             className="group relative rounded-xl overflow-hidden hover:shadow-xl hover:shadow-primary/10 transition-all duration-300"
@@ -144,6 +94,7 @@ export function RacesGrid({ catalog }: { catalog: PortalCatalog }) {
                 variant="card"
                 fill
                 sizes="(max-width: 640px) 50vw, 25vw"
+                loading="lazy"
                 className="object-cover group-hover:scale-110 transition-transform duration-500"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/10" />
@@ -160,7 +111,7 @@ export function RacesGrid({ catalog }: { catalog: PortalCatalog }) {
                 <p className="text-[10px] text-white/50 mt-0.5">{race.location}</p>
               </div>
             </div>
-          </Link>
+          </NavLink>
         ))}
       </div>
 

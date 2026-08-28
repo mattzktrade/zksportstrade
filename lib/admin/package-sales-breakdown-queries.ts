@@ -52,15 +52,34 @@ export async function getPackageSalesBreakdownByPackage(
     batches.push(ids.slice(i, i + IN_FILTER_BATCH))
   }
 
-  const orderLineResults = await Promise.all(
-    batches.map((batch) =>
-      supabase
-        .from("order_line_items")
-        .select("package_id, quantity, order_id, orders!inner(status, channel)")
-        .in("package_id", batch)
-        .neq("orders.status", "cancelled"),
+  const [orderLineResults, orderResults, dealLineResults] = await Promise.all([
+    Promise.all(
+      batches.map((batch) =>
+        supabase
+          .from("order_line_items")
+          .select("package_id, quantity, order_id, orders!inner(status, channel)")
+          .in("package_id", batch)
+          .neq("orders.status", "cancelled"),
+      ),
     ),
-  )
+    Promise.all(
+      batches.map((batch) =>
+        supabase
+          .from("orders")
+          .select("id, package_id, channel, guests")
+          .in("package_id", batch)
+          .neq("status", "cancelled"),
+      ),
+    ),
+    Promise.all(
+      batches.map((batch) =>
+        supabase
+          .from("deal_line_items")
+          .select("package_id, quantity, deals!inner(id, order_id, stage, source)")
+          .in("package_id", batch),
+      ),
+    ),
+  ])
 
   for (const { data: lines } of orderLineResults) {
     for (const row of lines ?? []) {
@@ -74,16 +93,6 @@ export async function getPackageSalesBreakdownByPackage(
       out.set(pkgId, breakdown)
     }
   }
-
-  const orderResults = await Promise.all(
-    batches.map((batch) =>
-      supabase
-        .from("orders")
-        .select("id, package_id, channel, guests")
-        .in("package_id", batch)
-        .neq("status", "cancelled"),
-    ),
-  )
 
   for (const { data: orders, error: orderErr } of orderResults) {
     if (orderErr || !orders) continue
@@ -99,14 +108,6 @@ export async function getPackageSalesBreakdownByPackage(
 
   const wanted = new Set(ids)
   const dealLines: Array<Record<string, unknown>> = []
-  const dealLineResults = await Promise.all(
-    batches.map((batch) =>
-      supabase
-        .from("deal_line_items")
-        .select("package_id, quantity, deals!inner(id, order_id, stage, source)")
-        .in("package_id", batch),
-    ),
-  )
   for (const { data } of dealLineResults) {
     if (data) dealLines.push(...data)
   }

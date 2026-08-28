@@ -3,7 +3,7 @@
 **Status:** First-build admin complete — ready to share with the ZK team  
 **Document owner:** ZK Sports & Entertainment  
 **Created:** 11 August 2026  
-**Last updated:** 26 August 2026  
+**Last updated:** 27 August 2026  
 **Primary reference:** `docs/ZK CMS Rebuild Draft (1).pdf`  
 **Purpose:** The single source of truth for the Salesforce-to-ZK platform pivot, including scope, decisions, architecture, phases, progress, risks, testing, and outstanding questions.
 
@@ -1337,9 +1337,19 @@ The first release is successful when:
 - **Decided:** Adding or editing a signed deal line allocates only that line. Prefer a supplier already used on the same deal when leftover stock is enough, rather than reshuffling every party on the product.
 - **Decided:** When packing purchased stock onto deals, keep a whole party on one supplier/purchase source where possible (pack the deal, not each split line).
 
+### 27 August 2026
+
+- **Decided:** Keep the Sales nav item as Accounts. Add a Leads tab on the same page as a work queue for prospects who have not booked yet. Do not rename the section to Leads, and do not revive the `crm_leads` enquiry inbox.
+- **Decided:** Account `lifecycle` is `lead` or `client`. Lead stages are New, Reach out, Talking, Later, and Not a fit. New accounts and bulk uploads start as New. Historical prospects backfill to Later so the queue is not a dump of old Salesforce.
+- **Decided:** A signed/sold deal or a non-cancelled order auto-promotes Lead → Client only. Deals remains the booking pipeline. Marketing campaigns stay a later module; Later is the hold list for that.
+
 ---
 
 ## 18. Change log
+
+### 27 August 2026 — Leads work queue inside Accounts
+
+Sales → Accounts keeps its name and URL. A Leads tab is the prospect work queue (`lifecycle` + `lead_stage` on `crm_accounts`). Booking marks the account as a client. Amber highlighting is only for New rows on that tab.
 
 ### 26 August 2026 — First-build admin complete; Help tab; signed-deal stock
 

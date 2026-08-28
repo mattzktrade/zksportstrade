@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useMemo } from "react"
-import Link from "next/link"
+import { NavLink } from "@/components/nav-link"
 import { useRouter } from "next/navigation"
 import { CatalogImage } from "@/components/catalog-image"
 import type { Race } from "@/lib/types/catalog"
@@ -19,6 +19,7 @@ function RaceTableRow({ race }: { race: RaceRow }) {
   return (
     <tr
       className="hover:bg-muted/30 transition-colors cursor-pointer"
+      onMouseEnter={() => router.prefetch(href)}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest("a,button")) return
         if (isModifiedClick(event)) {
@@ -57,13 +58,13 @@ function RaceTableRow({ race }: { race: RaceRow }) {
         </span>
       </td>
       <td className="px-4 sm:px-6 py-3 sm:py-4">
-        <Link
+        <NavLink
           href={`/packages/race/${race.id}`}
           className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-primary text-white text-xs sm:text-sm font-medium hover:bg-primary/90 transition-colors ml-auto"
         >
           View Packages
           <ArrowRight className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-        </Link>
+        </NavLink>
       </td>
     </tr>
   )
@@ -71,7 +72,7 @@ function RaceTableRow({ race }: { race: RaceRow }) {
 
 function RaceMobileCard({ race }: { race: RaceRow }) {
   return (
-    <Link
+    <NavLink
       href={`/packages/race/${race.id}`}
       className="block bg-card rounded-2xl border border-border overflow-hidden hover:shadow-lg transition-shadow"
     >
@@ -103,7 +104,7 @@ function RaceMobileCard({ race }: { race: RaceRow }) {
           <ArrowRight className="h-4 w-4 sm:h-5 sm:w-5 text-primary flex-shrink-0" />
         </div>
       </div>
-    </Link>
+    </NavLink>
   )
 }
 

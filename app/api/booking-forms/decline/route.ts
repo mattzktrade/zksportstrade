@@ -3,9 +3,14 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { sha256 } from "@/lib/booking-forms/snapshot"
 import { syncBookingFormDealInventory } from "@/lib/booking-forms/inventory-sync"
 import { getRequestEvidence } from "@/lib/booking-forms/request-evidence"
+import { checkRateLimit, clientIpFromHeaders } from "@/lib/auth/rate-limit"
 
 export async function POST(request: NextRequest) {
   try {
+    const ip = clientIpFromHeaders(request.headers)
+    if (!checkRateLimit(`booking-form:decline:${ip}`, 20, 15 * 60 * 1000)) {
+      return NextResponse.json({ error: "Too many requests. Try again shortly." }, { status: 429 })
+    }
     const body = (await request.json()) as Record<string, unknown>
     const token = String(body.token ?? "").trim()
     const reason = String(body.reason ?? "").trim().slice(0, 1000)

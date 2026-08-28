@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import Link from "next/link"
+import { NavLink } from "@/components/nav-link"
 import { usePathname, useRouter } from "next/navigation"
 import Image from "next/image"
 import { LayoutDashboard, Ticket, CalendarCheck, HelpCircle, LogOut, Menu, Shield } from "lucide-react"
@@ -10,8 +10,13 @@ import { useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { usePortalUser } from "@/components/portal-user-provider"
 import { LOGO_MAIN } from "@/lib/branding"
-import { ContactWidget } from "@/components/contact-widget"
+import dynamic from "next/dynamic"
 import { escapeCloseProps } from "@/lib/browser/laptop-qol"
+
+const ContactWidget = dynamic(
+  () => import("@/components/contact-widget").then((mod) => mod.ContactWidget),
+  { ssr: false },
+)
 
 export function PortalLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -54,7 +59,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
         )}
       >
         <div className="border-b border-border p-5">
-          <Link href="/" className="block">
+          <NavLink href="/" className="block">
             <Image
               src={LOGO_MAIN.src}
               alt="ZK Sports & Entertainment"
@@ -65,7 +70,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
               priority
             />
             <p className="text-[9px] uppercase tracking-widest text-primary font-semibold mt-1.5">Trade Portal</p>
-          </Link>
+          </NavLink>
         </div>
 
         <nav className="flex-1 overflow-y-auto overscroll-contain p-3 space-y-0.5">
@@ -75,7 +80,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
                 ? pathname === "/admin" || pathname.startsWith("/admin/")
                 : pathname === item.href
             return (
-              <Link
+              <NavLink
                 key={item.name}
                 href={item.href}
                 onClick={() => setSidebarOpen(false)}
@@ -91,13 +96,13 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
                 )}
                 <item.icon className={cn("h-[18px] w-[18px] flex-shrink-0", isActive ? "text-primary" : "")} />
                 <span>{item.name}</span>
-              </Link>
+              </NavLink>
             )
           })}
         </nav>
 
         <div className="p-3 border-t border-border">
-          <Link
+          <NavLink
             href="/profile"
             className="flex items-center gap-2.5 p-2 rounded-md hover:bg-muted/50 transition-colors"
           >
@@ -113,7 +118,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
               <p className="text-sm font-medium text-foreground truncate">{displayName}</p>
               <p className="text-[11px] text-muted-foreground truncate">{profile.company_name || profile.email}</p>
             </div>
-          </Link>
+          </NavLink>
           <button
             type="button"
             onClick={() => void handleSignOut()}
@@ -143,7 +148,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
               className="h-6 w-auto"
               sizes="120px"
             />
-            <Link
+            <NavLink
               href="/profile"
               className="h-8 w-8 rounded-full bg-primary text-white flex items-center justify-center text-xs font-semibold"
             >
@@ -153,7 +158,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
                 .join("")
                 .slice(0, 2)
                 .toUpperCase()}
-            </Link>
+            </NavLink>
           </div>
         </header>
 

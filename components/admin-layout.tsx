@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import Link from "next/link"
+import { NavLink } from "@/components/nav-link"
 import { usePathname, useRouter } from "next/navigation"
 import Image from "next/image"
 import {
@@ -88,7 +88,7 @@ const navigation: NavItem[] = [
 ]
 
 const JUMP_KEYWORDS: Record<string, string> = {
-  "/admin/leads": "leads clients companies contacts people",
+  "/admin/leads": "leads clients companies contacts people prospects funnel",
   "/admin/deals": "pipeline crm sales",
   "/admin/catalog/events": "races calendar",
   "/admin/orders": "bookings invoices portal",
@@ -199,7 +199,7 @@ export function AdminLayout({
         )}
       >
         <div className="flex h-16 items-center justify-between gap-2 border-b border-white/10 px-4">
-          <Link href="/admin" className="block min-w-0">
+          <NavLink href="/admin" className="block min-w-0">
             <Image
               src={LOGO_WHITE.src}
               alt="ZK Sports & Entertainment"
@@ -209,7 +209,7 @@ export function AdminLayout({
               sizes="192px"
               priority
             />
-          </Link>
+          </NavLink>
           <button
             type="button"
             onClick={() => setSidebarOpen(false)}
@@ -247,9 +247,10 @@ export function AdminLayout({
                         const active = itemIsActive(pathname, child.href)
                         const ChildIcon = child.icon
                         return (
-                          <Link
+                          <NavLink
                             key={child.href}
                             href={child.href}
+                            onClick={() => setSidebarOpen(false)}
                             className={cn(
                               "relative flex items-center gap-2 pl-8 pr-2.5 py-2.5 rounded-md text-[11px] transition-colors lg:py-2",
                               active
@@ -262,7 +263,7 @@ export function AdminLayout({
                             ) : null}
                             {ChildIcon ? <ChildIcon className={cn("h-3.5 w-3.5", active && "text-primary")} /> : null}
                             <span>{child.name}</span>
-                          </Link>
+                          </NavLink>
                         )
                       })}
                     </div>
@@ -285,9 +286,10 @@ export function AdminLayout({
             }
 
             return (
-              <Link
+              <NavLink
                 key={item.name}
                 href={item.href!}
+                onClick={() => setSidebarOpen(false)}
                 className={cn(
                   "relative flex items-center gap-2.5 rounded-md px-2.5 py-2.5 text-[12px] transition-all lg:py-2",
                   isActive
@@ -300,19 +302,19 @@ export function AdminLayout({
                 )}
                 <item.icon className={cn("h-4 w-4 flex-shrink-0", isActive ? "text-primary" : "")} />
                 <span>{item.name}</span>
-              </Link>
+              </NavLink>
             )
           })}
         </nav>
 
         <div className="p-3 border-t border-white/10 space-y-1">
-          <Link
+          <NavLink
             href="/"
             className="flex items-center gap-2 px-3 py-2 rounded-md text-xs text-slate-400 hover:text-white hover:bg-white/5"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             Trade portal
-          </Link>
+          </NavLink>
           <button
             type="button"
             onClick={() => void handleSignOut()}

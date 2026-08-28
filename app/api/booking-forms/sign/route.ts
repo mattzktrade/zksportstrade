@@ -15,11 +15,17 @@ import type { BookingFormSnapshot } from "@/lib/booking-forms/types"
 import { sendClientSignedBookingFormNotification } from "@/lib/email/send-booking-form"
 import { getServerSiteOrigin } from "@/lib/auth/site-origin"
 import { getRequestEvidence } from "@/lib/booking-forms/request-evidence"
+import { publicBookingFormSignError } from "@/lib/booking-forms/public-errors"
+import { checkRateLimit, clientIpFromHeaders } from "@/lib/auth/rate-limit"
 
 export const runtime = "nodejs"
 
 export async function POST(request: NextRequest) {
   try {
+    const ip = clientIpFromHeaders(request.headers)
+    if (!checkRateLimit(`booking-form:sign:${ip}`, 20, 15 * 60 * 1000)) {
+      return NextResponse.json({ error: "Too many requests. Try again shortly." }, { status: 429 })
+    }
     const body = (await request.json()) as Record<string, unknown>
     const token = String(body.token ?? "").trim()
     const signerName = String(body.signerName ?? "").trim()
@@ -101,9 +107,8 @@ export async function POST(request: NextRequest) {
       p_user_agent: requestEvidence.userAgent,
     })
     if (signError) {
-      const message = signError.message.toLowerCase()
-      const status = message.includes("expired") ? 410 : message.includes("not_signable") ? 409 : 400
-      return NextResponse.json({ error: signError.message }, { status })
+      const mapped = publicBookingFormSignError(signError.message)
+      return NextResponse.json({ error: mapped.error }, { status: mapped.status })
     }
 
     const snapshot = form.snapshot_data as BookingFormSnapshot
@@ -147,8 +152,8 @@ export async function POST(request: NextRequest) {
     revalidatePath("/admin/deals")
     return NextResponse.json({ ok: true })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not record signature."
-    return NextResponse.json({ error: message }, { status: 400 })
+    console.error("[booking-forms] sign:", error instanceof Error ? error.message : error)
+    return NextResponse.json({ error: "Could not record signature." }, { status: 400 })
   }
 }
 

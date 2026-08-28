@@ -3,11 +3,11 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { createClient } from "@/lib/supabase/client"
 import { AuthCardBrand } from "@/components/auth-card-brand"
 import { PasswordInput } from "@/components/password-input"
 import { COMPANY_TYPE_OPTIONS, type CompanyType } from "@/lib/types/profile"
 import { Loader2 } from "lucide-react"
+import { resendSignupConfirmationAction, signUpAction } from "./signup-actions"
 
 export default function SignupPage() {
   const router = useRouter()
@@ -27,26 +27,19 @@ export default function SignupPage() {
     e.preventDefault()
     setLoading(true)
     setMessage(null)
-    const supabase = createClient()
-    const normalizedEmail = email.trim().toLowerCase()
-    const { data, error } = await supabase.auth.signUp({
-      email: normalizedEmail,
+    const result = await signUpAction({
+      fullName,
+      companyName,
+      companyType,
+      email,
       password,
-      options: {
-        emailRedirectTo: typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined,
-        data: {
-          full_name: fullName.trim(),
-          company_name: companyName.trim(),
-          company_type: companyType,
-        },
-      },
     })
     setLoading(false)
-    if (error) {
-      setMessage(error.message)
+    if (!result.ok) {
+      setMessage(result.message)
       return
     }
-    if (data.user && !data.session) {
+    if (result.needsEmailConfirm) {
       setCheckEmail(true)
       return
     }
@@ -60,17 +53,10 @@ export default function SignupPage() {
     setResendLoading(true)
     setResendSuccess(null)
     setResendError(null)
-    const supabase = createClient()
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email: trimmed,
-      options: {
-        emailRedirectTo: typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined,
-      },
-    })
+    const result = await resendSignupConfirmationAction(trimmed)
     setResendLoading(false)
-    if (error) {
-      setResendError(error.message)
+    if (!result.ok) {
+      setResendError(result.message)
       return
     }
     setResendSuccess("Sent. Check your inbox and spam folder — it can take a minute to arrive.")

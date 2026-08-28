@@ -145,7 +145,10 @@ export function AdminJumpSearch({ destinations }: { destinations: AdminJumpItem[
                 type="button"
                 role="option"
                 aria-selected={index === activeIndex}
-                onMouseEnter={() => setHighlight(index)}
+                onMouseEnter={() => {
+                  setHighlight(index)
+                  router.prefetch(item.href)
+                }}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => go(item.href)}
                 className={cn(

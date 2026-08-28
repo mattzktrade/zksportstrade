@@ -37,7 +37,7 @@ export function prefetchCatalogImage(
     width: layout.width,
     height: layout.height,
     sizes: layout.sizes,
-    quality: 82,
+    quality: 75,
   })
 
   const img = new window.Image()

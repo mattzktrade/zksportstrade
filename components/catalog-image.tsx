@@ -21,7 +21,7 @@ export function CatalogImage({
   sizes,
   alt,
   fill,
-  quality = 82,
+  quality = 75,
   ...rest
 }: CatalogImageProps) {
   const displaySrc = toDisplayImageUrl(src, { variant })

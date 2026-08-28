@@ -2,11 +2,12 @@
 
 import { revalidatePath } from "next/cache"
 import { requireAdminAction } from "@/app/(admin)/actions"
+import { parseAccountKinds, primaryAccountType, type AccountKind } from "@/lib/crm/account-kinds"
 import {
-  parseAccountKinds,
-  primaryAccountType,
-  type AccountKind,
-} from "@/lib/crm/account-kinds"
+  isAccountLeadStage,
+  isAccountLifecycle,
+  newAccountLifecycle,
+} from "@/lib/crm/account-lifecycle"
 import { adminAccountPath, adminContactPath, adminSupplierPath } from "@/lib/crm/profile-links"
 import { ensureSupplierForAccount } from "@/lib/inventory/suppliers"
 import type { SupabaseClient } from "@supabase/supabase-js"
@@ -253,6 +254,7 @@ export async function createCrmAccount(input: {
   if (!ACCOUNT_SOURCES.has(source)) return { ok: false, message: "Account source is not valid." }
   const ownerProfileId = blank(input.ownerProfileId)
   if (ownerProfileId && !UUID_RE.test(ownerProfileId)) return { ok: false, message: "Invalid owner." }
+  const created = newAccountLifecycle()
 
   const contacts = (input.contacts ?? [])
     .map((contact) => ({
@@ -278,6 +280,8 @@ export async function createCrmAccount(input: {
       phone: blank(input.phone) ?? primary?.phone ?? null,
       notes: blank(input.notes),
       owner_profile_id: ownerProfileId,
+      lifecycle: created.lifecycle,
+      lead_stage: created.leadStage,
       billing_address_line1: blank(input.billing?.line1),
       billing_address_line2: blank(input.billing?.line2),
       billing_city: blank(input.billing?.city),
@@ -373,6 +377,61 @@ export async function assignAccountOwner(input: {
   if (error) return { ok: false, message: error.message }
   revalidateCompany(accountId)
   return { ok: true, message: ownerProfileId ? "Owner assigned." : "Owner cleared." }
+}
+
+export async function updateCrmAccountLifecycle(input: {
+  accountId: string
+  lifecycle: string
+  leadStage?: string | null
+}): Promise<Result> {
+  const gate = await requireAdminAction("accounts.manage")
+  if (!gate.ok) return gate
+  const accountId = input.accountId.trim()
+  if (!UUID_RE.test(accountId)) return { ok: false, message: "Invalid company id." }
+  if (!isAccountLifecycle(input.lifecycle)) return { ok: false, message: "Choose Lead or Client." }
+  const leadStage = blank(input.leadStage)
+  if (leadStage && !isAccountLeadStage(leadStage)) return { ok: false, message: "Choose a valid lead stage." }
+  if (input.lifecycle === "lead" && !leadStage) {
+    return { ok: false, message: "Choose a lead stage." }
+  }
+
+  const { error } = await gate.supabase
+    .from("crm_accounts")
+    .update({
+      lifecycle: input.lifecycle,
+      ...(leadStage ? { lead_stage: leadStage } : input.lifecycle === "lead" ? { lead_stage: "later" } : {}),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", accountId)
+  if (error) return { ok: false, message: error.message }
+  revalidateCompany(accountId)
+  return {
+    ok: true,
+    message: input.lifecycle === "client" ? "Marked as a client." : "Moved back to leads.",
+  }
+}
+
+export async function updateCrmAccountLeadStage(input: {
+  accountId: string
+  leadStage: string
+}): Promise<Result> {
+  const gate = await requireAdminAction("accounts.manage")
+  if (!gate.ok) return gate
+  const accountId = input.accountId.trim()
+  if (!UUID_RE.test(accountId)) return { ok: false, message: "Invalid company id." }
+  if (!isAccountLeadStage(input.leadStage)) return { ok: false, message: "Choose a valid lead stage." }
+
+  const { error } = await gate.supabase
+    .from("crm_accounts")
+    .update({
+      lead_stage: input.leadStage,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", accountId)
+    .eq("lifecycle", "lead")
+  if (error) return { ok: false, message: error.message }
+  revalidateCompany(accountId)
+  return { ok: true, message: "Lead stage updated." }
 }
 
 export async function updateCrmAccountInterests(input: {

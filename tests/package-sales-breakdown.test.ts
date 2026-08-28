@@ -237,3 +237,19 @@ test("linked weekend sales reduce 3-day remaining even without single-day SKUs",
     /if \(!threeDay\?\.id \|\| dayMembers\.length === 0\) return false/,
   )
 })
+
+test("portal home computes sellable for featured packages only", () => {
+  const queries = readFileSync("lib/catalog/queries.ts", "utf8")
+  const home = readFileSync("app/(portal)/page.tsx", "utf8")
+  const packages = readFileSync("app/(portal)/packages/page.tsx", "utf8")
+  const hero = readFileSync("components/dashboard/dashboard-hero.tsx", "utf8")
+  assert.match(queries, /sellable === "featured"/)
+  assert.match(queries, /sellable === "none"/)
+  assert.match(queries, /fetchHomeCatalog/)
+  assert.match(queries, /PORTAL_HOME_PACKAGE_COLUMNS/)
+  assert.match(home, /sellable: "featured"/)
+  assert.match(home, /DashboardHero/)
+  assert.match(packages, /sellable: "none"/)
+  assert.match(hero, /fetchPriority="high"/)
+  assert.match(hero, /priority/)
+})

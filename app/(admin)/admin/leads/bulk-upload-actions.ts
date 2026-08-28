@@ -11,6 +11,7 @@ import {
   type ParsedAccountBulkRow,
 } from "@/lib/crm/account-bulk-upload"
 import { parseAccountKinds, primaryAccountType } from "@/lib/crm/account-kinds"
+import { newAccountLifecycle } from "@/lib/crm/account-lifecycle"
 import { ACCOUNT_SOURCES, type AccountSource } from "@/lib/crm/lead-types"
 import { fetchAllRows } from "@/lib/supabase/fetch-all-rows"
 
@@ -192,6 +193,7 @@ export async function applyAccountBulkUpload(input: {
     try {
       let account = accountsByKey.get(key)
       if (!account) {
+        const created = newAccountLifecycle()
         const { data, error } = await gate.supabase
           .from("crm_accounts")
           .insert({
@@ -203,6 +205,8 @@ export async function applyAccountBulkUpload(input: {
             phone: first.phone,
             notes: first.notes,
             owner_profile_id: groupOwnerId,
+            lifecycle: created.lifecycle,
+            lead_stage: created.leadStage,
             billing_city: first.city,
             billing_country: first.country,
             created_by: createdBy,

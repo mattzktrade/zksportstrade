@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { Suspense } from "react"
 import {
   AlertTriangle,
   Boxes,
@@ -33,6 +34,31 @@ import {
 
 export const dynamic = "force-dynamic"
 
+function AdminDashboardFallback() {
+  return (
+    <div className="mx-auto max-w-[1540px] space-y-3 p-3 sm:p-4 lg:p-5 animate-pulse">
+      <div className="h-8 w-48 rounded-md bg-muted" />
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <div key={index} className="h-24 rounded-xl bg-muted" />
+        ))}
+      </div>
+      <div className="grid gap-3 xl:grid-cols-2">
+        <div className="h-64 rounded-xl bg-muted" />
+        <div className="h-64 rounded-xl bg-muted" />
+      </div>
+    </div>
+  )
+}
+
+export default function AdminDashboardPage() {
+  return (
+    <Suspense fallback={<AdminDashboardFallback />}>
+      <AdminDashboard />
+    </Suspense>
+  )
+}
+
 function money(value: number, currency = "USD"): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -66,7 +92,7 @@ function one<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value
 }
 
-export default async function AdminDashboardPage() {
+async function AdminDashboard() {
   const profile = await requireAdmin()
   const supabase = await createClient()
 

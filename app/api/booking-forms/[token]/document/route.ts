@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { sha256 } from "@/lib/booking-forms/snapshot"
 import { downloadBookingDocument } from "@/lib/booking-forms/storage"
+import { checkRateLimit, clientIpFromHeaders } from "@/lib/auth/rate-limit"
 
 export const runtime = "nodejs"
 
@@ -10,6 +11,9 @@ export async function GET(
   context: { params: Promise<{ token: string }> },
 ) {
   const { token } = await context.params
+  if (!checkRateLimit(`booking-form:document:${clientIpFromHeaders(_request.headers)}`, 60, 15 * 60 * 1000)) {
+    return NextResponse.json({ error: "Too many requests. Try again shortly." }, { status: 429 })
+  }
   if (!/^[A-Za-z0-9_-]{40,60}$/.test(token)) {
     return NextResponse.json({ error: "Document not found." }, { status: 404 })
   }

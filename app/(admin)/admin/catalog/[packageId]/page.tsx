@@ -45,7 +45,8 @@ export default async function AdminPackageDetailPage({ params, searchParams }: P
     linkedDayOverview.inventoryGroupId && linkedDayOverview.siblings.length > 0
       ? linkedDayOverview.siblings.map((pkg) => pkg.id)
       : [decodedId]
-  const [races, orders, deals, wixListings, initialPurchaseOrders, fulfilmentBlocks] =
+  const groupId = initialPkg.inventory_group_id?.trim() || null
+  const [races, orders, deals, wixListings, initialPurchaseOrders, fulfilmentBlocks, healed] =
     await Promise.all([
       getAdminRaceOptions(),
       getOrdersForPackages(linkedSalePackageIds),
@@ -53,20 +54,17 @@ export default async function AdminPackageDetailPage({ params, searchParams }: P
       getWixChannelListingsForPackage(decodedId),
       getPurchaseOrders(),
       getFulfilmentBlocksWithUsage(decodedId),
+      groupId ? healLinkedGroupInBackground(groupId) : Promise.resolve(false),
     ])
 
   let pkg = initialPkg
   let purchaseOrders = initialPurchaseOrders
-  const groupId = pkg.inventory_group_id?.trim() || null
 
   // Apply open-pipeline holds into package_inventory (storefront/Wix read qty_available).
   // Admin commitment UI can show −12; DB/storefront stay at max(0, …) = 0 when oversold.
-  if (groupId) {
-    const healed = await healLinkedGroupInBackground(groupId)
-    if (healed) {
-      const refreshed = await getAdminPackageById(decodedId)
-      if (refreshed) pkg = refreshed
-    }
+  if (healed) {
+    const refreshed = await getAdminPackageById(decodedId)
+    if (refreshed) pkg = refreshed
   }
 
   if (pkg.cost_layers.some((layer) => !layer.purchase_order_id)) {

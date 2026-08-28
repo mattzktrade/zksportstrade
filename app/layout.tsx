@@ -11,18 +11,20 @@ const PLATFORM_SCRIPT = `(function(){try{var p=navigator.platform||"";var u=navi
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
+  display: "swap",
 })
 
 const geistMono = Geist_Mono({
   subsets: ["latin"],
   variable: "--font-mono",
+  display: "swap",
+  preload: false,
 })
 
 export const metadata: Metadata = {
   title: "ZK Sports & Entertainment | Trade Portal",
   description:
     "Exclusive F1 hospitality packages for trade partners. Book premium motorsport experiences for your clients.",
-  generator: "v0.app",
   icons: {
     icon: [{ url: LOGO_ICON.src, type: "image/png", sizes: "32x32" }],
     apple: [{ url: LOGO_ICON.src, type: "image/png" }],

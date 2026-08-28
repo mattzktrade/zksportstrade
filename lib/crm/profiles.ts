@@ -1,9 +1,11 @@
 import { unstable_noStore as noStore } from "next/cache"
 import { parseAccountKinds, type AccountKind } from "@/lib/crm/account-kinds"
+import { parseAccountLeadStage, parseAccountLifecycle } from "@/lib/crm/account-lifecycle"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { createClient } from "@/lib/supabase/server"
 import { canonicalDealStage, type DealStage } from "@/lib/crm/deal-types"
 import type { AccountSource, LeadStatus } from "@/lib/crm/lead-types"
+import type { AccountLeadStage, AccountLifecycle } from "@/lib/crm/account-lifecycle"
 
 function one<T>(value: T | T[] | null | undefined): T | null {
   if (value == null) return null
@@ -88,6 +90,8 @@ export type CrmEntityProfile = {
     ownerProfileId: string | null
     ownerName: string | null
     source: AccountSource
+    lifecycle: AccountLifecycle
+    leadStage: AccountLeadStage
     createdAt: string
     updatedAt: string
   }
@@ -155,7 +159,7 @@ export async function getCrmEntityProfile(
     .select(`
       id, name, account_type, account_types, email, phone, billing_address_line1, billing_address_line2,
       billing_city, billing_postcode, billing_country, notes, active, owner_profile_id,
-      portal_profile_id, source, created_at, updated_at,
+      portal_profile_id, source, lifecycle, lead_stage, created_at, updated_at,
       crm_contacts(id, full_name, email, phone, job_title, notes, is_primary, active)
     `)
     .eq("id", cleanAccountId)
@@ -351,6 +355,8 @@ export async function getCrmEntityProfile(
       ownerProfileId: account.owner_profile_id ?? null,
       ownerName: owner?.full_name?.trim() || owner?.email || null,
       source: (account.source as AccountSource | null) ?? "manual",
+      lifecycle: parseAccountLifecycle(account.lifecycle),
+      leadStage: parseAccountLeadStage(account.lead_stage),
       createdAt: account.created_at,
       updatedAt: account.updated_at,
     },

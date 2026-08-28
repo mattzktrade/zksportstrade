@@ -30,13 +30,27 @@ export function isXeroConfigured(): boolean {
   return getXeroCredentials() !== null
 }
 
-function resolveRedirectUri(requestOrigin?: string): string | null {
-  const override = trimEnv("XERO_REDIRECT_URI")
+export function resolveXeroRedirectUri(
+  requestOrigin?: string,
+  sources: { redirectUri?: string; siteUrl?: string } = {
+    redirectUri: trimEnv("XERO_REDIRECT_URI"),
+    siteUrl: trimEnv("NEXT_PUBLIC_SITE_URL"),
+  },
+): string | null {
+  const override = sources.redirectUri?.trim()
   if (override) return override
+  const siteUrl = sources.siteUrl?.trim()
+  if (siteUrl) {
+    return `${siteUrl.replace(/\/$/, "")}/api/integrations/xero/callback`
+  }
   if (requestOrigin) {
     return `${requestOrigin.replace(/\/$/, "")}/api/integrations/xero/callback`
   }
   return null
+}
+
+function resolveRedirectUri(requestOrigin?: string): string | null {
+  return resolveXeroRedirectUri(requestOrigin)
 }
 
 /** Full OAuth config — pass requestOrigin on Connect/callback routes. */

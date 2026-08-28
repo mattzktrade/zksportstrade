@@ -3,7 +3,7 @@
 import { headers } from "next/headers"
 import { createClient } from "@supabase/supabase-js"
 import { buildPasswordResetRedirectUrl } from "@/lib/auth/password-reset-redirect"
-import { checkRateLimit } from "@/lib/auth/rate-limit"
+import { checkRateLimit, clientIpFromHeaders } from "@/lib/auth/rate-limit"
 import { getServerSiteOrigin } from "@/lib/auth/site-origin"
 import { sendPasswordResetEmail } from "@/lib/email/send-password-reset"
 
@@ -16,7 +16,7 @@ export async function requestPasswordReset(email: string): Promise<RequestPasswo
   }
 
   const h = await headers()
-  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? h.get("x-real-ip") ?? "unknown"
+  const ip = clientIpFromHeaders(h)
 
   if (!checkRateLimit(`pwreset:ip:${ip}`, 8, 15 * 60 * 1000)) {
     return { ok: true }

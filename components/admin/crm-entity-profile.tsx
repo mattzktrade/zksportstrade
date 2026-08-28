@@ -24,6 +24,11 @@ import { adminPackagePath } from "@/lib/admin/package-link"
 import { DEAL_STAGE_LABELS, type DealStage } from "@/lib/crm/deal-types"
 import { accountKindLabels, type AccountKind } from "@/lib/crm/account-kinds"
 import { ACCOUNT_SOURCE_LABELS, LEAD_STATUS_LABELS, type LeadStatus, type StaffOption } from "@/lib/crm/lead-types"
+import {
+  ACCOUNT_LEAD_STAGE_LABELS,
+  ACCOUNT_LIFECYCLE_LABELS,
+  lifecycleTone,
+} from "@/lib/crm/account-lifecycle"
 import type { SupplierProfile } from "@/lib/admin/supplier-profile"
 import { SupplierProfilePanel } from "@/components/admin/supplier-profile-panel"
 import {
@@ -33,6 +38,7 @@ import {
   CompanyMergeDeletePanel,
   ContactDetailsEditor,
   ContactMergeDeletePanel,
+  AccountLifecycleControls,
 } from "@/components/admin/crm-profile-editors"
 import { adminAccountPath, adminContactPath, type CompanyProfileTab } from "@/lib/crm/profile-links"
 import type { CrmEntityProfile } from "@/lib/crm/profiles"
@@ -154,7 +160,7 @@ export function CrmEntityProfileView({
         title={title}
         description={subtitle}
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {selectedContact && account ? (
               <Link
                 href={adminAccountPath(account.id)}
@@ -162,6 +168,18 @@ export function CrmEntityProfileView({
               >
                 View company
               </Link>
+            ) : null}
+            {account && !selectedContact ? (
+              <>
+                <StatusPill tone={lifecycleTone(account.lifecycle)}>
+                  {ACCOUNT_LIFECYCLE_LABELS[account.lifecycle]}
+                </StatusPill>
+                <AccountLifecycleControls
+                  accountId={account.id}
+                  lifecycle={account.lifecycle}
+                  leadStage={account.leadStage}
+                />
+              </>
             ) : null}
             <StatusPill
               tone={
@@ -281,6 +299,13 @@ export function CrmEntityProfileView({
                     <dd>{account.ownerName || "Unassigned"}</dd>
                     <dt className="text-[#93979f]">Source</dt>
                     <dd>{ACCOUNT_SOURCE_LABELS[account.source]}</dd>
+                    <dt className="text-[#93979f]">Status</dt>
+                    <dd>
+                      {ACCOUNT_LIFECYCLE_LABELS[account.lifecycle]}
+                      {account.lifecycle === "lead"
+                        ? ` · ${ACCOUNT_LEAD_STAGE_LABELS[account.leadStage]}`
+                        : ""}
+                    </dd>
                   </>
                 ) : null}
                 <dt className="text-[#93979f]">Client since</dt>

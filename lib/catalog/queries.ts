@@ -1,13 +1,15 @@
 import type { Package, Race } from "@/lib/types/catalog"
 import { bookableEventDateFrom } from "@/lib/catalog/bookable-events"
 import { seasonFromRaceId } from "@/lib/catalog/season-rollover"
+import { pickFeaturedPackages, FEATURED_PACKAGE_IDS } from "@/lib/catalog/featured-packages"
 import {
   buildPortalSeasonSlices,
   DEFAULT_PORTAL_SEASON,
   type PortalCatalog,
 } from "@/lib/catalog/portal-catalog"
-import { INVENTORY_COLUMNS, PACKAGE_COLUMNS, RACE_COLUMNS } from "@/lib/catalog/columns"
+import { INVENTORY_COLUMNS, PACKAGE_COLUMNS, PORTAL_HOME_PACKAGE_COLUMNS, RACE_COLUMNS } from "@/lib/catalog/columns"
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import {
   buildCatalog,
   mapPackageRow,
@@ -18,6 +20,16 @@ import {
 } from "@/lib/catalog/map-rows"
 import { attachLargestSameSuiteRemaining } from "@/lib/catalog/same-suite-remaining"
 import { attachStorefrontAvailability } from "@/lib/catalog/storefront-availability"
+import { getPortalProfile } from "@/lib/supabase/profile"
+
+export type PortalCatalogSellable = "all" | "featured" | "none"
+
+type PackageMeta = {
+  id: string
+  inventory_group_id?: string | null
+  duration?: string | null
+  shell_parent_package_id?: string | null
+}
 
 type HoldAgg = { qty: number; expiresAtMin: string }
 
@@ -85,15 +97,33 @@ function packageVisibleInPortal(dbPkg: DbPackage, raceSeason: number | null, boo
   return dbPkg.event_date >= bookableFrom
 }
 
-async function fetchFullCatalogBase(
+function catalogReadClient(fallback: Awaited<ReturnType<typeof createClient>>) {
+  return (createAdminClient() ?? fallback) as Awaited<ReturnType<typeof createClient>>
+}
+
+function isPortalVisiblePackage(pkg: DbPackage): boolean {
+  return !pkg.is_hidden && pkg.sell_on_trade_portal !== false && !pkg.shell_parent_package_id
+}
+
+async function fetchCatalogBuilt(
   supabase: Awaited<ReturnType<typeof createClient>>,
-): Promise<{ races: Race[]; packages: Package[] } | null> {
-  const { data: allRaces, error: racesError } = await supabase.from("races").select(RACE_COLUMNS).order("event_date")
-  const { data: allPackages, error: packagesError } = await supabase
-    .from("packages")
-    .select(PACKAGE_COLUMNS)
-    .order("sort_order")
-  const { data: inventory, error: invError } = await supabase.from("package_inventory").select(INVENTORY_COLUMNS)
+  options?: { includeInventory?: boolean; packageColumns?: string },
+): Promise<{ races: Race[]; packages: Package[]; packageMeta: PackageMeta[] } | null> {
+  const includeInventory = options?.includeInventory !== false
+  const packageColumns = options?.packageColumns ?? PACKAGE_COLUMNS
+  const [racesRes, packagesRes, inventoryRes] = await Promise.all([
+    supabase.from("races").select(RACE_COLUMNS).order("event_date"),
+    supabase.from("packages").select(packageColumns).order("sort_order"),
+    includeInventory
+      ? supabase.from("package_inventory").select(INVENTORY_COLUMNS)
+      : Promise.resolve({ data: [] as DbInventory[], error: null }),
+  ])
+  const allRaces = racesRes.data
+  const racesError = racesRes.error
+  const allPackages = packagesRes.data
+  const packagesError = packagesRes.error
+  const inventory = inventoryRes.data
+  const invError = inventoryRes.error
 
   if (racesError || packagesError) {
     console.warn("[portal] catalog query failed:", racesError?.message ?? packagesError?.message)
@@ -107,12 +137,7 @@ async function fetchFullCatalogBase(
     )
   }
 
-  const visiblePackageRows = (allPackages as DbPackage[]).filter(
-    (pkg) =>
-      !pkg.is_hidden &&
-      pkg.sell_on_trade_portal !== false &&
-      !pkg.shell_parent_package_id,
-  )
+  const visiblePackageRows = (allPackages as DbPackage[]).filter(isPortalVisiblePackage)
   const built = buildCatalog(allRaces as DbRace[], visiblePackageRows, (inventory ?? []) as DbInventory[])
   const packageMeta = visiblePackageRows.map((p) => ({
     id: p.id,
@@ -120,27 +145,116 @@ async function fetchFullCatalogBase(
     duration: p.duration,
     shell_parent_package_id: p.shell_parent_package_id,
   }))
-  const withSalesRemaining = await attachStorefrontAvailability(supabase, built.packages, packageMeta)
-  const packages = await attachLargestSameSuiteRemaining(supabase, withSalesRemaining, packageMeta)
-  return { races: built.races, packages }
+  return { races: built.races, packages: built.packages, packageMeta }
 }
 
-export async function getPortalCatalog(agentProfileId?: string | null): Promise<PortalCatalog | null> {
-  const supabase = await createClient()
-  const base = await fetchFullCatalogBase(supabase)
-  if (!base) return null
+async function fetchHomeCatalog(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<{ races: Race[]; packages: Package[]; packageMeta: PackageMeta[] } | null> {
+  const featuredOr = `featured.eq.true,id.in.(${FEATURED_PACKAGE_IDS.join(",")})`
+  const [racesRes, packagesRes] = await Promise.all([
+    supabase.from("races").select(RACE_COLUMNS).order("event_date"),
+    supabase.from("packages").select(PORTAL_HOME_PACKAGE_COLUMNS).or(featuredOr),
+  ])
+  if (racesRes.error || packagesRes.error) {
+    console.warn("[portal] home catalog query failed:", racesRes.error?.message ?? packagesRes.error?.message)
+    return null
+  }
+  if (!racesRes.data || !packagesRes.data) return null
 
-  let { races, packages } = base
+  const visiblePackageRows = (packagesRes.data as DbPackage[]).filter(isPortalVisiblePackage)
+  const built = buildCatalog(racesRes.data as DbRace[], visiblePackageRows, [])
+  const packageMeta = visiblePackageRows.map((p) => ({
+    id: p.id,
+    inventory_group_id: p.inventory_group_id,
+    duration: p.duration,
+    shell_parent_package_id: p.shell_parent_package_id,
+  }))
+  return { races: built.races, packages: built.packages, packageMeta }
+}
 
-  if (agentProfileId) {
-    const holdAgg = await fetchAgentHoldAggregates(supabase, agentProfileId)
-    if (holdAgg.size > 0) {
-      packages = mergeAgentHoldAvailability(packages, holdAgg)
+async function resolveAgentId(explicit?: string | null): Promise<string | null> {
+  if (explicit !== undefined) return explicit
+  const profile = await getPortalProfile()
+  return profile?.id ?? null
+}
+
+async function attachPortalSellable(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  packages: Package[],
+  packageMeta: PackageMeta[],
+  agentProfileId?: string | null,
+  holdPackageIds?: string[],
+): Promise<Package[]> {
+  if (packages.length === 0) return packages
+  const sellablePromise = attachStorefrontAvailability(supabase, packages, packageMeta).then((rows) =>
+    attachLargestSameSuiteRemaining(supabase, rows, packageMeta),
+  )
+  if (!agentProfileId) return sellablePromise
+
+  const [next, holdAgg] = await Promise.all([
+    sellablePromise,
+    fetchAgentHoldAggregates(supabase, agentProfileId, holdPackageIds),
+  ])
+  if (holdAgg.size === 0) return next
+  return mergeAgentHoldAvailability(next, holdAgg)
+}
+
+export async function getPortalCatalog(
+  agentProfileId?: string | null,
+  options?: { sellable?: PortalCatalogSellable },
+): Promise<PortalCatalog | null> {
+  const userClient = await createClient()
+  const supabase = catalogReadClient(userClient)
+  const sellable = options?.sellable ?? "all"
+
+  if (sellable === "featured") {
+    const [base, agentId] = await Promise.all([
+      fetchHomeCatalog(supabase),
+      resolveAgentId(agentProfileId),
+    ])
+    if (!base) return null
+    const seasons = buildPortalSeasonSlices(base.races, base.packages)
+    const featuredIds = new Set(
+      seasons.flatMap((slice) => pickFeaturedPackages(slice.packages).map((pkg) => pkg.id)),
+    )
+    const featuredPackages = base.packages.filter((pkg) => featuredIds.has(pkg.id))
+    const featuredMeta = base.packageMeta.filter((row) => featuredIds.has(row.id))
+    const withAvail = await attachPortalSellable(
+      supabase,
+      featuredPackages,
+      featuredMeta,
+      agentId,
+      [...featuredIds],
+    )
+    const byId = new Map(withAvail.map((pkg) => [pkg.id, pkg]))
+    return {
+      seasons: seasons.map((slice) => ({
+        ...slice,
+        packages: pickFeaturedPackages(slice.packages).map((pkg) => byId.get(pkg.id) ?? pkg),
+      })),
+      defaultSeasonYear: DEFAULT_PORTAL_SEASON,
     }
   }
 
-  const seasons = buildPortalSeasonSlices(races, packages)
-  return { seasons, defaultSeasonYear: DEFAULT_PORTAL_SEASON }
+  const base = await fetchCatalogBuilt(supabase, {
+    includeInventory: sellable === "all",
+    packageColumns: sellable === "none" ? PORTAL_HOME_PACKAGE_COLUMNS : PACKAGE_COLUMNS,
+  })
+  if (!base) return null
+
+  if (sellable === "none") {
+    return {
+      seasons: buildPortalSeasonSlices(base.races, base.packages),
+      defaultSeasonYear: DEFAULT_PORTAL_SEASON,
+    }
+  }
+
+  const packages = await attachPortalSellable(supabase, base.packages, base.packageMeta, agentProfileId)
+  return {
+    seasons: buildPortalSeasonSlices(base.races, packages),
+    defaultSeasonYear: DEFAULT_PORTAL_SEASON,
+  }
 }
 
 /** Flat list of all portal seasons (admin place-order, legacy callers). */
@@ -157,13 +271,12 @@ export async function getRaceCatalog(
   raceId: string,
   agentProfileId?: string | null,
 ): Promise<{ race: Race; packages: Package[] } | null> {
-  const supabase = await createClient()
+  const supabase = catalogReadClient(await createClient())
 
-  const { data: raceRow, error: raceError } = await supabase
-    .from("races")
-    .select(RACE_COLUMNS)
-    .eq("id", raceId)
-    .maybeSingle()
+  const [{ data: raceRow, error: raceError }, { data: packageRows, error: pkgError }] = await Promise.all([
+    supabase.from("races").select(RACE_COLUMNS).eq("id", raceId).maybeSingle(),
+    supabase.from("packages").select(PACKAGE_COLUMNS).eq("race_id", raceId).order("sort_order"),
+  ])
   if (raceError || !raceRow) return null
 
   const dbRace = raceRow as DbRace
@@ -171,11 +284,6 @@ export async function getRaceCatalog(
   const season = dbRace.season ?? seasonFromRaceId(dbRace.id)
   if (season === 2026 && dbRace.event_date < bookableFrom) return null
 
-  const { data: packageRows, error: pkgError } = await supabase
-    .from("packages")
-    .select(PACKAGE_COLUMNS)
-    .eq("race_id", raceId)
-    .order("sort_order")
   if (pkgError || !packageRows) return null
 
   const visiblePackageRows = (packageRows as DbPackage[]).filter(

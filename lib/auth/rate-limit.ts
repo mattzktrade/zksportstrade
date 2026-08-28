@@ -2,6 +2,14 @@ type Bucket = { count: number; resetAt: number }
 
 const buckets = new Map<string, Bucket>()
 
+export function clientIpFromHeaders(headersList: Headers): string {
+  return (
+    headersList.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    headersList.get("x-real-ip")?.trim() ||
+    "unknown"
+  )
+}
+
 /** In-memory limiter (per server instance). Returns false when over limit. */
 export function checkRateLimit(key: string, limit: number, windowMs: number): boolean {
   const now = Date.now()

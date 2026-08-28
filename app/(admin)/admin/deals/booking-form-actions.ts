@@ -602,6 +602,8 @@ export async function recordBookingFormEmailError(
   bookingFormId: string,
   message: string | null,
 ): Promise<void> {
+  const gate = await bookingFormGate()
+  if (!gate) return
   const admin = createAdminClient()
   if (!admin) return
   await admin

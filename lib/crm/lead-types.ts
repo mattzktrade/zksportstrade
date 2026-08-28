@@ -1,4 +1,5 @@
 import type { AccountKind } from "@/lib/crm/account-kinds"
+import type { AccountLeadStage, AccountLifecycle } from "@/lib/crm/account-lifecycle"
 
 export type LeadStatus =
   | "new"
@@ -63,6 +64,8 @@ export type ClientDirectoryRow = {
   owner_profile_id: string | null
   owner_name: string | null
   source: AccountSource
+  lifecycle: AccountLifecycle
+  lead_stage: AccountLeadStage
   created_at: string
   contacts: Array<{
     id: string

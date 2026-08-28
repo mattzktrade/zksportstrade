@@ -17,6 +17,8 @@ import {
   mergeCrmContacts,
   updateCrmAccountDetails,
   updateCrmAccountInterests,
+  updateCrmAccountLifecycle,
+  updateCrmAccountLeadStage,
   updateSupplierDetails,
   updateSupplierEventCoverage,
   upsertCrmContact,
@@ -26,6 +28,12 @@ import {
 import { adminRaceLabel } from "@/lib/admin/race-label"
 import type { AdminRaceOption } from "@/lib/admin/queries"
 import type { AccountKind } from "@/lib/crm/account-kinds"
+import {
+  ACCOUNT_LEAD_STAGE_LABELS,
+  ACCOUNT_LEAD_STAGES,
+  type AccountLeadStage,
+  type AccountLifecycle,
+} from "@/lib/crm/account-lifecycle"
 import { ACCOUNT_SOURCE_LABELS, type AccountSource, type StaffOption } from "@/lib/crm/lead-types"
 import type { CrmProfileContact } from "@/lib/crm/profiles"
 import { adminAccountPath, adminContactPath } from "@/lib/crm/profile-links"
@@ -73,6 +81,74 @@ function EditToggle({
         className="h-7 rounded-md border border-[#e4e6ea] px-2.5 text-[9px] font-medium text-[#555961] disabled:opacity-50"
       >
         Cancel
+      </button>
+    </div>
+  )
+}
+
+export function AccountLifecycleControls({
+  accountId,
+  lifecycle,
+  leadStage,
+}: {
+  accountId: string
+  lifecycle: AccountLifecycle
+  leadStage: AccountLeadStage
+}) {
+  const router = useRouter()
+  const [pending, start] = useTransition()
+
+  function setLifecycle(next: AccountLifecycle) {
+    start(async () => {
+      const res = await updateCrmAccountLifecycle({
+        accountId,
+        lifecycle: next,
+        leadStage: next === "lead" ? (lifecycle === "lead" ? leadStage : "later") : leadStage,
+      })
+      if (!res.ok) {
+        toast.error(res.message)
+        return
+      }
+      toast.success(res.message)
+      router.refresh()
+    })
+  }
+
+  function setStage(next: string) {
+    start(async () => {
+      const res = await updateCrmAccountLeadStage({ accountId, leadStage: next })
+      if (!res.ok) {
+        toast.error(res.message)
+        return
+      }
+      toast.success(res.message)
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {lifecycle === "lead" ? (
+        <select
+          value={leadStage}
+          disabled={pending}
+          onChange={(event) => setStage(event.target.value)}
+          className="h-9 rounded-md border border-[#e4e6ea] bg-white px-3 text-[10px] font-medium disabled:opacity-50"
+        >
+          {ACCOUNT_LEAD_STAGES.map((stage) => (
+            <option key={stage} value={stage}>
+              {ACCOUNT_LEAD_STAGE_LABELS[stage]}
+            </option>
+          ))}
+        </select>
+      ) : null}
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => setLifecycle(lifecycle === "lead" ? "client" : "lead")}
+        className="h-9 rounded-md border border-[#e4e6ea] bg-white px-3 text-[10px] font-medium text-[#555961] disabled:opacity-50"
+      >
+        {lifecycle === "lead" ? "Mark as client" : "Move back to leads"}
       </button>
     </div>
   )

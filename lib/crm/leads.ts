@@ -1,4 +1,5 @@
 import { parseAccountKinds } from "@/lib/crm/account-kinds"
+import { parseAccountLeadStage, parseAccountLifecycle } from "@/lib/crm/account-lifecycle"
 import { unstable_noStore as noStore } from "next/cache"
 import { chunkList, fetchAllRows } from "@/lib/supabase/fetch-all-rows"
 import { createClient } from "@/lib/supabase/server"
@@ -99,6 +100,8 @@ type DirectoryAccountRow = {
   owner_profile_id: string | null
   portal_profile_id: string | null
   source: string | null
+  lifecycle: string | null
+  lead_stage: string | null
   created_at: string
   updated_at: string
 }
@@ -137,7 +140,7 @@ export async function getClientDirectoryRows(): Promise<ClientDirectoryRow[]> {
       supabase
         .from("crm_accounts")
         .select(
-          "id, name, account_type, account_types, email, phone, owner_profile_id, portal_profile_id, source, created_at, updated_at",
+          "id, name, account_type, account_types, email, phone, owner_profile_id, portal_profile_id, source, lifecycle, lead_stage, created_at, updated_at",
         )
         .eq("active", true)
         .order("id")
@@ -245,6 +248,8 @@ export async function getClientDirectoryRows(): Promise<ClientDirectoryRow[]> {
         ? ownerName.get(account.owner_profile_id) ?? null
         : null,
       source: (account.source as AccountSource | null) ?? "manual",
+      lifecycle: parseAccountLifecycle(account.lifecycle),
+      lead_stage: parseAccountLeadStage(account.lead_stage),
       created_at: account.created_at,
       contacts,
       deal_count: deals.filter((deal) => deal.order_id == null).length + orders.length,
@@ -254,9 +259,7 @@ export async function getClientDirectoryRows(): Promise<ClientDirectoryRow[]> {
       last_activity_at: activityDates.sort().at(-1) ?? account.updated_at,
     }
   }).sort((a, b) => {
-    const unassigned = Number(Boolean(a.owner_profile_id)) - Number(Boolean(b.owner_profile_id))
-    if (unassigned !== 0) return unassigned
-    return b.created_at.localeCompare(a.created_at) || a.name.localeCompare(b.name)
+    return b.last_activity_at.localeCompare(a.last_activity_at) || a.name.localeCompare(b.name)
   })
 }
 

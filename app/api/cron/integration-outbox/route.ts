@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { safeEqualStrings } from "@/lib/crypto/timing-safe"
 
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET?.trim()
@@ -9,7 +10,9 @@ export async function GET(request: Request) {
   const auth = request.headers.get("authorization")
   const bearer = auth?.startsWith("Bearer ") ? auth.slice(7).trim() : null
   const headerSecret = request.headers.get("x-cron-secret")?.trim()
-  if (bearer !== secret && headerSecret !== secret) {
+  const bearerOk = Boolean(bearer && safeEqualStrings(bearer, secret))
+  const headerOk = Boolean(headerSecret && safeEqualStrings(headerSecret, secret))
+  if (!bearerOk && !headerOk) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 })
   }
 

@@ -21,16 +21,17 @@ const AGENT_ORDER_COLUMNS =
 export default async function AdminPlaceOrderPage() {
   await requireAdmin()
   const supabase = await createClient()
-  const catalog = await getCatalog(null)
+  const [catalog, agentQuery] = await Promise.all([
+    getCatalog(null),
+    supabase
+      .from("profiles")
+      .select(AGENT_ORDER_COLUMNS)
+      .eq("role", "agent")
+      .eq("approval_status", "approved")
+      .order("company_name", { ascending: true }),
+  ])
 
-  const { data: agentRows } = await supabase
-    .from("profiles")
-    .select(AGENT_ORDER_COLUMNS)
-    .eq("role", "agent")
-    .eq("approval_status", "approved")
-    .order("company_name", { ascending: true })
-
-  const agents = (agentRows ?? []) as PortalProfile[]
+  const agents = (agentQuery.data ?? []) as PortalProfile[]
   const packageOptions = catalog ? toAdminPlaceOrderPackageOptions(catalog.packages) : []
 
   const agentOptions = agents.map((a) => ({

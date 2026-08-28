@@ -1,16 +1,10 @@
-import { createHmac, timingSafeEqual } from "crypto"
+import { createHmac } from "crypto"
 import { NextResponse } from "next/server"
 import { drainOutboxNow } from "@/lib/integrations/schedule-drain"
 import { getWixConfig } from "@/lib/integrations/wix/config"
 import { placeWixOrderFromWebhook } from "@/lib/integrations/wix/orders"
 import { parseWixOrderWebhookBody } from "@/lib/integrations/wix/parse-webhook"
-
-function safeEqualStrings(a: string, b: string): boolean {
-  const ba = Buffer.from(a)
-  const bb = Buffer.from(b)
-  if (ba.length !== bb.length) return false
-  return timingSafeEqual(ba, bb)
-}
+import { safeEqualStrings } from "@/lib/crypto/timing-safe"
 
 function verifyWebhookSecret(request: Request, rawBody: string, secret: string): boolean {
   const header = request.headers.get("x-wix-webhook-secret") ?? request.headers.get("x-webhook-secret") ?? ""

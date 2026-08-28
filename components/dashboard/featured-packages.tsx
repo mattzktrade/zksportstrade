@@ -48,6 +48,7 @@ function FeaturedPackageCard({ pkg }: { pkg: Package }) {
           fill
           className="object-cover transition-transform duration-700 group-hover:scale-105"
           sizes="(max-width: 768px) 100vw, 33vw"
+          loading="lazy"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-zk-black/90 via-zk-black/45 to-zk-black/20" />
 

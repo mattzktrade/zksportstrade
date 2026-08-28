@@ -1,20 +1,14 @@
-import { createHmac, timingSafeEqual } from "crypto"
+import { createHmac } from "crypto"
 import { after, NextResponse } from "next/server"
 import { getXeroCredentials } from "@/lib/integrations/xero/config"
 import { markPortalInvoicePaidFromXero } from "@/lib/integrations/xero/invoices"
+import { safeEqualStrings } from "@/lib/crypto/timing-safe"
 
 type XeroWebhookEvent = {
   resourceId?: string
   eventType?: string
   eventCategory?: string
   tenantId?: string
-}
-
-function safeEqualStrings(a: string, b: string): boolean {
-  const ba = Buffer.from(a)
-  const bb = Buffer.from(b)
-  if (ba.length !== bb.length) return false
-  return timingSafeEqual(ba, bb)
 }
 
 async function processXeroEvents(events: XeroWebhookEvent[]): Promise<void> {

@@ -4,7 +4,7 @@ import { PackagesPageClient } from "./packages-page-client"
 
 export default async function PackagesPage() {
   const profile = await getPortalProfile()
-  const catalog = await getPortalCatalog(profile?.id ?? null)
+  const catalog = await getPortalCatalog(profile?.id ?? null, { sellable: "none" })
   if (!catalog) {
     return (
       <div className="p-6 lg:p-8 max-w-lg">

@@ -12,7 +12,17 @@ function pushWebpackExternal(config, external) {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  poweredByHeader: false,
   serverExternalPackages: ["exceljs"],
+  experimental: {
+    optimizePackageImports: ["lucide-react"],
+    // Keep a just-visited tab in the client router so going back is instant.
+    // Mutations still call router.refresh(). Checkout re-checks stock on submit.
+    staleTimes: {
+      dynamic: 30,
+      static: 180,
+    },
+  },
   // Next 16 production builds use Turbopack by default. The webpack() hook
   // below is only for local `next dev --webpack`; an empty turbopack config
   // tells Next this split is intentional.
@@ -68,6 +78,7 @@ const nextConfig = {
   },
   images: {
     formats: ["image/avif", "image/webp"],
+    qualities: [75],
     minimumCacheTTL: 60 * 60 * 24 * 30,
     remotePatterns: [
       { protocol: "https", hostname: "static.wixstatic.com", pathname: "/media/**" },
@@ -83,9 +94,12 @@ const nextConfig = {
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
       "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com",
-      "frame-ancestors 'none'",
+      "object-src 'none'",
+      "frame-src 'none'",
       "base-uri 'self'",
       "form-action 'self'",
+      "frame-ancestors 'none'",
+      "upgrade-insecure-requests",
     ].join("; ")
 
     return [
@@ -101,6 +115,20 @@ const nextConfig = {
             value: "max-age=63072000; includeSubDomains; preload",
           },
           { key: "Content-Security-Policy", value: csp },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
+          { key: "X-Permitted-Cross-Domain-Policies", value: "none" },
+        ],
+      },
+      {
+        source: "/admin",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store, max-age=0, must-revalidate" },
+        ],
+      },
+      {
+        source: "/admin/:path*",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store, max-age=0, must-revalidate" },
         ],
       },
     ]

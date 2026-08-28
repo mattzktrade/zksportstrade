@@ -9,3 +9,7 @@ export const CATALOG_LIST_PACKAGE_COLUMNS =
   "id, race_id, name, circuit, location, country, country_code, event_date, date_range, trade_price, currency, is_enquiry, is_hidden, featured, sort_order, product_code, inventory_group_id, inventory_is_standalone, shell_parent_package_id, duration, salesforce_product_id, image, brochure_url, description, gallery_images, includes, retail_price_multiplier, wix_retail_price, sell_on_trade_portal, sell_on_wix" as const
 
 export const INVENTORY_COLUMNS = "package_id, qty_available, qty_held" as const
+
+/** Home / packages-index rows: skip galleries and integration fields. */
+export const PORTAL_HOME_PACKAGE_COLUMNS =
+  "id, race_id, name, circuit, location, country, country_code, event_date, date_range, trade_price, currency, total_capacity, is_enquiry, is_hidden, requires_booking_approval, image, tier, duration, inventory_group_id, inventory_is_standalone, shell_parent_package_id, includes, featured, sort_order, sell_on_trade_portal" as const

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { exchangeXeroAuthorizationCode } from "@/lib/integrations/xero/auth"
+import { safeEqualStrings } from "@/lib/crypto/timing-safe"
 
 const COOKIE_STATE = "xero_oauth_state"
 
@@ -28,7 +29,7 @@ export async function GET(request: Request) {
   const expectedState = cookieStore.get(COOKIE_STATE)?.value
   cookieStore.delete(COOKIE_STATE)
 
-  if (!expectedState || state !== expectedState) {
+  if (!expectedState || !safeEqualStrings(state, expectedState)) {
     return NextResponse.redirect(
       `${adminBase}?error=${encodeURIComponent("OAuth session expired. Click Connect again.")}`,
     )

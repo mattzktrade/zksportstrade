@@ -42,7 +42,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     nav: "Getting started",
     title: "Getting started",
     summary: "A short first-day guide. You do not need to learn every screen.",
-    keywords: ["start", "onboarding", "login", "dashboard", "first day", "team", "how to", "begin", "search"],
+    keywords: ["start", "onboarding", "login", "dashboard", "first day", "team", "how to", "begin", "search", "lead", "leads"],
     blocks: [
       {
         type: "p",
@@ -72,7 +72,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           {
             title: "1. Find or add the client",
-            body: "Sales → Accounts. Search first so you do not create a second copy of the same company.",
+            body: "Sales → Accounts. Use the Leads tab for new people to contact. Search first so you do not create a second copy of the same company.",
             href: "/admin/leads",
           },
           {
@@ -102,7 +102,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           {
             role: "If you sell",
             items: [
-              "Live in Accounts, Sales list, and Deals.",
+              "Live in Accounts (Leads tab for new prospects), Sales list, and Deals.",
               "Create deals and holds. Send booking forms.",
               "Do not approve random portal users or change website visibility unless you mean to.",
             ],
@@ -236,7 +236,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           {
             title: "Accounts",
-            body: "Companies and people. Search here before creating anyone new.",
+            body: "Companies and people. The Leads tab is who to contact next. Accounts and Contacts are the full directory.",
             href: "/admin/leads",
           },
           {
@@ -347,12 +347,22 @@ export const HELP_TOPICS: HelpTopic[] = [
     id: "sales",
     nav: "Selling",
     title: "Selling",
-    summary: "Accounts, deals, booking forms, and the pipeline.",
-    keywords: ["deal", "deals", "account", "contact", "booking form", "sign", "pipeline", "enquiry", "price"],
+    summary: "Accounts, leads, deals, booking forms, and the pipeline.",
+    keywords: ["deal", "deals", "account", "contact", "lead", "leads", "booking form", "sign", "pipeline", "enquiry", "price"],
     blocks: [
       {
         type: "p",
         text: "A deal is the sale record. An order is created after both people have signed (offline) or after checkout (portal / website). You work from the deal either way.",
+      },
+      {
+        type: "bullets",
+        title: "Leads, accounts, and deals",
+        items: [
+          "Sales → Accounts is the directory. The Leads tab is the work queue for prospects who have not booked yet.",
+          "New accounts and bulk uploads start as New. Move them to Reach out, Talking, or Later (keep for marketing).",
+          "When they sign a booking or place an order, they become a Client and leave the Leads tab. Deals is still the booking pipeline.",
+          "A new person at a company that already buys from us is just a contact — not a new lead.",
+        ],
       },
       {
         type: "cards",
@@ -421,6 +431,10 @@ export const HELP_TOPICS: HelpTopic[] = [
           {
             q: "What is the difference between Accounts and Agents?",
             a: "Accounts is everyone we sell to (companies and people). Agents is only people with an approved trade-portal login.",
+          },
+          {
+            q: "What is the Leads tab?",
+            a: "It is the list of companies and people who have not booked yet. Work New and Reach out first. Later is for people to keep for marketing. A signed booking or order marks them as a client automatically.",
           },
           {
             q: "A portal or website booking appeared as a deal. Did I do something wrong?",
