@@ -15,20 +15,26 @@ export const DEFAULT_BOOKINGS_CC = "bookings@zk-sports.com"
 export const DEFAULT_OPERATIONS_CC = "jenny@zk-sports.com"
 export const OPERATIONS_EMAIL_SENDER_NAME = "Jenny Kent"
 
+/** Never CC these, even if a leftover Vercel env var still lists them. */
+export const NEVER_CC_ADDRESSES = new Set(["matt@zk-sports.com"])
+
 function exclusiveCc(address: string, excludeEmail: string): string[] {
   const email = address.trim()
   if (!email) return []
-  if (email.toLowerCase() === excludeEmail.trim().toLowerCase()) return []
+  const lower = email.toLowerCase()
+  if (lower === excludeEmail.trim().toLowerCase()) return []
+  if (NEVER_CC_ADDRESSES.has(lower)) return []
   return [email]
 }
 
-/** CC for portal booking confirmations: bookings@ only. */
+/** CC for portal booking confirmations: bookings@ only. Ignores ORDER_CONFIRMATION_CC. */
 export function getBookingConfirmationCc(excludeEmail: string): string[] {
   return exclusiveCc(DEFAULT_BOOKINGS_CC, excludeEmail)
 }
 
 /**
  * CC for invoice and payment-reminder emails: finance@ only.
+ * Ignores Vercel leftovers such as XERO_INVOICE_CC so they cannot put matt@ on invoice mail.
  */
 export function getInvoiceFinanceCc(excludeEmail: string): string[] {
   return exclusiveCc(DEFAULT_FINANCE_CC, excludeEmail)

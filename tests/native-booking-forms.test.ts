@@ -270,6 +270,8 @@ test("sent and completed booking form emails CC bookings", () => {
   assert.match(functionSource("sendNativeBookingFormEmail"), /cc: bookingFormCc\(to\)/)
   assert.match(functionSource("sendManualNativeBookingFormEmail"), /cc: bookingFormCc\(to\)/)
   assert.match(functionSource("sendCompletedBookingFormEmail"), /cc: bookingFormCc\(to\)/)
+  assert.match(functionSource("sendCompletedBookingFormEmail"), /const to = \[input\.clientEmail\]/)
+  assert.doesNotMatch(functionSource("sendCompletedBookingFormEmail"), /adminEmail\.toLowerCase/)
   assert.doesNotMatch(functionSource("sendNativeBookingFormReminder"), /cc: bookingFormCc/)
 })
 

@@ -53,7 +53,7 @@ async function send(input: {
   const { error } = await resend.emails.send({
     from,
     to: input.to,
-    ...(cc.length > 0 ? { cc } : {}),
+    ...(cc.length === 1 ? { cc: cc[0] } : cc.length > 0 ? { cc } : {}),
     subject: input.subject,
     html: input.html,
     attachments: input.attachments,
@@ -144,12 +144,13 @@ export function sendNativeBookingFormReminder(input: BookingFormEmail) {
 export function sendCompletedBookingFormEmail(input: {
   clientEmail: string
   clientName: string
-  adminEmail: string
+  /** Kept so callers can still pass the countersigner; they are not emailed. */
+  adminEmail?: string
   documentRef: string
   eventName: string
   pdf: Uint8Array
 }) {
-  const to = [...new Set([input.clientEmail.toLowerCase(), input.adminEmail.toLowerCase()])]
+  const to = [input.clientEmail]
   return send({
     to,
     cc: bookingFormCc(to),

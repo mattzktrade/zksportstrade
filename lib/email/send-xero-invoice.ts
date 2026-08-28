@@ -73,7 +73,7 @@ export async function sendXeroInvoiceEmail(
   const { error } = await resend.emails.send({
     from,
     to: [p.agentEmail],
-    ...(cc.length > 0 ? { cc } : {}),
+    ...(cc.length === 1 ? { cc: cc[0] } : cc.length > 0 ? { cc } : {}),
     subject,
     html: buildHtml(p),
     attachments: [

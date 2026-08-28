@@ -123,7 +123,7 @@ export async function sendOrderPlacedEmail(p: OrderEmailPayload): Promise<{ ok: 
   const { error } = await resend.emails.send({
     from,
     to: [p.agentEmail],
-    ...(cc.length > 0 ? { cc } : {}),
+    ...(cc.length === 1 ? { cc: cc[0] } : cc.length > 0 ? { cc } : {}),
     subject,
     html: body,
   })
