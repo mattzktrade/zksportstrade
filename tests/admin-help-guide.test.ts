@@ -29,6 +29,9 @@ describe("admin help guide", () => {
     const deals = searchHelp("booking form")
     assert.ok(deals.topics.some((topic) => topic.id === "sales"))
 
+    const ready = searchHelp("ready to send")
+    assert.ok(ready.topics.some((topic) => topic.id === "sales"))
+
     const stock = searchHelp("purchase order")
     assert.ok(stock.topics.some((topic) => topic.id === "inventory"))
 

@@ -4497,6 +4497,7 @@ const NATIVE_DEAL_STAGES = new Set([
   "draft",
   "sourcing",
   "proposal",
+  "awaiting_booking_form_send",
   "booking_form_sent",
   "awaiting_client_signature",
   "awaiting_zk_signature",

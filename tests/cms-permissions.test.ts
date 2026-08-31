@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { hasCmsPermission, isCmsStaff } from "../lib/auth/permissions"
+import { hasCmsPermission, isCmsStaff, canPrepareNativeBookingForm, canSendNativeBookingForm } from "../lib/auth/permissions"
 
 describe("CMS role permissions", () => {
   it("treats admin, finance and sales as CMS staff", () => {
@@ -33,5 +33,16 @@ describe("CMS role permissions", () => {
     assert.equal(hasCmsPermission({ role: "sales" }, "operations.manage"), true)
     assert.equal(hasCmsPermission({ role: "sales" }, "inventory.adjust"), false)
     assert.equal(hasCmsPermission({ role: "sales" }, "integrations.manage"), false)
+  })
+
+  it("lets sales and finance prepare booking forms, but only admin can send them", () => {
+    assert.equal(canPrepareNativeBookingForm({ role: "admin" }), true)
+    assert.equal(canPrepareNativeBookingForm({ role: "sales" }), true)
+    assert.equal(canPrepareNativeBookingForm({ role: "finance" }), true)
+    assert.equal(canPrepareNativeBookingForm({ role: "agent" }), false)
+    assert.equal(canSendNativeBookingForm({ role: "admin" }), true)
+    assert.equal(canSendNativeBookingForm({ role: "sales" }), false)
+    assert.equal(canSendNativeBookingForm({ role: "finance" }), false)
+    assert.equal(canSendNativeBookingForm({ role: "agent" }), false)
   })
 })

@@ -47,6 +47,17 @@ export async function countNativeBookingFormsAwaitingApproval(): Promise<number>
   return count ?? 0
 }
 
+export async function countNativeBookingFormsReadyToSend(): Promise<number> {
+  noStore()
+  const supabase = await createClient()
+  const { count, error } = await supabase
+    .from("deals")
+    .select("*", { count: "exact", head: true })
+    .eq("stage", "awaiting_booking_form_send")
+  if (error) return 0
+  return count ?? 0
+}
+
 export async function getBookingFormsForDeal(dealId: string): Promise<{
   form: BookingFormAdminRow | null
   events: BookingFormEventRow[]

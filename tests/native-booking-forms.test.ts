@@ -21,8 +21,11 @@ import {
 } from "../lib/booking-forms/template"
 import {
   bookingFormCc,
+  bookingFormReadyNotificationRecipients,
   clientSignedNotificationRecipients,
+  DEFAULT_BOOKING_FORM_READY_NOTIFY_EMAILS,
   DEFAULT_BOOKINGS_CC,
+  DEFAULT_CHELLEY_CC,
   DEFAULT_CLIENT_SIGNED_NOTIFY_EMAILS,
 } from "../lib/email/send-booking-form"
 import type { BookingFormSnapshot } from "../lib/booking-forms/types"
@@ -257,10 +260,13 @@ test("no-VAT is the default edit and 5% included VAT does not change the total",
   assert.equal(Buffer.from(noVatPdf).subarray(0, 4).toString(), "%PDF")
 })
 
-test("sent and completed booking form emails CC bookings", () => {
+test("booking form emails CC bookings and Chelley", () => {
   assert.equal(DEFAULT_BOOKINGS_CC, "bookings@zk-sports.com")
-  assert.deepEqual(bookingFormCc(["client@example.com"]), [DEFAULT_BOOKINGS_CC])
-  assert.deepEqual(bookingFormCc(["client@example.com", DEFAULT_BOOKINGS_CC]), [])
+  assert.equal(DEFAULT_CHELLEY_CC, "chelley@zk-sports.com")
+  assert.deepEqual(bookingFormCc(["client@example.com"]), [DEFAULT_BOOKINGS_CC, DEFAULT_CHELLEY_CC])
+  assert.deepEqual(bookingFormCc(["client@example.com", DEFAULT_BOOKINGS_CC]), [DEFAULT_CHELLEY_CC])
+  assert.deepEqual(bookingFormCc(["client@example.com", DEFAULT_CHELLEY_CC]), [DEFAULT_BOOKINGS_CC])
+  assert.deepEqual(bookingFormCc([DEFAULT_BOOKINGS_CC, DEFAULT_CHELLEY_CC]), [])
   const source = readFileSync("lib/email/send-booking-form.ts", "utf8")
   const functionSource = (name: string) => {
     const start = source.indexOf(`export function ${name}`)
@@ -269,10 +275,13 @@ test("sent and completed booking form emails CC bookings", () => {
   }
   assert.match(functionSource("sendNativeBookingFormEmail"), /cc: bookingFormCc\(to\)/)
   assert.match(functionSource("sendManualNativeBookingFormEmail"), /cc: bookingFormCc\(to\)/)
+  assert.match(functionSource("sendNativeBookingFormReminder"), /cc: bookingFormCc\(to\)/)
   assert.match(functionSource("sendCompletedBookingFormEmail"), /cc: bookingFormCc\(to\)/)
   assert.match(functionSource("sendCompletedBookingFormEmail"), /const to = \[input\.clientEmail\]/)
   assert.doesNotMatch(functionSource("sendCompletedBookingFormEmail"), /adminEmail\.toLowerCase/)
-  assert.doesNotMatch(functionSource("sendNativeBookingFormReminder"), /cc: bookingFormCc/)
+  const clientSignedStart = source.indexOf("export async function sendClientSignedBookingFormNotification")
+  const clientSigned = source.slice(clientSignedStart, source.indexOf("export async function sendBookingFormReadyToSendNotification"))
+  assert.match(clientSigned, /cc: bookingFormCc\(recipients\)/)
 })
 
 test("client-signed booking form alerts go only to Ollie and Michel by default", () => {
@@ -297,8 +306,47 @@ test("booking form signing page uses a product table, colour logo, and client si
   const editor = readFileSync("app/(admin)/admin/deals/booking-form-editor.tsx", "utf8")
   assert.match(editor, /No VAT/)
   assert.match(editor, /noVat/)
+  assert.match(editor, /Notify admins to send/)
+  assert.match(editor, /onNotify/)
   const panel = readFileSync("app/(admin)/admin/deals/booking-form-panel.tsx", "utf8")
   assert.match(panel, /Copy signing link/)
   assert.match(panel, /getNativeBookingFormSigningUrl/)
+  assert.match(panel, /currentIsAdmin \? \(/)
+  assert.match(panel, /Notify admins to send/)
+  assert.match(panel, /sendSavedNativeBookingForm/)
+  assert.match(panel, /currentCanManageDeals/)
+})
+
+test("ready-to-send booking form alerts go to Matt, Michel, and Ollie by default", () => {
+  assert.deepEqual(bookingFormReadyNotificationRecipients(""), [...DEFAULT_BOOKING_FORM_READY_NOTIFY_EMAILS])
+  assert.deepEqual(DEFAULT_BOOKING_FORM_READY_NOTIFY_EMAILS, [
+    "matt@zk-sports.com",
+    "michel@zk-sports.com",
+    "oliver@zk-sports.com",
+  ])
+  assert.deepEqual(bookingFormReadyNotificationRecipients("ops@zk-sports.com"), ["ops@zk-sports.com"])
+  const notifySource = readFileSync("lib/email/send-booking-form.ts", "utf8")
+  assert.match(notifySource, /BOOKING_FORM_READY_NOTIFY_EMAILS/)
+  assert.match(notifySource, /sendBookingFormReadyToSendNotification/)
+})
+
+test("saving a booking form draft is CMS-staff work; sending to the client is admin-only", () => {
+  const sql = readFileSync("supabase/migrations/20260831120000_booking_form_ready_to_send.sql", "utf8")
+  assert.match(sql, /awaiting_booking_form_send/)
+  assert.match(sql, /if not public\.is_cms_staff\(\) then/)
+  assert.match(sql, /if not public\.is_admin\(\) then/)
+  assert.match(sql, /admin_update_native_booking_form_draft/)
+  assert.match(sql, /admin_record_booking_form_ready_notification/)
+  assert.match(sql, /drop function if exists public\.admin_send_native_booking_form\(uuid\);/)
+  const actions = readFileSync("app/(admin)/admin/deals/booking-form-actions.ts", "utf8")
+  assert.match(actions, /canPrepareNativeBookingForm/)
+  assert.match(actions, /canSendNativeBookingForm/)
+  assert.match(actions, /saveNativeBookingFormDraft/)
+  assert.match(actions, /notifyNativeBookingFormReady/)
+  assert.match(actions, /sendSavedNativeBookingForm/)
+  assert.match(actions, /bookingFormGate\("send"\)/)
+  const dealsClient = readFileSync("app/(admin)/admin/deals/deals-client.tsx", "utf8")
+  assert.match(dealsClient, /id: "ready_to_send"/)
+  assert.match(dealsClient, /awaiting_booking_form_send/)
 })
 

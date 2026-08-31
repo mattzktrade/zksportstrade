@@ -84,6 +84,20 @@ export function hasCmsPermission(
   return ROLE_PERMISSIONS[profile.role].includes(permission)
 }
 
+/** Sales, finance, and admin can create and amend booking forms. */
+export function canPrepareNativeBookingForm(
+  profile: Pick<PortalProfile, "role"> | null | undefined,
+): boolean {
+  return isCmsStaff(profile)
+}
+
+/** Only the admin role can email a booking form to the client. */
+export function canSendNativeBookingForm(
+  profile: Pick<PortalProfile, "role"> | null | undefined,
+): boolean {
+  return profile?.role === "admin"
+}
+
 export function cmsRoleLabel(role: string | null | undefined): string {
   switch (role) {
     case "admin":
@@ -119,6 +133,7 @@ export const CMS_ROLE_GUIDES: Record<
     can: [
       "View and manage invoices and payments",
       "View deals, orders, operations, and inventory",
+      "Create and amend booking forms (an admin must send them)",
     ],
   },
   sales: {
@@ -127,6 +142,7 @@ export const CMS_ROLE_GUIDES: Record<
     can: [
       "Create and manage accounts and deals",
       "Place inventory holds",
+      "Create and amend booking forms (an admin must send them)",
       "View orders and run operations",
     ],
   },

@@ -49,13 +49,19 @@ export function BookingFormEditor({
   dealId,
   reissueFromId,
   pending,
+  canSend,
   onClose,
+  onSave,
+  onNotify,
   onSend,
 }: {
   dealId: string
   reissueFromId?: string
   pending: boolean
+  canSend: boolean
   onClose: () => void
+  onSave: (edits: BookingFormEdits) => void
+  onNotify: (edits: BookingFormEdits) => void
   onSend: (edits: BookingFormEdits, sendMode: BookingFormSendMode) => void
 }) {
   const [edits, setEdits] = useState<BookingFormEdits | null>(null)
@@ -115,11 +121,14 @@ export function BookingFormEditor({
         <div className="shrink-0 flex items-start justify-between gap-4 border-b px-6 py-5">
           <div>
             <h2 className="text-lg font-bold">
-              {reissueFromId ? "Edit booking form and reissue" : "Review booking form before sending"}
+              {reissueFromId ? "Edit booking form" : canSend ? "Review booking form before sending" : "Prepare booking form"}
             </h2>
             <p className="mt-1 text-sm text-slate-500">
               Everything below is copied from the deal and standard terms. Change any names, products, payment
               wording, or T&amp;Cs for this revision only.
+              {canSend
+                ? ""
+                : " Saving does not email the client. Use notify so an approved admin can send it."}
             </p>
           </div>
           <button type="button" onClick={onClose}>
@@ -476,14 +485,15 @@ export function BookingFormEditor({
         </div>
 
         <div className="shrink-0 border-t bg-slate-50 px-6 py-4">
-          {reissueFromId ? (
+          {canSend ? (
             <p className="mb-3 text-xs leading-5 text-amber-900">
-              Saving reissues a new revision: the current unsigned form is voided, stock is reserved again, and
-              the client receives a new link.
+              Sending locks this snapshot, reserves stock for seven days, and emails the client. You can also
+              save without sending so the form stays in Ready to send until an admin emails it.
             </p>
           ) : (
             <p className="mb-3 text-xs leading-5 text-amber-900">
-              Sending creates the PDF, locks this snapshot, reserves stock for seven days, and emails the client.
+              Saving does not email the client or reserve stock. Notify Ollie, Michel, and Matt when the form
+              is ready — an approved admin still has to send it.
             </p>
           )}
           <div className="flex flex-wrap gap-2">
@@ -502,19 +512,40 @@ export function BookingFormEditor({
             <button
               type="button"
               disabled={pending || !edits}
-              onClick={() => edits && onSend(edits, "manual_pdf")}
+              onClick={() => edits && onSave(edits)}
               className="h-11 rounded-md border px-4 font-semibold disabled:opacity-50"
             >
-              {pending ? "Sending…" : "Email PDF only"}
+              {pending ? "Saving…" : "Save booking form"}
             </button>
-            <button
-              type="button"
-              disabled={pending || !edits}
-              onClick={() => edits && onSend(edits, "signing_link")}
-              className="ml-auto h-11 rounded-md bg-[#010101] px-4 font-bold text-white disabled:opacity-50"
-            >
-              {pending ? "Creating and sending…" : reissueFromId ? "Reissue signing link" : "Confirm, reserve & send"}
-            </button>
+            {!canSend ? (
+              <button
+                type="button"
+                disabled={pending || !edits}
+                onClick={() => edits && onNotify(edits)}
+                className="ml-auto h-11 rounded-md bg-[#010101] px-4 font-bold text-white disabled:opacity-50"
+              >
+                {pending ? "Notifying…" : "Notify admins to send"}
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  disabled={pending || !edits}
+                  onClick={() => edits && onSend(edits, "manual_pdf")}
+                  className="h-11 rounded-md border px-4 font-semibold disabled:opacity-50"
+                >
+                  {pending ? "Sending…" : "Email PDF only"}
+                </button>
+                <button
+                  type="button"
+                  disabled={pending || !edits}
+                  onClick={() => edits && onSend(edits, "signing_link")}
+                  className="ml-auto h-11 rounded-md bg-[#010101] px-4 font-bold text-white disabled:opacity-50"
+                >
+                  {pending ? "Creating and sending…" : "Confirm, reserve & send"}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

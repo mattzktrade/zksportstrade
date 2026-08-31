@@ -5,7 +5,7 @@ import { headers } from "next/headers"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { hasCmsPermission } from "@/lib/auth/permissions"
+import { hasCmsPermission, canPrepareNativeBookingForm, canSendNativeBookingForm } from "@/lib/auth/permissions"
 import { getServerSiteOrigin } from "@/lib/auth/site-origin"
 import { generateBookingFormPdf, type PdfSignature } from "@/lib/booking-forms/pdf"
 import { syncBookingFormDealInventory } from "@/lib/booking-forms/inventory-sync"
@@ -43,6 +43,7 @@ import {
   sendCompletedBookingFormEmail,
   sendManualNativeBookingFormEmail,
   sendNativeBookingFormEmail,
+  sendBookingFormReadyToSendNotification,
 } from "@/lib/email/send-booking-form"
 import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
 import { ensureNativeDealOrderAndInvoice } from "@/lib/crm/deal-order-automation"
@@ -73,25 +74,235 @@ function totalLabel(snapshot: BookingFormSnapshot): string {
   }
 }
 
-async function bookingFormGate(adminOnly = false) {
+type BookingFormGateMode = "prepare" | "send" | "void" | "adminSign"
+
+async function bookingFormGate(mode: BookingFormGateMode = "prepare") {
   const [profile, supabase] = await Promise.all([getPortalProfile(), createClient()])
-  if (!profile || !hasCmsPermission(profile, "deals.manage")) return null
-  if (adminOnly && profile.role !== "admin") return null
+  if (!profile) return null
+  if (mode === "prepare" && !canPrepareNativeBookingForm(profile)) return null
+  if (mode === "send" && !canSendNativeBookingForm(profile)) return null
+  if (mode === "void" && !hasCmsPermission(profile, "deals.manage") && profile.role !== "admin") {
+    return null
+  }
+  if (mode === "adminSign" && profile.role !== "admin") return null
   return { profile, supabase }
 }
+
+type Gate = NonNullable<Awaited<ReturnType<typeof bookingFormGate>>>
 
 function signingUrl(token: string): string {
   return `${getServerSiteOrigin()}/sign/booking/${encodeURIComponent(token)}`
 }
 
 const UNSIGNED_EDITABLE_STATUSES = new Set(["draft", "sent", "viewed"])
+const DRAFT_STATUSES = new Set(["draft", "failed"])
+const DRAFT_TOKEN_DAYS = 30
+const SEND_TOKEN_DAYS = 7
+
+function permissionDenied(mode: BookingFormGateMode): { ok: false; message: string } {
+  if (mode === "send") {
+    return { ok: false, message: "Only an admin can send a booking form to the client." }
+  }
+  if (mode === "adminSign") {
+    return { ok: false, message: "Only an admin can countersign booking forms." }
+  }
+  return { ok: false, message: "You do not have permission to manage booking forms." }
+}
+
+async function persistDraftForm(
+  gate: Gate,
+  input: {
+    dealId: string
+    edits: BookingFormEdits
+    reissueFromId?: string
+  },
+): Promise<{ formId: string; snapshot: BookingFormSnapshot }> {
+  const id = input.dealId.trim()
+  const { data: existingDeal } = await gate.supabase
+    .from("deals")
+    .select("order_id")
+    .eq("id", id)
+    .maybeSingle()
+  if (existingDeal?.order_id) {
+    throw new Error(
+      "This deal already has a confirmed order. Portal checkout (or a completed booking form) already confirmed it.",
+    )
+  }
+
+  let draftId: string | null = null
+  if (input.reissueFromId?.trim()) {
+    const { data: existing, error: existingError } = await gate.supabase
+      .from("booking_forms")
+      .select("id, deal_id, status")
+      .eq("id", input.reissueFromId.trim())
+      .maybeSingle()
+    if (existingError || !existing) throw new Error(existingError?.message ?? "Booking form not found.")
+    if (String(existing.deal_id) !== id) {
+      throw new Error("That booking form does not belong to this deal.")
+    }
+    const status = String(existing.status)
+    if (!UNSIGNED_EDITABLE_STATUSES.has(status) && status !== "failed") {
+      throw new Error("Only an unsigned booking form can be edited. Void it first if the client has already signed.")
+    }
+    if (status === "sent" || status === "viewed") {
+      const { error: voidError } = await gate.supabase.rpc("admin_void_native_booking_form", {
+        p_booking_form_id: existing.id,
+        p_reason: "Reissued after booking form content was edited.",
+      })
+      if (voidError) throw new Error(voidError.message)
+      await syncBookingFormDealInventory(id, "booking_form_voided")
+    } else {
+      draftId = String(existing.id)
+    }
+  }
+
+  if (!draftId) {
+    const { data: drafts } = await gate.supabase
+      .from("booking_forms")
+      .select("id")
+      .eq("deal_id", id)
+      .in("status", ["draft", "failed"])
+      .order("revision", { ascending: false })
+      .limit(1)
+    draftId = drafts?.[0] ? String(drafts[0].id) : null
+  }
+
+  const now = new Date()
+  const documentRef = draftId
+    ? ((
+        await gate.supabase.from("booking_forms").select("document_ref").eq("id", draftId).maybeSingle()
+      ).data?.document_ref as string | undefined) ?? generateDocumentRef(now)
+    : generateDocumentRef(now)
+  const { snapshot: base } = await buildBookingFormSnapshot(gate.supabase, id, documentRef, now)
+  const snapshot = applyBookingFormEdits(base, input.edits)
+  const snapshotHash = sha256(stableJson(snapshot))
+  const unsignedPdf = await generateBookingFormPdf(snapshot)
+  const unsignedPath = `forms/${documentRef}/unsigned.pdf`
+  await uploadBookingDocument(unsignedPath, unsignedPdf, "application/pdf")
+
+  if (draftId) {
+    const { error: updateError } = await gate.supabase.rpc("admin_update_native_booking_form_draft", {
+      p_booking_form_id: draftId,
+      p_snapshot_data: snapshot,
+      p_snapshot_hash: snapshotHash,
+      p_client_name: snapshot.billTo.contactName,
+      p_client_email: snapshot.billTo.contactEmail,
+      p_unsigned_pdf_path: unsignedPath,
+    })
+    if (updateError) throw new Error(updateError.message)
+    return { formId: draftId, snapshot }
+  }
+
+  const { tokenHash } = generateSigningToken()
+  const expiresAt = new Date(now.getTime() + DRAFT_TOKEN_DAYS * 24 * 60 * 60 * 1000)
+  const { data: formId, error: createError } = await gate.supabase.rpc("admin_create_native_booking_form", {
+    p_deal_id: id,
+    p_template_id: BOOKING_TEMPLATE_ID,
+    p_document_ref: documentRef,
+    p_snapshot_data: snapshot,
+    p_snapshot_hash: snapshotHash,
+    p_client_name: snapshot.billTo.contactName,
+    p_client_email: snapshot.billTo.contactEmail,
+    p_client_token_hash: tokenHash,
+    p_client_token_expires_at: expiresAt.toISOString(),
+    p_unsigned_pdf_path: unsignedPath,
+  })
+  if (createError || !formId) throw new Error(createError?.message ?? "Could not create booking form.")
+  return { formId: String(formId), snapshot }
+}
+
+async function sendPersistedForm(
+  gate: Gate,
+  formId: string,
+  sendMode: BookingFormSendMode,
+): Promise<Result> {
+  const { data: form, error } = await gate.supabase
+    .from("booking_forms")
+    .select("id, deal_id, status, unsigned_pdf_path, snapshot_data")
+    .eq("id", formId)
+    .maybeSingle()
+  if (error || !form) throw new Error(error?.message ?? "Booking form not found.")
+  if (!DRAFT_STATUSES.has(String(form.status))) {
+    throw new Error("Only a saved draft booking form can be sent to the client.")
+  }
+  const snapshot = form.snapshot_data as BookingFormSnapshot
+  const now = new Date()
+  const { token, tokenHash } = generateSigningToken()
+  const expiresAt = new Date(now.getTime() + SEND_TOKEN_DAYS * 24 * 60 * 60 * 1000)
+  const { error: sendStateError } = await gate.supabase.rpc("admin_send_native_booking_form", {
+    p_booking_form_id: form.id,
+    p_client_token_hash: tokenHash,
+    p_client_token_expires_at: expiresAt.toISOString(),
+  })
+  if (sendStateError) throw new Error(sendStateError.message)
+  await syncBookingFormDealInventory(String(form.deal_id), "booking_form_sent")
+  const persistAdmin = createAdminClient()
+  if (persistAdmin) {
+    try {
+      await saveBookingFormSigningToken(persistAdmin, String(form.id), token)
+    } catch (tokenError) {
+      console.warn("[booking-forms] could not store signing token:", tokenError)
+    }
+  }
+
+  let pdf: Uint8Array | undefined
+  if (sendMode === "manual_pdf") {
+    if (form.unsigned_pdf_path) {
+      try {
+        pdf = await downloadBookingDocument(String(form.unsigned_pdf_path))
+      } catch {
+        pdf = await generateBookingFormPdf(snapshot)
+      }
+    } else {
+      pdf = await generateBookingFormPdf(snapshot)
+    }
+  }
+  const emailInput = {
+    recipientEmail: snapshot.billTo.contactEmail,
+    recipientName: snapshot.billTo.contactName,
+    accountName: snapshot.billTo.accountName,
+    documentRef: snapshot.documentRef,
+    eventName: snapshot.deal.title,
+    totalLabel: totalLabel(snapshot),
+    signingUrl: signingUrl(token),
+    expiresAt: expiresAt.toISOString(),
+    pdf,
+  }
+  const email =
+    sendMode === "manual_pdf"
+      ? await sendManualNativeBookingFormEmail(emailInput)
+      : await sendNativeBookingFormEmail(emailInput)
+  if (!email.ok) {
+    const detail = email.error ?? email.skipped ?? "Email delivery failed."
+    const admin = createAdminClient()
+    await admin?.from("booking_forms").update({ last_error: detail }).eq("id", form.id)
+    revalidatePath("/admin/deals")
+    revalidatePath("/admin")
+    return {
+      ok: true,
+      message: `Booking form created and stock reserved, but email was not sent: ${detail}. Copy the signing link to send it on WhatsApp, or resend after email is configured.`,
+      previewUrl: signingUrl(token),
+    }
+  }
+
+  revalidatePath("/admin/deals")
+  revalidatePath("/admin")
+  return {
+    ok: true,
+    message:
+      sendMode === "manual_pdf"
+        ? "Booking form PDF emailed. Stock is reserved for seven days and a signing link is included."
+        : "Booking form sent. Stock is reserved for seven days.",
+    previewUrl: signingUrl(token),
+  }
+}
 
 export async function previewNativeBookingFormSnapshot(input: {
   dealId: string
   bookingFormId?: string
 }): Promise<SnapshotResult> {
-  const gate = await bookingFormGate()
-  if (!gate) return { ok: false, message: "You do not have permission to manage deals." }
+  const gate = await bookingFormGate("prepare")
+  if (!gate) return permissionDenied("prepare")
   if (!isNativePlatformMode()) {
     return { ok: false, message: "Native booking forms are available only in native platform mode." }
   }
@@ -126,8 +337,8 @@ export async function previewNativeBookingFormPdf(input: {
   dealId: string
   edits: BookingFormEdits
 }): Promise<PdfPreviewResult> {
-  const gate = await bookingFormGate()
-  if (!gate) return { ok: false, message: "You do not have permission to manage deals." }
+  const gate = await bookingFormGate("prepare")
+  if (!gate) return permissionDenied("prepare")
   try {
     const now = new Date()
     const { snapshot: base } = await buildBookingFormSnapshot(
@@ -148,145 +359,155 @@ export async function previewNativeBookingFormPdf(input: {
   }
 }
 
-export async function createAndSendNativeBookingForm(input: {
+export async function saveNativeBookingFormDraft(input: {
   dealId: string
   edits: BookingFormEdits
-  sendMode?: BookingFormSendMode
   reissueFromId?: string
 }): Promise<Result> {
-  const gate = await bookingFormGate()
-  if (!gate) return { ok: false, message: "You do not have permission to manage deals." }
+  const gate = await bookingFormGate("prepare")
+  if (!gate) return permissionDenied("prepare")
   if (!isNativePlatformMode()) {
     return { ok: false, message: "Native booking forms are available only in native platform mode." }
   }
   const id = input.dealId.trim()
   if (!id) return { ok: false, message: "Choose a deal first." }
-  const sendMode: BookingFormSendMode = input.sendMode === "manual_pdf" ? "manual_pdf" : "signing_link"
-  const { data: existingDeal } = await gate.supabase
-    .from("deals")
-    .select("order_id, source")
-    .eq("id", id)
-    .maybeSingle()
-  if (existingDeal?.order_id) {
-    return {
-      ok: false,
-      message: "This deal already has a confirmed order. Portal checkout (or a completed booking form) already confirmed it.",
-    }
-  }
-
   try {
-    if (input.reissueFromId?.trim()) {
-      const { data: existing, error: existingError } = await gate.supabase
-        .from("booking_forms")
-        .select("id, deal_id, status")
-        .eq("id", input.reissueFromId.trim())
-        .maybeSingle()
-      if (existingError || !existing) throw new Error(existingError?.message ?? "Booking form not found.")
-      if (String(existing.deal_id) !== id) {
-        throw new Error("That booking form does not belong to this deal.")
-      }
-      if (!UNSIGNED_EDITABLE_STATUSES.has(String(existing.status))) {
-        throw new Error("Only an unsigned booking form can be edited. Void it first if the client has already signed.")
-      }
-      const { error: voidError } = await gate.supabase.rpc("admin_void_native_booking_form", {
-        p_booking_form_id: existing.id,
-        p_reason: "Reissued after booking form content was edited.",
-      })
-      if (voidError) throw new Error(voidError.message)
-      await syncBookingFormDealInventory(id, "booking_form_voided")
-    }
-
-    const now = new Date()
-    const documentRef = generateDocumentRef(now)
-    const { snapshot: base } = await buildBookingFormSnapshot(
-      gate.supabase,
-      id,
-      documentRef,
-      now,
-    )
-    const snapshot = applyBookingFormEdits(base, input.edits)
-    const snapshotHash = sha256(stableJson(snapshot))
-    const { token, tokenHash } = generateSigningToken()
-    const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
-    const unsignedPdf = await generateBookingFormPdf(snapshot)
-    const unsignedPath = `forms/${documentRef}/unsigned.pdf`
-    await uploadBookingDocument(unsignedPath, unsignedPdf, "application/pdf")
-
-    const { data: formId, error: createError } = await gate.supabase.rpc(
-      "admin_create_native_booking_form",
-      {
-        p_deal_id: id,
-        p_template_id: BOOKING_TEMPLATE_ID,
-        p_document_ref: documentRef,
-        p_snapshot_data: snapshot,
-        p_snapshot_hash: snapshotHash,
-        p_client_name: snapshot.billTo.contactName,
-        p_client_email: snapshot.billTo.contactEmail,
-        p_client_token_hash: tokenHash,
-        p_client_token_expires_at: expiresAt.toISOString(),
-        p_unsigned_pdf_path: unsignedPath,
-      },
-    )
-    if (createError || !formId) throw new Error(createError?.message ?? "Could not create booking form.")
-
-    const { error: sendStateError } = await gate.supabase.rpc("admin_send_native_booking_form", {
-      p_booking_form_id: formId,
+    await persistDraftForm(gate, {
+      dealId: id,
+      edits: input.edits,
+      reissueFromId: input.reissueFromId,
     })
-    if (sendStateError) throw new Error(sendStateError.message)
-    await syncBookingFormDealInventory(id, "booking_form_sent")
-    const persistAdmin = createAdminClient()
-    if (persistAdmin) {
-      try {
-        await saveBookingFormSigningToken(persistAdmin, String(formId), token)
-      } catch (tokenError) {
-        console.warn("[booking-forms] could not store signing token:", tokenError)
-      }
-    }
-
-    const emailInput = {
-      recipientEmail: snapshot.billTo.contactEmail,
-      recipientName: snapshot.billTo.contactName,
-      accountName: snapshot.billTo.accountName,
-      documentRef,
-      eventName: snapshot.deal.title,
-      totalLabel: totalLabel(snapshot),
-      signingUrl: signingUrl(token),
-      expiresAt: expiresAt.toISOString(),
-      pdf: sendMode === "manual_pdf" ? unsignedPdf : undefined,
-    }
-    const email =
-      sendMode === "manual_pdf"
-        ? await sendManualNativeBookingFormEmail(emailInput)
-        : await sendNativeBookingFormEmail(emailInput)
-    if (!email.ok) {
-      const detail = email.error ?? email.skipped ?? "Email delivery failed."
-      const admin = createAdminClient()
-      await admin?.from("booking_forms").update({ last_error: detail }).eq("id", formId)
-      revalidatePath("/admin/deals")
-      return {
-        ok: true,
-        message: `Booking form created and stock reserved, but email was not sent: ${detail}. Copy the signing link to send it on WhatsApp, or resend after email is configured.`,
-        previewUrl: signingUrl(token),
-      }
-    }
-
     revalidatePath("/admin/deals")
+    revalidatePath("/admin")
     return {
       ok: true,
       message:
-        sendMode === "manual_pdf"
-          ? "Booking form PDF emailed. Stock is reserved for seven days and a signing link is included."
-          : "Booking form sent. Stock is reserved for seven days.",
-      previewUrl: signingUrl(token),
+        "Booking form saved. It is ready for an approved admin to send to the client. Stock is not reserved until it is sent.",
     }
   } catch (error) {
     return { ok: false, message: errorMessage(error) }
   }
 }
 
+export async function notifyNativeBookingFormReady(input: {
+  dealId: string
+  edits?: BookingFormEdits
+  reissueFromId?: string
+  bookingFormId?: string
+}): Promise<Result> {
+  const gate = await bookingFormGate("prepare")
+  if (!gate) return permissionDenied("prepare")
+  if (!isNativePlatformMode()) {
+    return { ok: false, message: "Native booking forms are available only in native platform mode." }
+  }
+  const id = input.dealId.trim()
+  if (!id) return { ok: false, message: "Choose a deal first." }
+  try {
+    let formId = input.bookingFormId?.trim() || ""
+    let snapshot: BookingFormSnapshot | null = null
+    if (input.edits) {
+      const persisted = await persistDraftForm(gate, {
+        dealId: id,
+        edits: input.edits,
+        reissueFromId: input.reissueFromId,
+      })
+      formId = persisted.formId
+      snapshot = persisted.snapshot
+    }
+    if (!formId) return { ok: false, message: "Save the booking form before notifying admins." }
+
+    const { error: notifyError } = await gate.supabase.rpc(
+      "admin_record_booking_form_ready_notification",
+      { p_booking_form_id: formId },
+    )
+    if (notifyError) throw new Error(notifyError.message)
+
+    if (!snapshot) {
+      const { data: form, error } = await gate.supabase
+        .from("booking_forms")
+        .select("snapshot_data")
+        .eq("id", formId)
+        .maybeSingle()
+      if (error || !form) throw new Error(error?.message ?? "Booking form not found.")
+      snapshot = form.snapshot_data as BookingFormSnapshot
+    }
+
+    const preparedByName = gate.profile.full_name?.trim() || "A teammate"
+    const email = await sendBookingFormReadyToSendNotification({
+      documentRef: snapshot.documentRef,
+      accountName: snapshot.billTo.accountName,
+      eventName: snapshot.deal.title,
+      clientName: snapshot.billTo.contactName,
+      preparedByName,
+      dealUrl: `${getServerSiteOrigin()}/admin/deals/${encodeURIComponent(id)}`,
+    })
+    if (!email.ok) {
+      const detail = email.error ?? email.skipped ?? "Notification email failed."
+      revalidatePath("/admin/deals")
+      revalidatePath("/admin")
+      return {
+        ok: false,
+        message: `Booking form is saved, but the admin notification was not sent: ${detail}`,
+      }
+    }
+
+    revalidatePath("/admin/deals")
+    revalidatePath("/admin")
+    return {
+      ok: true,
+      message: "Ollie, Michel, and Matt have been emailed. An admin still needs to send the form to the client.",
+    }
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) }
+  }
+}
+
+export async function sendSavedNativeBookingForm(input: {
+  bookingFormId: string
+  sendMode?: BookingFormSendMode
+}): Promise<Result> {
+  const gate = await bookingFormGate("send")
+  if (!gate) return permissionDenied("send")
+  if (!isNativePlatformMode()) {
+    return { ok: false, message: "Native booking forms are available only in native platform mode." }
+  }
+  const sendMode: BookingFormSendMode = input.sendMode === "manual_pdf" ? "manual_pdf" : "signing_link"
+  try {
+    return await sendPersistedForm(gate, input.bookingFormId.trim(), sendMode)
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) }
+  }
+}
+
+export async function createAndSendNativeBookingForm(input: {
+  dealId: string
+  edits: BookingFormEdits
+  sendMode?: BookingFormSendMode
+  reissueFromId?: string
+}): Promise<Result> {
+  const gate = await bookingFormGate("send")
+  if (!gate) return permissionDenied("send")
+  if (!isNativePlatformMode()) {
+    return { ok: false, message: "Native booking forms are available only in native platform mode." }
+  }
+  const id = input.dealId.trim()
+  if (!id) return { ok: false, message: "Choose a deal first." }
+  const sendMode: BookingFormSendMode = input.sendMode === "manual_pdf" ? "manual_pdf" : "signing_link"
+  try {
+    const persisted = await persistDraftForm(gate, {
+      dealId: id,
+      edits: input.edits,
+      reissueFromId: input.reissueFromId,
+    })
+    return await sendPersistedForm(gate, persisted.formId, sendMode)
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) }
+  }
+}
+
 export async function resendNativeBookingForm(bookingFormId: string): Promise<Result> {
-  const gate = await bookingFormGate()
-  if (!gate) return { ok: false, message: "You do not have permission to manage deals." }
+  const gate = await bookingFormGate("send")
+  if (!gate) return permissionDenied("send")
   try {
     const { data: form, error } = await gate.supabase
       .from("booking_forms")
@@ -345,8 +566,8 @@ export async function voidNativeBookingForm(
   bookingFormId: string,
   reason: string,
 ): Promise<Result> {
-  const gate = await bookingFormGate()
-  if (!gate) return { ok: false, message: "You do not have permission to manage deals." }
+  const gate = await bookingFormGate("void")
+  if (!gate) return permissionDenied("void")
   try {
     const { data: form } = await gate.supabase
       .from("booking_forms")
@@ -373,8 +594,8 @@ export async function signNativeBookingFormAsAdmin(input: {
   signerName: string
   signatureDataUrl: string
 }): Promise<Result> {
-  const gate = await bookingFormGate(true)
-  if (!gate) return { ok: false, message: "Only an admin can countersign booking forms." }
+  const gate = await bookingFormGate("adminSign")
+  if (!gate) return permissionDenied("adminSign")
   try {
     const { data: auth } = await gate.supabase.auth.getUser()
     const signerEmail = auth.user?.email?.trim().toLowerCase()
@@ -523,8 +744,8 @@ export async function getNativeBookingFormSigningUrl(bookingFormId: string): Pro
   | { ok: true; url: string; rotated: boolean }
   | { ok: false; message: string }
 > {
-  const gate = await bookingFormGate()
-  if (!gate) return { ok: false, message: "You do not have permission to manage deals." }
+  const gate = await bookingFormGate("send")
+  if (!gate) return permissionDenied("send")
   const id = bookingFormId.trim()
   if (!id) return { ok: false, message: "Booking form not found." }
   try {
@@ -555,8 +776,8 @@ export async function getNativeBookingFormSigningUrl(bookingFormId: string): Pro
 }
 
 export async function getNativeBookingFormDownloadUrl(bookingFormId: string): Promise<UrlResult> {
-  const gate = await bookingFormGate()
-  if (!gate) return { ok: false, message: "You do not have permission to view booking forms." }
+  const gate = await bookingFormGate("prepare")
+  if (!gate) return permissionDenied("prepare")
   const { data: form, error } = await gate.supabase
     .from("booking_forms")
     .select("document_ref, status, snapshot_data, final_pdf_path, unsigned_pdf_path")
@@ -602,7 +823,7 @@ export async function recordBookingFormEmailError(
   bookingFormId: string,
   message: string | null,
 ): Promise<void> {
-  const gate = await bookingFormGate()
+  const gate = await bookingFormGate("prepare")
   if (!gate) return
   const admin = createAdminClient()
   if (!admin) return

@@ -8,6 +8,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   CircleDollarSign,
+  Mail,
   Search,
   Target,
   TrendingUp,
@@ -73,15 +74,17 @@ function date(value: string | null): string {
   )
 }
 
-function tone(status: string | null): "green" | "amber" | "red" | "blue" | "gray" {
+function tone(status: string | null): "green" | "amber" | "red" | "blue" | "purple" | "gray" {
   if (status === "paid" || status === "delivered" || status === "confirmed" || status === "completed" || status === "checkout_terms") return "green"
   if (status === "cancelled" || status === "failed" || status === "issue") return "red"
+  if (status === "ready_to_send") return "purple"
   if (status === "awaiting_payment" || status === "overdue") return "amber"
   if (status === "pending") return "blue"
   return "gray"
 }
 
 function label(value: string): string {
+  if (value === "ready_to_send") return "Ready to send"
   return value.replaceAll("_", " ")
 }
 
@@ -215,11 +218,13 @@ export function WorkflowTrackerClient({
       if (
         status === "awaiting_booking_form" &&
         row.bookingFormStatus &&
-        !["draft", "created"].includes(row.bookingFormStatus)
+        !["created"].includes(row.bookingFormStatus)
       ) return false
+      if (status === "ready_to_send" && row.bookingFormStatus !== "ready_to_send") return false
       if (
         status !== "all" &&
         status !== "awaiting_booking_form" &&
+        status !== "ready_to_send" &&
         statusValue !== status &&
         !(status === "paid" && statusValue === "delivered")
       ) return false
@@ -271,8 +276,9 @@ export function WorkflowTrackerClient({
     .filter((row) => row.paidAt && new Date(row.paidAt).getTime() >= monthStart.getTime())
     .reduce((sum, row) => sum + row.amountPaid, 0)
   const awaitingBookingForm = activeRows.filter(
-    (row) => !row.bookingFormStatus || ["draft", "created"].includes(row.bookingFormStatus),
+    (row) => !row.bookingFormStatus || row.bookingFormStatus === "created",
   ).length
+  const readyToSendBookingForm = activeRows.filter((row) => row.bookingFormStatus === "ready_to_send").length
   const openFinanceDeals = activeRows.filter(
     (row) => !["paid", "delivered", "cancelled"].includes(row.invoiceStatus ?? ""),
   ).length
@@ -320,7 +326,8 @@ export function WorkflowTrackerClient({
   const liveForTabs = scopedForTabs.filter((row) => !isCancelledWorkflowRow(row))
   const tabs = [
     ["all", "All deals", scopedForTabs.length],
-    ["awaiting_booking_form", "Awaiting booking form", liveForTabs.filter((row) => !row.bookingFormStatus || ["draft", "created"].includes(row.bookingFormStatus)).length],
+    ["awaiting_booking_form", "Awaiting booking form", liveForTabs.filter((row) => !row.bookingFormStatus || row.bookingFormStatus === "created").length],
+    ["ready_to_send", "Ready to send", liveForTabs.filter((row) => row.bookingFormStatus === "ready_to_send").length],
     ["awaiting_invoice", "Awaiting invoice", liveForTabs.filter((row) => row.invoiceStatus === "awaiting_invoice").length],
     ["awaiting_payment", "Awaiting payment", liveForTabs.filter((row) => row.invoiceStatus === "awaiting_payment" && !row.overdueSince).length],
     ["overdue", "Overdue", liveForTabs.filter((row) => row.invoiceStatus === "awaiting_payment" && row.overdueSince).length],
@@ -389,6 +396,7 @@ export function WorkflowTrackerClient({
           <>
             <AdminStatCard icon={Users} value={openFinanceDeals} label="Open finance deals" tone="blue" />
             <AdminStatCard icon={Target} value={awaitingBookingForm} label="Awaiting booking form" tone="amber" />
+            <AdminStatCard icon={Mail} value={readyToSendBookingForm} label="Ready to send" tone="purple" />
             <AdminStatCard icon={CircleDollarSign} value={activeRows.filter((row) => row.invoiceStatus === "awaiting_payment" && !row.overdueSince).length} label="Awaiting payment" tone="amber" />
             <AdminStatCard icon={AlertTriangle} value={overdue.length} label="Overdue invoices" tone="red" />
             <AdminStatCard icon={TrendingUp} value={money(collectedThisMonth)} label="Collected this month" tone="green" />

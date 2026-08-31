@@ -68,7 +68,8 @@ function date(value: string | null): string {
 function stageTone(stage: DealStage): "green" | "amber" | "red" | "blue" | "purple" | "gray" {
   if (WON_STAGES.has(stage)) return "green"
   if (LOST_STAGES.has(stage)) return "red"
-  if (stage === "awaiting_payment" || stage === "awaiting_invoice") return "amber"
+  if (stage === "awaiting_booking_form_send") return "purple"
+  if (stage === "awaiting_payment" || stage === "awaiting_invoice" || stage === "awaiting_client_signature" || stage === "awaiting_zk_signature") return "amber"
   if (stage === "draft" || stage === "sourcing") return "gray"
   return "blue"
 }

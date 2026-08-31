@@ -4,10 +4,9 @@ import {
   AlertTriangle,
   Boxes,
   CircleDollarSign,
-  ClipboardCheck,
   FileSignature,
+  Mail,
   PackageCheck,
-  Target,
   UserRoundPlus,
   UsersRound,
   CircleHelp,
@@ -16,11 +15,11 @@ import {
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { createClient } from "@/lib/supabase/server"
 import { countPendingBookingApprovalRequests } from "@/lib/booking-approval/queries"
-import { countNativeBookingFormsAwaitingApproval } from "@/lib/booking-forms/queries"
+import { countNativeBookingFormsAwaitingApproval, countNativeBookingFormsReadyToSend } from "@/lib/booking-forms/queries"
 import { getDashboardActionCounts } from "@/lib/admin/dashboard-stats"
 import { getSalesTrackerRows } from "@/lib/admin/workflow-views"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
-import { dealSourceLabel } from "@/lib/crm/deal-types"
+import { DEAL_STAGE_LABELS, dealSourceLabel, type DealStage } from "@/lib/crm/deal-types"
 import {
   AdminPageHeader,
   AdminPanel,
@@ -101,6 +100,7 @@ async function AdminDashboard() {
     { count: activeHolds },
     paddockRequests,
     bookingFormsAwaiting,
+    bookingFormsReadyToSend,
     actions,
     { data: inventory },
     { count: negativeStock },
@@ -112,6 +112,7 @@ async function AdminDashboard() {
     supabase.from("inventory_holds").select("*", { count: "exact", head: true }).is("released_at", null),
     countPendingBookingApprovalRequests(),
     countNativeBookingFormsAwaitingApproval(),
+    countNativeBookingFormsReadyToSend(),
     getDashboardActionCounts(),
     supabase.from("package_inventory").select("qty_available"),
     supabase
@@ -184,6 +185,7 @@ async function AdminDashboard() {
         total: Number(deal.total_amount ?? 0),
         currency: String(deal.currency || "USD"),
         status: String(deal.stage ?? "open"),
+        statusLabel: DEAL_STAGE_LABELS[(deal.stage as DealStage)] ?? String(deal.stage ?? "open").replaceAll("_", " "),
       }
     })
   const currentMonth = new Date().toISOString().slice(0, 7)
@@ -232,6 +234,7 @@ async function AdminDashboard() {
     href: string
   }> = [
     { icon: UsersRound, label: "Pending users", value: pending ?? 0, href: "/admin/pending-users" },
+    { icon: Mail, label: "Booking forms ready to send", value: bookingFormsReadyToSend, href: "/admin/deals?pipeline=ready_to_send" },
     { icon: FileSignature, label: "Booking forms awaiting approval", value: bookingFormsAwaiting, href: "/admin/deals" },
     { icon: AlertTriangle, label: "Negative stock items to purchase", value: negativeStock ?? 0, href: "/admin/inventory/negative-stock" },
     { icon: Boxes, label: "Tickets awaiting delivery", value: actions.awaitingDelivery, href: "/admin/operations" },
@@ -264,18 +267,19 @@ async function AdminDashboard() {
           tone="red"
         />
         <AdminStatCard
+          icon={Mail}
+          value={bookingFormsReadyToSend}
+          label="Booking forms ready to send"
+          hint="Waiting for an admin to send"
+          tone="amber"
+          href="/admin/deals?pipeline=ready_to_send"
+        />
+        <AdminStatCard
           icon={UserRoundPlus}
           value={activeHolds ?? 0}
           label="Active stock holds"
           hint="Across portal and sales"
           tone="purple"
-        />
-        <AdminStatCard
-          icon={Target}
-          value={money(pipeline)}
-          label="Confirmed sales value"
-          hint="All time"
-          tone="blue"
         />
         <AdminStatCard
           icon={PackageCheck}
@@ -455,7 +459,7 @@ async function AdminDashboard() {
                               : "amber"
                         }
                       >
-                        {row.status.replaceAll("_", " ")}
+                        {row.statusLabel}
                       </StatusPill>
                     </td>
                   </tr>

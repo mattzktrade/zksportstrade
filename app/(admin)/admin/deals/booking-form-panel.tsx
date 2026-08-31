@@ -17,7 +17,10 @@ import {
   createAndSendNativeBookingForm,
   getNativeBookingFormDownloadUrl,
   getNativeBookingFormSigningUrl,
+  notifyNativeBookingFormReady,
   resendNativeBookingForm,
+  saveNativeBookingFormDraft,
+  sendSavedNativeBookingForm,
   signNativeBookingFormAsAdmin,
   voidNativeBookingForm,
 } from "./booking-form-actions"
@@ -31,7 +34,7 @@ import { SignaturePad, type SignaturePadHandle } from "@/components/signature-pa
 import { BOOKING_SIGNATURE_CONSENT } from "@/lib/booking-forms/template"
 
 const STATUS_LABELS: Record<BookingFormAdminRow["status"], string> = {
-  draft: "Draft",
+  draft: "Ready to send",
   sent: "Sent",
   viewed: "Viewed",
   awaiting_zk_signature: "Client signed — ZK signature required",
@@ -139,6 +142,7 @@ export function BookingFormPanel({
   form,
   events,
   currentIsAdmin,
+  currentCanManageDeals,
   currentProfileName,
   orderAlreadyConfirmed = false,
   confirmedOffPlatform = false,
@@ -148,6 +152,7 @@ export function BookingFormPanel({
   form: BookingFormAdminRow | null
   events: BookingFormEventRow[]
   currentIsAdmin: boolean
+  currentCanManageDeals: boolean
   currentProfileName: string
   orderAlreadyConfirmed?: boolean
   confirmedOffPlatform?: boolean
@@ -155,7 +160,7 @@ export function BookingFormPanel({
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [showSignature, setShowSignature] = useState(false)
-  const [editorMode, setEditorMode] = useState<"create" | "reissue" | null>(null)
+  const [editorMode, setEditorMode] = useState<"create" | "edit" | "reissue" | null>(null)
   const [localPreviewUrl, setLocalPreviewUrl] = useState("")
 
   function run(
@@ -225,13 +230,45 @@ export function BookingFormPanel({
           dealId,
           edits,
           sendMode,
-          reissueFromId: editorMode === "reissue" ? form?.id : undefined,
+          reissueFromId: editorMode === "reissue" || editorMode === "edit" ? form?.id : undefined,
         }),
       () => setEditorMode(null),
     )
   }
 
-  const active = form && ["draft", "sent", "viewed", "awaiting_zk_signature", "zk_signed"].includes(form.status)
+  function saveForm(edits: BookingFormEdits) {
+    run(
+      () =>
+        saveNativeBookingFormDraft({
+          dealId,
+          edits,
+          reissueFromId: editorMode === "reissue" || editorMode === "edit" ? form?.id : undefined,
+        }),
+      () => setEditorMode(null),
+    )
+  }
+
+  function notifyForm(edits?: BookingFormEdits) {
+    run(
+      () =>
+        notifyNativeBookingFormReady({
+          dealId,
+          edits,
+          reissueFromId: editorMode === "reissue" || editorMode === "edit" ? form?.id : undefined,
+          bookingFormId: edits ? undefined : form?.id,
+        }),
+      () => setEditorMode(null),
+    )
+  }
+
+  function sendSaved(sendMode: BookingFormSendMode) {
+    if (!form) return
+    run(() => sendSavedNativeBookingForm({ bookingFormId: form.id, sendMode }))
+  }
+
+  const lastReadyNotice = events.find((event) => event.event_type === "ready_notified")
+  const isDraft = form?.status === "draft" || form?.status === "failed"
+  const active = form && ["draft", "failed", "sent", "viewed", "awaiting_zk_signature", "zk_signed"].includes(form.status)
 
   return (
     <div className="rounded-lg border border-slate-200 p-3">
@@ -256,7 +293,8 @@ export function BookingFormPanel({
             </p>
           ) : (
             <p className="mb-2 text-[8px] text-slate-500">
-              Creates an immutable PDF snapshot, reserves stock for seven days, and emails a secure client-first signing link. You can fully edit names, products and terms before sending, or email the PDF only.
+              Creates an editable PDF snapshot. Stock is reserved for seven days only when an approved admin
+              sends it to the client.
             </p>
           )}
           <button
@@ -267,7 +305,7 @@ export function BookingFormPanel({
           >
             <span className="inline-flex items-center gap-1.5">
               <Mail className="h-3.5 w-3.5" />
-              Create, reserve stock &amp; send
+              Create booking form
             </span>
           </button>
             </>
@@ -284,7 +322,7 @@ export function BookingFormPanel({
               <span className={`rounded-full px-2 py-1 text-[8px] font-semibold ${
                 form.status === "completed"
                   ? "bg-slate-900 text-white"
-                  : form.status === "awaiting_zk_signature"
+                  : form.status === "awaiting_zk_signature" || isDraft
                     ? "bg-amber-100 text-amber-900"
                     : "bg-slate-100 text-slate-800"
               }`}>
@@ -301,25 +339,54 @@ export function BookingFormPanel({
               ) : null}
             </dl>
             {form.last_error ? <p className="mt-2 text-[8px] font-medium text-red-600">{form.last_error}</p> : null}
+            {isDraft && lastReadyNotice ? (
+              <p className="mt-2 text-[8px] text-slate-500">
+                Admins notified {dateTime(lastReadyNotice.created_at)}. An approved admin still needs to send this to the client.
+              </p>
+            ) : isDraft ? (
+              <p className="mt-2 text-[8px] text-slate-500">
+                Saved for an approved admin to send. Stock is not reserved yet.
+              </p>
+            ) : null}
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <button type="button" onClick={download} className="h-9 rounded-md border text-[9px] font-semibold">
               <span className="inline-flex items-center gap-1"><Download className="h-3.5 w-3.5" /> View PDF</span>
             </button>
-            {["sent", "viewed"].includes(form.status) ? (
+            {["sent", "viewed"].includes(form.status) && currentIsAdmin ? (
               <button type="button" disabled={pending} onClick={() => void copySigningLink()} className="h-9 rounded-md border text-[9px] font-semibold disabled:opacity-50">
                 <span className="inline-flex items-center gap-1"><Copy className="h-3.5 w-3.5" /> Copy signing link</span>
               </button>
             ) : null}
-            {["sent", "viewed"].includes(form.status) ? (
+            {["sent", "viewed"].includes(form.status) && currentIsAdmin ? (
               <button type="button" disabled={pending} onClick={() => run(() => resendNativeBookingForm(form.id))} className="h-9 rounded-md border text-[9px] font-semibold disabled:opacity-50">
                 Resend email
               </button>
             ) : null}
-            {["draft", "sent", "viewed"].includes(form.status) ? (
+            {isDraft ? (
+              <button type="button" disabled={pending} onClick={() => setEditorMode("edit")} className="h-9 rounded-md border text-[9px] font-semibold disabled:opacity-50">
+                Edit
+              </button>
+            ) : null}
+            {["sent", "viewed"].includes(form.status) && currentIsAdmin ? (
               <button type="button" disabled={pending} onClick={() => setEditorMode("reissue")} className="h-9 rounded-md border text-[9px] font-semibold disabled:opacity-50">
                 Edit &amp; reissue
+              </button>
+            ) : null}
+            {isDraft ? (
+              <button type="button" disabled={pending} onClick={() => notifyForm()} className="h-9 rounded-md border text-[9px] font-semibold disabled:opacity-50">
+                Notify admins to send
+              </button>
+            ) : null}
+            {isDraft && currentIsAdmin ? (
+              <button type="button" disabled={pending} onClick={() => sendSaved("signing_link")} className="h-9 rounded-md bg-[#010101] text-[9px] font-semibold text-white disabled:opacity-50">
+                Send to client
+              </button>
+            ) : null}
+            {isDraft && currentIsAdmin ? (
+              <button type="button" disabled={pending} onClick={() => sendSaved("manual_pdf")} className="h-9 rounded-md border text-[9px] font-semibold disabled:opacity-50">
+                Email PDF only
               </button>
             ) : null}
             {form.status === "awaiting_zk_signature" && currentIsAdmin ? (
@@ -327,7 +394,7 @@ export function BookingFormPanel({
                 <span className="inline-flex items-center gap-1"><PenLine className="h-3.5 w-3.5" /> Review &amp; sign</span>
               </button>
             ) : null}
-            {active && form.status !== "zk_signed" ? (
+            {active && form.status !== "zk_signed" && currentCanManageDeals ? (
               <button type="button" disabled={pending} onClick={voidForm} className="h-9 rounded-md border border-red-200 text-[9px] font-semibold text-red-600 disabled:opacity-50">
                 Void &amp; release
               </button>
@@ -360,13 +427,16 @@ export function BookingFormPanel({
       {editorMode ? (
         <BookingFormEditor
           dealId={dealId}
-          reissueFromId={editorMode === "reissue" ? form?.id : undefined}
+          reissueFromId={editorMode === "create" ? undefined : form?.id}
           pending={pending}
+          canSend={currentIsAdmin}
           onClose={() => setEditorMode(null)}
+          onSave={saveForm}
+          onNotify={notifyForm}
           onSend={sendForm}
         />
       ) : null}
-      {localPreviewUrl && form && ["sent", "viewed"].includes(form.status) ? (
+      {localPreviewUrl && currentIsAdmin && form && ["sent", "viewed"].includes(form.status) ? (
         <button
           type="button"
           onClick={() => void copySigningLink()}

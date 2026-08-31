@@ -16,10 +16,10 @@ export const dynamic = "force-dynamic"
 export default async function DealsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ deal?: string }>
+  searchParams: Promise<{ deal?: string; pipeline?: string }>
 }) {
   const profile = await requireAdmin()
-  const { deal: initialSelectedId } = await searchParams
+  const { deal: initialSelectedId, pipeline: initialPipeline } = await searchParams
   const [initialDeals, packages, accountOptions, staffOptions, bookingForms, suppliers] = await Promise.all([
     getDealListRows(),
     getAdminCatalogListRows(),
@@ -66,10 +66,22 @@ export default async function DealsPage({
         currentProfileName={profile.full_name || "ZK Admin"}
         currentIsAdmin={profile.role === "admin"}
         currentCanManageFinance={hasCmsPermission(profile, "finance.manage")}
+        currentCanManageDeals={hasCmsPermission(profile, "deals.manage")}
         bookingForms={bookingForms.forms}
         bookingFormEvents={bookingForms.events}
         supplierOptions={suppliers.map((supplier) => ({ id: supplier.id, name: supplier.name }))}
         initialSelectedId={initialSelectedId ?? null}
+        initialPipelineFilter={
+          initialPipeline === "ready_to_send" ||
+          initialPipeline === "new_enquiry" ||
+          initialPipeline === "price_sent" ||
+          initialPipeline === "booking_form" ||
+          initialPipeline === "awaiting_payment" ||
+          initialPipeline === "won" ||
+          initialPipeline === "lost"
+            ? initialPipeline
+            : ""
+        }
       />
     </div>
   )

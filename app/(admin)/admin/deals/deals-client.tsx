@@ -75,6 +75,7 @@ type PipelineView = "all" | "mine" | "team"
 type PipelineStageId =
   | "new_enquiry"
   | "price_sent"
+  | "ready_to_send"
   | "booking_form"
   | "awaiting_payment"
   | "won"
@@ -175,6 +176,8 @@ function stageTone(stage: DealStage): "green" | "amber" | "red" | "blue" | "purp
       return "purple"
     case "price_sent":
       return "blue"
+    case "ready_to_send":
+      return "purple"
     case "booking_form":
       return "amber"
     case "awaiting_payment":
@@ -207,6 +210,12 @@ const PIPELINE_COLUMNS: Array<{
     colour: "border-violet-500",
   },
   { id: "price_sent", label: "Price sent", stages: ["proposal"], colour: "border-blue-500" },
+  {
+    id: "ready_to_send",
+    label: "Ready to send",
+    stages: ["awaiting_booking_form_send"],
+    colour: "border-fuchsia-500",
+  },
   {
     id: "booking_form",
     label: "Booking form",
@@ -241,6 +250,8 @@ function actionRequired(deal: DealListRow): string {
       return "Confirm sourcing and price"
     case "proposal":
       return "Follow up price"
+    case "awaiting_booking_form_send":
+      return "Approved admin to send booking form"
     case "booking_form_sent":
     case "awaiting_client_signature":
       return "Chase client signature"
@@ -273,10 +284,12 @@ export function DealsClient({
   currentProfileName,
   currentIsAdmin,
   currentCanManageFinance,
+  currentCanManageDeals,
   bookingForms,
   bookingFormEvents,
   supplierOptions,
   initialSelectedId = null,
+  initialPipelineFilter = "",
 }: {
   deals: DealListRow[]
   packageOptions: DealPackageOption[]
@@ -287,10 +300,12 @@ export function DealsClient({
   currentProfileName: string
   currentIsAdmin: boolean
   currentCanManageFinance: boolean
+  currentCanManageDeals: boolean
   bookingForms: BookingFormAdminRow[]
   bookingFormEvents: BookingFormEventRow[]
   supplierOptions: DealBasketSupplier[]
   initialSelectedId?: string | null
+  initialPipelineFilter?: PipelineStageId | ""
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -302,7 +317,7 @@ export function DealsClient({
     eventFilter: [] as string[],
     sortKey: "reference" as DealSortKey,
     sortDir: "desc" as "asc" | "desc",
-  })
+  }, initialPipelineFilter ? { override: { pipelineFilter: initialPipelineFilter } } : undefined)
   const { view, query, pipelineFilter, sourceFilter, eventFilter, sortKey, sortDir } = listState
   const {
     isDesktop,
@@ -933,7 +948,7 @@ export function DealsClient({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 border-b border-[#eceef1] p-3 md:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-2 border-b border-[#eceef1] p-3 md:grid-cols-4 xl:grid-cols-7">
           {PIPELINE_COLUMNS.map((column) => {
             const columnDeals = scoped.filter((deal) => column.stages.includes(deal.stage))
             const value = columnDeals.reduce((sum, deal) => sum + deal.total_amount, 0)
@@ -1350,6 +1365,7 @@ export function DealsClient({
                       : []
                   }
                   currentIsAdmin={currentIsAdmin}
+                  currentCanManageDeals={currentCanManageDeals}
                   currentProfileName={currentProfileName}
                 />
                 <DealFinancePanel

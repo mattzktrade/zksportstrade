@@ -238,6 +238,18 @@ function fulfilmentFromDealStage(stage: string): string {
   return "awaiting_payment"
 }
 
+function workflowBookingFormStatus(
+  formStatus: string | null | undefined,
+  dealStage: string | null | undefined,
+): string | null {
+  if (formStatus === "draft" || formStatus === "failed") {
+    return "ready_to_send"
+  }
+  if (formStatus) return formStatus
+  if (dealStage === "awaiting_booking_form_send") return "ready_to_send"
+  return bookingFormStatusFromDealStage(dealStage ?? "")
+}
+
 function bookingFormStatusFromDealStage(stage: string): string | null {
   if (
     [
@@ -253,10 +265,12 @@ function bookingFormStatusFromDealStage(stage: string): string | null {
   }
   if (stage === "awaiting_zk_signature") return "client_signed"
   if (stage === "booking_form_sent" || stage === "awaiting_client_signature") return "sent"
+  if (stage === "awaiting_booking_form_send") return "ready_to_send"
   return null
 }
 
 const FINANCE_DEAL_STAGES = [
+  "awaiting_booking_form_send",
   "booking_form_sent",
   "awaiting_client_signature",
   "awaiting_zk_signature",
@@ -410,7 +424,7 @@ function mapDealToWorkflowRow(
     amountDue: paidLike ? 0 : total,
     amountPaid: paidLike ? total : 0,
     paidAt: paidLike ? deal.closed_at ?? deal.created_at : null,
-    bookingFormStatus: bookingForm?.status ?? bookingFormStatusFromDealStage(deal.stage),
+    bookingFormStatus: workflowBookingFormStatus(bookingForm?.status, deal.stage),
     bookingFormSentAt: bookingForm?.sent_at ?? null,
     bookingFormClientSignedAt: bookingForm?.client_signed_at ?? null,
     bookingFormZkSignedAt: bookingForm?.zk_signed_at ?? null,
@@ -955,7 +969,11 @@ export async function getWorkflowOrderRows(): Promise<WorkflowOrderRow[]> {
         invoice?.xero_amount_due == null ? (paidLike ? 0 : total) : Number(invoice.xero_amount_due),
       amountPaid: Number(invoice?.xero_amount_paid ?? (paidLike ? total : 0)),
       paidAt: invoice?.paid_at ?? null,
-      bookingFormStatus: bookingForm?.status ?? (checkoutConfirmed ? "checkout_terms" : null),
+      bookingFormStatus: bookingForm
+        ? workflowBookingFormStatus(bookingForm.status, deal?.stage ?? null)
+        : checkoutConfirmed
+          ? "checkout_terms"
+          : null,
       bookingFormSentAt: bookingForm?.sent_at ?? (checkoutConfirmed ? String(row.created_at) : null),
       bookingFormClientSignedAt:
         bookingForm?.client_signed_at ?? (checkoutConfirmed ? String(row.created_at) : null),

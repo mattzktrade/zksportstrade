@@ -81,8 +81,8 @@ export const HELP_TOPICS: HelpTopic[] = [
             href: "/admin/inventory/sales-list",
           },
           {
-            title: "3. Send the booking form",
-            body: "Open the deal and send the form. Places are held for 7 days while they sign.",
+            title: "3. Prepare the booking form",
+            body: "Open the deal and create the form. Sales and finance can save it and notify an admin. Only an admin can send it to the client. Stock is held for 7 days at that point, not when the form is saved.",
             href: "/admin/deals",
           },
           {
@@ -103,7 +103,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             role: "If you sell",
             items: [
               "Live in Accounts (Leads tab for new prospects), Sales list, and Deals.",
-              "Create deals and holds. Send booking forms.",
+              "Create deals and holds. Prepare booking forms, then notify an admin to send them.",
               "Do not approve random portal users or change website visibility unless you mean to.",
             ],
           },
@@ -120,6 +120,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             items: [
               "Live in Finance. Check awaiting payment and overdue.",
               "Invoices are created in Xero after both signatures (or after a portal/website booking).",
+              "You can prepare booking forms; an admin must send them to the client.",
               "Do not void invoices unless you intend to cancel the order and return the stock.",
             ],
           },
@@ -241,7 +242,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             title: "Deals",
-            body: "Every sale in progress or won. Offline deals, portal bookings, and website orders all show up here.",
+            body: "Every sale in progress or won. Offline deals, portal bookings, and website orders all show up here. Ready to send is forms waiting for an admin to email the client.",
             href: "/admin/deals",
           },
           {
@@ -267,7 +268,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             title: "Finance",
-            body: "Invoices and payment. Overdue sits here so it is hard to miss.",
+            body: "Invoices and payment. Overdue sits here so it is hard to miss. Ready to send is booking forms waiting for an admin to email the client.",
             href: "/admin/finance",
           },
         ],
@@ -305,7 +306,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         type: "doDont",
         do: [
           "Search for a company or contact before creating a new one.",
-          "Double-check product, quantity, and price before sending a booking form.",
+          "Double-check product, quantity, and price before saving a booking form.",
           "Use Deals for phone / WhatsApp / email sales.",
           "Ask before ticking Live on website — that publishes to zk-sports.com.",
           "Stop and ask if stock numbers look wrong, rather than typing a fix.",
@@ -337,7 +338,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         title: "Sourced stock (we do not own it yet)",
         items: [
           "You can still create the deal. Mark the line as brokered and enter the supplier, buy price, and quote time.",
-          "The supplier quote must be from the last 24 hours before you hold stock or send the booking form.",
+          "The supplier quote must be from the last 24 hours before you hold stock or an admin sends the booking form.",
           "It will appear on Negative stock list until we buy it.",
         ],
       },
@@ -348,7 +349,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     nav: "Selling",
     title: "Selling",
     summary: "Accounts, leads, deals, booking forms, and the pipeline.",
-    keywords: ["deal", "deals", "account", "contact", "lead", "leads", "booking form", "sign", "pipeline", "enquiry", "price"],
+    keywords: ["deal", "deals", "account", "contact", "lead", "leads", "booking form", "sign", "pipeline", "enquiry", "price", "ready to send"],
     blocks: [
       {
         type: "p",
@@ -393,7 +394,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           "Choose Create deal. Search for the company or a person — companies that start with what you typed appear first, and you can pick a contact in the same list. Only create a new account if it is not there.",
           "Add the contact, quantity, and sale price. You can add more than one product, including from different events.",
           "Optional: tick Reserve stock for 7 days if you need to lock places before the form goes out.",
-          "Save, then open the deal from Sales → Deals to send the booking form.",
+          "Save, then open the deal from Sales → Deals to prepare the booking form.",
         ],
       },
       {
@@ -401,7 +402,8 @@ export const HELP_TOPICS: HelpTopic[] = [
         title: "Booking form",
         items: [
           "The deal needs a company, a contact with an email, and at least one product.",
-          "You can check the form, then send it. The client gets a signing link.",
+          "Create or edit the form, then save it. The deal moves to Ready to send. Stock is not held yet.",
+          "Sales and finance can notify Ollie, Michel, and Matt that it is ready. Only an admin can send it to the client — that send holds stock for 7 days.",
           "The client signs first. Then a ZK admin countersigns.",
           "When both have signed, the order is created and the Xero invoice is sent. You do not raise the invoice by hand.",
           "If they have not signed after 7 days, the form expires and held stock is released. You can void a form earlier if the deal is off.",
@@ -413,6 +415,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           "Enquiry — just created, or we are still sourcing.",
           "Price sent — quote is with the client.",
+          "Ready to send — form is saved, waiting for an admin to email the client.",
           "Booking form — form sent, waiting for the client or for ZK to sign.",
           "Awaiting payment — signed (or invoiced), money not in yet.",
           "Won — paid.",
@@ -654,7 +657,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             q: "The client has not signed.",
-            a: "Open the deal and resend the booking form if needed. After 7 days the form expires and held stock comes back. You can void it sooner if the deal is dead.",
+            a: "If the form is still in Ready to send, an admin still needs to email it. If it has already gone out, ask an admin to resend it. After 7 days the form expires and held stock comes back. You can void it sooner if the deal is dead.",
           },
           {
             q: "Available stock looks too low / too high.",
@@ -666,7 +669,11 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             q: "Can I change price after the form is sent?",
-            a: "Void the unsigned form first, edit the deal, then send a new form. Do not edit a signed document.",
+            a: "Void the unsigned form first, edit the deal, save a new form, then ask an admin to send it. Do not edit a signed document.",
+          },
+          {
+            q: "I prepared a booking form but cannot send it.",
+            a: "Only an admin can send it to the client. Use Notify admins to send so Ollie, Michel, and Matt get an email. The deal stays in Ready to send on the dashboard until they send it.",
           },
           {
             q: "What currency are we in?",

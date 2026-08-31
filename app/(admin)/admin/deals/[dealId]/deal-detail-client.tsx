@@ -88,7 +88,7 @@ function formatDay(iso: string | null): string {
 function stageTone(stage: DealStage): "green" | "amber" | "red" | "blue" | "gray" {
   if (["paid_confirmed", "in_fulfilment", "fulfilled"].includes(stage)) return "green"
   if (["closed_lost", "cancelled"].includes(stage)) return "red"
-  if (["awaiting_payment", "awaiting_client_signature", "awaiting_zk_signature"].includes(stage)) {
+  if (["awaiting_payment", "awaiting_client_signature", "awaiting_zk_signature", "awaiting_booking_form_send"].includes(stage)) {
     return "amber"
   }
   if (["booking_form_sent", "signed", "awaiting_invoice"].includes(stage)) return "blue"
@@ -1247,6 +1247,7 @@ export function DealDetailClient({
             form={bookingForm}
             events={bookingEvents}
             currentIsAdmin={currentIsAdmin}
+            currentCanManageDeals={canManageDeals}
             currentProfileName={currentProfileName}
           />
           <DealFinancePanel deal={deal} canManageFinance={currentCanManageFinance} />

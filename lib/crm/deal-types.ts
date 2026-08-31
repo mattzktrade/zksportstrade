@@ -2,6 +2,7 @@ export type DealStage =
   | "draft"
   | "sourcing"
   | "proposal"
+  | "awaiting_booking_form_send"
   | "booking_form_sent"
   | "awaiting_client_signature"
   | "awaiting_zk_signature"
@@ -18,6 +19,7 @@ export const DEAL_STAGES: readonly DealStage[] = [
   "draft",
   "sourcing",
   "proposal",
+  "awaiting_booking_form_send",
   "awaiting_client_signature",
   "awaiting_zk_signature",
   "signed",
@@ -62,6 +64,7 @@ export const DEAL_UNSIGNED_PIPELINE_STAGES: readonly DealStage[] = [
   "draft",
   "sourcing",
   "proposal",
+  "awaiting_booking_form_send",
   "booking_form_sent",
   "awaiting_client_signature",
   "awaiting_zk_signature",
@@ -269,6 +272,7 @@ export const DEAL_STAGE_LABELS: Record<DealStage, string> = {
   draft: "Draft",
   sourcing: "Sourcing",
   proposal: "Price sent",
+  awaiting_booking_form_send: "Ready to send",
   booking_form_sent: "Awaiting client signature",
   awaiting_client_signature: "Awaiting client signature",
   awaiting_zk_signature: "Awaiting ZK signature",
@@ -295,6 +299,7 @@ export const DEAL_NEXT_ACTION_OPTIONS = [
   "Send price",
   "Follow up price",
   "Send booking form",
+  "Approved admin to send booking form",
   "Chase client signature",
   "ZK admin to approve and sign",
   "Create and send invoice",
@@ -308,7 +313,7 @@ export const DEAL_NEXT_ACTION_OPTIONS = [
 
 export function friendlyDealActivitySummary(summary: string): string {
   return summary.replace(
-    /\b(draft|sourcing|proposal|booking_form_sent|awaiting_client_signature|awaiting_zk_signature|signed|awaiting_invoice|awaiting_payment|paid_confirmed|in_fulfilment|fulfilled|closed_lost|cancelled)\b/g,
+    /\b(draft|sourcing|proposal|awaiting_booking_form_send|booking_form_sent|awaiting_client_signature|awaiting_zk_signature|signed|awaiting_invoice|awaiting_payment|paid_confirmed|in_fulfilment|fulfilled|closed_lost|cancelled)\b/g,
     (stage) => DEAL_STAGE_LABELS[stage as DealStage] ?? stage,
   )
 }

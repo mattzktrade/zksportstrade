@@ -1,12 +1,13 @@
 import { Resend } from "resend"
 import {
   DEFAULT_BOOKINGS_CC,
+  DEFAULT_CHELLEY_CC,
   getResendApiKey,
   getResendFromAddress,
   stripSurroundingQuotes,
 } from "@/lib/email/config"
 
-export { DEFAULT_BOOKINGS_CC }
+export { DEFAULT_BOOKINGS_CC, DEFAULT_CHELLEY_CC }
 
 type BookingFormEmail = {
   recipientEmail: string
@@ -30,10 +31,11 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;")
 }
 
+const BOOKING_FORM_CC = [DEFAULT_BOOKINGS_CC, DEFAULT_CHELLEY_CC] as const
+
 export function bookingFormCc(to: string[]): string[] {
   const exclude = new Set(to.map((email) => email.trim().toLowerCase()))
-  if (exclude.has(DEFAULT_BOOKINGS_CC)) return []
-  return [DEFAULT_BOOKINGS_CC]
+  return BOOKING_FORM_CC.filter((email) => !exclude.has(email.toLowerCase()))
 }
 
 async function send(input: {
@@ -134,8 +136,10 @@ export function sendManualNativeBookingFormEmail(input: BookingFormEmail) {
 }
 
 export function sendNativeBookingFormReminder(input: BookingFormEmail) {
+  const to = [input.recipientEmail]
   return send({
-    to: [input.recipientEmail],
+    to,
+    cc: bookingFormCc(to),
     subject: `Reminder: booking form expires soon — ${input.documentRef}`,
     html: signingEmailHtml(input, true),
   })
@@ -175,6 +179,12 @@ export const DEFAULT_CLIENT_SIGNED_NOTIFY_EMAILS = [
   "oliver@zk-sports.com",
 ] as const
 
+export const DEFAULT_BOOKING_FORM_READY_NOTIFY_EMAILS = [
+  "matt@zk-sports.com",
+  "michel@zk-sports.com",
+  "oliver@zk-sports.com",
+] as const
+
 export function parseNotifyEmails(raw: string): string[] {
   return [
     ...new Set(
@@ -194,6 +204,14 @@ export function clientSignedNotificationRecipients(
   return fromEnv.length ? fromEnv : [...DEFAULT_CLIENT_SIGNED_NOTIFY_EMAILS]
 }
 
+/** Ready-to-send alerts go to Matt, Michel, and Ollie unless BOOKING_FORM_READY_NOTIFY_EMAILS overrides. */
+export function bookingFormReadyNotificationRecipients(
+  envValue = process.env.BOOKING_FORM_READY_NOTIFY_EMAILS ?? "",
+): string[] {
+  const fromEnv = parseNotifyEmails(envValue)
+  return fromEnv.length ? fromEnv : [...DEFAULT_BOOKING_FORM_READY_NOTIFY_EMAILS]
+}
+
 export async function sendClientSignedBookingFormNotification(input: {
   documentRef: string
   clientName: string
@@ -207,6 +225,7 @@ export async function sendClientSignedBookingFormNotification(input: {
   }
   return send({
     to: recipients,
+    cc: bookingFormCc(recipients),
     subject: `ZK signature required — ${input.documentRef}`,
     html: [
       "<p>A client has signed a native booking form and an approved ZK admin must now review and countersign it.</p>",
@@ -215,6 +234,33 @@ export async function sendClientSignedBookingFormNotification(input: {
       `Client signer: ${escapeHtml(input.clientName)}<br/>`,
       `Reference: ${escapeHtml(input.documentRef)}</p>`,
       `<p><a href="${escapeHtml(input.dealsUrl)}">Open Deals and review the agreement</a></p>`,
+    ].join(""),
+  })
+}
+
+export async function sendBookingFormReadyToSendNotification(input: {
+  documentRef: string
+  accountName: string
+  eventName: string
+  clientName: string
+  preparedByName: string
+  dealUrl: string
+}): Promise<EmailResult> {
+  const recipients = bookingFormReadyNotificationRecipients()
+  if (!recipients.length) {
+    return { ok: false, skipped: "No admin email addresses were found to notify." }
+  }
+  return send({
+    to: recipients,
+    subject: `Booking form ready to send — ${input.documentRef}`,
+    html: [
+      `<p>${escapeHtml(input.preparedByName)} has prepared a booking form. An approved admin needs to send it to the client.</p>`,
+      `<p><strong>${escapeHtml(input.eventName)}</strong><br/>`,
+      `Account: ${escapeHtml(input.accountName)}<br/>`,
+      `Client: ${escapeHtml(input.clientName)}<br/>`,
+      `Reference: ${escapeHtml(input.documentRef)}</p>`,
+      `<p>The form is saved as a draft. Stock is not reserved until an admin sends it.</p>`,
+      `<p><a href="${escapeHtml(input.dealUrl)}">Open the deal and send the booking form</a></p>`,
     ].join(""),
   })
 }

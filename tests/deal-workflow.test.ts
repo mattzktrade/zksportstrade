@@ -4,6 +4,7 @@ import {
   allowedDealTransitions,
   canTransitionDeal,
   dealStageFromOperations,
+  HAPPY_PATH_STAGES,
 } from "../lib/crm/deal-workflow"
 import {
   canonicalDealStage,
@@ -38,13 +39,17 @@ test("open deals can close and closed deals can be reopened", () => {
 
 test("deal stage labels match the sales pipeline language", () => {
   assert.equal(DEAL_STAGE_LABELS.proposal, "Price sent")
+  assert.equal(DEAL_STAGE_LABELS.awaiting_booking_form_send, "Ready to send")
   assert.equal(DEAL_STAGE_LABELS.booking_form_sent, "Awaiting client signature")
   assert.equal(DEAL_STAGE_LABELS.awaiting_client_signature, "Awaiting client signature")
   assert.equal(DEAL_STAGES.includes("booking_form_sent"), false)
+  assert.ok(DEAL_STAGES.includes("awaiting_booking_form_send"))
   assert.ok(DEAL_STAGES.includes("awaiting_client_signature"))
+  assert.ok(HAPPY_PATH_STAGES.includes("awaiting_booking_form_send"))
   assert.equal(canonicalDealStage("booking_form_sent"), "awaiting_client_signature")
   assert.equal(canonicalDealStage("proposal"), "proposal")
   assert.equal(canTransitionDeal("proposal", "booking_form_sent"), false)
+  assert.equal(canTransitionDeal("proposal", "awaiting_booking_form_send"), true)
   assert.equal(canTransitionDeal("proposal", "awaiting_client_signature"), true)
   assert.ok(!allowedDealTransitions("proposal").includes("booking_form_sent"))
 })
@@ -69,7 +74,10 @@ test("unsigned deals do not reserve sellable stock", () => {
   assert.equal(dealStageHoldsPurchasedStock("awaiting_payment"), true)
   assert.equal(dealStageIsUnsignedPipeline("draft"), true)
   assert.equal(dealStageIsUnsignedPipeline("proposal"), true)
+  assert.equal(dealStageIsUnsignedPipeline("awaiting_booking_form_send"), true)
   assert.equal(dealStageIsUnsignedPipeline("awaiting_zk_signature"), true)
+  assert.equal(dealStageCountsAsSold("awaiting_booking_form_send"), false)
+  assert.equal(dealStageReservesSellable("awaiting_booking_form_send"), false)
   assert.equal(dealStageIsUnsignedPipeline("signed"), false)
   assert.equal(dealStageIsUnsignedPipeline("awaiting_invoice"), false)
   assert.equal(dealStageIsUnsignedPipeline("awaiting_payment"), false)
