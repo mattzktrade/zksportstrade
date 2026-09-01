@@ -50,6 +50,8 @@ const ROLE_PERMISSIONS: Record<CmsRole, readonly CmsPermission[]> = {
     "cms.access",
     "inventory.view",
     "deals.view",
+    "deals.manage",
+    "accounts.manage",
     "orders.view",
     "operations.view",
     "finance.view",
@@ -129,10 +131,11 @@ export const CMS_ROLE_GUIDES: Record<
   },
   finance: {
     label: "Finance",
-    summary: "Invoices and payments, with a read-only view of the pipeline.",
+    summary: "Invoices, payments, and sales admin such as creating deals.",
     can: [
       "View and manage invoices and payments",
-      "View deals, orders, operations, and inventory",
+      "Create and manage accounts and deals",
+      "View orders, operations, and inventory",
       "Create and amend booking forms (an admin must send them)",
     ],
   },

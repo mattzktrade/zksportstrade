@@ -119,6 +119,7 @@ export const HELP_TOPICS: HelpTopic[] = [
             role: "If you do finance",
             items: [
               "Live in Finance. Check awaiting payment and overdue.",
+              "You can also create deals and accounts, the same way sales does.",
               "Invoices are created in Xero after both signatures (or after a portal/website booking).",
               "You can prepare booking forms; an admin must send them to the client.",
               "Do not void invoices unless you intend to cancel the order and return the stock.",
@@ -649,7 +650,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           {
             q: "I cannot see a page that is in this guide.",
-            a: "Your login has a role: Sales, Finance, or Admin. Finance cannot edit deals. Sales cannot change Settings or integrations. If you need access, ask an admin.",
+            a: "Your login has a role: Sales, Finance, or Admin. Finance cannot change Settings or integrations. Sales cannot either. If you need access, ask an admin.",
           },
           {
             q: "Where do I change my password?",

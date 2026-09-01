@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import { describe, it } from "node:test"
 import { hasCmsPermission, isCmsStaff, canPrepareNativeBookingForm, canSendNativeBookingForm } from "../lib/auth/permissions"
 
@@ -16,14 +17,16 @@ describe("CMS role permissions", () => {
     assert.equal(hasCmsPermission({ role: "admin" }, "integrations.manage"), true)
   })
 
-  it("limits finance to finance and read-only inventory/deals", () => {
+  it("lets finance manage deals and invoices, but not stock overrides or sending booking forms", () => {
     assert.equal(hasCmsPermission({ role: "finance" }, "finance.manage"), true)
     assert.equal(hasCmsPermission({ role: "finance" }, "inventory.view"), true)
     assert.equal(hasCmsPermission({ role: "finance" }, "deals.view"), true)
+    assert.equal(hasCmsPermission({ role: "finance" }, "deals.manage"), true)
+    assert.equal(hasCmsPermission({ role: "finance" }, "accounts.manage"), true)
     assert.equal(hasCmsPermission({ role: "finance" }, "operations.view"), true)
     assert.equal(hasCmsPermission({ role: "finance" }, "operations.manage"), false)
     assert.equal(hasCmsPermission({ role: "finance" }, "inventory.adjust"), false)
-    assert.equal(hasCmsPermission({ role: "finance" }, "deals.manage"), false)
+    assert.equal(hasCmsPermission({ role: "finance" }, "inventory.hold"), false)
   })
 
   it("allows sales to manage deals but not stock overrides", () => {
@@ -44,5 +47,12 @@ describe("CMS role permissions", () => {
     assert.equal(canSendNativeBookingForm({ role: "sales" }), false)
     assert.equal(canSendNativeBookingForm({ role: "finance" }), false)
     assert.equal(canSendNativeBookingForm({ role: "agent" }), false)
+  })
+
+  it("grants finance deal and account management in SQL as well as the app", () => {
+    const sql = readFileSync("supabase/migrations/20260901120000_finance_can_manage_deals.sql", "utf8")
+    assert.match(sql, /p\.role = 'finance'/)
+    assert.match(sql, /'deals.manage'/)
+    assert.match(sql, /'accounts.manage'/)
   })
 })
