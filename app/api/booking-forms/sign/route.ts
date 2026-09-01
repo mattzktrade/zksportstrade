@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { revalidateNativeBookingFormPages } from "@/lib/booking-forms/revalidate"
 import {
   sha256,
   stableJson,
@@ -148,8 +148,7 @@ export async function POST(request: NextRequest) {
       })
       .eq("id", form.id)
 
-    revalidatePath("/admin")
-    revalidatePath("/admin/deals")
+    revalidateNativeBookingFormPages(form.deal_id ? String(form.deal_id) : null)
     return NextResponse.json({ ok: true })
   } catch (error) {
     console.error("[booking-forms] sign:", error instanceof Error ? error.message : error)

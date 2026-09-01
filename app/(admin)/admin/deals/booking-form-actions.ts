@@ -1,7 +1,7 @@
 "use server"
 
-import { revalidatePath } from "next/cache"
 import { headers } from "next/headers"
+import { revalidateNativeBookingFormPages } from "@/lib/booking-forms/revalidate"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
@@ -276,8 +276,7 @@ async function sendPersistedForm(
     const detail = email.error ?? email.skipped ?? "Email delivery failed."
     const admin = createAdminClient()
     await admin?.from("booking_forms").update({ last_error: detail }).eq("id", form.id)
-    revalidatePath("/admin/deals")
-    revalidatePath("/admin")
+    revalidateNativeBookingFormPages(String(form.deal_id))
     return {
       ok: true,
       message: `Booking form created and stock reserved, but email was not sent: ${detail}. Copy the signing link to send it on WhatsApp, or resend after email is configured.`,
@@ -285,8 +284,7 @@ async function sendPersistedForm(
     }
   }
 
-  revalidatePath("/admin/deals")
-  revalidatePath("/admin")
+  revalidateNativeBookingFormPages(String(form.deal_id))
   return {
     ok: true,
     message:
@@ -377,8 +375,7 @@ export async function saveNativeBookingFormDraft(input: {
       edits: input.edits,
       reissueFromId: input.reissueFromId,
     })
-    revalidatePath("/admin/deals")
-    revalidatePath("/admin")
+    revalidateNativeBookingFormPages(id)
     return {
       ok: true,
       message:
@@ -443,16 +440,14 @@ export async function notifyNativeBookingFormReady(input: {
     })
     if (!email.ok) {
       const detail = email.error ?? email.skipped ?? "Notification email failed."
-      revalidatePath("/admin/deals")
-      revalidatePath("/admin")
+      revalidateNativeBookingFormPages(id)
       return {
         ok: false,
         message: `Booking form is saved, but the admin notification was not sent: ${detail}`,
       }
     }
 
-    revalidatePath("/admin/deals")
-    revalidatePath("/admin")
+    revalidateNativeBookingFormPages(id)
     return {
       ok: true,
       message: "Ollie, Michel, and Matt have been emailed. An admin still needs to send the form to the client.",
@@ -511,7 +506,7 @@ export async function resendNativeBookingForm(bookingFormId: string): Promise<Re
   try {
     const { data: form, error } = await gate.supabase
       .from("booking_forms")
-      .select("id, status, client_token_hash, client_token_expires_at, snapshot_data")
+      .select("id, deal_id, status, client_token_hash, client_token_expires_at, snapshot_data")
       .eq("id", bookingFormId)
       .maybeSingle()
     if (error || !form) throw new Error(error?.message ?? "Booking form not found.")
@@ -551,7 +546,7 @@ export async function resendNativeBookingForm(bookingFormId: string): Promise<Re
       )
       throw new Error(detail)
     }
-    revalidatePath("/admin/deals")
+    revalidateNativeBookingFormPages(form.deal_id ? String(form.deal_id) : null)
     return {
       ok: true,
       message: "A new secure signing link was emailed to the client.",
@@ -582,7 +577,7 @@ export async function voidNativeBookingForm(
     if (form?.deal_id) {
       await syncBookingFormDealInventory(String(form.deal_id), "booking_form_voided")
     }
-    revalidatePath("/admin/deals")
+    revalidateNativeBookingFormPages(form?.deal_id ? String(form.deal_id) : null)
     return { ok: true, message: "Booking form voided and reserved stock released." }
   } catch (error) {
     return { ok: false, message: errorMessage(error) }
@@ -725,8 +720,7 @@ export async function signNativeBookingFormAsAdmin(input: {
       await admin?.from("booking_forms").update({ last_error: null }).eq("id", form.id)
     }
 
-    revalidatePath("/admin/deals")
-    revalidatePath("/admin")
+    revalidateNativeBookingFormPages(String(form.deal_id))
     return {
       ok: true,
       message: invoiceWarning

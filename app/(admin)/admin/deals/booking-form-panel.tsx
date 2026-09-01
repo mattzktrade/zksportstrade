@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, useTransition } from "react"
+import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   CheckCircle2,
@@ -68,20 +68,27 @@ function AdminSignatureModal({
 }) {
   const router = useRouter()
   const padRef = useRef<SignaturePadHandle | null>(null)
-  const [pending, startTransition] = useTransition()
+  const inFlight = useRef(false)
+  const [pending, setPending] = useState(false)
   const [name, setName] = useState(defaultName)
   const [consent, setConsent] = useState(false)
   const [hasInk, setHasInk] = useState(false)
 
-  function submit() {
+  async function submit() {
+    if (inFlight.current) return
     if (!name.trim()) return toast.error("Enter the admin signer's full name.")
-    if (!hasInk || !padRef.current) return toast.error("Draw the admin signature.")
+    const signatureDataUrl = padRef.current?.toDataURL() ?? ""
+    if (!hasInk || !padRef.current?.hasInk() || !signatureDataUrl.startsWith("data:image/png")) {
+      return toast.error("Draw the admin signature.")
+    }
     if (!consent) return toast.error("Confirm the electronic signature consent.")
-    startTransition(async () => {
+    inFlight.current = true
+    setPending(true)
+    try {
       const result = await signNativeBookingFormAsAdmin({
         bookingFormId: form.id,
         signerName: name.trim(),
-        signatureDataUrl: padRef.current!.toDataURL(),
+        signatureDataUrl,
       })
       if (!result.ok) {
         toast.error(result.message)
@@ -90,7 +97,12 @@ function AdminSignatureModal({
       toast.success(result.message)
       onClose()
       router.refresh()
-    })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not complete the agreement.")
+    } finally {
+      inFlight.current = false
+      setPending(false)
+    }
   }
 
   return (
@@ -158,16 +170,20 @@ export function BookingFormPanel({
   confirmedOffPlatform?: boolean
 }) {
   const router = useRouter()
-  const [pending, startTransition] = useTransition()
+  const inFlight = useRef(false)
+  const [pending, setPending] = useState(false)
   const [showSignature, setShowSignature] = useState(false)
   const [editorMode, setEditorMode] = useState<"create" | "edit" | "reissue" | null>(null)
   const [localPreviewUrl, setLocalPreviewUrl] = useState("")
 
-  function run(
+  async function run(
     action: () => Promise<{ ok: boolean; message: string; previewUrl?: string }>,
     onSuccess?: () => void,
   ) {
-    startTransition(async () => {
+    if (inFlight.current) return
+    inFlight.current = true
+    setPending(true)
+    try {
       const result = await action()
       if (!result.ok) {
         toast.error(result.message)
@@ -179,7 +195,12 @@ export function BookingFormPanel({
       }
       onSuccess?.()
       router.refresh()
-    })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update the booking form.")
+    } finally {
+      inFlight.current = false
+      setPending(false)
+    }
   }
 
   async function download() {

@@ -45,7 +45,8 @@ export function SigningClient({
       setError("Enter your full name.")
       return
     }
-    if (!hasInk || !padRef.current) {
+    const signatureDataUrl = padRef.current?.toDataURL() ?? ""
+    if (!hasInk || !padRef.current?.hasInk() || !signatureDataUrl.startsWith("data:image/png")) {
       setError("Draw your signature in the box.")
       return
     }
@@ -63,7 +64,7 @@ export function SigningClient({
           token,
           signerName: signerName.trim(),
           signerEmail: snapshot.billTo.contactEmail,
-          signatureDataUrl: padRef.current.toDataURL(),
+          signatureDataUrl,
           consent: true,
         }),
       })

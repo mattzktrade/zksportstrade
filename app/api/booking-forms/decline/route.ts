@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { sha256 } from "@/lib/booking-forms/snapshot"
+import { revalidateNativeBookingFormPages } from "@/lib/booking-forms/revalidate"
 import { syncBookingFormDealInventory } from "@/lib/booking-forms/inventory-sync"
 import { getRequestEvidence } from "@/lib/booking-forms/request-evidence"
 import { checkRateLimit, clientIpFromHeaders } from "@/lib/auth/rate-limit"
@@ -42,6 +43,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "This booking form can no longer be declined." }, { status: 409 })
     }
     await syncBookingFormDealInventory(String(form.deal_id), "booking_form_declined")
+    revalidateNativeBookingFormPages(form.deal_id ? String(form.deal_id) : null)
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: "Could not decline this booking form." }, { status: 400 })

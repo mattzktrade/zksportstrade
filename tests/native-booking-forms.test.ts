@@ -29,6 +29,7 @@ import {
   DEFAULT_CLIENT_SIGNED_NOTIFY_EMAILS,
 } from "../lib/email/send-booking-form"
 import type { BookingFormSnapshot } from "../lib/booking-forms/types"
+import { paddedInkRect, signatureInkBounds } from "../lib/booking-forms/signature-ink"
 
 test("secure signer tokens are random and only hashes need persistence", () => {
   const first = generateSigningToken()
@@ -348,5 +349,60 @@ test("saving a booking form draft is CMS-staff work; sending to the client is ad
   const dealsClient = readFileSync("app/(admin)/admin/deals/deals-client.tsx", "utf8")
   assert.match(dealsClient, /id: "ready_to_send"/)
   assert.match(dealsClient, /awaiting_booking_form_send/)
+})
+
+test("signature ink detection ignores white canvas noise and keeps a real stroke", () => {
+  const width = 40
+  const height = 20
+  const blank = new Uint8ClampedArray(width * height * 4)
+  for (let i = 0; i < blank.length; i += 4) {
+    blank[i] = 255
+    blank[i + 1] = 255
+    blank[i + 2] = 255
+    blank[i + 3] = 255
+  }
+  assert.equal(signatureInkBounds(blank, width, height), null)
+
+  const speckle = new Uint8ClampedArray(blank)
+  speckle[0] = 17
+  speckle[1] = 17
+  speckle[2] = 17
+  speckle[3] = 255
+  assert.equal(signatureInkBounds(speckle, width, height), null)
+
+  const signed = new Uint8ClampedArray(blank)
+  for (let x = 4; x < 24; x++) {
+    for (let y = 6; y < 10; y++) {
+      const offset = (y * width + x) * 4
+      signed[offset] = 17
+      signed[offset + 1] = 17
+      signed[offset + 2] = 17
+      signed[offset + 3] = 255
+    }
+  }
+  const bounds = signatureInkBounds(signed, width, height)
+  assert.ok(bounds)
+  assert.equal(bounds?.minX, 4)
+  assert.equal(bounds?.maxX, 23)
+  const crop = paddedInkRect(bounds!, width, height)
+  assert.ok(crop.width >= 20)
+  assert.ok(crop.height >= 4)
+})
+
+test("booking form send and sign refresh the deal page instead of only the deals list", () => {
+  const actions = readFileSync("app/(admin)/admin/deals/booking-form-actions.ts", "utf8")
+  const panel = readFileSync("app/(admin)/admin/deals/booking-form-panel.tsx", "utf8")
+  const signRoute = readFileSync("app/api/booking-forms/sign/route.ts", "utf8")
+  const pad = readFileSync("components/signature-pad.tsx", "utf8")
+  const signing = readFileSync("app/sign/booking/[token]/signing-client.tsx", "utf8")
+  assert.match(actions, /revalidateNativeBookingFormPages/)
+  assert.match(signRoute, /revalidateNativeBookingFormPages/)
+  assert.doesNotMatch(actions, /revalidatePath\("\/admin\/deals"\)/)
+  assert.doesNotMatch(panel, /startTransition/)
+  assert.match(panel, /router\.refresh\(\)/)
+  assert.match(pad, /saveBackup/)
+  assert.match(pad, /exportCroppedPng/)
+  assert.match(signing, /signatureDataUrl/)
+  assert.match(signing, /padRef\.current\?\.toDataURL\(\)/)
 })
 
