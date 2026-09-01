@@ -16,6 +16,7 @@ import { invoiceDisplayStatus, invoiceWorkflowStatusLabels } from "@/lib/invoice
 import { pageSearchProps } from "@/lib/browser/laptop-qol"
 import { formatMoney } from "@/lib/format/money"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import { orderPartyPrimary } from "@/lib/orders/channel"
 
 type InvoiceFilter = "all" | "awaiting_payment" | "paid" | "delivered"
 
@@ -57,6 +58,25 @@ function agentSecondary(agent: AdminOrderListRow["agent"]): string {
   return parts.join(" · ")
 }
 
+function orderPartyLabel(order: AdminOrderListRow): string {
+  return orderPartyPrimary({
+    accountName: order.account?.name,
+    agentCompany: order.agent?.company_name,
+    contactName: order.contact?.full_name,
+    agentName: order.agent?.full_name,
+    clientName: order.client_name,
+  })
+}
+
+function orderPartySecondary(order: AdminOrderListRow): string {
+  const primary = orderPartyLabel(order)
+  const contact = order.contact?.full_name?.trim() || ""
+  if (order.account?.name?.trim() && contact && contact !== primary) return contact
+  const secondary = agentSecondary(order.agent)
+  if (secondary && agentPrimary(order.agent) !== primary) return secondary
+  return secondary
+}
+
 function SupplierAllocations({ order }: { order: AdminOrderListRow }) {
   if (order.supplierAllocations.length === 0) {
     return <span className="text-xs text-muted-foreground">No supplier assigned</span>
@@ -94,6 +114,9 @@ function matchesSearch(o: AdminOrderListRow, q: string): boolean {
     o.agent?.company_name ?? "",
     o.agent?.full_name ?? "",
     o.agent?.email ?? "",
+    o.account?.name ?? "",
+    o.contact?.full_name ?? "",
+    o.client_name ?? "",
   ]
     .join(" ")
     .toLowerCase()
@@ -125,7 +148,7 @@ function compare(a: AdminOrderListRow, b: AdminOrderListRow, key: SortKey, dir: 
     case "package":
       return pkgA.localeCompare(pkgB) * m
     case "agent":
-      return agentPrimary(a.agent).localeCompare(agentPrimary(b.agent)) * m
+      return orderPartyLabel(a).localeCompare(orderPartyLabel(b)) * m
     case "guests":
       return (a.guests - b.guests) * m
     case "total":
@@ -252,9 +275,9 @@ function AdminOrderMobileCard({
       </div>
 
       <div>
-        <p className="font-medium text-foreground">{agentPrimary(o.agent)}</p>
-        {agentSecondary(o.agent) ? (
-          <p className="text-xs text-muted-foreground break-words">{agentSecondary(o.agent)}</p>
+        <p className="font-medium text-foreground">{orderPartyLabel(o)}</p>
+        {orderPartySecondary(o) ? (
+          <p className="text-xs text-muted-foreground break-words">{orderPartySecondary(o)}</p>
         ) : null}
       </div>
 
@@ -657,9 +680,9 @@ export function OrdersAdminClient({
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <p className="font-medium text-foreground">{agentPrimary(o.agent)}</p>
-                      {agentSecondary(o.agent) ? (
-                        <p className="text-xs text-muted-foreground">{agentSecondary(o.agent)}</p>
+                      <p className="font-medium text-foreground">{orderPartyLabel(o)}</p>
+                      {orderPartySecondary(o) ? (
+                        <p className="text-xs text-muted-foreground">{orderPartySecondary(o)}</p>
                       ) : null}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums">{o.guests}</td>

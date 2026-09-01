@@ -30,6 +30,11 @@ import {
   groupSupplierPoolOptions,
   type SupplierPoolOption,
 } from "@/lib/inventory/supplier-pool"
+import {
+  isPortalCheckoutChannel,
+  orderPartyPrimary,
+  orderSaleChannelLabel,
+} from "@/lib/orders/channel"
 
 const EMPTY_DEALS: PackageDealSaleRow[] = []
 
@@ -45,16 +50,19 @@ function isPortalDealSource(source: string): boolean {
   return source === "portal" || source === "website"
 }
 
-function isPortalListedDeal(deal: PackageDealSaleRow): boolean {
-  return Boolean(deal.orderId) || isPortalDealSource(deal.source)
+function dealChannelLabel(deal: PackageDealSaleRow): string {
+  return orderSaleChannelLabel({ dealSource: deal.source })
 }
 
-function dealChannelLabel(deal: PackageDealSaleRow): string {
-  return isPortalListedDeal(deal) ? "Portal" : "Offline deal"
+function saleChannelLabel(order: AdminOrderListRow, deal: PackageDealSaleRow | null): string {
+  return orderSaleChannelLabel({
+    channel: order.channel,
+    dealSource: deal?.source,
+  })
 }
 
 function dealReferenceLabel(deal: PackageDealSaleRow): string {
-  if (isPortalListedDeal(deal) && deal.orderReference?.trim()) {
+  if (isPortalDealSource(deal.source) && deal.orderReference?.trim()) {
     return deal.orderReference.trim()
   }
   return deal.reference
@@ -202,9 +210,56 @@ function dealMatchesSearch(deal: PackageDealSaleRow, query: string): boolean {
   )
 }
 
-function agentPrimary(agent: AdminOrderListRow["agent"]): string {
-  if (!agent) return "—"
-  return (agent.company_name?.trim() || agent.full_name?.trim() || agent.email || "—").toString()
+function salePartyPrimary(order: AdminOrderListRow | null, deal: PackageDealSaleRow | null): string {
+  return orderPartyPrimary({
+    accountName: deal?.accountName || order?.account?.name,
+    agentCompany: order?.agent?.company_name,
+    contactName: deal?.contactName || order?.contact?.full_name,
+    agentName: order?.agent?.full_name,
+    clientName: order?.client_name,
+  })
+}
+
+function SalePartyCell({
+  order,
+  deal,
+}: {
+  order?: AdminOrderListRow | null
+  deal?: PackageDealSaleRow | null
+}) {
+  const accountId = deal?.accountId ?? order?.crm_account_id ?? order?.account?.id ?? null
+  const contactId = deal?.contactId ?? order?.crm_contact_id ?? order?.contact?.id ?? null
+  const accountName = deal?.accountName?.trim() || order?.account?.name?.trim() || ""
+  const contactName = deal?.contactName?.trim() || order?.contact?.full_name?.trim() || ""
+  const primary = salePartyPrimary(order ?? null, deal ?? null)
+  const agentEmail = order?.agent?.email?.trim() || ""
+  if (accountName || contactName) {
+    return (
+      <td className="px-3 py-3">
+        <AccountNameLink
+          accountId={accountId}
+          name={accountName || contactName || primary}
+          className="font-medium text-foreground"
+        />
+        {accountName && contactName ? (
+          <ContactNameLink
+            accountId={accountId}
+            contactId={contactId}
+            name={contactName}
+            className="block text-xs text-muted-foreground"
+          />
+        ) : null}
+      </td>
+    )
+  }
+  return (
+    <td className="px-3 py-3">
+      <p className="font-medium text-foreground">{primary}</p>
+      {agentEmail && primary !== "—" ? (
+        <p className="text-xs text-muted-foreground">{agentEmail}</p>
+      ) : null}
+    </td>
+  )
 }
 
 function layerSupplierLabel(layer: CostLayerRow): string {
@@ -912,13 +967,15 @@ export function PackageOrdersTable({
             const href = adminOrderDealPath(o.deal_id)
             const linkedDeal =
               dealByOrderId.get(o.id) ?? (o.deal_id ? dealById.get(o.deal_id) ?? null : null)
+            const party = salePartyPrimary(o, linkedDeal)
             const incomplete = saleIsIncomplete(linkedDeal, o)
             const body = (
               <>
                 <div className="min-w-0">
                   <p className={cn("font-semibold", href && "text-primary")}>{o.reference}</p>
                   <p className="mt-0.5 text-[10px] text-slate-600">
-                    {o.agent?.company_name || o.agent?.full_name || o.client_name || "Portal order"}
+                    {saleChannelLabel(o, linkedDeal)}
+                    {party !== "—" ? ` · ${party}` : ""}
                   </p>
                   <p className="mt-0.5 text-[8px] text-slate-400">
                     {saleQtyLabel(o.guests, o.packages?.name)}
@@ -1043,11 +1100,20 @@ function OrderSaleRows({
   supplierPending: boolean
   onSupplierChange: (lineId: string, supplierKey: string) => void
 }) {
-  const cogs = order.profit.cost_known ? order.profit.cogs : null
-  const profit = order.profit.cost_known ? order.profit.gross_profit : null
   const dealHref = adminOrderDealPath(order.deal_id) ?? (deal ? adminDealPath(deal.id) : null)
   const incomplete = saleIsIncomplete(deal, order)
   const canAssignDealSupplier = Boolean(deal && dealProjectsSupplierConsumption(deal))
+  const cogs = order.profit.cost_known ? order.profit.cogs : (deal?.cogs ?? null)
+  const profit = order.profit.cost_known
+    ? order.profit.gross_profit
+    : deal?.grossProfit ?? (cogs != null ? Number(order.total_amount) - cogs : null)
+  const margin =
+    order.profit.cost_known
+      ? order.profit.margin
+      : profit != null && Number(order.total_amount) > 0
+        ? profit / Number(order.total_amount)
+        : (deal?.margin ?? null)
+  const portalCheckout = isPortalCheckoutChannel(order.channel) && (!deal || isPortalDealSource(deal.source))
   return (
     <>
       <tr
@@ -1069,17 +1135,14 @@ function OrderSaleRows({
           )}
         </td>
         <td className="px-3 py-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-          <span>Portal</span>
+          <span>{saleChannelLabel(order, deal)}</span>
           {order.packages?.name ? (
             <span className="mt-0.5 block max-w-[180px] normal-case leading-snug tracking-normal text-foreground">
               {order.packages.name}
             </span>
           ) : null}
         </td>
-        <td className="px-3 py-3">
-          <p className="font-medium text-foreground">{agentPrimary(order.agent)}</p>
-          {order.agent?.email ? <p className="text-xs text-muted-foreground">{order.agent.email}</p> : null}
-        </td>
+        <SalePartyCell order={order} deal={deal} />
         <td className="px-3 py-3 text-right tabular-nums">{order.guests}</td>
         <td className="px-3 py-3 text-right tabular-nums font-medium">
           {formatMoney(order.currency, Number(order.total_amount))}
@@ -1087,7 +1150,7 @@ function OrderSaleRows({
         <MoneyCell value={cogs} currency={order.profit.currency || order.currency} />
         <MoneyCell value={profit} currency={order.profit.currency || order.currency} emphasize />
         <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">
-          {order.profit.margin != null ? formatPct(order.profit.margin) : "—"}
+          {margin != null ? formatPct(margin) : "—"}
         </td>
         <td className="px-3 py-3 text-muted-foreground">
           {canAssignDealSupplier && deal ? (
@@ -1100,7 +1163,7 @@ function OrderSaleRows({
               onChange={onSupplierChange}
             />
           ) : deal ? (
-            <UnconfirmedSupplierNote portalOrder />
+            <UnconfirmedSupplierNote portalOrder={portalCheckout} />
           ) : (
             <SupplierAllocationEditor order={order} costLayers={costLayers} />
           )}
@@ -1189,12 +1252,7 @@ function DealSaleRows({
             ].join(" · ")}
           </span>
         </td>
-        <td className="px-3 py-3">
-          <AccountNameLink accountId={deal.accountId} name={deal.accountName || deal.contactName || "—"} className="font-medium text-foreground" />
-          {deal.accountName && deal.contactName ? (
-            <ContactNameLink accountId={deal.accountId} contactId={deal.contactId} name={deal.contactName} className="block text-xs text-muted-foreground" />
-          ) : null}
-        </td>
+        <SalePartyCell deal={deal} />
         <td className="px-3 py-3 text-right tabular-nums">{deal.quantity}</td>
         <td className="px-3 py-3 text-right tabular-nums font-medium">
           {formatMoney(deal.currency, deal.totalAmount)}

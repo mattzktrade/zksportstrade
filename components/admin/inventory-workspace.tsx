@@ -52,6 +52,7 @@ import {
   type DealBasketSupplier,
 } from "@/components/admin/deal-line-basket"
 import { CatalogImage } from "@/components/catalog-image"
+import { PackageBrochureActions } from "@/components/admin/package-brochure-actions"
 import { PackageGallery } from "@/components/package-gallery"
 import { sanitizeHttpsUrl, sanitizeHttpsUrlList } from "@/lib/auth/safe-url"
 import { adminPackagePath } from "@/lib/admin/package-link"
@@ -612,7 +613,7 @@ export function InventoryWorkspace({
         title="Inventory"
         description={
           mode === "sales"
-            ? "Sales list — live sellable stock for the team"
+            ? "Sales list — live stock, deals, holds, and product brochures"
             : "Manage inventory — create, edit and control products, pricing and stock levels"
         }
       />
@@ -799,13 +800,21 @@ export function InventoryWorkspace({
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-2">
                           <ProductThumb row={row} />
-                          <Link
-                            href={adminPackagePath(row.id)}
-                            onClick={(event) => event.stopPropagation()}
-                            className="max-w-[150px] font-medium text-primary hover:underline"
-                          >
-                            {row.name}
-                          </Link>
+                          <div className="min-w-0">
+                            <Link
+                              href={adminPackagePath(row.id)}
+                              onClick={(event) => event.stopPropagation()}
+                              className="max-w-[150px] font-medium text-primary hover:underline"
+                            >
+                              {row.name}
+                            </Link>
+                            {sanitizeHttpsUrl(row.brochure_url) ? (
+                              <p className="mt-0.5 inline-flex items-center gap-1 text-[8px] text-[#8b8f97]">
+                                <FileText className="h-3 w-3" />
+                                Brochure ready
+                              </p>
+                            ) : null}
+                          </div>
                         </div>
                       </td>
                       <td className="whitespace-nowrap px-3 py-2.5 text-[#6a6e76]">{row.date_range || "—"}</td>
@@ -881,6 +890,12 @@ export function InventoryWorkspace({
                       <p className="font-semibold text-primary">{row.name}</p>
                       <p className="mt-0.5 font-medium text-slate-700">{row.race_name}</p>
                       <p className="mt-0.5 text-[8px] text-slate-400">{row.date_range || row.location || "—"}</p>
+                      {sanitizeHttpsUrl(row.brochure_url) ? (
+                        <p className="mt-0.5 inline-flex items-center gap-1 text-[8px] text-[#8b8f97]">
+                          <FileText className="h-3 w-3" />
+                          Brochure ready
+                        </p>
+                      ) : null}
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="font-semibold">{money(row.trade_price, row.currency)}</p>
@@ -934,30 +949,29 @@ export function InventoryWorkspace({
                       ))}
                     </div>
                   ) : null}
-                  <div className="flex gap-2">
+                  <div className="space-y-2">
                     {selectedImages[galleryIndex] ? (
                       <a
                         href={selectedImages[galleryIndex]}
                         target="_blank"
                         rel="noreferrer"
-                        className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border text-[8px] font-semibold text-slate-600"
+                        className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md border text-[8px] font-semibold text-slate-600"
                       >
                         <ImageIcon className="h-3.5 w-3.5" />
                         Open photo
                       </a>
                     ) : null}
-                    {selectedBrochure ? (
-                      <a
-                        href={selectedBrochure}
-                        target="_blank"
-                        rel="noreferrer"
-                        download={`${selected.name.replaceAll(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "") || "package"}-brochure.pdf`}
-                        className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md bg-slate-900 text-[8px] font-semibold text-white"
-                      >
-                        <FileText className="h-3.5 w-3.5" />
-                        Download brochure
-                        <Download className="h-3 w-3" />
-                      </a>
+                    <PackageBrochureActions
+                      packageId={selected.id}
+                      brochureUrl={selectedBrochure}
+                      productName={selected.name}
+                      compact
+                      onUrlChange={() => router.refresh()}
+                    />
+                    {!selectedBrochure ? (
+                      <p className="text-[8px] leading-4 text-[#93979f]">
+                        Creates a branded sales PDF from this product&apos;s photos, description and inclusions.
+                      </p>
                     ) : null}
                   </div>
                 </div>

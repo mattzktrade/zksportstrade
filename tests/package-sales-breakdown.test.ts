@@ -253,3 +253,15 @@ test("portal home computes sellable for featured packages only", () => {
   assert.match(hero, /fetchPriority="high"/)
   assert.match(hero, /priority/)
 })
+
+test("native deal orders count as offline sales, not portal", () => {
+  const queries = readFileSync("lib/admin/package-sales-breakdown-queries.ts", "utf8")
+  assert.match(queries, /classifySalesChannel/)
+  const table = readFileSync("components/admin/package-orders-table.tsx", "utf8")
+  assert.match(table, /orderSaleChannelLabel/)
+  assert.match(table, /SalePartyCell/)
+  assert.doesNotMatch(table, /<span>Portal<\/span>/)
+  const orderQueries = readFileSync("lib/orders/queries.ts", "utf8")
+  assert.match(orderQueries, /\n  channel,/)
+  assert.match(orderQueries, /crm_account_id/)
+})

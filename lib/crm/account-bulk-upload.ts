@@ -58,6 +58,7 @@ export type ParsedAccountBulkRow = {
   notes: string | null
   city: string | null
   country: string | null
+  accountNameFromContact: boolean
   errors: string[]
   warnings: string[]
 }
@@ -214,9 +215,10 @@ export function parseAccountBulkCsv(
     const country = text(cell(record, ["Country"]))
     const namedAccount = text(cell(record, ACCOUNT_NAME_ALIASES))
     let accountName = namedAccount ?? ""
+    const accountNameFromContact = !accountName && Boolean(contactName)
     if (!accountName && contactName) {
       accountName = contactName
-      warnings.push("No company name — this row will be saved as a direct client using the contact name.")
+      warnings.push("No company name — this row will be saved as a direct client using the contact name unless a matching company email domain is found.")
     }
     const accountTypes = parseKinds(
       cell(record, ["Account type", "Type", "Account types", "Company type"]),
@@ -255,6 +257,7 @@ export function parseAccountBulkCsv(
       notes,
       city,
       country,
+      accountNameFromContact,
       errors,
       warnings,
     }

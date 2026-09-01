@@ -36,7 +36,9 @@ test("parses the template with two contacts at one company and a nameless-compan
   assert.equal(person?.accountName, "John Doe")
   assert.equal(person?.contactName, "John Doe")
   assert.deepEqual(person?.accountTypes, ["direct_client"])
-  assert.ok(person?.warnings.some((warning) => warning.includes("direct client")))
+    assert.ok(person?.warnings.some((warning) => warning.includes("direct client")))
+    assert.equal(person?.accountNameFromContact, true)
+    assert.equal(company?.accountNameFromContact, false)
 })
 
 test("builds a contact name from first and last columns when company is missing", () => {

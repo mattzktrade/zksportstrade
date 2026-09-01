@@ -20,6 +20,16 @@ export type AdminOrderAgent = {
   email: string
 }
 
+export type AdminOrderAccount = {
+  id: string
+  name: string
+}
+
+export type AdminOrderContact = {
+  id: string
+  full_name: string | null
+}
+
 export type AdminOrderInvoice = {
   id: string
   reference: string
@@ -49,8 +59,13 @@ export type AdminOrderDeliveryProof = {
 }
 
 export type AdminOrderListRow = OrderRow & {
+  channel: string | null
+  crm_account_id: string | null
+  crm_contact_id: string | null
   packages: PackageSnippet | null
   agent: AdminOrderAgent | null
+  account: AdminOrderAccount | null
+  contact: AdminOrderContact | null
   invoice: AdminOrderInvoice | null
   supplierAllocations: AdminOrderSupplierAllocation[]
   supplierConsumptions: AdminOrderSupplierConsumption[]
@@ -197,6 +212,9 @@ export async function getMyBookings(): Promise<Booking[]> {
 }
 
 type RawAdminOrder = OrderRow & {
+  channel?: string | null
+  crm_account_id?: string | null
+  crm_contact_id?: string | null
   packages?: PackageSnippet | PackageSnippet[] | null
   profiles?: AdminOrderAgent | AdminOrderAgent[] | null
   invoices?: AdminOrderInvoice | AdminOrderInvoice[] | null
@@ -233,6 +251,9 @@ const ADMIN_ORDER_SELECT = `
   agent_profile_id,
   package_id,
   deal_id,
+  channel,
+  crm_account_id,
+  crm_contact_id,
   status,
   guests,
   unit_price,
@@ -294,15 +315,34 @@ async function fetchAdminOrderRows(orderIds?: string[]): Promise<RawAdminOrder[]
 async function hydrateAdminOrders(rows: RawAdminOrder[]): Promise<AdminOrderListRow[]> {
   const supabase = await createClient()
   const orderIds = rows.map((r) => r.id)
-  const consumptionsByOrder = await getConsumptionsForOrders(orderIds)
-  const { data: deliveryProofRows } =
+  const accountIds = [...new Set(rows.map((row) => row.crm_account_id).filter(Boolean).map(String))]
+  const contactIds = [...new Set(rows.map((row) => row.crm_contact_id).filter(Boolean).map(String))]
+  const [consumptionsByOrder, deliveryProofResult, accountResult, contactResult] = await Promise.all([
+    getConsumptionsForOrders(orderIds),
     orderIds.length > 0
-      ? await supabase
+      ? supabase
           .from("order_delivery_proofs")
           .select("id, order_id, note, file_name, file_content_type, created_at")
           .in("order_id", orderIds)
           .order("created_at", { ascending: false })
-      : { data: [] }
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
+    accountIds.length > 0
+      ? supabase.from("crm_accounts").select("id, name").in("id", accountIds)
+      : Promise.resolve({ data: [] as AdminOrderAccount[] }),
+    contactIds.length > 0
+      ? supabase.from("crm_contacts").select("id, full_name").in("id", contactIds)
+      : Promise.resolve({ data: [] as AdminOrderContact[] }),
+  ])
+  const deliveryProofRows = deliveryProofResult.data
+  const accountsById = new Map(
+    (accountResult.data ?? []).map((row) => [String(row.id), { id: String(row.id), name: String(row.name ?? "") }]),
+  )
+  const contactsById = new Map(
+    (contactResult.data ?? []).map((row) => [
+      String(row.id),
+      { id: String(row.id), full_name: typeof row.full_name === "string" ? row.full_name : null },
+    ]),
+  )
   const deliveryProofsByOrder = new Map<string, AdminOrderDeliveryProof[]>()
   for (const row of deliveryProofRows ?? []) {
     const orderId = String(row.order_id ?? "")
@@ -332,11 +372,18 @@ async function hydrateAdminOrders(rows: RawAdminOrder[]): Promise<AdminOrderList
       consumptions,
       guests > 0 ? guests : undefined,
     )
+    const accountId = row.crm_account_id ? String(row.crm_account_id) : null
+    const contactId = row.crm_contact_id ? String(row.crm_contact_id) : null
     return {
       ...(row as OrderRow),
       deal_id: row.deal_id ? String(row.deal_id) : null,
+      channel: typeof row.channel === "string" && row.channel.trim() ? row.channel.trim() : null,
+      crm_account_id: accountId,
+      crm_contact_id: contactId,
       packages: one(row.packages),
       agent: one(row.profiles),
+      account: accountId ? accountsById.get(accountId) ?? null : null,
+      contact: contactId ? contactsById.get(contactId) ?? null : null,
       invoice: one(row.invoices),
       supplierAllocations: [...suppliers.entries()].map(([supplier, quantity]) => ({ supplier, quantity })),
       supplierConsumptions: consumptions.map((c) => ({

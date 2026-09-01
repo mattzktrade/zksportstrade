@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils"
 import { PackageCostLayers } from "@/components/admin/package-cost-layers"
 import { PackagePortalVisibilityCheckbox } from "@/components/admin/package-portal-visibility"
 import { PackageIntegrationPanel } from "@/components/admin/package-integration-panel"
+import { PackageBrochureActions } from "@/components/admin/package-brochure-actions"
 import { LinkedDayInventoryToolbar } from "@/components/admin/linked-day-packages-panel"
 import { FulfilmentBlocksPanel } from "@/components/admin/fulfilment-blocks-panel"
 import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
@@ -485,14 +486,32 @@ export function PackageAdminPanel({
               {currencyHint((initial.currency || "USD").trim() || "USD")}
             </span>
           </label>
-          <label className="block text-xs text-muted-foreground sm:col-span-2">
-            Brochure URL (optional)
-            <input
-              value={brochureUrl}
-              onChange={(e) => setBrochureUrl(e.target.value)}
-              className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
-            />
-          </label>
+          <div className="sm:col-span-2 rounded-xl border border-border bg-muted/30 p-4 space-y-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">Sales brochure</p>
+                <p className="mt-1 text-xs text-muted-foreground leading-5">
+                  Creates a ZK-branded PDF from this product&apos;s photos, description and inclusions.
+                  Only the ZK team can generate it — portal clients just download the finished file.
+                </p>
+              </div>
+              <PackageBrochureActions
+                packageId={initial.id}
+                brochureUrl={brochureUrl.trim() || null}
+                productName={name.trim() || initial.name}
+                onUrlChange={(url) => setBrochureUrl(url)}
+              />
+            </div>
+            <label className="block text-xs text-muted-foreground">
+              Custom brochure URL (optional)
+              <input
+                value={brochureUrl}
+                onChange={(e) => setBrochureUrl(e.target.value)}
+                placeholder="https://"
+                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
+              />
+            </label>
+          </div>
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
             <input type="checkbox" checked={isEnquiry} onChange={(e) => setIsEnquiry(e.target.checked)} />
             Enquiry package

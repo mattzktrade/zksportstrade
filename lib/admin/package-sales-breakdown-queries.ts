@@ -6,19 +6,15 @@ import {
   type PackageSalesBreakdown,
 } from "@/lib/admin/package-sales-breakdown"
 import { dealStageCountsAsSold, dealStageIsUnsignedPipeline, dealStageReservesSellable } from "@/lib/crm/deal-types"
+import { classifySalesChannel } from "@/lib/orders/channel"
 
 function addGuests(target: PackageSalesBreakdown, channel: string, guests: number): void {
   const qty = Math.max(0, Math.floor(guests))
   if (qty <= 0) return
-  const normalized = channel.trim().toLowerCase()
-  if (normalized === "wix" || normalized === "website") {
+  const bucket = classifySalesChannel(channel)
+  if (bucket === "wix") {
     target.wix += qty
-  } else if (
-    normalized === "offline" ||
-    normalized === "admin" ||
-    normalized === "other" ||
-    normalized === "referral"
-  ) {
+  } else if (bucket === "offline") {
     target.salesforceOffline += qty
   } else {
     target.tradePortal += qty

@@ -202,7 +202,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           {
             title: "Sales list",
-            body: "What we can sell. Create a deal or place a 7-day hold from the product.",
+            body: "What we can sell. Open a product to create a deal, place a hold, or make a brochure.",
             href: "/admin/inventory/sales-list",
           },
           {
@@ -350,7 +350,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     nav: "Selling",
     title: "Selling",
     summary: "Accounts, leads, deals, booking forms, and the pipeline.",
-    keywords: ["deal", "deals", "account", "contact", "lead", "leads", "booking form", "sign", "pipeline", "enquiry", "price", "ready to send"],
+    keywords: ["deal", "deals", "account", "contact", "lead", "leads", "booking form", "sign", "pipeline", "enquiry", "price", "ready to send", "brochure", "pdf", "marketing"],
     blocks: [
       {
         type: "p",
@@ -396,6 +396,17 @@ export const HELP_TOPICS: HelpTopic[] = [
           "Add the contact, quantity, and sale price. You can add more than one product, including from different events.",
           "Optional: tick Reserve stock for 7 days if you need to lock places before the form goes out.",
           "Save, then open the deal from Sales → Deals to prepare the booking form.",
+        ],
+      },
+      {
+        type: "steps",
+        title: "Send a product brochure",
+        items: [
+          "Open Sales list and click the product the client is interested in.",
+          "If it already has a brochure, download that PDF and send it.",
+          "If not, click Create brochure. It builds a ZK-branded PDF from the product photos, description, and inclusions.",
+          "Send that file to the client. Portal clients cannot create brochures — only the ZK team can.",
+          "If you change the photos or copy later, use Recreate brochure so the PDF stays current.",
         ],
       },
       {
@@ -643,7 +654,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     nav: "Common questions",
     title: "Common questions",
     summary: "Short answers to the things people usually ask.",
-    keywords: ["faq", "help", "why", "how", "password", "login", "error", "stock wrong"],
+    keywords: ["faq", "help", "why", "how", "password", "login", "error", "stock wrong", "brochure"],
     blocks: [
       {
         type: "qa",
@@ -659,6 +670,10 @@ export const HELP_TOPICS: HelpTopic[] = [
           {
             q: "The client has not signed.",
             a: "If the form is still in Ready to send, an admin still needs to email it. If it has already gone out, ask an admin to resend it. After 7 days the form expires and held stock comes back. You can void it sooner if the deal is dead.",
+          },
+          {
+            q: "How do I make a brochure for a product?",
+            a: "Sales list → click the product → Create brochure. It uses the photos and copy already on the product. Only the ZK team can do this, not portal clients. If a brochure is already attached, download it, or recreate it after you change the listing.",
           },
           {
             q: "Available stock looks too low / too high.",

@@ -17,7 +17,7 @@ export type PackageSalesBreakdown = {
    * and does not reduce Sellable.
    */
   unsignedOpenPipeline: number
-  /** Trade portal, admin, and partner API bookings. */
+  /** Trade portal and partner API bookings. Native/offline deal orders are not included. */
   tradePortal: number
   total: number
 }

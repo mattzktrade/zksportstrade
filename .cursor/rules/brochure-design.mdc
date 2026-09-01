@@ -1,0 +1,14 @@
+---
+description: Product brochure PDFs are a first draft; do not polish unless Matt asks to revisit
+alwaysApply: true
+---
+
+# Brochure design — revisit later
+
+Admin can generate a product brochure PDF from Sales list and the product page. Matt reviewed it on 1 Sep 2026 and said the template is not good enough. Leave this until he asks to revisit.
+
+When he does:
+- Target is his landscape dark designs: black/white/ZK red (`#F90202`), diagonal split, condensed all-caps type, full-bleed photography
+- Keep generation CMS-staff only; portal clients may download an attached file, not create one
+- Do not invent itineraries, partner logos, or prices
+- Work lives in `lib/brochures/`, `components/admin/package-brochure-actions.tsx`, and `app/(admin)/admin/catalog/brochure-actions.ts`

@@ -26,8 +26,9 @@ describe("admin help guide", () => {
   })
 
   it("finds selling and stock topics from everyday words", () => {
-    const deals = searchHelp("booking form")
-    assert.ok(deals.topics.some((topic) => topic.id === "sales"))
+    const brochure = searchHelp("brochure")
+    assert.ok(brochure.topics.some((topic) => topic.id === "sales"))
+    assert.ok(brochure.questions.some((item) => item.q.toLowerCase().includes("brochure")))
 
     const ready = searchHelp("ready to send")
     assert.ok(ready.topics.some((topic) => topic.id === "sales"))

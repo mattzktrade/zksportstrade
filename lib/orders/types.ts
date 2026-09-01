@@ -1,9 +1,12 @@
 export type OrderRow = {
   id: string
   reference: string
-  agent_profile_id: string
+  agent_profile_id: string | null
   package_id: string
   deal_id: string | null
+  channel?: string | null
+  crm_account_id?: string | null
+  crm_contact_id?: string | null
   status: "pending" | "confirmed" | "cancelled"
   guests: number
   unit_price: number

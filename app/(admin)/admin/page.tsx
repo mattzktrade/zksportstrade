@@ -20,6 +20,7 @@ import { getDashboardActionCounts } from "@/lib/admin/dashboard-stats"
 import { getSalesTrackerRows } from "@/lib/admin/workflow-views"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { DEAL_STAGE_LABELS, dealSourceLabel, type DealStage } from "@/lib/crm/deal-types"
+import { orderSaleChannelLabel } from "@/lib/orders/channel"
 import {
   AdminPageHeader,
   AdminPanel,
@@ -71,9 +72,10 @@ function shortDate(value: string): string {
 }
 
 function dashboardSalesSource(row: { channel: string; dealSource: string | null }): string {
-  if (row.channel === "trade_portal" || row.dealSource === "portal") return "Portal"
-  if (row.channel === "wix" || row.dealSource === "website") return "Website"
   if (row.dealSource === "referral") return "Referral"
+  const label = orderSaleChannelLabel({ channel: row.channel, dealSource: row.dealSource })
+  if (label === "Website") return "Website"
+  if (label === "Portal") return "Portal"
   return "Offline"
 }
 

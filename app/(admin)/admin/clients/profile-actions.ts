@@ -10,6 +10,7 @@ import {
 } from "@/lib/crm/account-lifecycle"
 import { adminAccountPath, adminContactPath, adminSupplierPath } from "@/lib/crm/profile-links"
 import { ensureSupplierForAccount } from "@/lib/inventory/suppliers"
+import { fetchAllRows } from "@/lib/supabase/fetch-all-rows"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 type Result =
@@ -617,32 +618,44 @@ export type CrmMergeContactOption = {
 export async function listCrmMergeAccountOptions(): Promise<CrmMergeAccountOption[]> {
   const gate = await requireAdminAction("accounts.manage")
   if (!gate.ok) return []
-  const { data, error } = await gate.supabase
-    .from("crm_accounts")
-    .select("id, name")
-    .order("name")
+  const { data, error } = await fetchAllRows<{ id: string; name: string }>((from, to) =>
+    gate.supabase.from("crm_accounts").select("id, name").order("id").range(from, to),
+  )
   if (error || !data) return []
-  return data.map((row) => ({ id: String(row.id), name: String(row.name) }))
+  return data
+    .map((row) => ({ id: String(row.id), name: String(row.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export async function listCrmMergeContactOptions(): Promise<CrmMergeContactOption[]> {
   const gate = await requireAdminAction("accounts.manage")
   if (!gate.ok) return []
-  const { data, error } = await gate.supabase
-    .from("crm_contacts")
-    .select("id, full_name, email, account_id, crm_accounts(name)")
-    .order("full_name")
+  const { data, error } = await fetchAllRows<{
+    id: string
+    full_name: string
+    email: string | null
+    account_id: string
+    crm_accounts: { name: string } | { name: string }[] | null
+  }>((from, to) =>
+    gate.supabase
+      .from("crm_contacts")
+      .select("id, full_name, email, account_id, crm_accounts(name)")
+      .order("id")
+      .range(from, to),
+  )
   if (error || !data) return []
-  return data.map((row) => {
-    const account = Array.isArray(row.crm_accounts) ? row.crm_accounts[0] : row.crm_accounts
-    return {
-      id: String(row.id),
-      accountId: String(row.account_id),
-      fullName: String(row.full_name),
-      accountName: account?.name ? String(account.name) : "Unknown company",
-      email: row.email ? String(row.email) : null,
-    }
-  })
+  return data
+    .map((row) => {
+      const account = Array.isArray(row.crm_accounts) ? row.crm_accounts[0] : row.crm_accounts
+      return {
+        id: String(row.id),
+        accountId: String(row.account_id),
+        fullName: String(row.full_name),
+        accountName: account?.name ? String(account.name) : "Unknown company",
+        email: row.email ? String(row.email) : null,
+      }
+    })
+    .sort((a, b) => a.fullName.localeCompare(b.fullName) || a.accountName.localeCompare(b.accountName))
 }
 
 export async function deleteCrmAccount(input: { accountId: string }): Promise<Result> {

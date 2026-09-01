@@ -14,6 +14,11 @@ import { parseAccountKinds, primaryAccountType } from "@/lib/crm/account-kinds"
 import { newAccountLifecycle } from "@/lib/crm/account-lifecycle"
 import { ACCOUNT_SOURCES, type AccountSource } from "@/lib/crm/lead-types"
 import { fetchAllRows } from "@/lib/supabase/fetch-all-rows"
+import {
+  companyAccountForDomain,
+  corporateEmailDomain,
+  type DomainGroupAccount,
+} from "@/lib/crm/email-domain-account-groups"
 
 type PreviewResult =
   | {
@@ -171,6 +176,32 @@ export async function applyAccountBulkUpload(input: {
       email: row.email ? String(row.email).trim().toLowerCase() : null,
     })
     contactsByAccount.set(accountId, list)
+  }
+
+  const domainAccounts: DomainGroupAccount[] = (existingAccounts ?? []).map((row) => {
+    const contacts = contactsByAccount.get(String(row.id)) ?? []
+    return {
+      id: String(row.id),
+      name: String(row.name),
+      email: row.email ? String(row.email) : null,
+      accountTypes: [],
+      contactNames: contacts.map((contact) => contact.name),
+      contactEmails: contacts.map((contact) => contact.email).filter((email): email is string => Boolean(email)),
+      dealCount: 0,
+      orderCount: 0,
+      supplierNames: [],
+      createdAt: "1970-01-01T00:00:00.000Z",
+    }
+  })
+
+  for (const row of parsed.rows) {
+    if (row.errors.length || !row.accountNameFromContact || !row.email) continue
+    const domain = corporateEmailDomain(row.email)
+    if (!domain) continue
+    const company = companyAccountForDomain(domainAccounts, domain)
+    if (!company) continue
+    row.accountName = company.name
+    row.warnings.push(`Matched existing company “${company.name}” from ${domain}.`)
   }
 
   let accountsCreated = 0
