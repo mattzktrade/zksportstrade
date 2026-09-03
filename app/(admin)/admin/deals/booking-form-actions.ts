@@ -97,7 +97,7 @@ function signingUrl(token: string): string {
 const UNSIGNED_EDITABLE_STATUSES = new Set(["draft", "sent", "viewed"])
 const DRAFT_STATUSES = new Set(["draft", "failed"])
 const DRAFT_TOKEN_DAYS = 30
-const SEND_TOKEN_DAYS = 7
+const SEND_TOKEN_DAYS = 1
 
 function permissionDenied(mode: BookingFormGateMode): { ok: false; message: string } {
   if (mode === "send") {
@@ -289,8 +289,8 @@ async function sendPersistedForm(
     ok: true,
     message:
       sendMode === "manual_pdf"
-        ? "Booking form PDF emailed. Stock is reserved for seven days and a signing link is included."
-        : "Booking form sent. Stock is reserved for seven days.",
+        ? "Booking form PDF emailed. Stock is reserved for 24 hours and a signing link is included."
+        : "Booking form sent. Stock is reserved for 24 hours.",
     previewUrl: signingUrl(token),
   }
 }

@@ -1,11 +1,6 @@
-import { sendNativeInvoicePaymentReminder } from "@/lib/email/send-payment-reminder"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { reconcileXeroInvoiceForOrder } from "@/lib/integrations/xero/invoices"
-import {
-  cancellationEligibleDate,
-  daysOverdue,
-  paymentReminderIsDue,
-} from "@/lib/crm/deal-finance"
+import { cancellationEligibleDate, daysOverdue } from "@/lib/crm/deal-finance"
 
 export type NativeInvoiceReminderResult = {
   overdueInvoices: number
@@ -14,6 +9,10 @@ export type NativeInvoiceReminderResult = {
   cancellationEligible: number
 }
 
+/**
+ * Reconcile overdue native invoices with Xero and flag 28-day cancellation review.
+ * Payment reminder emails are not sent here — Xero already handles those.
+ */
 export async function processNativeInvoiceReminders(): Promise<NativeInvoiceReminderResult> {
   const admin = createAdminClient()
   if (!admin) {
@@ -23,9 +22,7 @@ export async function processNativeInvoiceReminders(): Promise<NativeInvoiceRemi
   const today = now.toISOString().slice(0, 10)
   const { data: invoices, error } = await admin
     .from("invoices")
-    .select(
-      "id, order_id, reference, amount, currency, due_date, xero_invoice_id, xero_invoice_number, payment_reminder_count, last_payment_reminder_at",
-    )
+    .select("id, order_id, due_date, xero_invoice_id")
     .eq("status", "awaiting_payment")
     .lt("due_date", today)
     .not("xero_invoice_id", "is", null)
@@ -33,16 +30,13 @@ export async function processNativeInvoiceReminders(): Promise<NativeInvoiceRemi
     .limit(200)
   if (error) throw new Error(error.message)
 
-  let remindersSent = 0
   let failures = 0
   let cancellationEligible = 0
   let overdueInvoices = 0
   for (const invoice of invoices ?? []) {
     const { data: order } = await admin
       .from("orders")
-      .select(
-        "id, reference, channel, deal_id, crm_account_id, crm_contact_id, agent_profile_id, client_name, client_email",
-      )
+      .select("id, channel, deal_id")
       .eq("id", invoice.order_id)
       .maybeSingle()
     if (!order || order.channel !== "native_deal") continue
@@ -74,6 +68,7 @@ export async function processNativeInvoiceReminders(): Promise<NativeInvoiceRemi
       .update({
         overdue_since: invoice.due_date,
         cancellation_eligible_at: eligibleDate,
+        payment_reminder_error: null,
       })
       .eq("id", invoice.id)
     if (isEligible && order.deal_id) {
@@ -86,100 +81,7 @@ export async function processNativeInvoiceReminders(): Promise<NativeInvoiceRemi
         })
         .eq("id", order.deal_id)
     }
-
-    const reminderCount = Number(invoice.payment_reminder_count ?? 0)
-    if (reminderCount >= 5) continue
-    const reminderDue = paymentReminderIsDue({
-      reminderCount,
-      lastReminderAt: invoice.last_payment_reminder_at,
-      now,
-    })
-    if (!reminderDue) continue
-
-    const [{ data: account }, { data: contact }, { data: agent }] = await Promise.all([
-      order.crm_account_id
-        ? admin
-            .from("crm_accounts")
-            .select("name, email")
-            .eq("id", order.crm_account_id)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
-      order.crm_contact_id
-        ? admin
-            .from("crm_contacts")
-            .select("full_name, email")
-            .eq("id", order.crm_contact_id)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
-      order.agent_profile_id
-        ? admin
-            .from("profiles")
-            .select("company_name, full_name, email")
-            .eq("id", order.agent_profile_id)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
-    ])
-    const recipientEmail =
-      contact?.email || account?.email || agent?.email || order.client_email
-    const recipientName =
-      account?.name ||
-      agent?.company_name ||
-      agent?.full_name ||
-      contact?.full_name ||
-      order.client_name
-    if (!recipientEmail) {
-      failures += 1
-      await admin
-        .from("invoices")
-        .update({ payment_reminder_error: "Billing contact has no email address." })
-        .eq("id", invoice.id)
-      continue
-    }
-    const sent = await sendNativeInvoicePaymentReminder({
-      recipientEmail,
-      recipientName,
-      orderReference: order.reference,
-      xeroInvoiceId: String(invoice.xero_invoice_id),
-      xeroInvoiceNumber: invoice.xero_invoice_number,
-      amount: Number(invoice.amount),
-      currency: invoice.currency,
-      dueDate: invoice.due_date,
-      daysOverdue: overdueDays,
-      reminderNumber: reminderCount + 1,
-    })
-    if (!sent.ok) {
-      failures += 1
-      await admin
-        .from("invoices")
-        .update({
-          payment_reminder_error: sent.error ?? sent.skipped ?? "Payment reminder failed.",
-        })
-        .eq("id", invoice.id)
-      continue
-    }
-    remindersSent += 1
-    await admin
-      .from("invoices")
-      .update({
-        payment_reminder_count: reminderCount + 1,
-        last_payment_reminder_at: now.toISOString(),
-        payment_reminder_error: null,
-      })
-      .eq("id", invoice.id)
-    if (order.deal_id) {
-      await admin.from("deal_activities").insert({
-        deal_id: order.deal_id,
-        action: "payment_reminder_sent",
-        summary: `Sent overdue payment reminder ${reminderCount + 1}`,
-        metadata: {
-          order_id: order.id,
-          invoice_id: invoice.id,
-          days_overdue: overdueDays,
-        },
-      })
-    }
   }
 
-  return { overdueInvoices, remindersSent, failures, cancellationEligible }
+  return { overdueInvoices, remindersSent: 0, failures, cancellationEligible }
 }
-

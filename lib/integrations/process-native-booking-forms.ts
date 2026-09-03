@@ -74,15 +74,14 @@ export async function processNativeBookingForms(): Promise<NativeBookingFormAuto
   }
   if (packagesToSync.size) scheduleOutboxDrain({ maxRounds: 10 })
 
-  const sixthDay = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000).toISOString()
-  const thirdDay = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString()
+  const twelveHoursAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000).toISOString()
   const { data: activeForms, error: activeError } = await admin
     .from("booking_forms")
     .select(
       "id, sent_at, reminder_count, client_token_hash, client_token_expires_at, snapshot_data",
     )
     .in("status", ["sent", "viewed"])
-    .lt("client_token_expires_at", new Date(now.getTime() + 8 * 24 * 60 * 60 * 1000).toISOString())
+    .lt("client_token_expires_at", new Date(now.getTime() + 36 * 60 * 60 * 1000).toISOString())
     .order("sent_at")
   if (activeError) throw new Error(activeError.message)
 
@@ -91,8 +90,8 @@ export async function processNativeBookingForms(): Promise<NativeBookingFormAuto
   for (const form of activeForms ?? []) {
     if (!form.sent_at) continue
     const count = Number(form.reminder_count ?? 0)
-    const due = (count === 0 && form.sent_at <= thirdDay) || (count === 1 && form.sent_at <= sixthDay)
-    if (!due || count >= 2) continue
+    const due = count === 0 && form.sent_at <= twelveHoursAgo
+    if (!due || count >= 1) continue
     const snapshot = form.snapshot_data as BookingFormSnapshot
     const previousToken = await readBookingFormSigningToken(admin, form.id)
     const { token, tokenHash } = generateSigningToken()

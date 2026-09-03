@@ -576,7 +576,6 @@ export function WorkflowTrackerClient({
                         </td>
                         <td className="px-4 py-3">
                           <p>{date(row.invoiceDueDate)}</p>
-                          <p className="mt-0.5 text-[8px] text-slate-400">{row.reminderCount} reminder{row.reminderCount === 1 ? "" : "s"}</p>
                           <StatusPill tone={tone(row.xeroSyncStatus)}>{row.xeroSyncStatus || "not queued"}</StatusPill>
                           <p className="mt-1 text-[8px] text-slate-400">{row.xeroInvoiceNumber || row.xeroSyncError || "—"}</p>
                           {row.xeroInvoiceNumber && !row.id.startsWith("deal:") ? (

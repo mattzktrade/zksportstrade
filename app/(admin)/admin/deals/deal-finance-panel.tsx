@@ -104,8 +104,6 @@ export function DealFinancePanel({
             <dd>{deal.xero_sync_status || "pending"}</dd>
             <dt className="text-slate-400">Due date</dt>
             <dd>{date(deal.invoice_due_date)}</dd>
-            <dt className="text-slate-400">Reminders</dt>
-            <dd>{deal.payment_reminder_count}</dd>
           </dl>
 
           {deal.xero_sync_error || deal.invoice_email_error || deal.payment_reminder_error ? (

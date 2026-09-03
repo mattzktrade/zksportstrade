@@ -1,11 +1,7 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
-import {
-  cancellationEligibleDate,
-  daysOverdue,
-  paymentReminderIsDue,
-} from "../lib/crm/deal-finance"
+import { cancellationEligibleDate, daysOverdue } from "../lib/crm/deal-finance"
 import { DEFAULT_FINANCE_CC, DEFAULT_BOOKINGS_CC, DEFAULT_OPERATIONS_CC, NEVER_CC_ADDRESSES, getInvoiceFinanceCc, getBookingConfirmationCc, getOperationsEmailCc } from "../lib/email/config"
 import { invoiceDisplayStatus, pickPreferredInvoice } from "../lib/invoices/status"
 
@@ -14,29 +10,7 @@ test("native invoice cancellation becomes eligible 28 days after due date", () =
   assert.equal(daysOverdue("2026-08-01", new Date("2026-08-29T12:00:00.000Z")), 28)
 })
 
-test("payment reminders run weekly and stop after five sends", () => {
-  const now = new Date("2026-08-20T12:00:00.000Z")
-  assert.equal(paymentReminderIsDue({ reminderCount: 0, lastReminderAt: null, now }), true)
-  assert.equal(
-    paymentReminderIsDue({
-      reminderCount: 1,
-      lastReminderAt: "2026-08-14T13:00:00.000Z",
-      now,
-    }),
-    false,
-  )
-  assert.equal(
-    paymentReminderIsDue({
-      reminderCount: 1,
-      lastReminderAt: "2026-08-13T12:00:00.000Z",
-      now,
-    }),
-    true,
-  )
-  assert.equal(paymentReminderIsDue({ reminderCount: 5, lastReminderAt: null, now }), false)
-})
-
-test("invoice and reminder emails only CC finance", () => {
+test("invoice emails only CC finance", () => {
   const previousInvoiceCc = process.env.XERO_INVOICE_CC
   const previousOrderCc = process.env.ORDER_CONFIRMATION_CC
   process.env.XERO_INVOICE_CC = "matt@zk-sports.com, accounts@zk-sports.com"

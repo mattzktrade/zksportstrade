@@ -30,7 +30,7 @@ export type IntegrationCronResult = {
 } & Awaited<ReturnType<typeof drainIntegrationOutbox>>
 
 /**
- * Single integration cron tick: expired holds, native booking forms, invoice reminders, Wix/Xero outbox.
+ * Single integration cron tick: expired holds, native booking forms, overdue invoice flags, Wix/Xero outbox.
  * Salesforce pull/heal is retired and never runs.
  */
 export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {
