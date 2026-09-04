@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
-import { requireAdmin } from "@/lib/admin/require-admin"
+import { requireCmsPermission } from "@/lib/admin/require-admin"
 import { exchangeXeroAuthorizationCode } from "@/lib/integrations/xero/auth"
 import { safeEqualStrings } from "@/lib/crypto/timing-safe"
 
 const COOKIE_STATE = "xero_oauth_state"
 
 export async function GET(request: Request) {
-  await requireAdmin()
+  await requireCmsPermission("settings.manage")
 
   const url = new URL(request.url)
   const code = url.searchParams.get("code")

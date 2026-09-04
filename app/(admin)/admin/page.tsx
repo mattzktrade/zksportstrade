@@ -15,7 +15,11 @@ import {
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { createClient } from "@/lib/supabase/server"
 import { countPendingBookingApprovalRequests } from "@/lib/booking-approval/queries"
-import { countNativeBookingFormsAwaitingApproval, countNativeBookingFormsReadyToSend } from "@/lib/booking-forms/queries"
+import { bookingFormsAwaitingApprovalHref } from "@/lib/admin/deal-link"
+import {
+  countNativeBookingFormsReadyToSend,
+  listNativeBookingFormsAwaitingApprovalDealIds,
+} from "@/lib/booking-forms/queries"
 import { getDashboardActionCounts } from "@/lib/admin/dashboard-stats"
 import { getSalesTrackerRows } from "@/lib/admin/workflow-views"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
@@ -101,7 +105,7 @@ async function AdminDashboard() {
     { count: pending },
     { count: activeHolds },
     paddockRequests,
-    bookingFormsAwaiting,
+    bookingFormsAwaitingDealIds,
     bookingFormsReadyToSend,
     actions,
     { data: inventory },
@@ -113,7 +117,7 @@ async function AdminDashboard() {
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("approval_status", "pending"),
     supabase.from("inventory_holds").select("*", { count: "exact", head: true }).is("released_at", null),
     countPendingBookingApprovalRequests(),
-    countNativeBookingFormsAwaitingApproval(),
+    listNativeBookingFormsAwaitingApprovalDealIds(),
     countNativeBookingFormsReadyToSend(),
     getDashboardActionCounts(),
     supabase.from("package_inventory").select("qty_available"),
@@ -237,7 +241,12 @@ async function AdminDashboard() {
   }> = [
     { icon: UsersRound, label: "Pending users", value: pending ?? 0, href: "/admin/pending-users" },
     { icon: Mail, label: "Booking forms ready to send", value: bookingFormsReadyToSend, href: "/admin/deals?pipeline=ready_to_send" },
-    { icon: FileSignature, label: "Booking forms awaiting approval", value: bookingFormsAwaiting, href: "/admin/deals" },
+    {
+      icon: FileSignature,
+      label: "Booking forms awaiting approval",
+      value: bookingFormsAwaitingDealIds.length,
+      href: bookingFormsAwaitingApprovalHref(bookingFormsAwaitingDealIds),
+    },
     { icon: AlertTriangle, label: "Negative stock items to purchase", value: negativeStock ?? 0, href: "/admin/inventory/negative-stock" },
     { icon: Boxes, label: "Tickets awaiting delivery", value: actions.awaitingDelivery, href: "/admin/operations" },
     { icon: CircleDollarSign, label: "Overdue invoices", value: overdueInvoices, href: "/admin/finance" },

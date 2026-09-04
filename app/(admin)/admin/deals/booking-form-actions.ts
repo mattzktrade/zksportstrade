@@ -5,7 +5,12 @@ import { revalidateNativeBookingFormPages } from "@/lib/booking-forms/revalidate
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { hasCmsPermission, canPrepareNativeBookingForm, canSendNativeBookingForm } from "@/lib/auth/permissions"
+import {
+  hasCmsPermission,
+  canPrepareNativeBookingForm,
+  canSendNativeBookingForm,
+  canSignNativeBookingForm,
+} from "@/lib/auth/permissions"
 import { getServerSiteOrigin } from "@/lib/auth/site-origin"
 import { generateBookingFormPdf, type PdfSignature } from "@/lib/booking-forms/pdf"
 import { syncBookingFormDealInventory } from "@/lib/booking-forms/inventory-sync"
@@ -84,7 +89,7 @@ async function bookingFormGate(mode: BookingFormGateMode = "prepare") {
   if (mode === "void" && !hasCmsPermission(profile, "deals.manage") && profile.role !== "admin") {
     return null
   }
-  if (mode === "adminSign" && profile.role !== "admin") return null
+  if (mode === "adminSign" && !canSignNativeBookingForm(profile)) return null
   return { profile, supabase }
 }
 
@@ -104,7 +109,7 @@ function permissionDenied(mode: BookingFormGateMode): { ok: false; message: stri
     return { ok: false, message: "Only an admin can send a booking form to the client." }
   }
   if (mode === "adminSign") {
-    return { ok: false, message: "Only an admin can countersign booking forms." }
+    return { ok: false, message: "Only admin or finance can countersign booking forms." }
   }
   return { ok: false, message: "You do not have permission to manage booking forms." }
 }

@@ -3,6 +3,7 @@ import { getServerSiteOrigin } from "@/lib/auth/site-origin"
 import { verifyBookingApprovalApproveToken } from "@/lib/booking-approval/approve-token"
 import { executeBookingApproval } from "@/lib/booking-approval/execute-approval"
 import { getPortalProfile } from "@/lib/supabase/profile"
+import { isCmsOperator } from "@/lib/auth/permissions"
 
 function escapeHtml(s: string): string {
   return s
@@ -52,10 +53,10 @@ async function requireAdminApprovalPage(): Promise<NextResponse | null> {
       401,
     )
   }
-  if (profile.role !== "admin") {
+  if (!isCmsOperator(profile)) {
     return approvalResultPage(
-      "Admin access required",
-      `<p style="margin:0;font-size:15px;line-height:1.6;color:#52525b;">Only admin users can approve booking requests from email links. Please review this request in the admin portal.</p>`,
+      "Access required",
+      `<p style="margin:0;font-size:15px;line-height:1.6;color:#52525b;">Only admin or finance can approve booking requests from email links. Please review this request in the admin portal.</p>`,
       403,
     )
   }

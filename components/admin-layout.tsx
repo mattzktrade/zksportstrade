@@ -95,21 +95,23 @@ const JUMP_KEYWORDS: Record<string, string> = {
   "/admin/finance": "invoices payments xero",
 }
 
-const adminJumpDestinations: AdminJumpItem[] = [
-  ...navigation.flatMap((item): AdminJumpItem[] => {
-    if (item.disabled) return []
-    const self: AdminJumpItem[] = item.href ? [{ label: item.name, href: item.href }] : []
-    const children: AdminJumpItem[] = (item.children ?? []).map((child) => ({
-      label: child.name,
-      href: child.href,
-    }))
-    return [...self, ...children]
-  }),
-  { label: "Trade portal", href: "/", keywords: "home packages bookings" },
-  { label: "Orders", href: "/admin/orders", keywords: JUMP_KEYWORDS["/admin/orders"] },
-].map((item) =>
-  JUMP_KEYWORDS[item.href] && !item.keywords ? { ...item, keywords: JUMP_KEYWORDS[item.href] } : item,
-)
+function jumpDestinationsFor(items: NavItem[]): AdminJumpItem[] {
+  return [
+    ...items.flatMap((item): AdminJumpItem[] => {
+      if (item.disabled) return []
+      const self: AdminJumpItem[] = item.href ? [{ label: item.name, href: item.href }] : []
+      const children: AdminJumpItem[] = (item.children ?? []).map((child) => ({
+        label: child.name,
+        href: child.href,
+      }))
+      return [...self, ...children]
+    }),
+    { label: "Trade portal", href: "/", keywords: "home packages bookings" },
+    { label: "Orders", href: "/admin/orders", keywords: JUMP_KEYWORDS["/admin/orders"] },
+  ].map((item) =>
+    JUMP_KEYWORDS[item.href] && !item.keywords ? { ...item, keywords: JUMP_KEYWORDS[item.href] } : item,
+  )
+}
 
 function adminPageTitle(pathname: string): string {
   if (pathname === "/admin") return "Dashboard"
@@ -143,13 +145,29 @@ function itemIsActive(pathname: string, href: string): boolean {
   return pathname === path || pathname.startsWith(`${path}/`)
 }
 
+function navigationFor(canManageSettings: boolean): NavItem[] {
+  return navigation.flatMap((item) => {
+    if (item.href === "/admin/settings" && !canManageSettings) return []
+    if (!item.children) return [item]
+    const children = item.children.filter((child) => {
+      if (child.href === "/admin/imports" && !canManageSettings) return false
+      return true
+    })
+    return [{ ...item, children }]
+  })
+}
+
 export function AdminLayout({
   children,
   profileName = "Admin",
+  canManageSettings = false,
 }: {
   children: React.ReactNode
   profileName?: string
+  canManageSettings?: boolean
 }) {
+  const visibleNavigation = navigationFor(canManageSettings)
+  const adminJumpDestinations = jumpDestinationsFor(visibleNavigation)
   const pathname = usePathname()
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -221,7 +239,7 @@ export function AdminLayout({
         </div>
 
         <nav className="no-scrollbar flex-1 overflow-y-auto overscroll-contain p-2.5 space-y-1">
-          {navigation.map((item) => {
+          {visibleNavigation.map((item) => {
             const isActive = item.href ? itemIsActive(pathname, item.href) : false
             const childActive = item.children?.some((child) => itemIsActive(pathname, child.href)) ?? false
             const expanded = openGroups[item.name] ?? childActive

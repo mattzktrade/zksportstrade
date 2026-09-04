@@ -1,7 +1,9 @@
 import { parseAccountKinds } from "@/lib/crm/account-kinds"
 import { parseAccountLeadStage, parseAccountLifecycle } from "@/lib/crm/account-lifecycle"
+import { CMS_STAFF_ROLES } from "@/lib/auth/permissions"
 import { unstable_noStore as noStore } from "next/cache"
 import { chunkList, fetchAllRows } from "@/lib/supabase/fetch-all-rows"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 import type {
   AccountSource,
@@ -265,11 +267,11 @@ export async function getClientDirectoryRows(): Promise<ClientDirectoryRow[]> {
 
 export async function getSalesStaffOptions(): Promise<StaffOption[]> {
   noStore()
-  const supabase = await createClient()
+  const supabase = createAdminClient() ?? (await createClient())
   const { data, error } = await supabase
     .from("profiles")
     .select("id, full_name, email, role")
-    .in("role", ["admin", "sales"])
+    .in("role", [...CMS_STAFF_ROLES])
     .order("full_name")
 
   if (error || !data) return []

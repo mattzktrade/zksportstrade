@@ -36,6 +36,18 @@ export async function getBookingFormsForDeals(): Promise<{
   }
 }
 
+export async function listNativeBookingFormsAwaitingApprovalDealIds(): Promise<string[]> {
+  noStore()
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from("booking_forms")
+    .select("deal_id")
+    .eq("status", "awaiting_zk_signature")
+    .order("created_at", { ascending: true })
+  if (error || !data) return []
+  return data.map((row) => String(row.deal_id ?? "")).filter(Boolean)
+}
+
 export async function countNativeBookingFormsAwaitingApproval(): Promise<number> {
   noStore()
   const supabase = await createClient()

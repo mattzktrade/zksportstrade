@@ -72,7 +72,7 @@ async function loadStaff(supabase: SupabaseClient): Promise<BulkUploadStaff[]> {
   const { data } = await supabase
     .from("profiles")
     .select("id, full_name, email")
-    .in("role", ["admin", "sales"])
+    .in("role", ["admin", "finance", "sales"])
   return (data ?? []).map((profile) => ({
     id: String(profile.id),
     name: String(profile.full_name?.trim() || profile.email || ""),

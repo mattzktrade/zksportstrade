@@ -87,7 +87,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             title: "4. Both sides sign",
-            body: "The client signs first. Then a ZK admin signs. After that the invoice is created in Xero automatically.",
+            body: "The client signs first. Then an admin or finance countersigns. After that the invoice is created in Xero automatically.",
           },
           {
             title: "5. Hand over",
@@ -119,9 +119,11 @@ export const HELP_TOPICS: HelpTopic[] = [
             role: "If you do finance",
             items: [
               "Live in Finance. Check awaiting payment and overdue.",
-              "You can also create deals and accounts, the same way sales does.",
+              "You can also create deals and accounts, manage stock, purchase orders, and suppliers, and run Operations.",
+              "You can be a deal owner, and you can assign owners on deals and accounts.",
               "Invoices are created in Xero after both signatures (or after a portal/website booking).",
-              "You can prepare booking forms; an admin must send them to the client.",
+              "You can prepare and countersign booking forms; an admin must send them to the client.",
+              "Settings, team logins, and integrations stay with an admin.",
               "Do not void invoices unless you intend to cancel the order and return the stock.",
             ],
           },
@@ -416,7 +418,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           "The deal needs a company, a contact with an email, and at least one product.",
           "Create or edit the form, then save it. The deal moves to Ready to send. Stock is not held yet.",
           "Sales and finance can notify Ollie, Michel, and Matt that it is ready. Only an admin can send it to the client — that send holds stock for 7 days.",
-          "The client signs first. Then a ZK admin countersigns.",
+          "The client signs first. Then an admin or finance countersigns.",
           "When both have signed, the order is created and the Xero invoice is sent. You do not raise the invoice by hand.",
           "If they have not signed after 7 days, the form expires and held stock is released. You can void a form earlier if the deal is off.",
         ],

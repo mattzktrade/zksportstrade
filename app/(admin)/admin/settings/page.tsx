@@ -1,4 +1,4 @@
-import { requireAdmin } from "@/lib/admin/require-admin"
+import { requireCmsPermission } from "@/lib/admin/require-admin"
 import { hasCmsPermission } from "@/lib/auth/permissions"
 import { listCmsStaffUsers } from "@/lib/admin/settings-users"
 import { getXeroConnectionStatus } from "@/lib/integrations/xero/settings-store"
@@ -12,7 +12,7 @@ export default async function SettingsPage({
 }: {
   searchParams: Promise<{ tab?: string }>
 }) {
-  const profile = await requireAdmin()
+  const profile = await requireCmsPermission("settings.manage")
   const { tab } = await searchParams
   const canManageUsers = hasCmsPermission(profile, "users.manage")
 

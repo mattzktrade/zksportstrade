@@ -49,11 +49,18 @@ const ROLE_PERMISSIONS: Record<CmsRole, readonly CmsPermission[]> = {
   finance: [
     "cms.access",
     "inventory.view",
+    "inventory.manage",
+    "inventory.purchase",
+    "inventory.adjust",
+    "inventory.archive",
+    "inventory.hold",
+    "pricing.manage",
     "deals.view",
     "deals.manage",
     "accounts.manage",
     "orders.view",
     "operations.view",
+    "operations.manage",
     "finance.view",
     "finance.manage",
   ],
@@ -78,6 +85,11 @@ export function isCmsStaff(profile: Pick<PortalProfile, "role"> | null | undefin
   return isCmsRole(profile?.role)
 }
 
+/** Admin and finance: day-to-day CMS work. Settings and sending booking forms stay admin-only. */
+export function isCmsOperator(profile: Pick<PortalProfile, "role"> | null | undefined): boolean {
+  return profile?.role === "admin" || profile?.role === "finance"
+}
+
 export function hasCmsPermission(
   profile: Pick<PortalProfile, "role"> | null | undefined,
   permission: CmsPermission,
@@ -98,6 +110,13 @@ export function canSendNativeBookingForm(
   profile: Pick<PortalProfile, "role"> | null | undefined,
 ): boolean {
   return profile?.role === "admin"
+}
+
+/** Admin and finance can countersign after the client has signed. */
+export function canSignNativeBookingForm(
+  profile: Pick<PortalProfile, "role"> | null | undefined,
+): boolean {
+  return isCmsOperator(profile)
 }
 
 export function cmsRoleLabel(role: string | null | undefined): string {
@@ -131,12 +150,12 @@ export const CMS_ROLE_GUIDES: Record<
   },
   finance: {
     label: "Finance",
-    summary: "Invoices, payments, and sales admin such as creating deals.",
+    summary: "Same as admin for day-to-day work, except Settings and sending booking forms.",
     can: [
-      "View and manage invoices and payments",
-      "Create and manage accounts and deals",
-      "View orders, operations, and inventory",
-      "Create and amend booking forms (an admin must send them)",
+      "Accounts, deals, operations, finance, inventory, purchase orders, and suppliers",
+      "Own deals and assign deal owners",
+      "Create, amend, and countersign booking forms (an admin must send them)",
+      "Cannot open Settings or connect integrations",
     ],
   },
   sales: {

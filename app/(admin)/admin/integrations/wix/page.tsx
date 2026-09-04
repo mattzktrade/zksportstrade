@@ -1,7 +1,9 @@
 import Link from "next/link"
+import { requireCmsPermission } from "@/lib/admin/require-admin"
 import { getWixConfig, isWixConfigured } from "@/lib/integrations/wix/config"
 
-export default function WixIntegrationPage() {
+export default async function WixIntegrationPage() {
+  await requireCmsPermission("settings.manage")
   const configured = isWixConfigured()
   const config = getWixConfig()
 

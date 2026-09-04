@@ -77,6 +77,7 @@ type PipelineStageId =
   | "price_sent"
   | "ready_to_send"
   | "booking_form"
+  | "awaiting_approval"
   | "awaiting_payment"
   | "won"
   | "lost"
@@ -282,7 +283,8 @@ export function DealsClient({
   staffOptions,
   currentProfileId,
   currentProfileName,
-  currentIsAdmin,
+  currentCanSendBookingForm,
+  currentCanSignBookingForm,
   currentCanManageFinance,
   currentCanManageDeals,
   bookingForms,
@@ -298,7 +300,8 @@ export function DealsClient({
   staffOptions: StaffOption[]
   currentProfileId: string
   currentProfileName: string
-  currentIsAdmin: boolean
+  currentCanSendBookingForm: boolean
+  currentCanSignBookingForm: boolean
   currentCanManageFinance: boolean
   currentCanManageDeals: boolean
   bookingForms: BookingFormAdminRow[]
@@ -396,6 +399,9 @@ export function DealsClient({
 
   const filtered = useMemo(() => {
     if (!pipelineFilter) return scoped
+    if (pipelineFilter === "awaiting_approval") {
+      return scoped.filter((deal) => deal.stage === "awaiting_zk_signature")
+    }
     return scoped.filter((deal) => pipelineStageFor(deal.stage).id === pipelineFilter)
   }, [pipelineFilter, scoped])
 
@@ -928,6 +934,7 @@ export function DealsClient({
             {PIPELINE_COLUMNS.map((column) => (
               <option key={column.id} value={column.id}>{column.label}</option>
             ))}
+            <option value="awaiting_approval">Awaiting ZK approval</option>
           </select>
           <select value={sourceFilter} onChange={(e) => setListState((current) => ({ ...current, sourceFilter: e.target.value }))} className="h-9 rounded-md border bg-white px-3 text-[9px]">
             <option value="">All sources</option>
@@ -1364,7 +1371,8 @@ export function DealsClient({
                       ? bookingEventsByForm.get(latestBookingByDeal.get(selected.id)!.id) ?? []
                       : []
                   }
-                  currentIsAdmin={currentIsAdmin}
+                  currentCanSend={currentCanSendBookingForm}
+                  currentCanSign={currentCanSignBookingForm}
                   currentCanManageDeals={currentCanManageDeals}
                   currentProfileName={currentProfileName}
                 />

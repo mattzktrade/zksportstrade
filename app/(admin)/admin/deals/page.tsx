@@ -7,7 +7,7 @@ import {
 import { getCrmAccountOptions, getDealListRows } from "@/lib/crm/deals"
 import { getSalesStaffOptions } from "@/lib/crm/leads"
 import { getBookingFormsForDeals } from "@/lib/booking-forms/queries"
-import { hasCmsPermission } from "@/lib/auth/permissions"
+import { hasCmsPermission, canSendNativeBookingForm, canSignNativeBookingForm } from "@/lib/auth/permissions"
 import { getSuppliers } from "@/lib/inventory/suppliers"
 import { DealsClient } from "./deals-client"
 
@@ -64,7 +64,8 @@ export default async function DealsPage({
         staffOptions={staffOptions}
         currentProfileId={profile.id}
         currentProfileName={profile.full_name || "ZK Admin"}
-        currentIsAdmin={profile.role === "admin"}
+        currentCanSendBookingForm={canSendNativeBookingForm(profile)}
+        currentCanSignBookingForm={canSignNativeBookingForm(profile)}
         currentCanManageFinance={hasCmsPermission(profile, "finance.manage")}
         currentCanManageDeals={hasCmsPermission(profile, "deals.manage")}
         bookingForms={bookingForms.forms}
@@ -76,6 +77,7 @@ export default async function DealsPage({
           initialPipeline === "new_enquiry" ||
           initialPipeline === "price_sent" ||
           initialPipeline === "booking_form" ||
+          initialPipeline === "awaiting_approval" ||
           initialPipeline === "awaiting_payment" ||
           initialPipeline === "won" ||
           initialPipeline === "lost"

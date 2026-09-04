@@ -9,7 +9,7 @@ import { getCrmAccountOptions } from "@/lib/crm/deals"
 import { getDealDetailPageData } from "@/lib/crm/deal-detail"
 import { getSalesStaffOptions } from "@/lib/crm/leads"
 import { getSuppliers } from "@/lib/inventory/suppliers"
-import { hasCmsPermission } from "@/lib/auth/permissions"
+import { hasCmsPermission, canSendNativeBookingForm, canSignNativeBookingForm } from "@/lib/auth/permissions"
 import { DealDetailClient } from "./deal-detail-client"
 
 export const dynamic = "force-dynamic"
@@ -52,7 +52,8 @@ export default async function AdminDealDetailPage({
       packageOptions={packageOptions}
       staffOptions={staffOptions}
       supplierOptions={suppliers.map((supplier) => ({ id: supplier.id, name: supplier.name }))}
-      currentIsAdmin={profile.role === "admin"}
+      currentCanSendBookingForm={canSendNativeBookingForm(profile)}
+      currentCanSignBookingForm={canSignNativeBookingForm(profile)}
       currentProfileName={profile.full_name || "ZK Admin"}
       currentCanManageFinance={hasCmsPermission(profile, "finance.manage")}
       canManageOperations={hasCmsPermission(profile, "operations.manage")}

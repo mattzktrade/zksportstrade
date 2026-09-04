@@ -232,7 +232,8 @@ export function DealDetailClient({
   packageOptions,
   staffOptions,
   supplierOptions,
-  currentIsAdmin,
+  currentCanSendBookingForm,
+  currentCanSignBookingForm,
   currentProfileName,
   currentCanManageFinance,
   canManageOperations,
@@ -243,7 +244,8 @@ export function DealDetailClient({
   packageOptions: DealPackageOption[]
   staffOptions: StaffOption[]
   supplierOptions: DealBasketSupplier[]
-  currentIsAdmin: boolean
+  currentCanSendBookingForm: boolean
+  currentCanSignBookingForm: boolean
   currentProfileName: string
   currentCanManageFinance: boolean
   canManageOperations: boolean
@@ -1246,7 +1248,8 @@ export function DealDetailClient({
             confirmedOffPlatform={confirmedOffPlatform}
             form={bookingForm}
             events={bookingEvents}
-            currentIsAdmin={currentIsAdmin}
+            currentCanSend={currentCanSendBookingForm}
+            currentCanSign={currentCanSignBookingForm}
             currentCanManageDeals={canManageDeals}
             currentProfileName={currentProfileName}
           />

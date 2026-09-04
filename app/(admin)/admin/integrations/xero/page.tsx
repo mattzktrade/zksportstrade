@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { requireCmsPermission } from "@/lib/admin/require-admin"
 import { getXeroConnectionStatus } from "@/lib/integrations/xero/settings-store"
 import { isXeroConfigured } from "@/lib/integrations/xero/config"
 import { XeroIntegrationClient } from "./xero-integration-client"
@@ -8,6 +9,7 @@ export default async function XeroIntegrationPage({
 }: {
   searchParams: Promise<{ connected?: string; error?: string }>
 }) {
+  await requireCmsPermission("settings.manage")
   const params = await searchParams
   const status = await getXeroConnectionStatus()
 

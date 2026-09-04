@@ -1049,7 +1049,7 @@ export async function getOperationsSupportingData(): Promise<OperationsSupportin
     supabase
       .from("profiles")
       .select("id, full_name")
-      .in("role", ["admin", "sales"])
+      .in("role", ["admin", "finance", "sales"])
       .order("full_name"),
     supabase.from("orders").select("id, package_id, guests, packages(name)"),
     supabase

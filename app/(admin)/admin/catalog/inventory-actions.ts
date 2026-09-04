@@ -2,12 +2,19 @@
 
 import { revalidatePath } from "next/cache"
 import { requireAdmin } from "@/lib/admin/require-admin"
+import { hasCmsPermission } from "@/lib/auth/permissions"
 import { enqueueProductUpsert } from "@/lib/integrations/enqueue"
 import { createClient } from "@/lib/supabase/server"
 
 type Result = { ok: true; message: string } | { ok: false; message: string }
 
-async function adminClient() {
+async function inventoryClient(permission: "inventory.manage" | "inventory.archive") {
+  const profile = await requireAdmin()
+  if (!hasCmsPermission(profile, permission)) return null
+  return createClient()
+}
+
+async function strictAdminClient() {
   const profile = await requireAdmin()
   if (profile.role !== "admin") return null
   return createClient()
@@ -22,8 +29,8 @@ function revalidateInventory() {
 }
 
 export async function removeInventoryProduct(packageId: string): Promise<Result> {
-  const supabase = await adminClient()
-  if (!supabase) return { ok: false, message: "Administrator permission is required." }
+  const supabase = await inventoryClient("inventory.archive")
+  if (!supabase) return { ok: false, message: "You do not have permission to archive or delete products." }
   const { data, error } = await supabase.rpc("admin_remove_inventory_product", {
     p_package_id: packageId,
   })
@@ -42,7 +49,7 @@ export async function removeInventoryProduct(packageId: string): Promise<Result>
 }
 
 export async function cleanupLegacyShellProducts(): Promise<Result> {
-  const supabase = await adminClient()
+  const supabase = await strictAdminClient()
   if (!supabase) return { ok: false, message: "Administrator permission is required." }
   const { data, error } = await supabase.rpc("admin_cleanup_legacy_shell_packages")
   if (error) return { ok: false, message: error.message }
@@ -61,8 +68,8 @@ export async function updateInventoryProductPublishing(input: {
   sellOnWebsite: boolean
   websitePrice: number | null
 }): Promise<Result> {
-  const supabase = await adminClient()
-  if (!supabase) return { ok: false, message: "Administrator permission is required." }
+  const supabase = await inventoryClient("inventory.manage")
+  if (!supabase) return { ok: false, message: "You do not have permission to change product visibility." }
   const id = input.packageId.trim()
   if (!id) return { ok: false, message: "Product is missing." }
   if (

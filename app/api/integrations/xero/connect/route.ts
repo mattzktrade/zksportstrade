@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
-import { requireAdmin } from "@/lib/admin/require-admin"
+import { requireCmsPermission } from "@/lib/admin/require-admin"
 import { buildXeroAuthorizeUrl } from "@/lib/integrations/xero/auth"
 import { isXeroConfigured } from "@/lib/integrations/xero/config"
 import { randomBytes } from "crypto"
@@ -9,7 +9,7 @@ const COOKIE_STATE = "xero_oauth_state"
 const COOKIE_MAX_AGE = 600
 
 export async function GET(request: Request) {
-  await requireAdmin()
+  await requireCmsPermission("settings.manage")
 
   if (!isXeroConfigured()) {
     return NextResponse.json({ error: "Xero Client ID and Secret are not configured." }, { status: 500 })

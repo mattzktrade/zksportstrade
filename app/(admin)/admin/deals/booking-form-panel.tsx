@@ -153,7 +153,8 @@ export function BookingFormPanel({
   dealClosed,
   form,
   events,
-  currentIsAdmin,
+  currentCanSend,
+  currentCanSign,
   currentCanManageDeals,
   currentProfileName,
   orderAlreadyConfirmed = false,
@@ -163,7 +164,8 @@ export function BookingFormPanel({
   dealClosed: boolean
   form: BookingFormAdminRow | null
   events: BookingFormEventRow[]
-  currentIsAdmin: boolean
+  currentCanSend: boolean
+  currentCanSign: boolean
   currentCanManageDeals: boolean
   currentProfileName: string
   orderAlreadyConfirmed?: boolean
@@ -375,12 +377,12 @@ export function BookingFormPanel({
             <button type="button" onClick={download} className="h-9 rounded-md border text-[9px] font-semibold">
               <span className="inline-flex items-center gap-1"><Download className="h-3.5 w-3.5" /> View PDF</span>
             </button>
-            {["sent", "viewed"].includes(form.status) && currentIsAdmin ? (
+            {["sent", "viewed"].includes(form.status) && currentCanSend ? (
               <button type="button" disabled={pending} onClick={() => void copySigningLink()} className="h-9 rounded-md border text-[9px] font-semibold disabled:opacity-50">
                 <span className="inline-flex items-center gap-1"><Copy className="h-3.5 w-3.5" /> Copy signing link</span>
               </button>
             ) : null}
-            {["sent", "viewed"].includes(form.status) && currentIsAdmin ? (
+            {["sent", "viewed"].includes(form.status) && currentCanSend ? (
               <button type="button" disabled={pending} onClick={() => run(() => resendNativeBookingForm(form.id))} className="h-9 rounded-md border text-[9px] font-semibold disabled:opacity-50">
                 Resend email
               </button>
@@ -390,7 +392,7 @@ export function BookingFormPanel({
                 Edit
               </button>
             ) : null}
-            {["sent", "viewed"].includes(form.status) && currentIsAdmin ? (
+            {["sent", "viewed"].includes(form.status) && currentCanSend ? (
               <button type="button" disabled={pending} onClick={() => setEditorMode("reissue")} className="h-9 rounded-md border text-[9px] font-semibold disabled:opacity-50">
                 Edit &amp; reissue
               </button>
@@ -400,17 +402,17 @@ export function BookingFormPanel({
                 Notify admins to send
               </button>
             ) : null}
-            {isDraft && currentIsAdmin ? (
+            {isDraft && currentCanSend ? (
               <button type="button" disabled={pending} onClick={() => sendSaved("signing_link")} className="h-9 rounded-md bg-[#010101] text-[9px] font-semibold text-white disabled:opacity-50">
                 Send to client
               </button>
             ) : null}
-            {isDraft && currentIsAdmin ? (
+            {isDraft && currentCanSend ? (
               <button type="button" disabled={pending} onClick={() => sendSaved("manual_pdf")} className="h-9 rounded-md border text-[9px] font-semibold disabled:opacity-50">
                 Email PDF only
               </button>
             ) : null}
-            {form.status === "awaiting_zk_signature" && currentIsAdmin ? (
+            {form.status === "awaiting_zk_signature" && currentCanSign ? (
               <button type="button" onClick={() => setShowSignature(true)} className="h-9 rounded-md bg-[#010101] text-[9px] font-semibold text-white">
                 <span className="inline-flex items-center gap-1"><PenLine className="h-3.5 w-3.5" /> Review &amp; sign</span>
               </button>
@@ -450,14 +452,14 @@ export function BookingFormPanel({
           dealId={dealId}
           reissueFromId={editorMode === "create" ? undefined : form?.id}
           pending={pending}
-          canSend={currentIsAdmin}
+          canSend={currentCanSend}
           onClose={() => setEditorMode(null)}
           onSave={saveForm}
           onNotify={notifyForm}
           onSend={sendForm}
         />
       ) : null}
-      {localPreviewUrl && currentIsAdmin && form && ["sent", "viewed"].includes(form.status) ? (
+      {localPreviewUrl && currentCanSend && form && ["sent", "viewed"].includes(form.status) ? (
         <button
           type="button"
           onClick={() => void copySigningLink()}
