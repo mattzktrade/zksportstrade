@@ -97,7 +97,15 @@ export function DealFinancePanel({
             <dt className="text-slate-400">Order</dt>
             <dd className="font-semibold">{deal.order_reference || deal.order_id}</dd>
             <dt className="text-slate-400">Invoice</dt>
-            <dd>{deal.xero_invoice_number || (deal.xero_invoice_id ? "Created in Xero" : "Not created")}</dd>
+            <dd>
+              {deal.xero_invoice_number ||
+                (deal.xero_invoice_id ? "Created in Xero" : deal.ledger_invoice_number || "Not created")}
+              {deal.ledger_invoice_number &&
+              deal.ledger_invoice_number !== deal.xero_invoice_number &&
+              deal.xero_invoice_number
+                ? ` · Ledger ${deal.ledger_invoice_number}`
+                : null}
+            </dd>
             <dt className="text-slate-400">Status</dt>
             <dd className="font-semibold">{deal.invoice_status?.replaceAll("_", " ") || "Awaiting invoice"}</dd>
             <dt className="text-slate-400">Xero sync</dt>

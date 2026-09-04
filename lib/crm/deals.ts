@@ -3,6 +3,10 @@ import { fetchAllRows } from "@/lib/supabase/fetch-all-rows"
 import { createClient } from "@/lib/supabase/server"
 import type { CrmAccountOption, DealListRow, PackageDealSaleRow } from "@/lib/crm/deal-types"
 import { canonicalDealStage, dealStageCountsAsSold } from "@/lib/crm/deal-types"
+import {
+  enquiryCrmStageFromDeal,
+  enquiryTemperatureFromDeal,
+} from "@/lib/crm/deal-pipeline"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { costLayerSupplierPoolKey } from "@/lib/inventory/supplier-pool"
 
@@ -91,23 +95,72 @@ export async function getDealListRows(options?: { ids?: string[] }): Promise<Dea
   noStore()
   const supabase = await createClient()
   const ids = [...new Set((options?.ids ?? []).map((id) => id.trim()).filter(Boolean))]
-  let query = supabase
-    .from("deals")
-    .select(`
-      id, account_id, primary_contact_id, reference, stage, source, currency, total_amount, expected_close_date, next_action,
-      next_action_due_at, loss_reason, hold_expires_at, do_not_expire, notes, created_at,
-      updated_at, created_by, owner_profile_id, race_id, order_id,
+  const lineSelect = `
       crm_accounts(name),
       crm_contacts(full_name),
       deal_line_items(
         id, package_id, quantity, unit_sale_price, expected_unit_cost,
         sourcing_mode, supplier_id, supplier_quote_at,
         reservation_status, packages(name, race_id, races(name, season))
-      )
-    `)
-    .order("reference", { ascending: false })
-  query = ids.length > 0 ? query.in("id", ids) : query.limit(5000)
-  const { data, error } = await query
+      )`
+  const baseSelect = `id, account_id, primary_contact_id, reference, stage, source, currency, total_amount, expected_close_date, next_action,
+      next_action_due_at, loss_reason, hold_expires_at, do_not_expire, notes, created_at,
+      updated_at, created_by, owner_profile_id, race_id, order_id, ledger_invoice_number, ${lineSelect}`
+  const enquirySelect = `id, account_id, primary_contact_id, reference, stage, source, enquiry_stage, enquiry_temperature, currency, total_amount, expected_close_date, next_action,
+      next_action_due_at, loss_reason, hold_expires_at, do_not_expire, notes, created_at,
+      updated_at, created_by, owner_profile_id, race_id, order_id, ledger_invoice_number, ${lineSelect}`
+
+  const enquiryNoLedger = enquirySelect.replace("ledger_invoice_number, ", "")
+  const baseNoLedger = baseSelect.replace("ledger_invoice_number, ", "")
+
+  async function load(select: string) {
+    let query = supabase.from("deals").select(select as never).order("reference", { ascending: false })
+    query = ids.length > 0 ? query.in("id", ids) : query.limit(5000)
+    return query as unknown as Promise<{
+      data: Array<{
+        id: string
+        account_id: string | null
+        primary_contact_id: string | null
+        reference: string
+        stage: string
+        source: string | null
+        enquiry_stage?: string | null
+        enquiry_temperature?: string | null
+        currency: string
+        total_amount: number | string | null
+        expected_close_date: string | null
+        next_action: string | null
+        next_action_due_at: string | null
+        loss_reason: string | null
+        hold_expires_at: string | null
+        do_not_expire: boolean | null
+        notes: string | null
+        created_at: string
+        updated_at: string
+        created_by: string | null
+        owner_profile_id: string | null
+        race_id: string | null
+        order_id: string | null
+        ledger_invoice_number?: string | null
+        crm_accounts: unknown
+        crm_contacts: unknown
+        deal_line_items: unknown
+      }> | null
+      error: { message: string } | null
+    }>
+  }
+
+  let data: Awaited<ReturnType<typeof load>>["data"] = null
+  let error: Awaited<ReturnType<typeof load>>["error"] = null
+  for (const select of [enquirySelect, enquiryNoLedger, baseSelect, baseNoLedger]) {
+    const result = await load(select)
+    data = result.data
+    error = result.error
+    if (!error) break
+    if (!/enquiry_stage|enquiry_temperature|ledger_invoice_number|schema cache/i.test(error.message)) {
+      break
+    }
+  }
 
   if (error || !data) return []
 
@@ -320,7 +373,18 @@ export async function getDealListRows(options?: { ids?: string[] }): Promise<Dea
       race_id: effectiveRaceId,
       reference: row.reference,
       stage: canonicalDealStage(row.stage),
-      source: row.source,
+      source: row.source ?? "",
+      enquiry_stage: enquiryCrmStageFromDeal({
+        stage: row.stage,
+        enquiry_stage: typeof row.enquiry_stage === "string" ? row.enquiry_stage : null,
+      }),
+      enquiry_temperature: enquiryTemperatureFromDeal({
+        source: row.source,
+        enquiry_temperature:
+          row.enquiry_temperature === "warm" || row.enquiry_temperature === "cold"
+            ? row.enquiry_temperature
+            : null,
+      }),
       currency: row.currency,
       total_amount: Number(row.total_amount ?? 0),
       expected_close_date: row.expected_close_date,
@@ -383,6 +447,12 @@ export async function getDealListRows(options?: { ids?: string[] }): Promise<Dea
       invoice_status: invoice?.status ?? null,
       xero_invoice_id: invoice?.xero_invoice_id ?? null,
       xero_invoice_number: invoice?.xero_invoice_number ?? null,
+      ledger_invoice_number:
+        "ledger_invoice_number" in row &&
+        typeof row.ledger_invoice_number === "string" &&
+        row.ledger_invoice_number.trim()
+          ? row.ledger_invoice_number.trim()
+          : null,
       xero_sync_status: invoice?.xero_sync_status ?? null,
       xero_sync_error: invoice?.xero_sync_error ?? null,
       invoice_due_date: invoice?.due_date ?? null,

@@ -102,6 +102,7 @@ export async function saveSalesListCrmParty(input: {
 
   revalidatePath("/admin/inventory/sales-list")
   revalidatePath("/admin/deals")
+  revalidatePath("/admin/enquiries")
   revalidatePath("/admin/leads")
   return { ok: true, accountId, contactId }
 }

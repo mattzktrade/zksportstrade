@@ -30,13 +30,17 @@ import type {
   BookingFormEventRow,
 } from "@/lib/booking-forms/types"
 import type { BookingFormEdits, BookingFormSendMode } from "@/lib/booking-forms/edits"
+import {
+  bookingFormHandoffStatus,
+  bookingFormHandoffTone,
+} from "@/lib/booking-forms/handoff-status"
 import { SignaturePad, type SignaturePadHandle } from "@/components/signature-pad"
 import { BOOKING_SIGNATURE_CONSENT } from "@/lib/booking-forms/template"
 
 const STATUS_LABELS: Record<BookingFormAdminRow["status"], string> = {
-  draft: "Ready to send",
-  sent: "Sent",
-  viewed: "Viewed",
+  draft: "Draft",
+  sent: "Sent to client",
+  viewed: "Sent to client",
   awaiting_zk_signature: "Client signed — ZK signature required",
   zk_signed: "Generating final document",
   completed: "Completed",
@@ -44,6 +48,25 @@ const STATUS_LABELS: Record<BookingFormAdminRow["status"], string> = {
   expired: "Expired",
   voided: "Voided",
   failed: "Failed",
+}
+
+export function BookingFormHandoffCallout({
+  form,
+  events,
+}: {
+  form: BookingFormAdminRow | null
+  events: BookingFormEventRow[]
+}) {
+  const status = bookingFormHandoffStatus(form, events)
+  if (!status) return null
+  return (
+    <div className={`rounded-lg border p-3 ${bookingFormHandoffTone(status.kind)}`}>
+      <p className="text-[9px] font-semibold">{status.title}</p>
+      {status.detail ? (
+        <p className="mt-1 text-[8px] leading-relaxed opacity-90">{status.detail}</p>
+      ) : null}
+    </div>
+  )
 }
 
 function dateTime(value: string | null): string {
@@ -159,6 +182,7 @@ export function BookingFormPanel({
   currentProfileName,
   orderAlreadyConfirmed = false,
   confirmedOffPlatform = false,
+  onMovedToDeals,
 }: {
   dealId: string
   dealClosed: boolean
@@ -170,6 +194,7 @@ export function BookingFormPanel({
   currentProfileName: string
   orderAlreadyConfirmed?: boolean
   confirmedOffPlatform?: boolean
+  onMovedToDeals?: (dealId: string, reason: "approval" | "sent") => void
 }) {
   const router = useRouter()
   const inFlight = useRef(false)
@@ -246,6 +271,10 @@ export function BookingFormPanel({
     run(() => voidNativeBookingForm(form.id, reason))
   }
 
+  function movedToDeals(reason: "approval" | "sent") {
+    onMovedToDeals?.(dealId, reason)
+  }
+
   function sendForm(edits: BookingFormEdits, sendMode: BookingFormSendMode) {
     run(
       () =>
@@ -255,7 +284,10 @@ export function BookingFormPanel({
           sendMode,
           reissueFromId: editorMode === "reissue" || editorMode === "edit" ? form?.id : undefined,
         }),
-      () => setEditorMode(null),
+      () => {
+        setEditorMode(null)
+        movedToDeals("sent")
+      },
     )
   }
 
@@ -280,18 +312,23 @@ export function BookingFormPanel({
           reissueFromId: editorMode === "reissue" || editorMode === "edit" ? form?.id : undefined,
           bookingFormId: edits ? undefined : form?.id,
         }),
-      () => setEditorMode(null),
+      () => {
+        setEditorMode(null)
+        movedToDeals("approval")
+      },
     )
   }
 
   function sendSaved(sendMode: BookingFormSendMode) {
     if (!form) return
-    run(() => sendSavedNativeBookingForm({ bookingFormId: form.id, sendMode }))
+    run(() => sendSavedNativeBookingForm({ bookingFormId: form.id, sendMode }), () => movedToDeals("sent"))
   }
 
+  const handoff = bookingFormHandoffStatus(form, events)
   const lastReadyNotice = events.find((event) => event.event_type === "ready_notified")
   const isDraft = form?.status === "draft" || form?.status === "failed"
   const active = form && ["draft", "failed", "sent", "viewed", "awaiting_zk_signature", "zk_signed"].includes(form.status)
+  const statusBadge = handoff?.badge ?? (form ? STATUS_LABELS[form.status] : "")
 
   return (
     <div className="rounded-lg border border-slate-200 p-3">
@@ -316,8 +353,8 @@ export function BookingFormPanel({
             </p>
           ) : (
             <p className="mb-2 text-[8px] text-slate-500">
-              Creates an editable PDF snapshot. Stock is reserved for seven days only when an approved admin
-              sends it to the client.
+              Creates an editable PDF. Saving keeps this enquiry here. Send for approval, or send it to the
+              client, to move it onto Deals. Stock is reserved only when an admin sends it.
             </p>
           )}
           <button
@@ -336,6 +373,7 @@ export function BookingFormPanel({
         </div>
       ) : (
         <div className="mt-3 space-y-3">
+          <BookingFormHandoffCallout form={form} events={events} />
           <div className="rounded-md bg-slate-50 p-3">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -345,11 +383,13 @@ export function BookingFormPanel({
               <span className={`rounded-full px-2 py-1 text-[8px] font-semibold ${
                 form.status === "completed"
                   ? "bg-slate-900 text-white"
-                  : form.status === "awaiting_zk_signature" || isDraft
+                  : form.status === "awaiting_zk_signature" || handoff?.kind === "approval" || isDraft
                     ? "bg-amber-100 text-amber-900"
-                    : "bg-slate-100 text-slate-800"
+                    : ["sent", "viewed"].includes(form.status)
+                      ? "bg-emerald-100 text-emerald-900"
+                      : "bg-slate-100 text-slate-800"
               }`}>
-                {STATUS_LABELS[form.status]}
+                {statusBadge}
               </span>
             </div>
             <dl className="mt-3 grid grid-cols-[82px_1fr] gap-y-1.5 text-[8px]">
@@ -364,11 +404,15 @@ export function BookingFormPanel({
             {form.last_error ? <p className="mt-2 text-[8px] font-medium text-red-600">{form.last_error}</p> : null}
             {isDraft && lastReadyNotice ? (
               <p className="mt-2 text-[8px] text-slate-500">
-                Admins notified {dateTime(lastReadyNotice.created_at)}. An approved admin still needs to send this to the client.
+                Sent for approval {dateTime(lastReadyNotice.created_at)}. Ollie or Michel still need to send this to the client.
               </p>
             ) : isDraft ? (
               <p className="mt-2 text-[8px] text-slate-500">
-                Saved for an approved admin to send. Stock is not reserved yet.
+                Saved on this enquiry. Stock is not reserved until an admin sends it to the client.
+              </p>
+            ) : ["sent", "viewed"].includes(form.status) ? (
+              <p className="mt-2 text-[8px] text-slate-500">
+                Sent to the client{form.sent_at ? ` ${dateTime(form.sent_at)}` : ""}.
               </p>
             ) : null}
           </div>
@@ -399,7 +443,7 @@ export function BookingFormPanel({
             ) : null}
             {isDraft ? (
               <button type="button" disabled={pending} onClick={() => notifyForm()} className="h-9 rounded-md border text-[9px] font-semibold disabled:opacity-50">
-                Notify admins to send
+                Send for approval
               </button>
             ) : null}
             {isDraft && currentCanSend ? (

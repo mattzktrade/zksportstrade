@@ -440,12 +440,17 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
   const raceName = typedRace
     ? eventSeasonLabel(typedRace.name, typedRace.season)
     : row.race_id
-  return {
+  const bought = layers.reduce(
+    (sum, layer) => sum + Math.max(0, Math.floor(Number(layer.quantity) || 0)),
+    0,
+  )
+  const packageRow: AdminPackageRow = {
     ...row,
     inventory: (inv as DbInventory | null) ?? null,
     race_name: raceName,
     cost_layers: layers,
     cost_summary: summary,
+    layer_units_purchased: bought,
     sales_breakdown: salesByPkg.get(id) ?? emptyPackageSalesBreakdown(id),
     fulfilment_sold_by_layer: recordFromSoldMap(fulfilmentSold),
     canonical_availability: canonical
@@ -467,6 +472,8 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
         ? sfInventoryByProduct.get(row.salesforce_product_id.trim()) ?? null
         : null,
   }
+  applyEffectiveSellable([packageRow])
+  return packageRow
 }
 
 /**
@@ -596,7 +603,7 @@ export async function getAdminPackageRows(
   const availabilityByPackage = new Map(
     availabilityRows.map((availability) => [availability.package_id, availability]),
   )
-  return (packages as DbPackage[]).map((p) => {
+  const rows = (packages as DbPackage[]).map((p) => {
     const layers = layersByPkg.get(p.id) ?? []
     const totals = layerTotalsByPkg.get(p.id)
     const summary = includeCostLayers ? summarizePackageCost(p.currency || "USD", layers) : null
@@ -607,7 +614,12 @@ export async function getAdminPackageRows(
       race_name: raceName.get(p.race_id) ?? p.race_id,
       cost_layers: layers,
       cost_summary: summary,
-      layer_units_purchased: totals?.quantity_purchased,
+      layer_units_purchased: includeCostLayers
+        ? layers.reduce(
+            (sum, layer) => sum + Math.max(0, Math.floor(Number(layer.quantity) || 0)),
+            0,
+          )
+        : (totals?.quantity_purchased ?? 0),
       sales_breakdown: salesByPkg.get(p.id) ?? emptyPackageSalesBreakdown(p.id),
       effective_website_price: retailPriceFromTrade(
         p.trade_price,
@@ -619,6 +631,8 @@ export async function getAdminPackageRows(
     }
     return attachCanonicalAvailability(packageRow, availabilityByPackage.get(p.id))
   })
+  applyEffectiveSellable(rows)
+  return rows
 }
 
 async function getSalesforceInventorySnapshotsForPackages(

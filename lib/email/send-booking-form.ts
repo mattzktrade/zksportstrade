@@ -145,6 +145,67 @@ export function sendNativeBookingFormReminder(input: BookingFormEmail) {
   })
 }
 
+function finalReminderEmailHtml(input: BookingFormEmail): string {
+  const expiry = new Date(input.expiresAt).toLocaleString("en-GB", {
+    dateStyle: "long",
+    timeStyle: "short",
+    timeZone: "UTC",
+  })
+  return [
+    `<p>Hi ${escapeHtml(input.recipientName)},</p>`,
+    "<p>This is a final reminder: please sign your ZK booking form. If it is not signed within the next hour, the stock hold will be released.</p>",
+    `<p><strong>${escapeHtml(input.eventName)}</strong><br/>`,
+    `Reference: ${escapeHtml(input.documentRef)}<br/>`,
+    `Total: ${escapeHtml(input.totalLabel)}</p>`,
+    `<p><a href="${escapeHtml(input.signingUrl)}" style="display:inline-block;background:#F90202;color:#fff;text-decoration:none;padding:12px 20px;border-radius:6px;font-weight:700">Review and sign booking form</a></p>`,
+    `<p>This secure link expires on ${escapeHtml(expiry)} UTC.</p>`,
+    "<p>If you were not expecting this email, please contact ZK Sports directly and do not forward the signing link.</p>",
+    "<p>Thank you,<br/>ZK Sports &amp; Entertainment</p>",
+  ].join("")
+}
+
+export function sendNativeBookingFormFinalReminder(input: BookingFormEmail) {
+  const to = [input.recipientEmail]
+  return send({
+    to,
+    cc: bookingFormCc(to),
+    subject: `Please sign now — stock will be released in 1 hour — ${input.documentRef}`,
+    html: finalReminderEmailHtml(input),
+  })
+}
+
+type HoldReleasedEmail = {
+  recipientEmail: string
+  recipientName: string
+  accountName: string
+  documentRef: string
+  eventName: string
+  totalLabel: string
+}
+
+function holdReleasedEmailHtml(input: HoldReleasedEmail): string {
+  return [
+    `<p>Hi ${escapeHtml(input.recipientName)},</p>`,
+    "<p>The signing window for this booking form has ended, so the stock is no longer held.</p>",
+    `<p><strong>${escapeHtml(input.eventName)}</strong><br/>`,
+    `Account: ${escapeHtml(input.accountName)}<br/>`,
+    `Reference: ${escapeHtml(input.documentRef)}<br/>`,
+    `Total: ${escapeHtml(input.totalLabel)}</p>`,
+    "<p>If you are still interested, please contact the team again to extend.</p>",
+    "<p>Thank you,<br/>ZK Sports &amp; Entertainment</p>",
+  ].join("")
+}
+
+export function sendNativeBookingFormHoldReleased(input: HoldReleasedEmail) {
+  const to = [input.recipientEmail]
+  return send({
+    to,
+    cc: bookingFormCc(to),
+    subject: `Stock is no longer held — ${input.documentRef}`,
+    html: holdReleasedEmailHtml(input),
+  })
+}
+
 export function sendCompletedBookingFormEmail(input: {
   clientEmail: string
   clientName: string

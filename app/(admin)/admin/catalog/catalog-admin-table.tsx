@@ -6,6 +6,7 @@ import { LOGO_ICON } from "@/lib/branding"
 import Link from "next/link"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import type { AdminPackageRow, AdminRaceOption } from "@/lib/admin/queries"
+import { adminPackageNetQuantity, adminPackageSellable } from "@/lib/inventory/effective-availability"
 import { linkedPackagesFromAdminRows, type LinkedInventoryPackage } from "@/lib/admin/linked-inventory"
 import { fetchAdminPackageForCatalogExpand } from "@/app/(admin)/actions"
 import { adminCatalogProductTitleFromPackage } from "@/lib/admin/catalog-product-title"
@@ -21,9 +22,9 @@ import { pageSearchProps } from "@/lib/browser/laptop-qol"
 
 const CATALOG_FILTER_STORAGE_KEY = "zk-admin-catalog-filters-v2"
 
-function sellableFromInventory(inv: { qty_available: number; qty_held: number } | null): number | null {
-  if (!inv) return null
-  return Math.max(0, inv.qty_available - inv.qty_held)
+function sellableFromInventory(row: AdminPackageRow): number | null {
+  if (!row.inventory && row.effective_net == null && row.effective_sellable == null) return null
+  return adminPackageSellable(row)
 }
 
 function rowMatchesSearch(row: AdminPackageRow, q: string): boolean {
@@ -73,7 +74,7 @@ function rowMatchesScheduleFilter(row: AdminPackageRow, f: ScheduleFilter): bool
 
 function rowMatchesStockFilter(row: AdminPackageRow, f: StockFilter): boolean {
   if (f === "all") return true
-  const sellable = sellableFromInventory(row.inventory)
+  const sellable = sellableFromInventory(row)
   if (f === "in_stock") return (sellable ?? 0) > 0
   return row.inventory == null || (sellable ?? 0) === 0
 }
@@ -383,18 +384,21 @@ function CatalogRow({
 
   const raceMatch = races.find((r) => r.id === initial.race_id)
   const displayTitle = adminCatalogProductTitleFromPackage(initial, raceMatch)
-  const qa = initial.inventory?.qty_available ?? 0
   const qh = initial.inventory?.qty_held ?? 0
   const hasInventoryRow = initial.inventory != null
-  const sellableLive = hasInventoryRow ? Math.max(0, qa - qh) : null
+  const netQty = adminPackageNetQuantity(initial)
+  const sellableLive = hasInventoryRow || initial.effective_net != null ? netQty : null
   const priceSummary = formatTradeSummary(currency, tradePrice, isEnquiry)
   const sfCode = initial.product_code?.trim()
 
   let stockLabel: string
   let stockClass: string
-  if (!hasInventoryRow) {
+  if (sellableLive == null && !hasInventoryRow) {
     stockLabel = "No stock"
     stockClass = "text-amber-800 dark:text-amber-200"
+  } else if ((sellableLive ?? 0) < 0) {
+    stockLabel = `${sellableLive}`
+    stockClass = "text-destructive"
   } else if ((sellableLive ?? 0) > 0) {
     stockLabel = `${sellableLive} avail.`
     stockClass = "text-emerald-700 dark:text-emerald-300"
@@ -441,7 +445,7 @@ function CatalogRow({
             {isHidden ? (
               <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Hidden</span>
             ) : null}
-            <span className={cn("text-xs font-medium tabular-nums", stockClass)} title={hasInventoryRow ? `Available ${qa}, held ${qh}` : undefined}>
+            <span className={cn("text-xs font-medium tabular-nums", stockClass)} title={hasInventoryRow ? `Net ${netQty}, held ${qh}` : undefined}>
               {stockLabel}
             </span>
             <span className="font-semibold tabular-nums text-foreground min-w-[4.5rem] text-right">

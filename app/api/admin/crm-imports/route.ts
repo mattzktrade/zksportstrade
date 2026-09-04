@@ -2,9 +2,17 @@ import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import {
   parseSalesforceCsv,
-  type CrmImportType,
+  type CrmImportType as SalesforceImportType,
 } from "@/lib/crm/imports/salesforce-csv"
+import type { CrmImportType } from "@/lib/crm/imports/types"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
+import {
+  dealLedgerNormalizedData,
+  parseDealLedgerCsv,
+  type ParsedDealLedger,
+} from "@/lib/crm/imports/deal-ledger"
+import { loadDealLedgerCatalog } from "@/lib/crm/imports/deal-ledger-catalog"
+import { matchDealLedgerRows } from "@/lib/crm/imports/deal-ledger-match"
 
 export const runtime = "nodejs"
 
@@ -58,19 +66,22 @@ export async function POST(request: Request) {
     const file = formData.get("file")
     const importType = String(formData.get("importType") ?? "") as CrmImportType
     if (!(file instanceof File) || file.size === 0) {
-      return NextResponse.json({ error: "Choose a CSV file." }, { status: 400 })
+      return NextResponse.json({ error: "Choose a spreadsheet to upload." }, { status: 400 })
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      return NextResponse.json({ error: "File must be 25MB or smaller." }, { status: 400 })
+    }
+    if (importType === "deal_ledger") {
+      return stageDealLedgerImport(supabase, user.id, file)
     }
     if (!["contacts", "opportunities"].includes(importType)) {
       return NextResponse.json({ error: "Select a valid import type." }, { status: 400 })
     }
-    if (file.size > MAX_FILE_BYTES) {
-      return NextResponse.json({ error: "CSV must be 25MB or smaller." }, { status: 400 })
-    }
     if (!file.name.toLowerCase().endsWith(".csv")) {
-      return NextResponse.json({ error: "Only CSV files are supported." }, { status: 400 })
+      return NextResponse.json({ error: "Salesforce imports only accept CSV files." }, { status: 400 })
     }
 
-    const parsed = parseSalesforceCsv(await file.text(), importType)
+    const parsed = parseSalesforceCsv(await file.text(), importType as SalesforceImportType)
     if (importType === "opportunities") {
       const { data: packageRows, error: packageError } = await supabase
         .from("packages")
@@ -218,5 +229,93 @@ export async function POST(request: Request) {
       { status: 400 },
     )
   }
+}
+
+async function stageDealLedgerImport(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  file: File,
+) {
+  const name = file.name.toLowerCase()
+  if (name.endsWith(".xls") && !name.endsWith(".xlsx") && !name.endsWith(".xlsm")) {
+    return NextResponse.json(
+      { error: "Save the workbook as .xlsx, not the older .xls format." },
+      { status: 400 },
+    )
+  }
+  if (!name.endsWith(".csv") && !name.endsWith(".xlsx") && !name.endsWith(".xlsm")) {
+    return NextResponse.json(
+      { error: "Upload the Excel workbook (.xlsx) or a CSV export of the sales ledger." },
+      { status: 400 },
+    )
+  }
+
+  let parsed: ParsedDealLedger
+  if (name.endsWith(".xlsx") || name.endsWith(".xlsm")) {
+    const { parseDealLedgerXlsx } = await import("@/lib/crm/imports/deal-ledger-xlsx")
+    parsed = await parseDealLedgerXlsx(Buffer.from(await file.arrayBuffer()))
+  } else {
+    parsed = parseDealLedgerCsv(await file.text())
+  }
+
+  const catalog = await loadDealLedgerCatalog(supabase)
+  parsed = matchDealLedgerRows(parsed, catalog)
+  const warningRows = parsed.rows.filter((row) => row.warnings.length > 0).length
+  const matchedRows = parsed.rows.filter((row) => row.dealId && row.errors.length === 0).length
+
+  const { data: batch, error: batchError } = await supabase
+    .from("crm_import_batches")
+    .insert({
+      import_type: "deal_ledger",
+      source_system: "sales_ledger",
+      file_name: file.name.slice(0, 255),
+      status: "validated",
+      total_rows: parsed.totalRows,
+      valid_rows: parsed.validRows,
+      error_rows: parsed.errorRows,
+      headers: parsed.headers,
+      summary: {
+        warning_rows: warningRows,
+        matched_rows: matchedRows,
+        stock_will_change: false,
+        creates_deals: false,
+      },
+      created_by: userId,
+    })
+    .select("id")
+    .single()
+  if (batchError || !batch) {
+    throw new Error(batchError?.message ?? "Could not create import batch.")
+  }
+
+  try {
+    for (let i = 0; i < parsed.rows.length; i += INSERT_CHUNK_SIZE) {
+      const chunk = parsed.rows.slice(i, i + INSERT_CHUNK_SIZE).map((row) => ({
+        batch_id: batch.id,
+        row_number: row.rowNumber,
+        source_external_id: row.dealReference,
+        raw_data: row.rawData,
+        normalized_data: dealLedgerNormalizedData(row),
+        validation_errors: row.errors,
+        validation_warnings: row.warnings,
+        status: row.errors.length > 0 ? "error" : "valid",
+      }))
+      const { error } = await supabase.from("crm_import_rows").insert(chunk)
+      if (error) throw new Error(error.message)
+    }
+  } catch (error) {
+    await supabase.from("crm_import_batches").delete().eq("id", batch.id)
+    throw error
+  }
+
+  return NextResponse.json({
+    ok: true,
+    batchId: batch.id,
+    totalRows: parsed.totalRows,
+    validRows: parsed.validRows,
+    errorRows: parsed.errorRows,
+    warningRows,
+    matchedRows,
+  })
 }
 

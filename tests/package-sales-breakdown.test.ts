@@ -172,10 +172,12 @@ test("places sold pipeline column shows unsigned open deals", () => {
   assert.match(eventDetail, /unsignedPipelinePlaces/)
 })
 
-test("event remaining uses product-page sellable, not stale qty_available", () => {
+test("event remaining uses product-page net quantity, not stale qty_available", () => {
   const eventDetail = readFileSync("lib/admin/event-detail.ts", "utf8")
-  assert.match(eventDetail, /effectiveSellableByPackageId/)
+  assert.match(eventDetail, /applyEffectiveSellable/)
+  assert.match(eventDetail, /effective_net/)
   assert.doesNotMatch(eventDetail, /available:\s*Number\(inventory\?\.qty_available/)
+  assert.doesNotMatch(eventDetail, /Math\.max\(0, \(sellableByPkg/)
 })
 
 test("signed contracts hold sellable as sold; unsigned demand does not", () => {
@@ -225,6 +227,40 @@ test("stale package_inventory is ignored when purchased stock and sibling sales 
   applyEffectiveSellable(rows)
   assert.equal(rows[0].effective_sellable, 20)
   assert.equal(rows[1].effective_sellable, 20)
+})
+
+test("admin catalog list shows net quantity, including negatives", () => {
+  const catalogTable = readFileSync("app/(admin)/admin/catalog/catalog-admin-table.tsx", "utf8")
+  assert.match(catalogTable, /adminPackageNetQuantity/)
+  assert.doesNotMatch(catalogTable, /Math\.max\(0, qa - qh\)/)
+})
+
+test("signed sales without purchased stock make admin net quantity negative", () => {
+  const rows: EffectiveSellablePackage[] = [
+    {
+      id: "club-suite",
+      inventory: { qty_available: 0, qty_held: 0 },
+      layer_units_purchased: 0,
+      sales_breakdown: sold("club-suite", 4),
+    },
+  ]
+  applyEffectiveSellable(rows)
+  assert.equal(rows[0].effective_sellable, 0)
+  assert.equal(rows[0].effective_net, -4)
+})
+
+test("leftover physical qty does not hide a purchased-stock shortage on admin net", () => {
+  const rows: EffectiveSellablePackage[] = [
+    {
+      id: "club-suite",
+      inventory: { qty_available: 10, qty_held: 0 },
+      layer_units_purchased: 0,
+      sales_breakdown: sold("club-suite", 4),
+    },
+  ]
+  applyEffectiveSellable(rows)
+  assert.equal(rows[0].effective_net, -4)
+  assert.equal(rows[0].effective_sellable, 6)
 })
 
 test("linked weekend sales reduce 3-day remaining even without single-day SKUs", () => {

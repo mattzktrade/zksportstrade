@@ -75,6 +75,8 @@ export function AdminStatCard({
   hint,
   tone = "red",
   href,
+  onClick,
+  active = false,
 }: {
   icon: React.ComponentType<{ className?: string }>
   value: string | number
@@ -82,6 +84,8 @@ export function AdminStatCard({
   hint?: string
   tone?: Tone
   href?: string
+  onClick?: () => void
+  active?: boolean
 }) {
   const content = (
     <>
@@ -101,11 +105,22 @@ export function AdminStatCard({
     </>
   )
 
-  const classes =
-    "@container flex min-h-[78px] min-w-0 items-center gap-3 overflow-visible rounded-lg border border-[#eceef1] bg-white px-4 py-4"
+  const classes = cn(
+    "@container flex min-h-[78px] min-w-0 items-center gap-3 overflow-visible rounded-lg border bg-white px-4 py-4 text-left",
+    active ? "border-primary/40 ring-1 ring-primary/20" : "border-[#eceef1]",
+    (href || onClick) && "transition-colors hover:border-primary/30",
+  )
+
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={classes}>
+        {content}
+      </button>
+    )
+  }
 
   return href ? (
-    <Link href={href} className={cn(classes, "transition-colors hover:border-primary/30")}>
+    <Link href={href} className={classes}>
       {content}
     </Link>
   ) : (

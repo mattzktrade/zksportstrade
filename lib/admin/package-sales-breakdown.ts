@@ -275,10 +275,8 @@ export function applyEffectiveSellable<T extends EffectiveSellablePackage>(rows:
       ...stockSource.map((member) => Number(member.layer_units_purchased ?? 0)),
       0,
     )
-    const stock =
-      purchasedStock > 0
-        ? purchasedStock
-        : Math.max(0, Number(row.inventory?.qty_available ?? 0))
+    const physicalStock = Math.max(0, Number(row.inventory?.qty_available ?? 0))
+    const sellableStock = purchasedStock > 0 ? purchasedStock : physicalStock
     if (groupMembers.length > 1) {
       const members: LinkedSellableMember[] = groupMembers.map((member) => ({
         id: member.id,
@@ -288,14 +286,14 @@ export function applyEffectiveSellable<T extends EffectiveSellablePackage>(rows:
       row.effective_sellable = Math.max(
         0,
         linkedPoolSellableForPackage({
-          stock,
+          stock: sellableStock,
           targetId: row.id,
           targetDuration: row.duration ?? null,
           members,
         }),
       )
       row.effective_net = linkedPoolSellableForPackage({
-        stock,
+        stock: purchasedStock,
         targetId: row.id,
         targetDuration: row.duration ?? null,
         members: members.map((member) => ({
@@ -310,12 +308,14 @@ export function applyEffectiveSellable<T extends EffectiveSellablePackage>(rows:
       row.effective_sellable = Math.max(
         0,
         Math.floor(
-          stock -
+          sellableStock -
             Number(row.sales_breakdown.total ?? 0) -
             Number(row.sales_breakdown.salesforceOpenPipeline ?? 0),
         ),
       )
-      row.effective_net = Math.floor(stock - Number(row.sales_breakdown.total ?? 0))
+      row.effective_net = Math.floor(
+        purchasedStock - Number(row.sales_breakdown.total ?? 0),
+      )
     }
   }
   return rows

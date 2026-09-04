@@ -101,6 +101,7 @@ export async function updateDealCommercials(input: {
     return { ok: false, message: error.message }
   }
   revalidatePath("/admin/deals", "layout")
+  revalidatePath("/admin/enquiries", "layout")
   revalidatePath("/admin/sales-tracker")
   revalidatePath("/admin")
   return { ok: true, message: "Deal details updated." }
@@ -275,6 +276,7 @@ export async function updateDealClientDetails(input: {
   }
 
   revalidatePath("/admin/deals", "layout")
+  revalidatePath("/admin/enquiries", "layout")
   revalidatePath("/admin/sales-tracker")
   revalidatePath("/admin")
   return { ok: true, message: "Client and fulfilment details updated." }
@@ -330,6 +332,7 @@ export async function updateDealLineSupplier(input: {
     }
 
     revalidatePath("/admin/deals", "layout")
+  revalidatePath("/admin/enquiries", "layout")
     revalidatePath("/admin/catalog", "layout")
     revalidatePath("/admin/purchase-orders")
     revalidatePath("/admin")
@@ -391,6 +394,7 @@ export async function updateDealLineSupplier(input: {
   }
 
   revalidatePath("/admin/deals", "layout")
+  revalidatePath("/admin/enquiries", "layout")
   revalidatePath("/admin/catalog", "layout")
   revalidatePath("/admin/purchase-orders")
   revalidatePath("/admin")
@@ -491,6 +495,7 @@ export async function swapDealLineSuppliers(input: {
     )
     if (reconcileError) {
       revalidatePath("/admin/deals", "layout")
+  revalidatePath("/admin/enquiries", "layout")
       revalidatePath("/admin/catalog", "layout")
       revalidatePath("/admin/purchase-orders")
       revalidatePath("/admin")
@@ -503,6 +508,7 @@ export async function swapDealLineSuppliers(input: {
   }
 
   revalidatePath("/admin/deals", "layout")
+  revalidatePath("/admin/enquiries", "layout")
   revalidatePath("/admin/catalog", "layout")
   revalidatePath("/admin/purchase-orders")
   revalidatePath("/admin")
@@ -541,9 +547,50 @@ export async function addDealNote(input: { dealId: string; note: string }): Prom
     .eq("id", dealId)
 
   revalidatePath("/admin/deals", "layout")
+  revalidatePath("/admin/enquiries", "layout")
   revalidatePath("/admin/sales-tracker")
   revalidatePath("/admin")
   return { ok: true, message: "Note added." }
+}
+
+export async function updateEnquiryNotes(input: {
+  dealId: string
+  notes: string
+}): Promise<Result> {
+  const [profile, supabase] = await Promise.all([getPortalProfile(), createClient()])
+  if (!profile || !hasCmsPermission(profile, "deals.manage")) {
+    return { ok: false, message: "Sales permission is required." }
+  }
+  const dealId = input.dealId.trim()
+  if (!dealId) return { ok: false, message: "Enquiry id is not valid." }
+  const notes = input.notes.trim() || null
+
+  const { data: deal, error: dealError } = await supabase
+    .from("deals")
+    .select("id")
+    .eq("id", dealId)
+    .maybeSingle()
+  if (dealError || !deal) return { ok: false, message: "Enquiry was not found." }
+
+  const { error } = await supabase
+    .from("deals")
+    .update({ notes, updated_at: new Date().toISOString() })
+    .eq("id", dealId)
+  if (error) return { ok: false, message: error.message }
+
+  const { error: activityError } = await supabase.from("deal_activities").insert({
+    deal_id: dealId,
+    actor_profile_id: profile.id,
+    action: "notes_updated",
+    summary: notes ? "Enquiry notes updated" : "Enquiry notes cleared",
+    metadata: {},
+  })
+  if (activityError) return { ok: false, message: activityError.message }
+
+  revalidatePath("/admin/deals", "layout")
+  revalidatePath("/admin/enquiries", "layout")
+  revalidatePath("/admin")
+  return { ok: true, message: "Notes saved." }
 }
 
 export async function deleteDeal(input: { dealId: string }): Promise<Result> {
@@ -583,6 +630,7 @@ export async function deleteDeal(input: { dealId: string }): Promise<Result> {
   }
 
   revalidatePath("/admin/deals", "layout")
+  revalidatePath("/admin/enquiries", "layout")
   revalidatePath("/admin/inventory/sales-list")
   revalidatePath("/admin/inventory/negative-stock")
   revalidatePath("/admin/sales-tracker")

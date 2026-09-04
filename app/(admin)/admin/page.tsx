@@ -21,6 +21,7 @@ import {
   listNativeBookingFormsAwaitingApprovalDealIds,
 } from "@/lib/booking-forms/queries"
 import { getDashboardActionCounts } from "@/lib/admin/dashboard-stats"
+import { getNegativeStockRows } from "@/lib/admin/negative-stock-query"
 import { getSalesTrackerRows } from "@/lib/admin/workflow-views"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { DEAL_STAGE_LABELS, dealSourceLabel, type DealStage } from "@/lib/crm/deal-types"
@@ -109,7 +110,7 @@ async function AdminDashboard() {
     bookingFormsReadyToSend,
     actions,
     { data: inventory },
-    { count: negativeStock },
+    negativeStockRows,
     salesRows,
     { data: newestDealRows },
     { data: myDeals },
@@ -121,11 +122,7 @@ async function AdminDashboard() {
     countNativeBookingFormsReadyToSend(),
     getDashboardActionCounts(),
     supabase.from("package_inventory").select("qty_available"),
-    supabase
-      .from("sourcing_shortages")
-      .select("*", { count: "exact", head: true })
-      .neq("status", "purchased")
-      .neq("status", "cancelled"),
+    getNegativeStockRows(),
     getSalesTrackerRows(),
     supabase
       .from("deals")
@@ -151,6 +148,7 @@ async function AdminDashboard() {
       .limit(5),
   ])
 
+  const negativeStock = negativeStockRows.length
   const totalAvailable = (inventory ?? []).reduce(
     (sum, row) => sum + Number(row.qty_available ?? 0),
     0,

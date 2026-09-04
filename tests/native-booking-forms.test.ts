@@ -30,6 +30,7 @@ import {
 } from "../lib/email/send-booking-form"
 import type { BookingFormSnapshot } from "../lib/booking-forms/types"
 import { paddedInkRect, signatureInkBounds } from "../lib/booking-forms/signature-ink"
+import { bookingFormHandoffStatus } from "../lib/booking-forms/handoff-status"
 
 test("secure signer tokens are random and only hashes need persistence", () => {
   const first = generateSigningToken()
@@ -175,14 +176,14 @@ test("booking form edits can rename parties, products and terms without changing
 })
 
 test("new accounts can omit postcode and booking forms still render the rest of the address", () => {
-  const dealsClient = readFileSync("app/(admin)/admin/deals/deals-client.tsx", "utf8")
-  assert.match(dealsClient, /Postcode \(optional\)/)
+  const createModal = readFileSync("components/admin/deal-create-modal.tsx", "utf8")
+  assert.match(createModal, /Postcode \(optional\)/)
   assert.match(
-    dealsClient,
+    createModal,
     /newBillingLine1\.trim\(\) && newBillingCity\.trim\(\) && newBillingCountry\.trim\(\)/,
   )
   assert.doesNotMatch(
-    dealsClient,
+    createModal,
     /newBillingLine1\.trim\(\) && newBillingCity\.trim\(\) && newBillingPostcode\.trim\(\) && newBillingCountry\.trim\(\)/,
   )
   const snapshot = readFileSync("lib/booking-forms/snapshot.ts", "utf8")
@@ -277,6 +278,12 @@ test("booking form emails CC bookings and Chelley", () => {
   assert.match(functionSource("sendNativeBookingFormEmail"), /cc: bookingFormCc\(to\)/)
   assert.match(functionSource("sendManualNativeBookingFormEmail"), /cc: bookingFormCc\(to\)/)
   assert.match(functionSource("sendNativeBookingFormReminder"), /cc: bookingFormCc\(to\)/)
+  assert.match(functionSource("sendNativeBookingFormFinalReminder"), /cc: bookingFormCc\(to\)/)
+  assert.match(functionSource("sendNativeBookingFormHoldReleased"), /cc: bookingFormCc\(to\)/)
+  assert.match(source, /stock is no longer held/)
+  assert.match(source, /contact the team again to extend/)
+  assert.match(source, /stock hold will be released/)
+  assert.doesNotMatch(functionSource("sendNativeBookingFormHoldReleased"), /signingUrl/)
   assert.match(functionSource("sendCompletedBookingFormEmail"), /cc: bookingFormCc\(to\)/)
   assert.match(functionSource("sendCompletedBookingFormEmail"), /const to = \[input\.clientEmail\]/)
   assert.doesNotMatch(functionSource("sendCompletedBookingFormEmail"), /adminEmail\.toLowerCase/)
@@ -307,16 +314,18 @@ test("booking form signing page uses a product table, colour logo, and client si
   const editor = readFileSync("app/(admin)/admin/deals/booking-form-editor.tsx", "utf8")
   assert.match(editor, /No VAT/)
   assert.match(editor, /noVat/)
-  assert.match(editor, /Notify admins to send/)
+  assert.match(editor, /Send for approval/)
   assert.match(editor, /onNotify/)
   const panel = readFileSync("app/(admin)/admin/deals/booking-form-panel.tsx", "utf8")
   assert.match(panel, /Copy signing link/)
   assert.match(panel, /getNativeBookingFormSigningUrl/)
   assert.match(panel, /currentCanSend \? \(/)
   assert.match(panel, /currentCanSign \? \(/)
-  assert.match(panel, /Notify admins to send/)
+  assert.match(panel, /Send for approval/)
   assert.match(panel, /sendSavedNativeBookingForm/)
   assert.match(panel, /currentCanManageDeals/)
+  assert.match(panel, /onMovedToDeals/)
+  assert.doesNotMatch(panel, /Notify admins to send/)
 })
 
 test("ready-to-send booking form alerts go to Matt, Michel, and Ollie by default", () => {
@@ -351,6 +360,32 @@ test("saving a booking form draft is CMS-staff work; sending to the client is ad
   const dealsClient = readFileSync("app/(admin)/admin/deals/deals-client.tsx", "utf8")
   assert.match(dealsClient, /id: "ready_to_send"/)
   assert.match(dealsClient, /awaiting_booking_form_send/)
+  assert.match(dealsClient, /BookingFormHandoffCallout/)
+})
+
+test("saving a booking form draft stays on the enquiry until send or approval", () => {
+  const sql = readFileSync(
+    "supabase/migrations/20260904150000_booking_form_convert_on_notify.sql",
+    "utf8",
+  )
+  assert.match(sql, /admin_create_native_booking_form/)
+  assert.match(sql, /admin_update_native_booking_form_draft/)
+  assert.match(sql, /perform public.mark_deal_awaiting_booking_form_send\(v_form.deal_id\)/)
+  assert.doesNotMatch(sql, /perform public.mark_deal_awaiting_booking_form_send\(p_deal_id\)/)
+  assert.match(sql, /Sent for approval to Ollie and Michel/)
+  const enquiriesPage = readFileSync("app/(admin)/admin/enquiries/page.tsx", "utf8")
+  assert.match(enquiriesPage, /getBookingFormsForDeals/)
+  const approval = bookingFormHandoffStatus(
+    { status: "draft" },
+    [{ event_type: "ready_notified" }],
+  )
+  assert.equal(approval?.kind, "approval")
+  assert.match(approval?.title ?? "", /Ollie and Michel/)
+  const sent = bookingFormHandoffStatus({ status: "sent" }, [])
+  assert.equal(sent?.kind, "sent")
+  assert.match(sent?.title ?? "", /sent to the client/i)
+  const draft = bookingFormHandoffStatus({ status: "draft" }, [])
+  assert.equal(draft?.kind, "draft")
 })
 
 test("signature ink detection ignores white canvas noise and keeps a real stroke", () => {

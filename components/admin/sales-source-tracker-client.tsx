@@ -4,12 +4,14 @@ import { useMemo } from "react"
 import { CircleDollarSign, Download, Target, TrendingUp, Users } from "lucide-react"
 import type { WorkflowOrderRow } from "@/lib/admin/workflow-views"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
+import { SalesTrackerNav } from "@/components/admin/sales-tracker-nav"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 import { orderSaleChannelLabel } from "@/lib/orders/channel"
 
 type SourceAggregate = {
   source: string
   rows: WorkflowOrderRow[]
+  monthDeals: number
   monthRevenue: number
   monthProfit: number
   ytdRevenue: number
@@ -56,6 +58,7 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
       const aggregate = map.get(source) ?? {
         source,
         rows: [],
+        monthDeals: 0,
         monthRevenue: 0,
         monthProfit: 0,
         ytdRevenue: 0,
@@ -65,6 +68,7 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
       aggregate.ytdRevenue += row.total
       aggregate.ytdProfit += row.grossProfit ?? 0
       if (created.getUTCMonth() === month) {
+        aggregate.monthDeals += 1
         aggregate.monthRevenue += row.total
         aggregate.monthProfit += row.grossProfit ?? 0
       }
@@ -72,6 +76,7 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
     }
     return [...map.values()].sort((a, b) => b.ytdRevenue - a.ytdRevenue)
   }, [active, year, month])
+  const totalMonthDeals = aggregates.reduce((sum, row) => sum + row.monthDeals, 0)
   const totalMonthRevenue = aggregates.reduce((sum, row) => sum + row.monthRevenue, 0)
   const totalMonthProfit = aggregates.reduce((sum, row) => sum + row.monthProfit, 0)
   const totalYtdRevenue = aggregates.reduce((sum, row) => sum + row.ytdRevenue, 0)
@@ -99,7 +104,7 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
       ["Source", "Deals", "Month revenue", "Month gross profit", "YTD revenue", "YTD gross profit"],
       ...aggregates.map((row) => [
         row.source,
-        row.rows.length,
+        row.monthDeals,
         row.monthRevenue,
         row.monthProfit,
         row.ytdRevenue,
@@ -126,6 +131,7 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
           </button>
         }
       />
+      <SalesTrackerNav tab="revenue" />
       <AdminStats className="sm:grid-cols-2 xl:grid-cols-5">
         <AdminStatCard icon={CircleDollarSign} value={money(totalMonthRevenue)} label="This month revenue" tone="blue" />
         <AdminStatCard icon={TrendingUp} value={money(totalMonthProfit)} label="This month gross profit" tone="green" />
@@ -152,8 +158,8 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
                   <tr><th className="px-4 py-2.5">Source</th><th className="px-4 py-2.5 text-right">Deals</th><th className="px-4 py-2.5 text-right">Month revenue</th><th className="px-4 py-2.5 text-right">Month GP</th><th className="px-4 py-2.5 text-right">YTD revenue</th><th className="px-4 py-2.5 text-right">YTD GP</th><th className="px-4 py-2.5 text-right">Average order</th></tr>
                 </thead>
                 <tbody className="divide-y text-[10px]">
-                  {aggregates.map((row, index) => <tr key={row.source} onClick={() => setListState((current) => ({ ...current, selectedSource: row.source }))} className={`cursor-pointer hover:bg-slate-50 ${selected?.source === row.source ? "bg-red-50/50" : ""}`}><td className="px-4 py-3 font-semibold">{row.source}{index === 0 ? <StatusPill tone="green">Top source</StatusPill> : null}</td><td className="px-4 py-3 text-right">{row.rows.length}</td><td className="px-4 py-3 text-right">{money(row.monthRevenue)}</td><td className="px-4 py-3 text-right text-emerald-700">{money(row.monthProfit)}</td><td className="px-4 py-3 text-right font-semibold">{money(row.ytdRevenue)}</td><td className="px-4 py-3 text-right text-emerald-700">{money(row.ytdProfit)}</td><td className="px-4 py-3 text-right">{money(row.rows.length ? row.ytdRevenue / row.rows.length : 0)}</td></tr>)}
-                  <tr className="bg-slate-50 font-semibold"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{aggregates.reduce((sum, row) => sum + row.rows.length, 0)}</td><td className="px-4 py-3 text-right">{money(totalMonthRevenue)}</td><td className="px-4 py-3 text-right">{money(totalMonthProfit)}</td><td className="px-4 py-3 text-right">{money(totalYtdRevenue)}</td><td className="px-4 py-3 text-right">{money(totalYtdProfit)}</td><td /></tr>
+                  {aggregates.map((row, index) => <tr key={row.source} onClick={() => setListState((current) => ({ ...current, selectedSource: row.source }))} className={`cursor-pointer hover:bg-slate-50 ${selected?.source === row.source ? "bg-red-50/50" : ""}`}><td className="px-4 py-3 font-semibold">{row.source}{index === 0 ? <StatusPill tone="green">Top source</StatusPill> : null}</td><td className="px-4 py-3 text-right">{row.monthDeals}</td><td className="px-4 py-3 text-right">{money(row.monthRevenue)}</td><td className="px-4 py-3 text-right text-emerald-700">{money(row.monthProfit)}</td><td className="px-4 py-3 text-right font-semibold">{money(row.ytdRevenue)}</td><td className="px-4 py-3 text-right text-emerald-700">{money(row.ytdProfit)}</td><td className="px-4 py-3 text-right">{money(row.rows.length ? row.ytdRevenue / row.rows.length : 0)}</td></tr>)}
+                  <tr className="bg-slate-50 font-semibold"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{totalMonthDeals}</td><td className="px-4 py-3 text-right">{money(totalMonthRevenue)}</td><td className="px-4 py-3 text-right">{money(totalMonthProfit)}</td><td className="px-4 py-3 text-right">{money(totalYtdRevenue)}</td><td className="px-4 py-3 text-right">{money(totalYtdProfit)}</td><td /></tr>
                 </tbody>
               </table>
             </AdminDesktopTable>
@@ -167,7 +173,7 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
                 >
                   <div className="min-w-0">
                     <p className="font-semibold">{row.source}{index === 0 ? <span className="ml-2"><StatusPill tone="green">Top source</StatusPill></span> : null}</p>
-                    <p className="mt-0.5 text-[8px] text-slate-400">{row.rows.length} deals</p>
+                    <p className="mt-0.5 text-[8px] text-slate-400">{row.monthDeals} deals</p>
                   </div>
                   <div className="shrink-0 text-right">
                     <p className="font-semibold">{money(row.monthRevenue)}</p>
@@ -190,7 +196,7 @@ export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] })
         </div>
 
         <AdminPanel>
-          {selected ? <div><div className="border-b p-4"><StatusPill tone="green">Selected source</StatusPill><h2 className="mt-2 text-[16px] font-semibold">{selected.source}</h2></div><dl className="grid grid-cols-2 gap-3 p-4 text-[9px]"><div><dt className="text-slate-400">Revenue this month</dt><dd className="mt-1 text-[14px] font-semibold">{money(selected.monthRevenue)}</dd></div><div><dt className="text-slate-400">YTD revenue</dt><dd className="mt-1 text-[14px] font-semibold">{money(selected.ytdRevenue)}</dd></div><div><dt className="text-slate-400">Gross profit this month</dt><dd className="mt-1 font-semibold text-emerald-700">{money(selected.monthProfit)}</dd></div><div><dt className="text-slate-400">YTD gross profit</dt><dd className="mt-1 font-semibold text-emerald-700">{money(selected.ytdProfit)}</dd></div><div><dt className="text-slate-400">Deals</dt><dd className="mt-1 font-semibold">{selected.rows.length}</dd></div><div><dt className="text-slate-400">Average order</dt><dd className="mt-1 font-semibold">{money(selected.rows.length ? selected.ytdRevenue / selected.rows.length : 0)}</dd></div></dl><div className="border-t p-4"><h3 className="text-[10px] font-semibold">Top events sold</h3><div className="mt-2 divide-y">{topEvents.map(([event, value]) => <div key={event} className="flex gap-3 py-2 text-[9px]"><span className="flex-1 truncate">{event}</span><span className="font-semibold">{money(value)}</span></div>)}</div></div></div> : <p className="p-8 text-center text-[9px] text-slate-400">No sales in this period.</p>}
+          {selected ? <div><div className="border-b p-4"><StatusPill tone="green">Selected source</StatusPill><h2 className="mt-2 text-[16px] font-semibold">{selected.source}</h2></div><dl className="grid grid-cols-2 gap-3 p-4 text-[9px]"><div><dt className="text-slate-400">Revenue this month</dt><dd className="mt-1 text-[14px] font-semibold">{money(selected.monthRevenue)}</dd></div><div><dt className="text-slate-400">YTD revenue</dt><dd className="mt-1 text-[14px] font-semibold">{money(selected.ytdRevenue)}</dd></div><div><dt className="text-slate-400">Gross profit this month</dt><dd className="mt-1 font-semibold text-emerald-700">{money(selected.monthProfit)}</dd></div><div><dt className="text-slate-400">YTD gross profit</dt><dd className="mt-1 font-semibold text-emerald-700">{money(selected.ytdProfit)}</dd></div><div><dt className="text-slate-400">Deals this month</dt><dd className="mt-1 font-semibold">{selected.monthDeals}</dd></div><div><dt className="text-slate-400">Average order</dt><dd className="mt-1 font-semibold">{money(selected.rows.length ? selected.ytdRevenue / selected.rows.length : 0)}</dd></div></dl><div className="border-t p-4"><h3 className="text-[10px] font-semibold">Top events sold</h3><div className="mt-2 divide-y">{topEvents.map(([event, value]) => <div key={event} className="flex gap-3 py-2 text-[9px]"><span className="flex-1 truncate">{event}</span><span className="font-semibold">{money(value)}</span></div>)}</div></div></div> : <p className="p-8 text-center text-[9px] text-slate-400">No sales in this period.</p>}
         </AdminPanel>
       </div>
     </div>

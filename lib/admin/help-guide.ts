@@ -76,13 +76,13 @@ export const HELP_TOPICS: HelpTopic[] = [
             href: "/admin/leads",
           },
           {
-            title: "2. Create the deal",
-            body: "Inventory → Sales list. Pick the product, then Create deal. Add quantity and price.",
+            title: "2. Create the enquiry",
+            body: "Inventory → Sales list. Pick the product, then Create deal. It lands in Sales → Enquiries until a booking form is ready to send.",
             href: "/admin/inventory/sales-list",
           },
           {
             title: "3. Prepare the booking form",
-            body: "Open the deal and create the form. Sales and finance can save it and notify an admin. Only an admin can send it to the client. Stock is held for 7 days at that point, not when the form is saved.",
+            body: "When you are ready to send a booking form, convert the enquiry to a Deal. Sales and finance can save the form and notify an admin. Only an admin can send it to the client. Stock is held for 7 days at that point, not when the form is saved.",
             href: "/admin/deals",
           },
           {
@@ -102,8 +102,8 @@ export const HELP_TOPICS: HelpTopic[] = [
           {
             role: "If you sell",
             items: [
-              "Live in Accounts (Leads tab for new prospects), Sales list, and Deals.",
-              "Create deals and holds. Prepare booking forms, then notify an admin to send them.",
+              "Live in Accounts (Leads tab for new prospects), Enquiries, Sales list, and Deals.",
+              "Create enquiries, deals and holds. Prepare booking forms, then notify an admin to send them.",
               "Do not approve random portal users or change website visibility unless you mean to.",
             ],
           },
@@ -244,18 +244,23 @@ export const HELP_TOPICS: HelpTopic[] = [
             href: "/admin/leads",
           },
           {
+            title: "Enquiries",
+            body: "Warm and cold enquiries through contact, sourcing, price sent, and follow-up. Create a booking form on the enquiry. Sending it for approval, or sending it to the client, moves it to Deals. Not interested stays here, not on Deals Lost.",
+            href: "/admin/enquiries",
+          },
+          {
             title: "Deals",
-            body: "Every sale in progress or won. Offline deals, portal bookings, and website orders all show up here. Ready to send is forms waiting for an admin to email the client.",
+            body: "Booking form ready to send through signed, won, and lost. Portal bookings and website orders also show up here.",
             href: "/admin/deals",
           },
           {
             title: "Sales tracker",
-            body: "Revenue and profit by source (portal, offline, website, referral).",
+            body: "Revenue by source, plus Demand — enquiries, Deals, and won/lost by event, product, and client type. Demand includes portal and website sales that are not already on a deal.",
             href: "/admin/sales-tracker",
           },
           {
             title: "CRM imports",
-            body: "Spreadsheet loads from the old system. Leave this unless you have been asked to import a file.",
+            body: "Salesforce contact and opportunity CSVs, plus the sales ledger spreadsheet that fills deal date, paid status and invoice number on existing deals. Unmatched ledger rows can be downloaded for review.",
             href: "/admin/imports",
           },
         ],
@@ -340,9 +345,9 @@ export const HELP_TOPICS: HelpTopic[] = [
         type: "bullets",
         title: "Sourced stock (we do not own it yet)",
         items: [
-          "You can still create the deal. Mark the line as brokered and enter the supplier, buy price, and quote time.",
+          "You can still create the deal and send a booking form. Mark the line as brokered and enter the supplier, buy price, and quote time if you already know them.",
           "The supplier quote must be from the last 24 hours before you hold stock or an admin sends the booking form.",
-          "It will appear on Negative stock list until we buy it.",
+          "After both parties have signed, it appears on Negative stock list until we buy it. Our-stock sales with nothing purchased show the same way, with no supplier or quote yet.",
         ],
       },
     ],
@@ -352,7 +357,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     nav: "Selling",
     title: "Selling",
     summary: "Accounts, leads, deals, booking forms, and the pipeline.",
-    keywords: ["deal", "deals", "account", "contact", "lead", "leads", "booking form", "sign", "pipeline", "enquiry", "price", "ready to send", "brochure", "pdf", "marketing"],
+    keywords: ["deal", "deals", "account", "contact", "lead", "leads", "enquiry", "enquiries", "booking form", "sign", "pipeline", "price", "ready to send", "brochure", "pdf", "marketing", "demand", "conversion", "sales tracker"],
     blocks: [
       {
         type: "p",
@@ -364,7 +369,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           "Sales → Accounts is the directory. The Leads tab is the work queue for prospects who have not booked yet.",
           "New accounts and bulk uploads start as New. Move them to Reach out, Talking, or Later (keep for marketing).",
-          "When they sign a booking or place an order, they become a Client and leave the Leads tab. Deals is still the booking pipeline.",
+          "When they sign a booking or place an order, they become a Client and leave the Leads tab. Enquiries is the early pipeline; Deals is booking forms onwards.",
           "A new person at a company that already buys from us is just a contact — not a new lead.",
         ],
       },
@@ -397,7 +402,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           "Choose Create deal. Search for the company or a person — companies that start with what you typed appear first, and you can pick a contact in the same list. Only create a new account if it is not there.",
           "Add the contact, quantity, and sale price. You can add more than one product, including from different events.",
           "Optional: tick Reserve stock for 7 days if you need to lock places before the form goes out.",
-          "Save, then open the deal from Sales → Deals to prepare the booking form.",
+          "Save, then open it from Sales → Enquiries. Create a booking form there. Sending it for approval, or sending it to the client, moves it to Deals.",
         ],
       },
       {
@@ -416,8 +421,8 @@ export const HELP_TOPICS: HelpTopic[] = [
         title: "Booking form",
         items: [
           "The deal needs a company, a contact with an email, and at least one product.",
-          "Create or edit the form, then save it. The deal moves to Ready to send. Stock is not held yet.",
-          "Sales and finance can notify Ollie, Michel, and Matt that it is ready. Only an admin can send it to the client — that send holds stock for 7 days.",
+          "Create or edit the form on the enquiry, then save it. Saving does not move it to Deals, and stock is not held yet.",
+          "Sales can send it for approval so Ollie and Michel are emailed. That moves the enquiry onto Deals. Only an admin can send it to the client — that send also moves it to Deals and holds stock for 7 days.",
           "The client signs first. Then an admin or finance countersigns.",
           "When both have signed, the order is created and the Xero invoice is sent. You do not raise the invoice by hand.",
           "If they have not signed after 7 days, the form expires and held stock is released. You can void a form earlier if the deal is off.",
@@ -425,11 +430,10 @@ export const HELP_TOPICS: HelpTopic[] = [
       },
       {
         type: "bullets",
-        title: "Pipeline columns (the simplified view)",
+        title: "Pipeline columns",
         items: [
-          "Enquiry — just created, or we are still sourcing.",
-          "Price sent — quote is with the client.",
-          "Ready to send — form is saved, waiting for an admin to email the client.",
+          "Enquiries — New, quoting / sourcing, and price sent.",
+          "Ready to send — sent for approval, waiting for an admin to email the client.",
           "Booking form — form sent, waiting for the client or for ZK to sign.",
           "Awaiting payment — signed (or invoiced), money not in yet.",
           "Won — paid.",
@@ -671,7 +675,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             q: "The client has not signed.",
-            a: "If the form is still in Ready to send, an admin still needs to email it. If it has already gone out, ask an admin to resend it. After 7 days the form expires and held stock comes back. You can void it sooner if the deal is dead.",
+            a: "If the form is still in Ready to send, it was sent for approval and an admin still needs to email it. If it has already gone out, ask an admin to resend it. After 7 days the form expires and held stock comes back. You can void it sooner if the deal is dead.",
           },
           {
             q: "How do I make a brochure for a product?",
@@ -691,7 +695,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             q: "I prepared a booking form but cannot send it.",
-            a: "Only an admin can send it to the client. Use Notify admins to send so Ollie, Michel, and Matt get an email. The deal stays in Ready to send on the dashboard until they send it.",
+            a: "Only an admin can send it to the client. Use Send for approval so Ollie and Michel get an email. That moves the enquiry onto Deals, in Ready to send, until they send it.",
           },
           {
             q: "What currency are we in?",

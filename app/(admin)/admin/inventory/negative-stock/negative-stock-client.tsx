@@ -6,6 +6,7 @@ import { AlertTriangle, ArrowUpDown, CalendarClock, CircleDollarSign, Download, 
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { EventFilter, uniqueEventFilterOptions } from "@/components/admin/event-filter"
 import { AccountNameLink, SupplierNameLink } from "@/components/admin/profile-name-link"
+import { adminDealPath } from "@/lib/admin/deal-link"
 import {
   filterNegativeStockRows,
   formatDate,
@@ -23,6 +24,7 @@ import {
   type NegativeStockStatus,
   type NegativeStockUrgency,
 } from "@/lib/admin/negative-stock"
+import { adminPackagePath } from "@/lib/admin/package-link"
 import { cn } from "@/lib/utils"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 import { pageSearchProps } from "@/lib/browser/laptop-qol"
@@ -364,7 +366,7 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
         </div>
 
         <AdminDesktopTable>
-          <table className="w-full min-w-[1180px] text-left">
+          <table className="w-full min-w-[1080px] text-left">
             <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
               <tr>
                 <th className="px-3 py-2 font-medium">Event</th>
@@ -379,7 +381,6 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
                 <th className="px-3 py-2 font-medium">Assigned to</th>
                 <th className="px-3 py-2 font-medium">Shortage type</th>
                 <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f0f1f3] text-[9px]">
@@ -394,7 +395,18 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
                       <p className="font-semibold text-[#36393f]">{row.eventName}</p>
                       <p className="mt-0.5 text-[8px] text-[#9a9ea5]">{row.location || "—"}</p>
                     </td>
-                    <td className="px-3 py-3 font-medium text-[#4a4e55]">{row.packageName}</td>
+                    <td className="px-3 py-3">
+                      {row.packageId ? (
+                        <Link
+                          href={adminPackagePath(row.packageId)}
+                          className="font-medium text-primary hover:underline"
+                        >
+                          {row.packageName}
+                        </Link>
+                      ) : (
+                        <span className="font-medium text-[#4a4e55]">{row.packageName}</span>
+                      )}
+                    </td>
                     <td className="px-3 py-3 font-semibold">{row.quantity}</td>
                     <td className="px-3 py-3 text-[#5f636b]">
                       <p><SupplierNameLink supplierId={row.supplierId} name={row.supplierName ?? "Not assigned"} /></p>
@@ -432,7 +444,16 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
                       ) : null}
                     </td>
                     <td className="px-3 py-3">
-                      <p className="font-mono text-[8px] text-[#6e727a]">{row.dealReference ?? "—"}</p>
+                      {row.dealId ? (
+                        <Link
+                          href={adminDealPath(row.dealId)}
+                          className="font-mono text-[8px] font-medium text-primary hover:underline"
+                        >
+                          {row.dealReference ?? "Deal"}
+                        </Link>
+                      ) : (
+                        <p className="font-mono text-[8px] text-[#6e727a]">{row.dealReference ?? "—"}</p>
+                      )}
                       <p className="mt-0.5 text-[8px] text-[#9a9ea5]"><AccountNameLink accountId={row.accountId} name={row.accountName ?? "No account"} /></p>
                     </td>
                     <td className="px-3 py-3 text-[#5f636b]">{row.ownerName ?? "Unassigned"}</td>
@@ -440,30 +461,12 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
                     <td className="px-3 py-3">
                       <StatusPill tone={statusTone(row.status)}>{statusLabel(row.status)}</StatusPill>
                     </td>
-                    <td className="px-3 py-3">
-                      <div className="flex flex-wrap gap-1">
-                        {row.dealId ? (
-                          <Link
-                            href={`/admin/deals/${row.dealId}`}
-                            className="rounded-md border border-[#e5e7eb] px-2 py-1.5 text-[8px] font-medium"
-                          >
-                            View deal
-                          </Link>
-                        ) : null}
-                        <Link
-                          href={row.packageId ? `/admin/catalog/${row.packageId}` : "/admin/catalog"}
-                          className="rounded-md border border-[#e5e7eb] px-2 py-1.5 text-[8px] font-medium"
-                        >
-                          View product
-                        </Link>
-                      </div>
-                    </td>
                   </tr>
                 )
               })}
               {visible.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-4 py-14 text-center">
+                  <td colSpan={12} className="px-4 py-14 text-center">
                     <AlertTriangle className="mx-auto h-6 w-6 text-slate-300" />
                     <p className="mt-2 text-[10px] text-slate-400">
                       {rows.length === 0
@@ -487,9 +490,25 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-semibold text-slate-800">{row.eventName}</p>
-                    <p className="mt-0.5 text-[10px] text-slate-600">{row.packageName}</p>
+                    {row.packageId ? (
+                      <Link
+                        href={adminPackagePath(row.packageId)}
+                        className="mt-0.5 block text-[10px] font-medium text-primary hover:underline"
+                      >
+                        {row.packageName}
+                      </Link>
+                    ) : (
+                      <p className="mt-0.5 text-[10px] text-slate-600">{row.packageName}</p>
+                    )}
                     <p className="mt-0.5 text-[8px] text-slate-400">
-                      {row.dealReference ?? "—"} · {row.quantity} units · {reasonLabel(row.reason)}
+                      {row.dealId ? (
+                        <Link href={adminDealPath(row.dealId)} className="font-medium text-primary hover:underline">
+                          {row.dealReference ?? "Deal"}
+                        </Link>
+                      ) : (
+                        (row.dealReference ?? "—")
+                      )}{" "}
+                      · {row.quantity} units · {reasonLabel(row.reason)}
                     </p>
                   </div>
                   <StatusPill tone={statusTone(row.status)}>{statusLabel(row.status)}</StatusPill>
@@ -501,19 +520,6 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
                   GP {money(profit, row.currency)}
                   {urgency === "critical" ? " · Critical" : urgency === "urgent" ? " · Urgent" : ""}
                 </p>
-                <div className="flex flex-wrap gap-1">
-                  {row.dealId ? (
-                    <Link href={`/admin/deals/${row.dealId}`} className="rounded-md border border-[#e5e7eb] px-2 py-1.5 text-[8px] font-medium">
-                      View deal
-                    </Link>
-                  ) : null}
-                  <Link
-                    href={row.packageId ? `/admin/catalog/${row.packageId}` : "/admin/catalog"}
-                    className="rounded-md border border-[#e5e7eb] px-2 py-1.5 text-[8px] font-medium"
-                  >
-                    View product
-                  </Link>
-                </div>
               </div>
             )
           })}

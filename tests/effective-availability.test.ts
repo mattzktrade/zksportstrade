@@ -68,6 +68,17 @@ test("exposes a signed canonical balance for operational stock displays", () => 
   )
 })
 
+test("admin net quantity stays negative when sold exceeds purchased stock", () => {
+  assert.equal(
+    adminPackageNetQuantity({
+      sales_breakdown: { total: 4, salesforceOpenPipeline: 0 },
+      layer_units_purchased: 0,
+      effective_net: -4,
+    }),
+    -4,
+  )
+})
+
 test("total sold comes only from confirmed channel sales, not shortages", () => {
   assert.equal(
     adminPackageSoldQuantity({

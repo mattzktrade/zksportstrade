@@ -164,7 +164,7 @@ export function EventDetailClient({ detail }: { detail: NativeEventDetail }) {
                   <td className="px-4 py-3 tabular-nums">{product.bought}</td>
                   <td className="px-4 py-3 tabular-nums font-semibold">{product.sold}</td>
                   <td className="px-4 py-3 tabular-nums text-amber-700">{product.pipeline || "—"}</td>
-                  <td className="px-4 py-3 tabular-nums">
+                  <td className={`px-4 py-3 tabular-nums ${product.available < 0 ? "font-semibold text-destructive" : ""}`}>
                     {product.available}
                     {product.held > 0 ? (
                       <span className="ml-1 text-[10px] font-normal text-slate-400">({product.held} held)</span>
@@ -191,7 +191,9 @@ export function EventDetailClient({ detail }: { detail: NativeEventDetail }) {
               </div>
               <div className="shrink-0 text-right">
                 <p className="font-semibold">{formatMoney(product.currency, product.price)}</p>
-                <p className="mt-0.5 text-[8px] text-slate-500">{product.available} remaining</p>
+                <p className={`mt-0.5 text-[8px] tabular-nums ${product.available < 0 ? "font-semibold text-destructive" : "text-slate-500"}`}>
+                  {product.available} remaining
+                </p>
               </div>
             </Link>
           ))}

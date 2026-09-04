@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import {
   AlertTriangle,
   CheckCircle2,
+  Download,
   FileSpreadsheet,
   History,
   LoaderCircle,
@@ -31,7 +32,8 @@ import type {
   CrmImportBatch,
   CrmImportPreviewRow,
 } from "@/lib/crm/imports/types"
-import type { CrmImportType } from "@/lib/crm/imports/salesforce-csv"
+import type { CrmImportType as SalesforceImportType } from "@/lib/crm/imports/salesforce-csv"
+import { DEAL_LEDGER_TEMPLATE_CSV } from "@/lib/crm/imports/deal-ledger"
 import { cn } from "@/lib/utils"
 
 const CONTACT_TEMPLATE = [
@@ -101,7 +103,7 @@ function dateTime(value: string | null): string {
   })
 }
 
-function downloadTemplate(type: CrmImportType) {
+function downloadTemplate(type: SalesforceImportType) {
   const columns = type === "contacts" ? CONTACT_TEMPLATE : OPPORTUNITY_TEMPLATE
   const example =
     type === "contacts"
@@ -159,13 +161,22 @@ function downloadTemplate(type: CrmImportType) {
   URL.revokeObjectURL(url)
 }
 
+function downloadLedgerTemplate() {
+  const url = URL.createObjectURL(new Blob([DEAL_LEDGER_TEMPLATE_CSV], { type: "text/csv;charset=utf-8" }))
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = "sales-ledger-import-template.csv"
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
 function ImportUploader({
   type,
   title,
   description,
   onUploaded,
 }: {
-  type: CrmImportType
+  type: SalesforceImportType
   title: string
   description: string
   onUploaded: (batchId: string) => void
@@ -251,6 +262,100 @@ function ImportUploader({
   )
 }
 
+function LedgerUploader({ onUploaded }: { onUploaded: (batchId: string) => void }) {
+  const [file, setFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+
+  async function upload() {
+    if (!file) {
+      toast.error("Choose the sales ledger spreadsheet.")
+      return
+    }
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.set("importType", "deal_ledger")
+      formData.set("file", file)
+      const response = await fetch("/api/admin/crm-imports", { method: "POST", body: formData })
+      const result = (await response.json()) as {
+        error?: string
+        batchId?: string
+        validRows?: number
+        errorRows?: number
+      }
+      if (!response.ok || !result.batchId) {
+        throw new Error(result.error ?? "Upload failed.")
+      }
+      toast.success(
+        `Matched ${result.validRows ?? 0} deal(s); ${result.errorRows ?? 0} row(s) left off for review.`,
+      )
+      setFile(null)
+      onUploaded(result.batchId)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Upload failed.")
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-[#e8eaee] bg-white p-5">
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-50 text-primary">
+          <FileSpreadsheet className="h-4 w-4" />
+        </div>
+        <div>
+          <h2 className="text-sm font-semibold">Sales ledger (deal date, paid status, invoice)</h2>
+          <p className="mt-1 text-[10px] leading-4 text-slate-500">
+            Upload the master deals spreadsheet (.xlsx or CSV). The portal matches CLIENT, EVENT and
+            PRODUCT to existing deals, then fills deal date, paid/unpaid/cancel, invoice number and
+            finance notes (MAW Comment / COMMENTS). Rows it cannot match uniquely are left unchanged
+            and can be downloaded for review.
+          </p>
+        </div>
+      </div>
+      <label className="mt-4 flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 text-center hover:border-primary/40">
+        <Upload className="h-4 w-4 text-slate-400" />
+        <span className="mt-2 text-[10px] font-medium text-slate-700">
+          {file ? file.name : "Choose Excel or CSV"}
+        </span>
+        <span className="mt-0.5 text-[9px] text-slate-400">
+          Month sheets are fine · Maximum 25MB / 5,000 rows
+        </span>
+        <input
+          type="file"
+          accept=".xlsx,.xlsm,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          className="sr-only"
+          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+        />
+      </label>
+      <div className="mt-3 flex gap-2">
+        <button
+          type="button"
+          onClick={downloadLedgerTemplate}
+          className="h-9 flex-1 rounded-md border px-3 text-[10px] font-semibold"
+        >
+          Download template
+        </button>
+        <button
+          type="button"
+          disabled={!file || uploading}
+          onClick={() => void upload()}
+          className="flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-primary px-3 text-[10px] font-semibold text-white disabled:opacity-50"
+        >
+          {uploading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+          Match deals
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function importTypeLabel(type: CrmImportBatch["import_type"]): string {
+  if (type === "deal_ledger") return "sales ledger"
+  return type
+}
+
 export function CrmImportsClient({
   batches,
   selectedBatchId,
@@ -264,8 +369,12 @@ export function CrmImportsClient({
   const [pending, startTransition] = useTransition()
   const [confirmed, setConfirmed] = useState(false)
   const selected = batches.find((batch) => batch.id === selectedBatchId) ?? null
+  const isLedger = selected?.import_type === "deal_ledger"
   const wonRows = Number(selected?.summary.won_rows ?? 0)
   const warningRows = Number(selected?.summary.warning_rows ?? 0)
+  const reviewCount = selected
+    ? selected.error_rows + selected.failed_rows + selected.skipped_rows
+    : 0
   const appliedTotal = batches.reduce((sum, batch) => sum + batch.applied_rows, 0)
   const pendingBatches = batches.filter((batch) => batch.status === "validated")
 
@@ -301,7 +410,7 @@ export function CrmImportsClient({
     <div className="space-y-4">
       <AdminPageHeader
         title="CRM imports"
-        description="Stage, validate and apply historical contacts, opportunities and won sales from CSV."
+        description="Stage and apply Salesforce CSV files, or update existing deals from the sales ledger spreadsheet."
       />
 
       <AdminStats className="sm:grid-cols-2 xl:grid-cols-4">
@@ -317,10 +426,12 @@ export function CrmImportsClient({
       </AdminStats>
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[10px] leading-4 text-amber-900">
-        <strong>Safe migration rule:</strong> imported Closed Won sales are marked for stock
-        reconciliation, but this importer never changes inventory, creates reservations, sends
-        invoices or contacts clients.
+        <strong>Safe update rule:</strong> sales-ledger uploads only change deal date, invoice number,
+        payment status and notes on deals that match uniquely. They never create deals, send invoices, or
+        change stock. Unmatched rows stay as they are and can be downloaded.
       </div>
+
+      <LedgerUploader onUploaded={(batchId) => router.push(`/admin/imports?batch=${batchId}`)} />
 
       <section className="grid gap-4 lg:grid-cols-2">
         <ImportUploader
@@ -359,7 +470,7 @@ export function CrmImportsClient({
                   </StatusPill>
                 </div>
                 <p className="mt-1 text-[9px] capitalize text-slate-500">
-                  {batch.import_type} · {batch.total_rows} rows
+                  {importTypeLabel(batch.import_type)} · {batch.total_rows} rows
                 </p>
                 <p className="mt-1 text-[8px] text-slate-400">
                   {dateTime(batch.created_at)}{batch.creator_name ? ` · ${batch.creator_name}` : ""}
@@ -388,9 +499,18 @@ export function CrmImportsClient({
                   <p className="mt-1 text-[9px] text-slate-500">
                     {selected.valid_rows} valid · {selected.error_rows} errors · {warningRows} warnings
                     {wonRows > 0 ? ` · ${wonRows} won-sale rows` : ""}
+                    {isLedger ? ` · ${Number(selected.summary.matched_rows ?? selected.valid_rows)} matched deals` : ""}
                   </p>
                 </div>
                 <div className="flex gap-2">
+                  {reviewCount > 0 ? (
+                    <a
+                      href={`/api/admin/crm-imports/${selected.id}/failures`}
+                      className="flex h-9 items-center gap-1.5 rounded-md border px-3 text-[9px] font-semibold"
+                    >
+                      <Download className="h-3.5 w-3.5" /> Download unmatched
+                    </a>
+                  ) : null}
                   {["validated", "failed"].includes(selected.status) ? (
                     <button
                       type="button"
@@ -414,8 +534,9 @@ export function CrmImportsClient({
                       className="mt-0.5"
                     />
                     <span>
-                      I have reviewed the validation errors and understand that only valid rows
-                      will be applied. Historical won sales will not change stock.
+                      {isLedger
+                        ? "I have reviewed unmatched rows. Only uniquely matched deals will be updated. Stock, Xero and client emails will not change."
+                        : "I have reviewed the validation errors and understand that only valid rows will be applied. Historical won sales will not change stock."}
                     </span>
                   </label>
                   <button
@@ -425,7 +546,9 @@ export function CrmImportsClient({
                     className="mt-3 flex h-10 items-center gap-2 rounded-md bg-primary px-5 text-[10px] font-semibold text-white disabled:opacity-50"
                   >
                     {pending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                    Apply {selected.valid_rows} valid row{selected.valid_rows === 1 ? "" : "s"}
+                    {isLedger
+                      ? `Update ${selected.valid_rows} matched deal${selected.valid_rows === 1 ? "" : "s"}`
+                      : `Apply ${selected.valid_rows} valid row${selected.valid_rows === 1 ? "" : "s"}`}
                   </button>
                 </div>
               ) : null}
@@ -436,9 +559,19 @@ export function CrmImportsClient({
                     <tr>
                       <th className="px-3 py-2 font-medium">Row</th>
                       <th className="px-3 py-2 font-medium">Status</th>
-                      <th className="px-3 py-2 font-medium">Salesforce ID</th>
-                      <th className="px-3 py-2 font-medium">Account / Contact</th>
-                      <th className="px-3 py-2 font-medium">Stage / Product</th>
+                      {isLedger ? (
+                        <>
+                          <th className="px-3 py-2 font-medium">Client / Event</th>
+                          <th className="px-3 py-2 font-medium">Product</th>
+                          <th className="px-3 py-2 font-medium">Matched deal</th>
+                        </>
+                      ) : (
+                        <>
+                          <th className="px-3 py-2 font-medium">Salesforce ID</th>
+                          <th className="px-3 py-2 font-medium">Account / Contact</th>
+                          <th className="px-3 py-2 font-medium">Stage / Product</th>
+                        </>
+                      )}
                       <th className="px-3 py-2 font-medium">Validation / Apply result</th>
                     </tr>
                   </thead>
@@ -449,9 +582,37 @@ export function CrmImportsClient({
                         <tr key={row.id} className="align-top">
                           <td className="px-3 py-3">{row.row_number}</td>
                           <td className="px-3 py-3"><StatusPill tone={statusTone(row.status)}>{row.status}</StatusPill></td>
-                          <td className="max-w-[150px] break-all px-3 py-3 font-mono text-[8px]">{row.source_external_id || "Portal ID generated"}</td>
-                          <td className="px-3 py-3"><p className="font-medium">{String(n.accountName ?? "—")}</p><p className="text-[8px] text-slate-400">{String(n.contactName ?? n.email ?? "—")}</p></td>
-                          <td className="px-3 py-3"><p className="font-medium">{String(n.nativeStage ?? "Contact")}</p><p className="text-[8px] text-slate-400">{String(n.productName ?? n.productCode ?? "—")}</p></td>
+                          {isLedger ? (
+                            <>
+                              <td className="px-3 py-3">
+                                <p className="font-medium">{String(n.client ?? "—")}</p>
+                                <p className="text-[8px] text-slate-400">{String(n.event ?? "—")}</p>
+                              </td>
+                              <td className="px-3 py-3">
+                                <p className="font-medium">{String(n.product ?? "—")}</p>
+                                <p className="text-[8px] text-slate-400">
+                                  {n.paymentStatus ? String(n.paymentStatus).toUpperCase() : "—"}
+                                  {n.invoiceNumber ? ` · ${String(n.invoiceNumber)}` : ""}
+                                  {n.dealDate ? ` · ${String(n.dealDate)}` : ""}
+                                </p>
+                                {n.note ? (
+                                  <p className="mt-1 max-w-[240px] truncate text-[8px] text-slate-500">
+                                    {String(n.note)}
+                                  </p>
+                                ) : null}
+                              </td>
+                              <td className="px-3 py-3">
+                                <p className="font-medium">{String(n.dealReference ?? "Not matched")}</p>
+                                <p className="text-[8px] text-slate-400">{String(n.matchSummary ?? "—")}</p>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="max-w-[150px] break-all px-3 py-3 font-mono text-[8px]">{row.source_external_id || "Portal ID generated"}</td>
+                              <td className="px-3 py-3"><p className="font-medium">{String(n.accountName ?? "—")}</p><p className="text-[8px] text-slate-400">{String(n.contactName ?? n.email ?? "—")}</p></td>
+                              <td className="px-3 py-3"><p className="font-medium">{String(n.nativeStage ?? "Contact")}</p><p className="text-[8px] text-slate-400">{String(n.productName ?? n.productCode ?? "—")}</p></td>
+                            </>
+                          )}
                           <td className="max-w-[320px] px-3 py-3">
                             {row.validation_errors.map((message) => <p key={message} className="text-red-600">{message}</p>)}
                             {row.validation_warnings.map((message) => <p key={message} className="text-amber-700">{message}</p>)}
@@ -474,8 +635,16 @@ export function CrmImportsClient({
                         <p className="font-semibold">Row {row.row_number}</p>
                         <StatusPill tone={statusTone(row.status)}>{row.status}</StatusPill>
                       </div>
-                      <p className="text-[10px] text-slate-700">{String(n.accountName ?? "—")}</p>
-                      <p className="text-[8px] text-slate-400">{String(n.contactName ?? n.email ?? "—")}</p>
+                      <p className="text-[10px] text-slate-700">
+                        {String(isLedger ? n.client ?? "—" : n.accountName ?? "—")}
+                      </p>
+                      <p className="text-[8px] text-slate-400">
+                        {String(
+                          isLedger
+                            ? n.dealReference ?? n.event ?? "—"
+                            : n.contactName ?? n.email ?? "—",
+                        )}
+                      </p>
                       {row.validation_errors[0] ? <p className="text-[8px] text-red-600">{row.validation_errors[0]}</p> : null}
                       {row.apply_error ? <p className="text-[8px] text-red-600">{row.apply_error}</p> : null}
                     </div>

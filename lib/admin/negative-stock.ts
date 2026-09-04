@@ -8,6 +8,7 @@ export type NegativeStockSortKey = "eventDate" | "event" | "created" | "cost" | 
 export type NegativeStockRow = {
   id: string
   dealId: string | null
+  dealLineItemId?: string | null
   packageId: string
   quantity: number
   unitCost: number
@@ -65,6 +66,28 @@ export function statusLabel(status: NegativeStockStatus): string {
 
 export function reasonLabel(reason: NegativeStockReason): string {
   return reason === "historical_reconciliation" ? "Missing historical purchase" : "Brokered stock"
+}
+
+export function negativeStockRowKey(
+  row: Pick<NegativeStockRow, "dealLineItemId" | "id">,
+): string {
+  if (row.dealLineItemId) return `line:${row.dealLineItemId}`
+  return `row:${row.id}`
+}
+
+export function mergeNegativeStockRows(
+  primary: NegativeStockRow[],
+  extra: NegativeStockRow[],
+): NegativeStockRow[] {
+  const seen = new Set(primary.map((row) => negativeStockRowKey(row)))
+  const merged = [...primary]
+  for (const row of extra) {
+    const key = negativeStockRowKey(row)
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(row)
+  }
+  return merged
 }
 
 export function money(value: number, currency = "USD"): string {

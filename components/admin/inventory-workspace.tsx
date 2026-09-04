@@ -96,6 +96,10 @@ function liveQty(row: AdminPackageRow): number {
   return adminPackageNetQuantity(row)
 }
 
+function qtyClass(value: number): string {
+  return value < 0 ? "font-semibold text-destructive" : "font-semibold text-[#393c42]"
+}
+
 function heldQty(row: AdminPackageRow): number {
   if (row.canonical_availability) return Math.max(0, Math.floor(row.canonical_availability.reserved))
   return Number(row.inventory?.qty_held ?? 0)
@@ -530,7 +534,7 @@ export function InventoryWorkspace({
       setDealContactEmail("")
       setDealContactPhone("")
       setDealLines([])
-      if (dealMode === "deal") router.push("/admin/deals")
+      if (dealMode === "deal") router.push("/admin/enquiries")
       router.refresh()
     })
   }
@@ -842,8 +846,8 @@ export function InventoryWorkspace({
                           </div>
                         </td>
                       ) : null}
-                      <td className="px-3 py-2.5 font-semibold text-[#393c42]">
-                        {mode === "manage" ? liveQty(row) : available}
+                      <td className={cn("px-3 py-2.5 tabular-nums", qtyClass(liveQty(row)))}>
+                        {liveQty(row)}
                       </td>
                       {mode === "manage" ? (
                         <td className="px-3 py-2.5 text-[#6a6e76]">{heldQty(row)}</td>
@@ -899,8 +903,8 @@ export function InventoryWorkspace({
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="font-semibold">{money(row.trade_price, row.currency)}</p>
-                      <p className="mt-0.5 text-[8px] text-slate-500">
-                        {mode === "manage" ? `${liveQty(row)} live` : `${available} avail.`}
+                      <p className={cn("mt-0.5 text-[8px]", liveQty(row) < 0 ? "text-destructive" : "text-slate-500")}>
+                        {mode === "manage" ? `${liveQty(row)} live` : `${liveQty(row)} qty`}
                       </p>
                     </div>
                   </button>
@@ -987,7 +991,7 @@ export function InventoryWorkspace({
                   {mode === "manage" ? (
                     <>
                       <dt className="text-[#93979f]">Live qty</dt>
-                      <dd className="font-semibold">{liveQty(selected)}</dd>
+                      <dd className={cn("font-semibold", liveQty(selected) < 0 && "text-destructive")}>{liveQty(selected)}</dd>
                       <dt className="text-[#93979f]">Held</dt>
                       <dd className="font-semibold">{heldQty(selected)}</dd>
                       <dt className="text-[#93979f]">Total bought</dt>
@@ -997,10 +1001,9 @@ export function InventoryWorkspace({
                     </>
                   ) : (
                     <>
-                      <dt className="text-[#93979f]">Quantity available</dt>
-                      <dd className="font-semibold">
-                        {nativeAvailability[selected.id]?.sellable ??
-                          adminPackageSellable(selected)}
+                      <dt className="text-[#93979f]">Quantity</dt>
+                      <dd className={cn("font-semibold", liveQty(selected) < 0 && "text-destructive")}>
+                        {liveQty(selected)}
                       </dd>
                     </>
                   )}
@@ -1089,9 +1092,8 @@ export function InventoryWorkspace({
                       : [
                           ["Bought", nativeAvailability[selected.id]?.bought ?? boughtQty(selected)],
                           [
-                            "Available",
-                            nativeAvailability[selected.id]?.sellable ??
-                              adminPackageSellable(selected),
+                            "Quantity",
+                            liveQty(selected),
                           ],
                           [
                             "Reserved",
@@ -1101,7 +1103,7 @@ export function InventoryWorkspace({
                         ]
                     ).map(([label, value]) => (
                       <div key={String(label)} className="rounded-md bg-[#fafbfc] p-2 text-center">
-                        <p className="text-[12px] font-semibold">{value}</p>
+                        <p className={cn("text-[12px] font-semibold tabular-nums", Number(value) < 0 && "text-destructive")}>{value}</p>
                         <p className="mt-0.5 text-[8px] text-[#93979f]">{label}</p>
                       </div>
                     ))}

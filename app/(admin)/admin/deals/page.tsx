@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation"
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { getAdminCatalogListRows } from "@/lib/admin/queries"
 import {
@@ -9,9 +10,25 @@ import { getSalesStaffOptions } from "@/lib/crm/leads"
 import { getBookingFormsForDeals } from "@/lib/booking-forms/queries"
 import { hasCmsPermission, canSendNativeBookingForm, canSignNativeBookingForm } from "@/lib/auth/permissions"
 import { getSuppliers } from "@/lib/inventory/suppliers"
+import { adminEnquiryListPath, isDealBoardStage, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
 import { DealsClient } from "./deals-client"
 
 export const dynamic = "force-dynamic"
+
+const DEAL_BOARD_FILTERS = [
+  "ready_to_send",
+  "booking_form",
+  "awaiting_approval",
+  "awaiting_payment",
+  "won",
+  "lost",
+] as const
+
+function isDealBoardFilter(
+  value: string | undefined,
+): value is (typeof DEAL_BOARD_FILTERS)[number] {
+  return typeof value === "string" && (DEAL_BOARD_FILTERS as readonly string[]).includes(value)
+}
 
 export default async function DealsPage({
   searchParams,
@@ -20,6 +37,14 @@ export default async function DealsPage({
 }) {
   const profile = await requireAdmin()
   const { deal: initialSelectedId, pipeline: initialPipeline } = await searchParams
+
+  if (initialPipeline === "new_enquiry") {
+    redirect("/admin/enquiries?stage=new")
+  }
+  if (initialPipeline === "price_sent") {
+    redirect("/admin/enquiries?stage=price_sent")
+  }
+
   const [initialDeals, packages, accountOptions, staffOptions, bookingForms, suppliers] = await Promise.all([
     getDealListRows(),
     getAdminCatalogListRows(),
@@ -35,6 +60,13 @@ export default async function DealsPage({
     const extra = await getDealListRows({ ids: [selectedId] })
     if (extra.length > 0) deals = [...extra, ...deals]
   }
+
+  const selected = selectedId ? deals.find((deal) => deal.id === selectedId) ?? null : null
+  if (selected && isEnquiryPipelineStage(selected.stage)) {
+    redirect(adminEnquiryListPath(selected.id))
+  }
+
+  const boardDeals = deals.filter((deal) => isDealBoardStage(deal.stage))
 
   const packageOptions = packages
     .filter((row) => !row.shell_parent_package_id)
@@ -57,7 +89,7 @@ export default async function DealsPage({
   return (
     <div className="mx-auto max-w-[1540px] p-3 sm:p-5 lg:p-7">
       <DealsClient
-        deals={deals}
+        deals={boardDeals}
         packageOptions={packageOptions}
         createPackageOptions={createPackageOptions}
         accountOptions={accountOptions}
@@ -72,18 +104,7 @@ export default async function DealsPage({
         bookingFormEvents={bookingForms.events}
         supplierOptions={suppliers.map((supplier) => ({ id: supplier.id, name: supplier.name }))}
         initialSelectedId={initialSelectedId ?? null}
-        initialPipelineFilter={
-          initialPipeline === "ready_to_send" ||
-          initialPipeline === "new_enquiry" ||
-          initialPipeline === "price_sent" ||
-          initialPipeline === "booking_form" ||
-          initialPipeline === "awaiting_approval" ||
-          initialPipeline === "awaiting_payment" ||
-          initialPipeline === "won" ||
-          initialPipeline === "lost"
-            ? initialPipeline
-            : ""
-        }
+        initialPipelineFilter={isDealBoardFilter(initialPipeline) ? initialPipeline : ""}
       />
     </div>
   )

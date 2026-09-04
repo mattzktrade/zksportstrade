@@ -12,7 +12,8 @@ import { SearchableSelect } from "@/components/admin/searchable-select"
 import { AdminPageHeader, AdminPanel, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { AdminModalScrim } from "@/components/admin/admin-list-preview"
 import type { DealBasketSupplier } from "@/components/admin/deal-line-basket"
-import { DEAL_NEXT_ACTION_OPTIONS, DEAL_SOURCE_LABELS, DEAL_SOURCES, DEAL_STAGES, DEAL_STAGE_LABELS, canonicalDealStage, dealConfirmedOffPlatform, dealSourceLabel, friendlyDealActivitySummary, type CrmAccountOption, type DealPackageOption, type DealStage } from "@/lib/crm/deal-types"
+import { DEAL_NEXT_ACTION_OPTIONS, DEAL_SOURCE_LABELS, DEAL_SOURCES, DEAL_STAGES, DEAL_STAGE_LABELS, canonicalDealStage, dealConfirmedOffPlatform, dealSourceLabel, dealSourceTone, friendlyDealActivitySummary, type CrmAccountOption, type DealPackageOption, type DealStage } from "@/lib/crm/deal-types"
+import { adminPipelineHome, enquiryStageLabel, enquiryStageTone, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
 import type { DealAddressDraft, DealDetailPageData, DealFulfilmentClient } from "@/lib/crm/deal-detail"
 import type { StaffOption } from "@/lib/crm/lead-types"
 import { formatMoney } from "@/lib/format/money"
@@ -22,7 +23,7 @@ import { mergeCrmAccountOptions } from "@/lib/crm/party-search"
 import { deleteOrderGuest, saveOrderGuests } from "@/app/(admin)/admin/operations/actions"
 import { OperationsGuestEditor, type GuestDraft } from "@/app/(admin)/admin/operations/guest-editor"
 import { updateDealClientDetails, updateDealCommercials, updateDealLineSupplier, addDealNote, deleteDeal } from "../deal-edit-actions"
-import { BookingFormPanel } from "../booking-form-panel"
+import { BookingFormPanel, BookingFormHandoffCallout } from "../booking-form-panel"
 import { DealFinancePanel } from "../deal-finance-panel"
 import { OperationsEmailComposer } from "@/app/(admin)/admin/operations/operations-email-composer"
 import {
@@ -442,14 +443,14 @@ export function DealDetailClient({
     ) {
       return
     }
-    run(() => deleteDeal({ dealId: deal.id }), () => router.push("/admin/deals"))
+    run(() => deleteDeal({ dealId: deal.id }), () => router.push(adminPipelineHome(deal.stage).href))
   }
 
   return (
     <div className="mx-auto max-w-[1540px] space-y-3 p-3 sm:p-5 lg:p-7">
       <div>
-        <Link href="/admin/deals" className="text-[11px] font-medium text-primary hover:underline">
-          ← Deals
+        <Link href={adminPipelineHome(deal.stage).href} className="text-[11px] font-medium text-primary hover:underline">
+          ← {adminPipelineHome(deal.stage).label}
         </Link>
         <AdminPageHeader
           title={`${deal.reference} — ${deal.account_name || "Deal"}`}
@@ -486,11 +487,15 @@ export function DealDetailClient({
                   <Trash2 className="h-3 w-3" /> Delete
                 </button>
               ) : null}
-              <StatusPill tone={stageTone(deal.stage)}>{DEAL_STAGE_LABELS[deal.stage]}</StatusPill>
+              <StatusPill tone={isEnquiryPipelineStage(deal.stage) ? enquiryStageTone(deal) : stageTone(deal.stage)}>
+                {isEnquiryPipelineStage(deal.stage) ? enquiryStageLabel(deal) : DEAL_STAGE_LABELS[deal.stage]}
+              </StatusPill>
             </div>
           }
         />
       </div>
+
+      <BookingFormHandoffCallout form={bookingForm} events={bookingEvents} />
 
       <section className="grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.8fr)]">
         <div className="space-y-3">
@@ -1106,7 +1111,7 @@ export function DealDetailClient({
                 <dd className="font-semibold">{deal.reference}</dd>
                 <dt className="text-slate-400">Source</dt>
                 <dd>
-                  <StatusPill tone="blue">{dealSourceLabel(deal.source)}</StatusPill>
+                  <StatusPill tone={dealSourceTone(deal.source)}>{dealSourceLabel(deal.source)}</StatusPill>
                 </dd>
                 <dt className="text-slate-400">Owner</dt>
                 <dd>{deal.owner_name || "—"}</dd>
@@ -1124,6 +1129,8 @@ export function DealDetailClient({
                 </dd>
                 <dt className="text-slate-400">Expected close</dt>
                 <dd>{formatDay(deal.expected_close_date)}</dd>
+                <dt className="text-slate-400">Invoice #</dt>
+                <dd>{deal.xero_invoice_number || deal.ledger_invoice_number || "—"}</dd>
                 <dt className="text-slate-400">Next action</dt>
                 <dd>{deal.next_action || "—"}</dd>
                 <dt className="text-slate-400">Stock hold</dt>

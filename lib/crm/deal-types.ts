@@ -129,6 +129,24 @@ export function dealSourceLabel(source: string | null | undefined): string {
   return source.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
+export type DealSourceTone = "green" | "amber" | "red" | "blue" | "purple" | "gray"
+
+export function dealSourceTone(source: string | null | undefined): DealSourceTone {
+  switch (source) {
+    case "website":
+      return "green"
+    case "portal":
+      return "amber"
+    case "referral":
+      return "purple"
+    case "other":
+      return "blue"
+    case "offline":
+    default:
+      return "gray"
+  }
+}
+
 export type DealListRow = {
   id: string
   account_id: string | null
@@ -137,6 +155,8 @@ export type DealListRow = {
   reference: string
   stage: DealStage
   source: string
+  enquiry_stage: string | null
+  enquiry_temperature: "warm" | "cold" | null
   currency: string
   total_amount: number
   expected_close_date: string | null
@@ -168,6 +188,7 @@ export type DealListRow = {
   invoice_status: string | null
   xero_invoice_id: string | null
   xero_invoice_number: string | null
+  ledger_invoice_number: string | null
   xero_sync_status: string | null
   xero_sync_error: string | null
   invoice_due_date: string | null
@@ -294,11 +315,15 @@ export type DealActivityPreview = {
 }
 
 export const DEAL_NEXT_ACTION_OPTIONS = [
+  "Review enquiry and make contact",
+  "Chase for a response",
+  "Confirm interest and source or price",
   "Review enquiry and send price",
   "Confirm sourcing and price",
   "Send price",
   "Follow up price",
   "Send booking form",
+  "Sent for approval to Ollie and Michel",
   "Approved admin to send booking form",
   "Chase client signature",
   "ZK admin to approve and sign",

@@ -17,6 +17,7 @@ import { executeBookingApproval } from "@/lib/booking-approval/execute-approval"
 import { mapPlaceOrderError } from "@/lib/orders/place-order-errors"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { hasCmsPermission, isCmsStaff, type CmsPermission } from "@/lib/auth/permissions"
+import { applyDealLedgerImportBatch } from "@/lib/crm/imports/deal-ledger-apply"
 import { isInvoiceWorkflowStatus, normalizeInvoiceStatus, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
 import { enqueuePackageInventoryChannelSync, enqueueProductUpsert } from "@/lib/integrations/enqueue"
 import { repairLinkedGroupInventory } from "@/lib/inventory/repair-linked-group"
@@ -59,6 +60,13 @@ import { isWixConfigured } from "@/lib/integrations/wix/config"
 import { deleteWixProductsForPackage } from "@/lib/integrations/wix/delete-product"
 import { deleteSalesforceProductForPackage } from "@/lib/integrations/salesforce/delete-product"
 import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
+import {
+  inboundEnquirySource,
+  isEnquiryCrmStage,
+  isEnquiryTemperature,
+  suggestedEnquiryAction,
+  ENQUIRY_CRM_STAGE_LABELS,
+} from "@/lib/crm/deal-pipeline"
 
 type ActionResult = { ok: true; message?: string } | { ok: false; message: string }
 
@@ -4103,6 +4111,7 @@ export async function createNativeDeal(input: {
   source?: string | null
   notes?: string | null
   reserve?: boolean
+  enquiryTemperature?: "warm" | "cold" | null
   lines?: Array<{
     packageId: string
     quantity: number
@@ -4244,7 +4253,32 @@ export async function createNativeDeal(input: {
   }
 
   const dealId = String(data)
+  const source = input.source?.trim() || "offline"
+  const enquiryTemperature = inboundEnquirySource(source)
+    ? "warm"
+    : input.enquiryTemperature === "cold"
+      ? "cold"
+      : "warm"
+  const { error: enquiryError } = await gate.supabase
+    .from("deals")
+    .update({
+      enquiry_stage: input.reserve ? "price_sent" : "new",
+      enquiry_temperature: enquiryTemperature,
+    })
+    .eq("id", dealId)
+  if (enquiryError) {
+    const missingColumn = /enquiry_stage|enquiry_temperature|schema cache|could not find/i.test(
+      enquiryError.message,
+    )
+    if (!missingColumn) {
+      return {
+        ok: false,
+        message: "Enquiry was created but warm/cold could not be saved. Apply the latest database migration and try again.",
+      }
+    }
+  }
   revalidatePath("/admin/deals")
+  revalidatePath("/admin/enquiries")
   revalidatePath("/admin/inventory/sales-list")
   revalidatePath("/admin/catalog")
   if (input.packageId?.trim()) {
@@ -4253,8 +4287,8 @@ export async function createNativeDeal(input: {
   return {
     ok: true,
     message: input.reserve
-      ? "Deal created and stock reserved for 7 days."
-      : "Deal created as a draft.",
+      ? "Enquiry created and stock reserved for 7 days."
+      : "Enquiry created.",
     dealId,
   }
 }
@@ -4394,6 +4428,7 @@ export async function convertNativeLeadToDeal(
 
   revalidatePath("/admin/leads")
   revalidatePath("/admin/deals")
+  revalidatePath("/admin/enquiries")
   return { ok: true, message: "Lead converted to a deal.", dealId: String(data) }
 }
 
@@ -4446,6 +4481,43 @@ export async function applyCrmImportBatch(
   const id = batchId.trim()
   if (!UUID_RE.test(id)) return { ok: false, message: "Import batch id is not valid." }
 
+  const { data: batch, error: batchError } = await gate.supabase
+    .from("crm_import_batches")
+    .select("import_type")
+    .eq("id", id)
+    .maybeSingle()
+  if (batchError) return { ok: false, message: batchError.message }
+  if (!batch) return { ok: false, message: "Import batch was not found." }
+
+  if (batch.import_type === "deal_ledger") {
+    try {
+      const result = await applyDealLedgerImportBatch({
+        supabase: gate.supabase,
+        batchId: id,
+        actorId: gate.profile.id,
+      })
+      revalidatePath("/admin/imports")
+      revalidatePath("/admin/deals")
+      revalidatePath("/admin/finance")
+      revalidatePath("/admin/sales-tracker")
+      return {
+        ok: true,
+        message:
+          result.failed > 0
+            ? `Updated ${result.applied} deal(s); ${result.failed} row(s) need review.`
+            : `Updated ${result.applied} deal(s). Stock was not changed.`,
+        applied: result.applied,
+        skipped: result.skipped,
+        failed: result.failed,
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "Sales ledger import failed.",
+      }
+    }
+  }
+
   const { data, error } = await gate.supabase.rpc("admin_apply_crm_import_batch", {
     p_batch_id: id,
   })
@@ -4458,6 +4530,7 @@ export async function applyCrmImportBatch(
   revalidatePath("/admin/imports")
   revalidatePath("/admin/leads")
   revalidatePath("/admin/deals")
+  revalidatePath("/admin/enquiries")
   return {
     ok: true,
     message:
@@ -4510,6 +4583,132 @@ const NATIVE_DEAL_STAGES = new Set([
   "closed_lost",
   "cancelled",
 ])
+
+export async function updateEnquiryPipeline(input: {
+  dealId: string
+  enquiryStage: string
+  enquiryTemperature?: string | null
+  ownerProfileId?: string | null
+  nextAction?: string | null
+  nextActionDueAt?: string | null
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction("deals.manage")
+  if (!gate.ok) return gate
+  const dealId = input.dealId.trim()
+  if (!UUID_RE.test(dealId)) return { ok: false, message: "Enquiry id is not valid." }
+  if (!isEnquiryCrmStage(input.enquiryStage)) {
+    return { ok: false, message: "Selected enquiry stage is not valid." }
+  }
+  const enquiryTemperature = input.enquiryTemperature?.trim() || null
+  if (enquiryTemperature && !isEnquiryTemperature(enquiryTemperature)) {
+    return { ok: false, message: "Warm/cold is not valid." }
+  }
+  const ownerProfileId = input.ownerProfileId?.trim() || null
+  if (ownerProfileId && !UUID_RE.test(ownerProfileId)) {
+    return { ok: false, message: "Selected owner is not valid." }
+  }
+  let nextActionDueAt: string | null = null
+  if (input.nextActionDueAt?.trim()) {
+    const due = new Date(input.nextActionDueAt)
+    if (Number.isNaN(due.getTime())) {
+      return { ok: false, message: "Next-action date is not valid." }
+    }
+    nextActionDueAt = due.toISOString()
+  }
+
+  const { error } = await gate.supabase.rpc("admin_update_enquiry_pipeline", {
+    p_deal_id: dealId,
+    p_enquiry_stage: input.enquiryStage,
+    p_enquiry_temperature: enquiryTemperature,
+    p_owner_profile_id: ownerProfileId,
+    p_next_action: input.nextAction?.trim() || null,
+    p_next_action_due_at: nextActionDueAt,
+  })
+  if (error) {
+    const message = error.message.toLowerCase()
+    if (message.includes("invalid_enquiry_stage")) {
+      return { ok: false, message: "That enquiry stage is not valid." }
+    }
+    if (message.includes("enquiry_already_converted")) {
+      return { ok: false, message: "This record is already a Deal. Open it from Deals." }
+    }
+    return { ok: false, message: error.message }
+  }
+  revalidatePath("/admin/deals", "layout")
+  revalidatePath("/admin/enquiries", "layout")
+  return { ok: true, message: "Enquiry updated." }
+}
+
+export async function updateEnquiryPipelineBulk(input: {
+  dealIds: string[]
+  enquiryStage: string
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction("deals.manage")
+  if (!gate.ok) return gate
+  if (!isEnquiryCrmStage(input.enquiryStage)) {
+    return { ok: false, message: "Selected enquiry stage is not valid." }
+  }
+  const dealIds = [...new Set(input.dealIds.map((id) => id.trim()).filter((id) => UUID_RE.test(id)))]
+  if (dealIds.length === 0) return { ok: false, message: "Select at least one enquiry." }
+  if (dealIds.length > 80) {
+    return { ok: false, message: "Select up to 80 enquiries at a time." }
+  }
+
+  const nextAction = suggestedEnquiryAction(input.enquiryStage)
+  let updated = 0
+  let firstError = ""
+  for (const dealId of dealIds) {
+    const { data: deal, error: loadError } = await gate.supabase
+      .from("deals")
+      .select("owner_profile_id, enquiry_temperature, next_action_due_at")
+      .eq("id", dealId)
+      .maybeSingle()
+    if (loadError || !deal) {
+      if (!firstError) firstError = "One of the selected enquiries was not found."
+      continue
+    }
+    const { error } = await gate.supabase.rpc("admin_update_enquiry_pipeline", {
+      p_deal_id: dealId,
+      p_enquiry_stage: input.enquiryStage,
+      p_enquiry_temperature:
+        deal.enquiry_temperature === "warm" || deal.enquiry_temperature === "cold"
+          ? deal.enquiry_temperature
+          : "warm",
+      p_owner_profile_id: deal.owner_profile_id,
+      p_next_action: nextAction,
+      p_next_action_due_at: deal.next_action_due_at,
+    })
+    if (error) {
+      if (!firstError) {
+        const message = error.message.toLowerCase()
+        firstError = message.includes("enquiry_already_converted")
+          ? "One selected record is already a Deal."
+          : error.message
+      }
+      continue
+    }
+    updated += 1
+  }
+
+  revalidatePath("/admin/deals", "layout")
+  revalidatePath("/admin/enquiries", "layout")
+  if (updated === 0) {
+    return { ok: false, message: firstError || "None of the selected enquiries could be updated." }
+  }
+  if (updated < dealIds.length) {
+    return {
+      ok: true,
+      message: `Updated ${updated} of ${dealIds.length} enquiries. ${firstError}`.trim(),
+    }
+  }
+  return {
+    ok: true,
+    message:
+      dealIds.length === 1
+        ? "Enquiry stage updated."
+        : `${updated} enquiries moved to ${ENQUIRY_CRM_STAGE_LABELS[input.enquiryStage]}.`,
+  }
+}
 
 export async function updateNativeDealWorkflow(input: {
   dealId: string
@@ -4575,6 +4774,7 @@ export async function updateNativeDealWorkflow(input: {
     return { ok: false, message: error.message }
   }
   revalidatePath("/admin/deals", "layout")
+  revalidatePath("/admin/enquiries", "layout")
   return { ok: true, message: "Deal workflow updated." }
 }
 
@@ -4617,6 +4817,7 @@ export async function reserveNativeDealStock(
     await enqueueLinkedInventoryChannelSync(gate.supabase, packageId)
   }
   revalidatePath("/admin/deals")
+  revalidatePath("/admin/enquiries")
   revalidatePath("/admin/inventory/sales-list")
   return { ok: true, message: `${Number(data ?? 0)} deal line(s) reserved.` }
 }
@@ -4640,6 +4841,7 @@ export async function releaseNativeDealStock(dealId: string): Promise<ActionResu
     await enqueueLinkedInventoryChannelSync(gate.supabase, packageId)
   }
   revalidatePath("/admin/deals")
+  revalidatePath("/admin/enquiries")
   revalidatePath("/admin/inventory/sales-list")
   return {
     ok: true,
@@ -4678,6 +4880,7 @@ export async function setNativeDealHoldPolicy(input: {
   })
   if (error) return { ok: false, message: error.message }
   revalidatePath("/admin/deals")
+  revalidatePath("/admin/enquiries")
   return { ok: true, message: "Hold policy updated." }
 }
 

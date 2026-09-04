@@ -50,6 +50,7 @@ import {
   sendNativeBookingFormEmail,
   sendBookingFormReadyToSendNotification,
 } from "@/lib/email/send-booking-form"
+import { adminDealListPath } from "@/lib/crm/deal-pipeline"
 import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
 import { ensureNativeDealOrderAndInvoice } from "@/lib/crm/deal-order-automation"
 
@@ -441,7 +442,7 @@ export async function notifyNativeBookingFormReady(input: {
       eventName: snapshot.deal.title,
       clientName: snapshot.billTo.contactName,
       preparedByName,
-      dealUrl: `${getServerSiteOrigin()}/admin/deals/${encodeURIComponent(id)}`,
+      dealUrl: `${getServerSiteOrigin()}${adminDealListPath(id)}`,
     })
     if (!email.ok) {
       const detail = email.error ?? email.skipped ?? "Notification email failed."
@@ -455,7 +456,7 @@ export async function notifyNativeBookingFormReady(input: {
     revalidateNativeBookingFormPages(id)
     return {
       ok: true,
-      message: "Ollie, Michel, and Matt have been emailed. An admin still needs to send the form to the client.",
+      message: "Sent for approval to Ollie and Michel. An admin still needs to send the form to the client.",
     }
   } catch (error) {
     return { ok: false, message: errorMessage(error) }

@@ -2,11 +2,15 @@ import { unstable_noStore as noStore } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import { getCostLayerQuantityTotalsByPackage } from "@/lib/admin/cost-layers"
 import { adminPackagePath } from "@/lib/admin/package-link"
-import { unsignedPipelinePlaces } from "@/lib/admin/package-sales-breakdown"
+import {
+  applyEffectiveSellable,
+  emptyPackageSalesBreakdown,
+  unsignedPipelinePlaces,
+  type EffectiveSellablePackage,
+} from "@/lib/admin/package-sales-breakdown"
 import { getPackageSalesBreakdownByPackage } from "@/lib/admin/package-sales-breakdown-queries"
 import { isEventCategory, type EventCategory } from "@/lib/catalog/event-categories"
 import { packageDurationLabel } from "@/lib/catalog/package-duration"
-import { effectiveSellableByPackageId } from "@/lib/catalog/storefront-availability"
 import { adminDealPath, adminOrderDealPath } from "@/lib/admin/deal-link"
 import { getDealsForPackages } from "@/lib/crm/deals"
 import { DEAL_STAGE_LABELS, dealSourceLabel, type DealStage } from "@/lib/crm/deal-types"
@@ -122,37 +126,43 @@ export async function getNativeEventDetail(eventId: string): Promise<NativeEvent
   const productsSource = (packageRows ?? []).filter((pkg) => !pkg.shell_parent_package_id)
   const packageIds = productsSource.map((pkg) => String(pkg.id))
 
-  const [inventoryResult, boughtByPkg, salesByPkg, deals, sellableByPkg] = await Promise.all([
+  const [inventoryResult, boughtByPkg, salesByPkg, deals] = await Promise.all([
     packageIds.length
       ? supabase.from("package_inventory").select("package_id, qty_available, qty_held").in("package_id", packageIds)
       : Promise.resolve({ data: [] as Array<{ package_id: string; qty_available: number; qty_held: number }> }),
     getCostLayerQuantityTotalsByPackage(packageIds),
     getPackageSalesBreakdownByPackage(packageIds),
     getDealsForPackages(packageIds),
-    packageIds.length
-      ? effectiveSellableByPackageId(
-          supabase,
-          productsSource.map((pkg) => ({
-            id: String(pkg.id),
-            duration: pkg.duration ?? null,
-            inventory_group_id: pkg.inventory_group_id ? String(pkg.inventory_group_id) : null,
-            shell_parent_package_id: pkg.shell_parent_package_id
-              ? String(pkg.shell_parent_package_id)
-              : null,
-          })),
-        )
-      : Promise.resolve(new Map<string, number>()),
   ])
 
   const inventoryBy = new Map(
     (inventoryResult.data ?? []).map((row) => [String(row.package_id), row]),
   )
+  const sellableRows: EffectiveSellablePackage[] = productsSource.map((pkg) => {
+    const pkgId = String(pkg.id)
+    const inventory = inventoryBy.get(pkgId)
+    return {
+      id: pkgId,
+      duration: pkg.duration ?? null,
+      inventory_group_id: pkg.inventory_group_id ? String(pkg.inventory_group_id) : null,
+      shell_parent_package_id: pkg.shell_parent_package_id
+        ? String(pkg.shell_parent_package_id)
+        : null,
+      inventory: inventory
+        ? { qty_available: Number(inventory.qty_available ?? 0), qty_held: Number(inventory.qty_held ?? 0) }
+        : null,
+      layer_units_purchased: boughtByPkg.get(pkgId)?.quantity_purchased ?? 0,
+      sales_breakdown: salesByPkg.get(pkgId) ?? emptyPackageSalesBreakdown(pkgId),
+    }
+  })
+  applyEffectiveSellable(sellableRows)
+  const netByPkg = new Map(sellableRows.map((row) => [row.id, Math.floor(Number(row.effective_net) || 0)]))
+
   const products: NativeEventProductRow[] = productsSource.map((pkg) => {
     const pkgId = String(pkg.id)
     const breakdown = salesByPkg.get(pkgId)
     const inventory = inventoryBy.get(pkgId)
     const held = Math.max(0, Math.floor(Number(inventory?.qty_held ?? 0)))
-    const remaining = Math.max(0, (sellableByPkg.get(pkgId) ?? 0) - held)
     return {
       id: pkgId,
       name: String(pkg.name),
@@ -163,7 +173,7 @@ export async function getNativeEventDetail(eventId: string): Promise<NativeEvent
       bought: boughtByPkg.get(pkgId)?.quantity_purchased ?? 0,
       sold: breakdown?.total ?? 0,
       pipeline: breakdown ? unsignedPipelinePlaces(breakdown) : 0,
-      available: remaining,
+      available: netByPkg.get(pkgId) ?? 0,
       held,
     }
   })

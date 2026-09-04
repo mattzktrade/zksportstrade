@@ -20,29 +20,21 @@ import {
   X,
 } from "lucide-react"
 import { toast } from "sonner"
-import { createCrmAccount, upsertCrmContact } from "@/app/(admin)/admin/clients/profile-actions"
 import {
-  createNativeDeal,
   releaseNativeDealStock,
   reserveNativeDealStock,
   setNativeDealHoldPolicy,
   updateNativeDealWorkflow,
 } from "@/app/(admin)/actions"
-import { AccountKindPills } from "@/components/admin/account-kind-pills"
 import { ActionCombobox } from "@/components/admin/action-combobox"
 import { CrmPartySelect } from "@/components/admin/crm-party-select"
+import { DealCreateModal } from "@/components/admin/deal-create-modal"
 import { SearchableSelect } from "@/components/admin/searchable-select"
 import { EventFilter, uniqueEventFilterOptions } from "@/components/admin/event-filter"
-import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
+import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { AdminListPreview, AdminModalScrim } from "@/components/admin/admin-list-preview"
 import { useAdminListSelection } from "@/lib/admin/use-admin-list-selection"
-import {
-  DealLineBasket,
-  isPricedDealBasketLine,
-  numericDealField,
-  type DealBasketLine,
-  type DealBasketSupplier,
-} from "@/components/admin/deal-line-basket"
+import { type DealBasketSupplier } from "@/components/admin/deal-line-basket"
 import {
   DEAL_NEXT_ACTION_OPTIONS,
   DEAL_SOURCE_LABELS,
@@ -52,14 +44,15 @@ import {
   canonicalDealStage,
   dealConfirmedOffPlatform,
   dealSourceLabel,
+  dealSourceTone,
   friendlyDealActivitySummary,
   type CrmAccountOption,
   type DealListRow,
   type DealPackageOption,
   type DealStage,
 } from "@/lib/crm/deal-types"
-import { type AccountKind } from "@/lib/crm/account-kinds"
 import type { StaffOption } from "@/lib/crm/lead-types"
+import { adminEnquiryListPath, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
 import type { BookingFormAdminRow, BookingFormEventRow } from "@/lib/booking-forms/types"
 import { cn } from "@/lib/utils"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
@@ -67,14 +60,12 @@ import { adminDealPath } from "@/lib/admin/deal-link"
 import { isModifiedClick, openInNewTab, pageSearchProps } from "@/lib/browser/laptop-qol"
 import { adminAccountPath, adminContactPath } from "@/lib/crm/profile-links"
 import Link from "next/link"
-import { BookingFormPanel } from "./booking-form-panel"
+import { BookingFormPanel, BookingFormHandoffCallout } from "./booking-form-panel"
 import { DealFinancePanel } from "./deal-finance-panel"
 import { updateDealCommercials, deleteDeal } from "./deal-edit-actions"
 
 type PipelineView = "all" | "mine" | "team"
 type PipelineStageId =
-  | "new_enquiry"
-  | "price_sent"
   | "ready_to_send"
   | "booking_form"
   | "awaiting_approval"
@@ -173,10 +164,6 @@ function DealSortTh({
 
 function stageTone(stage: DealStage): "green" | "amber" | "red" | "blue" | "purple" | "gray" {
   switch (pipelineStageFor(stage).id) {
-    case "new_enquiry":
-      return "purple"
-    case "price_sent":
-      return "blue"
     case "ready_to_send":
       return "purple"
     case "booking_form":
@@ -207,13 +194,6 @@ const PIPELINE_COLUMNS: Array<{
   stages: DealStage[]
   colour: string
 }> = [
-  {
-    id: "new_enquiry",
-    label: "Enquiry",
-    stages: ["draft", "sourcing"],
-    colour: "border-violet-500",
-  },
-  { id: "price_sent", label: "Price sent", stages: ["proposal"], colour: "border-blue-500" },
   {
     id: "ready_to_send",
     label: "Ready to send",
@@ -255,7 +235,7 @@ function actionRequired(deal: DealListRow): string {
     case "proposal":
       return "Follow up price"
     case "awaiting_booking_form_send":
-      return "Approved admin to send booking form"
+      return "Sent for approval — Ollie or Michel to send to the client"
     case "booking_form_sent":
     case "awaiting_client_signature":
       return "Chase client signature"
@@ -336,25 +316,7 @@ export function DealsClient({
   })
   const previewRef = useRef<HTMLElement>(null)
   const [showCreate, setShowCreate] = useState(false)
-  const [accountId, setAccountId] = useState("")
-  const [contactId, setContactId] = useState("")
-  const [newAccountMode, setNewAccountMode] = useState(false)
-  const [newContactMode, setNewContactMode] = useState(false)
-  const [newAccountName, setNewAccountName] = useState("")
-  const [newAccountTypes, setNewAccountTypes] = useState<AccountKind[]>([])
-  const [newContactName, setNewContactName] = useState("")
-  const [newContactEmail, setNewContactEmail] = useState("")
-  const [newContactPhone, setNewContactPhone] = useState("")
-  const [newBillingLine1, setNewBillingLine1] = useState("")
-  const [newBillingLine2, setNewBillingLine2] = useState("")
-  const [newBillingCity, setNewBillingCity] = useState("")
-  const [newBillingPostcode, setNewBillingPostcode] = useState("")
-  const [newBillingCountry, setNewBillingCountry] = useState("")
   const [createdAccounts, setCreatedAccounts] = useState<CrmAccountOption[]>([])
-  const [createLines, setCreateLines] = useState<DealBasketLine[]>([])
-  const [notes, setNotes] = useState("")
-  const [createSource, setCreateSource] = useState("offline")
-  const [reserve, setReserve] = useState(false)
   const [workflowStage, setWorkflowStage] = useState<DealStage>("draft")
   const [workflowOwner, setWorkflowOwner] = useState("")
   const [workflowAction, setWorkflowAction] = useState("")
@@ -374,6 +336,7 @@ export function DealsClient({
   const scoped = useMemo(() => {
     const q = query.trim().toLowerCase()
     return deals.filter((deal) => {
+      if (isEnquiryPipelineStage(deal.stage)) return false
       if (view === "mine" && deal.owner_profile_id !== currentProfileId) return false
       if (
         view === "team" &&
@@ -401,7 +364,8 @@ export function DealsClient({
   }, [currentProfileId, deals, eventFilter, query, sourceFilter, view])
 
   const filtered = useMemo(() => {
-    if (!pipelineFilter) return scoped
+    const activePipeline = String(pipelineFilter)
+    if (!activePipeline || activePipeline === "new_enquiry" || activePipeline === "price_sent") return scoped
     if (pipelineFilter === "awaiting_approval") {
       return scoped.filter((deal) => deal.stage === "awaiting_zk_signature")
     }
@@ -522,19 +486,7 @@ export function DealsClient({
     }
     return [...byId.values()]
   }, [accountOptions, createdAccounts])
-  const selectedAccount = clientAccounts.find((account) => account.id === accountId) ?? null
   const editAccount = clientAccounts.find((account) => account.id === editAccountId) ?? null
-  const addingNewContact =
-    newAccountMode || newContactMode || Boolean(selectedAccount && selectedAccount.contacts.length === 0)
-  const hasNewContactDetails = Boolean(newContactName.trim() && newContactEmail.trim())
-  const hasNewAccountAddress = Boolean(
-    newBillingLine1.trim() && newBillingCity.trim() && newBillingCountry.trim(),
-  )
-  const canSubmitDeal =
-    createLines.length > 0 &&
-    (newAccountMode
-      ? Boolean(newAccountName.trim() && hasNewContactDetails && hasNewAccountAddress)
-      : Boolean(accountId && (addingNewContact ? hasNewContactDetails : contactId)))
 
   function rememberCreatedClient(account: CrmAccountOption) {
     setCreatedAccounts((current) => {
@@ -553,27 +505,6 @@ export function DealsClient({
     })
   }
 
-  function resetCreateForm() {
-    setShowCreate(false)
-    setAccountId("")
-    setContactId("")
-    setNewAccountMode(false)
-    setNewContactMode(false)
-    setNewAccountName("")
-    setNewAccountTypes([])
-    setNewContactName("")
-    setNewContactEmail("")
-    setNewContactPhone("")
-    setNewBillingLine1("")
-    setNewBillingLine2("")
-    setNewBillingCity("")
-    setNewBillingPostcode("")
-    setNewBillingCountry("")
-    setCreateLines([])
-    setNotes("")
-    setCreateSource("offline")
-    setReserve(false)
-  }
   function openDealEditor() {
     if (!selected) return
     setEditAccountId(selected.account_id ?? "")
@@ -637,154 +568,6 @@ export function DealsClient({
       }
       toast.success(result.message)
       setShowEdit(false)
-      router.refresh()
-    })
-  }
-
-  function submit() {
-    if (newAccountMode) {
-      if (!newAccountName.trim()) {
-        toast.error(newAccountTypes.includes("direct_client") ? "Enter the client's name." : "Enter the account / company name.")
-        return
-      }
-      if (!newContactName.trim()) {
-        toast.error("Add a contact name so we know who to speak to.")
-        return
-      }
-      if (!newContactEmail.trim()) {
-        toast.error("Add the contact email — it is used on the booking form and invoice.")
-        return
-      }
-      if (!newBillingLine1.trim() || !newBillingCity.trim() || !newBillingCountry.trim()) {
-        toast.error("Add the billing address — it is used on the booking form and invoice. Postcode can be left blank.")
-        return
-      }
-    } else {
-      if (!accountId) {
-        toast.error("Select an account / company.")
-        return
-      }
-      if (addingNewContact) {
-        if (!newContactName.trim()) {
-          toast.error("Add a contact name so we know who to speak to.")
-          return
-        }
-        if (!newContactEmail.trim()) {
-          toast.error("Add the contact email — it is used on the booking form and invoice.")
-          return
-        }
-      } else if (!contactId) {
-        toast.error("Select a contact for this account.")
-        return
-      }
-    }
-    if (createLines.length === 0) {
-      toast.error("Add at least one product.")
-      return
-    }
-    if (createLines.some((line) => !isPricedDealBasketLine(line))) {
-      toast.error("Check the quantity and sale price for every product.")
-      return
-    }
-    startTransition(async () => {
-      let resolvedAccountId = accountId
-      let resolvedContactId = contactId
-
-      if (newAccountMode) {
-        const created = await createCrmAccount({
-          name: newAccountName.trim(),
-          accountTypes: newAccountTypes,
-          source: "manual",
-          email: newContactEmail.trim(),
-          phone: newContactPhone.trim() || null,
-          billing: {
-            line1: newBillingLine1.trim(),
-            line2: newBillingLine2.trim() || null,
-            city: newBillingCity.trim(),
-            postcode: newBillingPostcode.trim() || null,
-            country: newBillingCountry.trim(),
-          },
-          contacts: [{
-            fullName: newContactName.trim(),
-            email: newContactEmail.trim(),
-            phone: newContactPhone.trim() || null,
-          }],
-        })
-        if (!created.ok || !created.accountId) {
-          toast.error(created.ok ? "Account was created but its id was not returned." : created.message)
-          return
-        }
-        if (!created.contactId) {
-          rememberCreatedClient({ id: created.accountId, name: newAccountName.trim(), contacts: [] })
-          setAccountId(created.accountId)
-          setNewAccountMode(false)
-          setNewContactMode(true)
-          toast.error("Account created, but the contact could not be saved. Add the contact and try again.")
-          return
-        }
-        resolvedAccountId = created.accountId
-        resolvedContactId = created.contactId
-        rememberCreatedClient({
-          id: created.accountId,
-          name: newAccountName.trim(),
-          contacts: [{
-            id: created.contactId,
-            full_name: newContactName.trim(),
-            email: newContactEmail.trim(),
-            phone: newContactPhone.trim() || null,
-          }],
-        })
-      } else if (addingNewContact) {
-        const created = await upsertCrmContact({
-          accountId: resolvedAccountId,
-          fullName: newContactName.trim(),
-          email: newContactEmail.trim(),
-          phone: newContactPhone.trim() || null,
-          isPrimary: !selectedAccount?.contacts.length,
-        })
-        if (!created.ok || !created.contactId) {
-          toast.error(created.ok ? "Contact was saved but its id was not returned." : created.message)
-          return
-        }
-        resolvedContactId = created.contactId
-        rememberCreatedClient({
-          id: resolvedAccountId,
-          name: selectedAccount?.name ?? "",
-          contacts: [{
-            id: created.contactId,
-            full_name: newContactName.trim(),
-            email: newContactEmail.trim(),
-            phone: newContactPhone.trim() || null,
-          }],
-        })
-      }
-
-      const result = await createNativeDeal({
-        accountId: resolvedAccountId,
-        contactId: resolvedContactId,
-        lines: createLines.map((line) => ({
-          packageId: line.packageId,
-          quantity: numericDealField(line.quantity),
-          unitPrice: numericDealField(line.unitPrice),
-          sourcingMode: line.sourcingMode,
-          supplierId: line.supplierId || null,
-          expectedUnitCost: line.expectedUnitCost,
-          supplierQuoteAt: line.supplierQuoteAt || null,
-        })),
-        notes,
-        reserve,
-        source: createSource,
-      })
-      if (!result.ok) {
-        toast.error(result.message)
-        setAccountId(resolvedAccountId)
-        setContactId(resolvedContactId)
-        setNewAccountMode(false)
-        setNewContactMode(false)
-        return
-      }
-      toast.success(result.message)
-      resetCreateForm()
       router.refresh()
     })
   }
@@ -877,8 +660,8 @@ export function DealsClient({
   return (
     <div className="space-y-3">
       <AdminPageHeader
-        title="Deals / Pipeline"
-        description="View all deals, track status, and manage your personal pipeline."
+        title="Deals"
+        description="Booking forms ready to send, in signature, signed, won and lost. Earlier enquiries and prices sent live under Sales → Enquiries."
       />
 
       <AdminStats className="sm:grid-cols-2 xl:grid-cols-5">
@@ -913,7 +696,7 @@ export function DealsClient({
               {label}
             </button>
           ))}
-          <button type="button" className="mb-3 hidden h-9 rounded-md border px-3 text-[9px] font-medium sm:inline-flex sm:ml-auto">
+          <button type="button" className="mb-3 hidden h-9 items-center justify-center rounded-md border px-3 text-[9px] font-medium leading-none sm:ml-auto sm:inline-flex">
             Save view
           </button>
           <button
@@ -921,7 +704,7 @@ export function DealsClient({
             onClick={() => setShowCreate(true)}
             className="mb-3 ml-auto flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-primary px-4 text-[9px] font-semibold text-white sm:ml-0 sm:w-auto"
           >
-            <Plus className="h-3.5 w-3.5" /> New deal
+            <Plus className="h-3.5 w-3.5" /> New enquiry
           </button>
         </div>
 
@@ -958,7 +741,7 @@ export function DealsClient({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 border-b border-[#eceef1] p-3 md:grid-cols-4 xl:grid-cols-7">
+        <div className="grid grid-cols-2 gap-2 border-b border-[#eceef1] p-3 md:grid-cols-3 xl:grid-cols-5">
           {PIPELINE_COLUMNS.map((column) => {
             const columnDeals = scoped.filter((deal) => column.stages.includes(deal.stage))
             const value = columnDeals.reduce((sum, deal) => sum + deal.total_amount, 0)
@@ -1064,7 +847,7 @@ export function DealsClient({
                         <p className="font-medium">{deal.race_name || "—"}</p>
                         <p className="mt-0.5 text-[8px] text-slate-400">{deal.line_summary || "—"}</p>
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3"><StatusPill tone="blue">{dealSourceLabel(deal.source)}</StatusPill></td>
+                      <td className="whitespace-nowrap px-3 py-3"><StatusPill tone={dealSourceTone(deal.source)}>{dealSourceLabel(deal.source)}</StatusPill></td>
                       <td className="whitespace-nowrap px-3 py-3">{deal.owner_name || "—"}</td>
                       <td className="whitespace-nowrap px-3 py-3">
                         <StatusPill tone={stageTone(deal.stage)}>{pipelineStage.label}</StatusPill>
@@ -1177,11 +960,19 @@ export function DealsClient({
                     </button>
                   </div>
                 </div>
+                <BookingFormHandoffCallout
+                  form={selectedBookingForm}
+                  events={
+                    selectedBookingForm
+                      ? bookingEventsByForm.get(selectedBookingForm.id) ?? []
+                      : []
+                  }
+                />
                 <dl className="grid grid-cols-[125px_1fr] gap-y-2.5 border-y py-4 text-[9px]">
                   <dt className="text-slate-400">Client / Company</dt><dd className="font-medium">{selected.account_id && selected.account_name ? <Link href={adminAccountPath(selected.account_id)} className="text-primary hover:underline">{selected.account_name}</Link> : "—"}</dd>
                   <dt className="text-slate-400">Contact</dt><dd>{selected.account_id && selected.primary_contact_id && selected.contact_name ? <Link href={adminContactPath(selected.account_id, selected.primary_contact_id)} className="text-primary hover:underline">{selected.contact_name}</Link> : "—"}</dd>
                   <dt className="text-slate-400">Event / Package</dt><dd>{selected.race_name || "—"}<br /><span className="text-slate-500">{selected.line_summary || "—"}</span></dd>
-                  <dt className="text-slate-400">Source</dt><dd><StatusPill tone="blue">{dealSourceLabel(selected.source)}</StatusPill></dd>
+                  <dt className="text-slate-400">Source</dt><dd><StatusPill tone={dealSourceTone(selected.source)}>{dealSourceLabel(selected.source)}</StatusPill></dd>
                   <dt className="text-slate-400">Deal owner</dt><dd>{selected.owner_name || "—"}</dd>
                   <dt className="text-slate-400">Sales stage</dt>
                   <dd><StatusPill tone={stageTone(selected.stage)}>{pipelineStageFor(selected.stage).label}</StatusPill></dd>
@@ -1191,6 +982,8 @@ export function DealsClient({
                   <dt className="text-slate-400">Gross profit / Margin</dt>
                   <dd>{selected.gross_profit == null ? "Not costed" : `${money(selected.gross_profit, selected.currency)} (${((selected.margin ?? 0) * 100).toFixed(1)}%)`}</dd>
                   <dt className="text-slate-400">Expected close date</dt><dd>{shortDate(selected.expected_close_date)}</dd>
+                  <dt className="text-slate-400">Invoice #</dt>
+                  <dd>{selected.xero_invoice_number || selected.ledger_invoice_number || "—"}</dd>
                   <dt className="text-slate-400">Stock reservation</dt>
                   <dd>
                     {selected.reserved_qty > 0
@@ -1541,312 +1334,19 @@ export function DealsClient({
       ) : null}
 
       {showCreate ? (
-        <AdminModalScrim onClose={resetCreateForm} zClassName="z-[80]" panelClassName="max-w-4xl overflow-hidden">
-            <div className="flex shrink-0 items-start justify-between px-4 pt-4 sm:px-6 sm:pt-6">
-              <div>
-                <h2 className="text-lg font-semibold">Create new deal</h2>
-                <p className="text-sm text-slate-500">Choose the client and product, then confirm pricing and stock.</p>
-              </div>
-              <button type="button" onClick={resetCreateForm}><X className="h-5 w-5" /></button>
-            </div>
-
-            <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
-              <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold">1. Client</h3>
-                  <div className="flex rounded-md border border-slate-200 bg-white p-0.5 text-xs font-medium">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNewAccountMode(false)
-                        setNewContactMode(false)
-                      }}
-                      className={cn(
-                        "rounded px-3 py-1.5",
-                        !newAccountMode ? "bg-primary text-white" : "text-slate-600 hover:bg-slate-50",
-                      )}
-                    >
-                      Existing account
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNewAccountMode(true)
-                        setAccountId("")
-                        setContactId("")
-                        setNewContactMode(true)
-                      }}
-                      className={cn(
-                        "rounded px-3 py-1.5",
-                        newAccountMode ? "bg-primary text-white" : "text-slate-600 hover:bg-slate-50",
-                      )}
-                    >
-                      New account
-                    </button>
-                  </div>
-                </div>
-
-                {newAccountMode ? (
-                  <div className="mt-4 space-y-4">
-                    <label className="block text-sm">
-                      <span className="mb-1 block font-medium">
-                        {newAccountTypes.includes("direct_client") ? "Name" : "Account / company"}
-                      </span>
-                      <input
-                        value={newAccountName}
-                        onChange={(e) => setNewAccountName(e.target.value)}
-                        placeholder={newAccountTypes.includes("direct_client") ? "e.g. Jane Smith" : "e.g. Apex Travel"}
-                        className="h-11 w-full rounded-md border bg-white px-3"
-                      />
-                      <span className="mt-1.5 block text-xs text-slate-500">
-                        If this is a direct client / end user, put their name here instead of a company.
-                      </span>
-                    </label>
-                    <div>
-                      <p className="mb-1 text-sm font-medium">Type</p>
-                      <p className="mb-2 text-xs text-slate-500">Select all that apply.</p>
-                      <AccountKindPills compact value={newAccountTypes} onChange={setNewAccountTypes} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">Billing address</p>
-                      <p className="mt-0.5 text-xs text-slate-500">Used on the booking form and invoice.</p>
-                      <div className="mt-3 grid gap-2">
-                        <input
-                          value={newBillingLine1}
-                          onChange={(e) => setNewBillingLine1(e.target.value)}
-                          placeholder="Address line 1"
-                          className="h-10 w-full rounded-md border bg-white px-3 text-sm"
-                        />
-                        <input
-                          value={newBillingLine2}
-                          onChange={(e) => setNewBillingLine2(e.target.value)}
-                          placeholder="Address line 2 (optional)"
-                          className="h-10 w-full rounded-md border bg-white px-3 text-sm"
-                        />
-                        <div className="grid gap-2 md:grid-cols-3">
-                          <input
-                            value={newBillingCity}
-                            onChange={(e) => setNewBillingCity(e.target.value)}
-                            placeholder="City"
-                            className="h-10 rounded-md border bg-white px-3 text-sm"
-                          />
-                          <input
-                            value={newBillingPostcode}
-                            onChange={(e) => setNewBillingPostcode(e.target.value)}
-                            placeholder="Postcode (optional)"
-                            className="h-10 rounded-md border bg-white px-3 text-sm"
-                          />
-                          <input
-                            value={newBillingCountry}
-                            onChange={(e) => setNewBillingCountry(e.target.value)}
-                            placeholder="Country"
-                            className="h-10 rounded-md border bg-white px-3 text-sm"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-white bg-white p-3">
-                      <p className="text-sm font-medium">Primary contact</p>
-                      <p className="mt-0.5 text-xs text-slate-500">Name and email are required for the booking form and invoice.</p>
-                      <div className="mt-3 grid gap-2 md:grid-cols-3">
-                        <input
-                          value={newContactName}
-                          onChange={(e) => setNewContactName(e.target.value)}
-                          placeholder="Full name"
-                          className="h-10 rounded-md border px-3 text-sm"
-                        />
-                        <input
-                          type="email"
-                          value={newContactEmail}
-                          onChange={(e) => setNewContactEmail(e.target.value)}
-                          placeholder="Email"
-                          className="h-10 rounded-md border px-3 text-sm"
-                        />
-                        <input
-                          value={newContactPhone}
-                          onChange={(e) => setNewContactPhone(e.target.value)}
-                          placeholder="Phone (optional)"
-                          className="h-10 rounded-md border px-3 text-sm"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mt-4 space-y-4">
-                    <label className="block text-sm">
-                      <span className="mb-1 block font-medium">Account / company</span>
-                      <CrmPartySelect
-                        accountId={accountId}
-                        localAccounts={clientAccounts}
-                        onSelect={(account, nextContactId) => {
-                          if (!account.id) {
-                            setAccountId("")
-                            setContactId("")
-                            return
-                          }
-                          rememberCreatedClient(account)
-                          setAccountId(account.id)
-                          setContactId(nextContactId ?? "")
-                          setNewContactMode(false)
-                          setNewContactName("")
-                          setNewContactEmail("")
-                          setNewContactPhone("")
-                        }}
-                        placeholder="Search accounts and contacts…"
-                        emptyLabel="No accounts or contacts match"
-                        className="h-11 w-full rounded-md border bg-white px-3 text-sm outline-none focus:border-primary/50"
-                      />
-                    </label>
-
-                    {!selectedAccount ? (
-                      <p className="text-xs text-slate-500">Pick an account, or switch to New account if they are not in the list yet.</p>
-                    ) : addingNewContact ? (
-                      <div className="rounded-lg border border-white bg-white p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <p className="text-sm font-medium">
-                              {selectedAccount.contacts.length === 0 ? "Add a contact" : "New contact"}
-                            </p>
-                            <p className="mt-0.5 text-xs text-slate-500">
-                              {selectedAccount.contacts.length === 0
-                                ? `${selectedAccount.name} has no contacts yet.`
-                                : `Adding someone new at ${selectedAccount.name}.`}
-                            </p>
-                          </div>
-                          {selectedAccount.contacts.length > 0 ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setNewContactMode(false)
-                                setNewContactName("")
-                                setNewContactEmail("")
-                                setNewContactPhone("")
-                              }}
-                              className="text-xs font-medium text-primary hover:underline"
-                            >
-                              Use existing contact
-                            </button>
-                          ) : null}
-                        </div>
-                        <div className="mt-3 grid gap-2 md:grid-cols-3">
-                          <input
-                            value={newContactName}
-                            onChange={(e) => setNewContactName(e.target.value)}
-                            placeholder="Full name"
-                            className="h-10 rounded-md border px-3 text-sm"
-                          />
-                          <input
-                            type="email"
-                            value={newContactEmail}
-                            onChange={(e) => setNewContactEmail(e.target.value)}
-                            placeholder="Email"
-                            className="h-10 rounded-md border px-3 text-sm"
-                          />
-                          <input
-                            value={newContactPhone}
-                            onChange={(e) => setNewContactPhone(e.target.value)}
-                            placeholder="Phone (optional)"
-                            className="h-10 rounded-md border px-3 text-sm"
-                          />
-                        </div>
-                      </div>
-                    ) : (
-                      <div>
-                        <div className="mb-1 flex items-center justify-between gap-2">
-                          <span className="text-sm font-medium">Contact</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setNewContactMode(true)
-                              setContactId("")
-                            }}
-                            className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                          >
-                            <Plus className="h-3.5 w-3.5" /> New contact
-                          </button>
-                        </div>
-                        <select
-                          value={contactId}
-                          onChange={(e) => setContactId(e.target.value)}
-                          className="h-11 w-full rounded-md border bg-white px-3 text-sm"
-                        >
-                          <option value="">Select a contact…</option>
-                          {selectedAccount.contacts.map((contact) => (
-                            <option key={contact.id} value={contact.id}>
-                              {contact.full_name}{contact.email ? ` · ${contact.email}` : ""}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-4 rounded-lg border border-slate-200 p-4">
-                <div>
-                  <h3 className="text-sm font-semibold">2. Products, events and pricing</h3>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    Add products from any event. Each line can use your stock or a fresh broker quote, and its sale price can be changed.
-                  </p>
-                </div>
-                <div className="mt-3">
-                  <DealLineBasket
-                    products={createPackageOptions}
-                    suppliers={supplierOptions}
-                    lines={createLines}
-                    onChange={setCreateLines}
-                  />
-                </div>
-                <div className="mt-4 flex items-center justify-between border-t pt-3">
-                  <label className="flex items-center gap-2 text-sm font-medium">
-                    <input type="checkbox" checked={reserve} onChange={(event) => setReserve(event.target.checked)} />
-                    Place a seven-day hold now
-                  </label>
-                  <div className="text-right">
-                    <p className="text-[10px] uppercase text-slate-400">Deal total</p>
-                    <p className="text-lg font-semibold">
-                      {money(createLines.reduce((sum, line) => sum + numericDealField(line.quantity) * numericDealField(line.unitPrice), 0), "USD")}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-4">
-                <label className="text-sm">
-                  <span className="mb-1 block font-medium">Source</span>
-                  <select
-                    value={createSource}
-                    onChange={(e) => setCreateSource(e.target.value)}
-                    className="h-11 w-full rounded-md border bg-white px-3"
-                  >
-                    {DEAL_SOURCES.map((source) => (
-                      <option key={source} value={source}>{DEAL_SOURCE_LABELS[source]}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
-              <div className="mt-4">
-                <label className="text-sm">
-                  <span className="mb-1 block font-medium">Notes / interests</span>
-                  <textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="min-h-20 w-full rounded-md border p-3" />
-                </label>
-              </div>
-            </div>
-
-            <div className="flex shrink-0 justify-end gap-2 border-t border-slate-100 px-6 py-4">
-              <button type="button" onClick={resetCreateForm} className="h-10 rounded-md border px-4 text-sm">Cancel</button>
-              <button
-                type="button"
-                disabled={pending || !canSubmitDeal}
-                onClick={submit}
-                className="h-10 rounded-md bg-primary px-5 text-sm font-semibold text-white disabled:opacity-50"
-              >
-                {pending ? "Creating…" : "Create deal"}
-              </button>
-            </div>
-        </AdminModalScrim>
+        <DealCreateModal
+          accountOptions={accountOptions}
+          products={createPackageOptions}
+          suppliers={supplierOptions}
+          title="Create new enquiry"
+          description="New records start in Enquiries. Create a booking form there; sending it for approval or to the client moves it onto Deals."
+          submitLabel="Create enquiry"
+          onClose={() => setShowCreate(false)}
+          onCreated={(dealId) => {
+            setShowCreate(false)
+            if (dealId) router.push(adminEnquiryListPath(dealId))
+          }}
+        />
       ) : null}
     </div>
   )

@@ -72,7 +72,7 @@ function sellableQty(
       Number(pkg.canonical_availability?.reserved ?? pkg.inventory.qty_held) || 0,
     ),
   )
-  return Math.max(0, committedSellable - held)
+  return committedSellable - held
 }
 
 export function PackageDetailClient({
@@ -156,7 +156,9 @@ export function PackageDetailClient({
             {saleCount} order{saleCount === 1 ? "" : "s"}
           </span>
           {sellable != null ? (
-            <span className="text-xs font-medium text-foreground">{sellable} sellable</span>
+            <span className={`text-xs font-medium tabular-nums ${sellable < 0 ? "text-destructive" : "text-foreground"}`}>
+              {sellable} {sellable < 0 ? "to buy" : "sellable"}
+            </span>
           ) : (
             <span className="text-xs text-amber-700 dark:text-amber-200">No inventory row</span>
           )}
@@ -181,7 +183,9 @@ export function PackageDetailClient({
               <span className="ml-1.5 text-xs tabular-nums text-muted-foreground">({saleCount})</span>
             ) : null}
             {t.id === "inventory" && sellable != null ? (
-              <span className="ml-1.5 text-xs tabular-nums text-muted-foreground">({sellable})</span>
+              <span className={`ml-1.5 text-xs tabular-nums ${sellable < 0 ? "text-destructive" : "text-muted-foreground"}`}>
+                ({sellable})
+              </span>
             ) : null}
           </button>
         ))}

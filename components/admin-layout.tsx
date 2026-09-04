@@ -28,6 +28,7 @@ import {
   Warehouse,
   CalendarDays,
   TrendingUp,
+  Inbox,
   CircleHelp,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -75,6 +76,7 @@ const navigation: NavItem[] = [
     icon: BriefcaseBusiness,
     children: [
       { name: "Accounts", href: "/admin/leads", icon: Users },
+      { name: "Enquiries", href: "/admin/enquiries", icon: Inbox },
       { name: "Deals", href: "/admin/deals", icon: BriefcaseBusiness },
       { name: "Sales tracker", href: "/admin/sales-tracker", icon: TrendingUp },
       { name: "CRM imports", href: "/admin/imports", icon: FileText },
@@ -89,7 +91,9 @@ const navigation: NavItem[] = [
 
 const JUMP_KEYWORDS: Record<string, string> = {
   "/admin/leads": "leads clients companies contacts people prospects funnel",
-  "/admin/deals": "pipeline crm sales",
+  "/admin/enquiries": "enquiry enquiries sourcing inbound quote pipeline crm",
+  "/admin/deals": "pipeline crm sales booking form",
+  "/admin/sales-tracker": "sales tracker revenue demand conversion event product stock planning",
   "/admin/catalog/events": "races calendar",
   "/admin/orders": "bookings invoices portal",
   "/admin/finance": "invoices payments xero",
@@ -117,6 +121,7 @@ function adminPageTitle(pathname: string): string {
   if (pathname === "/admin") return "Dashboard"
   if (pathname.startsWith("/admin/finance")) return "Finance"
   if (pathname.startsWith("/admin/operations")) return "Operations"
+  if (pathname.startsWith("/admin/enquiries")) return "Enquiries"
   if (pathname.startsWith("/admin/deals")) return "Deals"
   if (pathname.startsWith("/admin/leads") || pathname.startsWith("/admin/clients")) return "Accounts"
   if (pathname.startsWith("/admin/sales-tracker")) return "Sales tracker"
@@ -184,6 +189,7 @@ export function AdminLayout({
       pathname.startsWith("/admin/place-order"),
     Sales:
       pathname.startsWith("/admin/leads") ||
+      pathname.startsWith("/admin/enquiries") ||
       pathname.startsWith("/admin/deals") ||
       pathname.startsWith("/admin/sales-tracker") ||
       pathname.startsWith("/admin/imports"),

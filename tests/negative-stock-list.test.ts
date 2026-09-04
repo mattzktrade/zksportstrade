@@ -1,8 +1,11 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import { test } from "node:test"
 import {
   filterNegativeStockRows,
   hasActiveNegativeStockFilters,
+  mergeNegativeStockRows,
+  reasonLabel,
   sortNegativeStockRows,
   statusLabel,
   summarizeNegativeStock,
@@ -126,6 +129,61 @@ test("sort by event date puts undated rows last when ascending", () => {
     sorted.map((item) => item.id),
     ["soon", "later", "none"],
   )
+})
+
+test("merges uncovered signed sales without duplicating a deal line", () => {
+  const existing = [row({ id: "ns-1", dealLineItemId: "line-1" })]
+  const extra = [
+    row({ id: "uncovered:line-1", dealLineItemId: "line-1", quantity: 4 }),
+    row({ id: "uncovered:line-2", dealLineItemId: "line-2", dealId: "deal-2", quantity: 4 }),
+  ]
+  const merged = mergeNegativeStockRows(existing, extra)
+  assert.deepEqual(
+    merged.map((item) => item.id),
+    ["ns-1", "uncovered:line-2"],
+  )
+})
+
+test("owned uncovered rows look like historical gaps; brokered rows keep supplier and cost", () => {
+  const owned = row({
+    id: "owned-gap",
+    supplierId: null,
+    supplierName: null,
+    unitCost: 0,
+    status: "open",
+    reason: "historical_reconciliation",
+  })
+  const brokered = row({
+    id: "brokered-gap",
+    supplierName: "Paddock Co",
+    unitCost: 4200,
+    status: "confirmed",
+    reason: "brokered",
+  })
+  assert.equal(reasonLabel(owned.reason), "Missing historical purchase")
+  assert.equal(reasonLabel(brokered.reason), "Brokered stock")
+  assert.equal(owned.supplierName, null)
+  assert.equal(brokered.unitCost, 4200)
+})
+
+test("negative stock query includes signed deal lines even without a shortage row", () => {
+  const query = readFileSync("lib/admin/negative-stock-query.ts", "utf8")
+  assert.match(query, /loadSoldDealLines/)
+  assert.match(query, /\.in\("deal_id", chunk\)/)
+  assert.doesNotMatch(query, /\.in\("deals\.stage"/)
+  assert.match(query, /status", "purchased"/)
+})
+
+test("package and deal id are the links; there is no actions column", () => {
+  const client = readFileSync(
+    "app/(admin)/admin/inventory/negative-stock/negative-stock-client.tsx",
+    "utf8",
+  )
+  assert.match(client, /adminPackagePath\(row\.packageId\)/)
+  assert.match(client, /adminDealPath\(row\.dealId\)/)
+  assert.doesNotMatch(client, /View deal/)
+  assert.doesNotMatch(client, /View product/)
+  assert.doesNotMatch(client, />Actions</)
 })
 
 test("separates historical reconciliation gaps from brokered shortages", () => {

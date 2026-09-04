@@ -1,4 +1,6 @@
-import type { CrmImportType } from "@/lib/crm/imports/salesforce-csv"
+import type { CrmImportType as SalesforceImportType } from "@/lib/crm/imports/salesforce-csv"
+
+export type CrmImportType = SalesforceImportType | "deal_ledger"
 
 export type CrmImportBatch = {
   id: string

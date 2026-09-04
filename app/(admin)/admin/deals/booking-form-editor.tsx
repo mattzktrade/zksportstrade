@@ -487,13 +487,13 @@ export function BookingFormEditor({
         <div className="shrink-0 border-t bg-slate-50 px-6 py-4">
           {canSend ? (
             <p className="mb-3 text-xs leading-5 text-amber-900">
-              Sending locks this snapshot, reserves stock for seven days, and emails the client. You can also
-              save without sending so the form stays in Ready to send until an admin emails it.
+              Sending locks this snapshot, reserves stock for seven days, and emails the client. Saving
+              keeps the form here until you send it, or send it for approval.
             </p>
           ) : (
             <p className="mb-3 text-xs leading-5 text-amber-900">
-              Saving does not email the client or reserve stock. Notify Ollie, Michel, and Matt when the form
-              is ready — an approved admin still has to send it.
+              Saving does not email the client or reserve stock. Send for approval when Ollie or Michel
+              should send it to the client.
             </p>
           )}
           <div className="flex flex-wrap gap-2">
@@ -524,7 +524,7 @@ export function BookingFormEditor({
                 onClick={() => edits && onNotify(edits)}
                 className="ml-auto h-11 rounded-md bg-[#010101] px-4 font-bold text-white disabled:opacity-50"
               >
-                {pending ? "Notifying…" : "Notify admins to send"}
+                {pending ? "Sending for approval…" : "Send for approval"}
               </button>
             ) : (
               <>

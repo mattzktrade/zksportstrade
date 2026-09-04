@@ -296,7 +296,7 @@ export function PackageAdminPanel({
   const netStock = Math.floor(
     linkedMembers.length > 0
       ? (linkedSoldRemaining ?? stockDisplay - soldDisplay)
-      : initial.canonical_availability?.net ?? calculatedSellable,
+      : initial.effective_net ?? calculatedSellable,
   )
   const ownedShortage = initial.canonical_availability
     ? Math.max(initial.canonical_availability.historicalShortage, -netStock, 0)
