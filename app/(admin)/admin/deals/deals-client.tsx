@@ -180,12 +180,15 @@ function stageTone(stage: DealStage): "green" | "amber" | "red" | "blue" | "purp
     case "ready_to_send":
       return "purple"
     case "booking_form":
+    case "awaiting_approval":
       return "amber"
     case "awaiting_payment":
       return "red"
     case "won":
       return "green"
     case "lost":
+      return "gray"
+    default:
       return "gray"
   }
 }
