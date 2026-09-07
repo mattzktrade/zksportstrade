@@ -55,7 +55,6 @@ import {
   ENQUIRY_PAGE_SIZE,
   ENQUIRY_STAGE_TABS,
   adminDealListPath,
-  adminEnquiryListPath,
   enquiryCrmStageFromDeal,
   enquiryInterestLabel,
   enquiryLastActivityAt,
@@ -70,7 +69,6 @@ import {
   enquiryTemperatureFromDeal,
   enquiryTemperatureLabel,
   enquiryTemperatureTone,
-  isDealBoardStage,
   isEnquiryCrmStage,
   isOpenEnquiry,
   relativeActivityTime,
@@ -1094,15 +1092,7 @@ export function EnquiriesClient({
           description="Log the client, at least one product, and notes. Stage defaults to New; won / paid skips the booking form."
           submitLabel="Create enquiry"
           onClose={() => setShowCreate(false)}
-          onCreated={(dealId, stage) => {
-            setShowCreate(false)
-            if (!dealId) return
-            if (stage && isDealBoardStage(stage)) {
-              router.push(adminDealPath(dealId))
-              return
-            }
-            router.push(adminEnquiryListPath(dealId))
-          }}
+          onCreated={() => setShowCreate(false)}
         />
       ) : null}
     </div>

@@ -21,6 +21,7 @@ import { type AccountKind } from "@/lib/crm/account-kinds"
 import { DEAL_SOURCE_LABELS, DEAL_SOURCES, type CrmAccountOption } from "@/lib/crm/deal-types"
 import { EnquirySelectableStageSelect } from "@/components/admin/enquiry-selectable-stage-select"
 import {
+  adminCreatedRecordPath,
   createdDealPipeline,
   enquirySelectableStageAllowsHold,
   inboundEnquirySource,
@@ -262,6 +263,7 @@ export function DealCreateModal({
         if (result.dealId) {
           onClose()
           onCreated?.(result.dealId, result.stage)
+          router.push(adminCreatedRecordPath(result.dealId, result.stage || createStage))
           router.refresh()
           return
         }
@@ -274,12 +276,18 @@ export function DealCreateModal({
       toast.success(result.message)
       onClose()
       onCreated?.(result.dealId, result.stage)
+      if (result.dealId) router.push(adminCreatedRecordPath(result.dealId, result.stage || createStage))
       router.refresh()
     })
   }
 
   return (
-    <AdminModalScrim onClose={onClose} zClassName="z-[80]" panelClassName="max-w-4xl overflow-hidden">
+    <AdminModalScrim
+      onClose={onClose}
+      closeOnBackdropClick={false}
+      zClassName="z-[80]"
+      panelClassName="max-w-4xl overflow-hidden"
+    >
       <div className="flex shrink-0 items-start justify-between px-4 pt-4 sm:px-6 sm:pt-6">
         <div>
           <h2 className="text-lg font-semibold">{title}</h2>

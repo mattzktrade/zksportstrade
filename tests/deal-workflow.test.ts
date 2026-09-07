@@ -5,9 +5,11 @@ import {
   canTransitionDeal,
   dealStageFromOperations,
   HAPPY_PATH_STAGES,
+  nextActionForDealStage,
 } from "../lib/crm/deal-workflow"
 import {
   canonicalDealStage,
+  DEAL_NEXT_ACTION_OPTIONS,
   DEAL_STAGE_LABELS,
   DEAL_STAGES,
   dealConfirmedOffPlatform,
@@ -18,6 +20,20 @@ import {
   dealStageIsUnsignedPipeline,
   dealStageReservesSellable,
 } from "../lib/crm/deal-types"
+
+test("changing a deal stage suggests a matching next action from the combobox list", () => {
+  assert.equal(nextActionForDealStage("awaiting_payment"), "Follow up payment")
+  assert.equal(nextActionForDealStage("paid_confirmed"), "Hand over to fulfilment")
+  assert.equal(nextActionForDealStage("in_fulfilment"), "Complete fulfilment")
+  assert.equal(nextActionForDealStage("fulfilled"), "No action — closed")
+  assert.equal(nextActionForDealStage("booking_form_sent"), "Chase client signature")
+  for (const stage of DEAL_STAGES) {
+    assert.ok(
+      (DEAL_NEXT_ACTION_OPTIONS as readonly string[]).includes(nextActionForDealStage(stage)),
+      `${stage} next action must be a selectable option`,
+    )
+  }
+})
 
 test("deal workflow allows jumping to any valid stage", () => {
   assert.equal(canTransitionDeal("draft", "proposal"), true)

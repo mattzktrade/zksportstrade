@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
-import { PDFDocument } from "pdf-lib"
+import { decodePDFRawStream, PDFDocument, PDFRawStream, StandardFonts } from "pdf-lib"
 import { generateBookingFormPdf } from "../lib/booking-forms/pdf"
 import {
   applyBookingFormEdits,
@@ -107,6 +107,42 @@ test("native booking form renderer creates a multi-page PDF", async () => {
   assert.ok(pdf.getPageCount() >= 4)
 })
 
+test("bill to is right-aligned with the seller address", async () => {
+  const bytes = await generateBookingFormPdf(
+    testSnapshot({
+      documentRef: "ZK-20260907-A7146F05",
+      billTo: {
+        accountId: "account-1",
+        accountName: "Sportfive UK Ltd",
+        contactId: "contact-1",
+        contactName: "Roisin McCarthy",
+        contactEmail: "roisin.mccarthy@sportfive.com",
+        addressLines: ["London", "United Kingdom"],
+      },
+    }),
+  )
+  const pdf = await PDFDocument.load(bytes)
+  const placements = firstPageTextPlacements(pdf)
+  const quote = placements.find((item) => item.text.startsWith("Quote No "))
+  const billTo = placements.find((item) => item.text === "BILL TO:")
+  const trn = placements.find((item) => item.text.startsWith("TRN "))
+  const london = placements.find((item) => item.text === "London")
+  assert.ok(quote)
+  assert.ok(billTo)
+  assert.ok(trn)
+  assert.ok(london)
+  assert.equal(billTo.y, quote.y)
+  assert.ok(billTo.x > 480)
+  assert.ok(london.x > 500)
+
+  const fonts = await PDFDocument.create()
+  const regular = await fonts.embedFont(StandardFonts.Helvetica)
+  const bold = await fonts.embedFont(StandardFonts.HelveticaBold)
+  const addressRight = trn.x + regular.widthOfTextAtSize(trn.text, 8)
+  const billRight = billTo.x + bold.widthOfTextAtSize("BILL TO:", 10)
+  assert.ok(Math.abs(addressRight - billRight) < 0.6)
+})
+
 test("booking form edits can rename parties, products and terms without changing locked ids", () => {
   const snapshot: BookingFormSnapshot = {
     schemaVersion: 1,
@@ -192,6 +228,27 @@ test("new accounts can omit postcode and booking forms still render the rest of 
   const xero = readFileSync("lib/integrations/xero/invoices.ts", "utf8")
   assert.match(xero, /PostalCode: postcode/)
 })
+
+function firstPageTextPlacements(pdf: PDFDocument): Array<{ x: number; y: number; text: string }> {
+  const contents = pdf.getPages()[0].node.Contents()
+  const refs =
+    contents && typeof contents === "object" && "array" in contents
+      ? (contents as { array: unknown[] }).array
+      : [contents]
+  let content = ""
+  for (const ref of refs) {
+    const raw = pdf.context.lookup(ref as never)
+    if (!(raw instanceof PDFRawStream)) continue
+    const decoded = decodePDFRawStream(raw)
+    const bytes = "decode" in decoded && typeof decoded.decode === "function" ? decoded.decode() : decoded
+    content += Buffer.from(bytes as Uint8Array).toString("latin1")
+  }
+  return [...content.matchAll(/1 0 0 1 ([0-9.]+) ([0-9.]+) Tm\s+<([0-9A-Fa-f]+)>/g)].map((match) => ({
+    x: Number(match[1]),
+    y: Number(match[2]),
+    text: Buffer.from(match[3], "hex").toString("latin1"),
+  }))
+}
 
 function testSnapshot(overrides: Partial<BookingFormSnapshot> = {}): BookingFormSnapshot {
   return {

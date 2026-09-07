@@ -9,6 +9,8 @@ import {
   ENQUIRY_SELECTABLE_STAGE_GROUPS,
   ENQUIRY_SKIPAHEAD_STAGES,
   ENQUIRY_STAGE_TABS,
+  adminCreatedRecordPath,
+  adminDealListPath,
   adminEnquiryListPath,
   adminPipelineHome,
   createdDealPipeline,
@@ -273,8 +275,13 @@ test("enquiry helpers describe interest, sourcing, and next action", () => {
     false,
   )
   assert.equal(adminEnquiryListPath("abc"), "/admin/enquiries?enquiry=abc")
+  assert.equal(adminDealListPath("abc"), "/admin/deals?deal=abc")
   assert.deepEqual(adminPipelineHome("proposal"), { href: "/admin/enquiries", label: "Enquiries" })
   assert.deepEqual(adminPipelineHome("signed"), { href: "/admin/deals", label: "Deals" })
+  assert.equal(adminCreatedRecordPath("abc", "new"), "/admin/enquiries?enquiry=abc")
+  assert.equal(adminCreatedRecordPath("abc", "draft"), "/admin/enquiries?enquiry=abc")
+  assert.equal(adminCreatedRecordPath("abc", "paid_confirmed"), "/admin/deals?deal=abc")
+  assert.equal(adminCreatedRecordPath("abc", "awaiting_booking_form_send"), "/admin/deals?deal=abc")
 })
 
 test("sales nav and deals list keep enquiries off the later pipeline", () => {
@@ -308,6 +315,11 @@ test("sales nav and deals list keep enquiries off the later pipeline", () => {
   assert.match(createModal, /Other options, dates, or anything they were not sure about/)
   assert.match(createModal, /EnquirySelectableStageSelect/)
   assert.match(createModal, /Defaults to New/)
+  assert.match(createModal, /adminCreatedRecordPath/)
+  assert.match(createModal, /closeOnBackdropClick=\{false\}/)
+  assert.match(dealsClient, /setWorkflowAction\(nextActionForDealStage\(stage\)\)/)
+  const dealDetail = readFileSync("app/(admin)/admin/deals/[dealId]/deal-detail-client.tsx", "utf8")
+  assert.match(dealDetail, /setWorkflowAction\(nextActionForDealStage\(stage\)\)/)
   const createAction = readFileSync("app/(admin)/actions.ts", "utf8")
   assert.match(createAction, /stage\?: string \| null/)
   assert.match(createAction, /admin_update_deal_workflow/)

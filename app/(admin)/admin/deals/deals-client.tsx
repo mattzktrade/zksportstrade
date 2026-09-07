@@ -52,7 +52,8 @@ import {
   type DealStage,
 } from "@/lib/crm/deal-types"
 import type { StaffOption } from "@/lib/crm/lead-types"
-import { adminEnquiryListPath, isDealBoardStage, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
+import { isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
+import { nextActionForDealStage } from "@/lib/crm/deal-workflow"
 import type { BookingFormAdminRow, BookingFormEventRow } from "@/lib/booking-forms/types"
 import { cn } from "@/lib/utils"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
@@ -236,37 +237,7 @@ function pipelineStageFor(stage: DealStage) {
 
 function actionRequired(deal: DealListRow): string {
   if (deal.next_action?.trim()) return deal.next_action
-  switch (deal.stage) {
-    case "draft":
-      return "Review enquiry and send price"
-    case "sourcing":
-      return "Confirm sourcing and price"
-    case "proposal":
-      return "Follow up price"
-    case "awaiting_booking_form_send":
-      return "Sent for approval — Ollie or Michel to send to the client"
-    case "booking_form_sent":
-    case "awaiting_client_signature":
-      return "Chase client signature"
-    case "awaiting_zk_signature":
-      return "ZK admin to approve and sign"
-    case "form_expired":
-      return "Booking form expired; send a new form or follow up"
-    case "signed":
-    case "awaiting_invoice":
-      return "Create and send invoice"
-    case "awaiting_payment":
-      return "Follow up payment"
-    case "paid_confirmed":
-      return "Hand over to fulfilment"
-    case "in_fulfilment":
-      return "Complete fulfilment"
-    case "fulfilled":
-      return "Complete"
-    case "closed_lost":
-    case "cancelled":
-      return "No action — closed"
-  }
+  return nextActionForDealStage(deal.stage)
 }
 
 export function DealsClient({
@@ -1009,7 +980,11 @@ export function DealsClient({
                       Stage
                       <select
                         value={workflowStage}
-                        onChange={(event) => setWorkflowStage(event.target.value as DealStage)}
+                        onChange={(event) => {
+                          const stage = event.target.value as DealStage
+                          setWorkflowStage(stage)
+                          setWorkflowAction(nextActionForDealStage(stage))
+                        }}
                         className="mt-1 h-9 w-full rounded-md border bg-white px-2 text-[9px] text-slate-800"
                       >
                         {DEAL_STAGES.map((stage) => (
@@ -1353,15 +1328,7 @@ export function DealsClient({
           description="New records start in Enquiries unless you pick a later deal stage such as won / paid, which skips the booking form."
           submitLabel="Create enquiry"
           onClose={() => setShowCreate(false)}
-          onCreated={(dealId, stage) => {
-            setShowCreate(false)
-            if (!dealId) return
-            if (stage && isDealBoardStage(stage)) {
-              router.push(adminDealPath(dealId))
-              return
-            }
-            router.push(adminEnquiryListPath(dealId))
-          }}
+          onCreated={() => setShowCreate(false)}
         />
       ) : null}
     </div>

@@ -133,20 +133,20 @@ export function SigningClient({
             </div>
           </div>
 
-          <div className="grid gap-8 px-8 pb-4 sm:px-10 md:grid-cols-2">
+          <div className="flex flex-wrap items-start justify-between gap-8 px-8 pb-4 sm:px-10">
             <div>
               <h1 className="text-2xl font-bold" style={{ color: BRAND_RED }}>
                 Quote N° {snapshot.documentRef}
               </h1>
               <p className="mt-3 text-sm">Date : {isoDate(snapshot.createdAt)}</p>
             </div>
-            <div className="md:text-right">
+            <div className="text-right">
               <div className="text-sm font-bold" style={{ color: BRAND_RED }}>
                 BILL TO:
               </div>
               <div className="mt-2 space-y-0.5 text-sm leading-6">
                 <div className="font-semibold">{snapshot.billTo.accountName}</div>
-                <div>{snapshot.billTo.contactName}</div>
+                <div className="font-semibold">{snapshot.billTo.contactName}</div>
                 <div>{snapshot.billTo.contactEmail}</div>
                 {snapshot.billTo.addressLines.map((line) => (
                   <div key={line}>{line}</div>

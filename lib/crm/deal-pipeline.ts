@@ -1,4 +1,3 @@
-import { adminDealPath } from "@/lib/admin/deal-link"
 import {
   canonicalDealStage,
   DEAL_STAGE_LABELS,
@@ -6,6 +5,7 @@ import {
   type DealListRow,
   type DealStage,
 } from "@/lib/crm/deal-types"
+import { nextActionForDealStage } from "@/lib/crm/deal-workflow"
 
 /** Pre-deal records: enquiry, sourcing, and price sent. Shown on Sales → Enquiries. */
 export const ENQUIRY_PIPELINE_STAGES = ["draft", "sourcing", "proposal"] as const satisfies readonly DealStage[]
@@ -101,26 +101,7 @@ export function enquirySelectableStageLabel(stage: EnquirySelectableStage | stri
 
 export function suggestedSelectableStageAction(stage: EnquirySelectableStage): string {
   if (isEnquiryCrmStage(stage)) return suggestedEnquiryAction(stage)
-  switch (stage) {
-    case "awaiting_booking_form_send":
-      return "Send booking form"
-    case "awaiting_client_signature":
-      return "Chase client signature"
-    case "awaiting_zk_signature":
-      return "ZK admin to approve and sign"
-    case "signed":
-    case "awaiting_invoice":
-      return "Create and send invoice"
-    case "awaiting_payment":
-      return "Follow up payment"
-    case "paid_confirmed":
-      return "Hand over to fulfilment"
-    case "in_fulfilment":
-      return "Complete fulfilment"
-    case "fulfilled":
-    case "cancelled":
-      return "No action — closed"
-  }
+  return nextActionForDealStage(stage)
 }
 
 export function enquirySelectableStageAllowsHold(stage: EnquirySelectableStage): boolean {
@@ -375,7 +356,17 @@ export function adminPipelineHome(stage: string): { href: string; label: string 
 }
 
 export function adminRecordWorkspacePath(dealId: string, stage: string): string {
-  return isEnquiryPipelineStage(stage) ? adminEnquiryListPath(dealId) : adminDealPath(dealId)
+  return isEnquiryPipelineStage(stage) ? adminEnquiryListPath(dealId) : adminDealListPath(dealId)
+}
+
+/** After create: Enquiries for enquiry stages, Deals for booking-form-onwards stages. */
+export function adminCreatedRecordPath(dealId: string, stage?: string | null): string {
+  const resolved = stage?.trim() || ""
+  if (resolved && (isEnquiryCrmStage(resolved) || isEnquiryPipelineStage(resolved))) {
+    return adminEnquiryListPath(dealId)
+  }
+  if (resolved && isDealBoardStage(resolved)) return adminDealListPath(dealId)
+  return adminEnquiryListPath(dealId)
 }
 
 export const ENQUIRY_CONVERT_STAGE: DealStage = "awaiting_booking_form_send"

@@ -123,11 +123,13 @@ const modalPanelClass =
 export function AdminModalScrim({
   children,
   onClose,
+  closeOnBackdropClick = true,
   zClassName = "z-[85]",
   panelClassName,
 }: {
   children: ReactNode
   onClose: () => void
+  closeOnBackdropClick?: boolean
   zClassName?: string
   panelClassName?: string
 }) {
@@ -145,7 +147,7 @@ export function AdminModalScrim({
           zClassName,
         )}
         {...escapeCloseProps}
-        onClick={onClose}
+        onClick={closeOnBackdropClick ? onClose : undefined}
       >
         <div className={cn(modalPanelClass, panelClassName)} onClick={stop}>
           {children}

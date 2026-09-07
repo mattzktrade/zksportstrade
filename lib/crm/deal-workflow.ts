@@ -1,4 +1,4 @@
-import { DEAL_STAGE_LABELS, DEAL_STAGES, type DealStage } from "@/lib/crm/deal-types"
+import { canonicalDealStage, DEAL_STAGES, type DealStage } from "@/lib/crm/deal-types"
 
 export const HAPPY_PATH_STAGES: readonly DealStage[] = [
   "draft",
@@ -32,10 +32,37 @@ function operationsDelivered(deliveryStatus: string, fulfilmentStatus?: string):
   )
 }
 
-export function nextActionForDealStage(stage: DealStage): string {
-  if (stage === "in_fulfilment") return "Complete fulfilment"
-  if (stage === "fulfilled") return "Complete"
-  return DEAL_STAGE_LABELS[stage]
+export function nextActionForDealStage(stage: DealStage | string): string {
+  switch (canonicalDealStage(String(stage))) {
+    case "draft":
+      return "Review enquiry and send price"
+    case "sourcing":
+      return "Confirm sourcing and price"
+    case "proposal":
+      return "Follow up price"
+    case "awaiting_booking_form_send":
+      return "Send booking form"
+    case "booking_form_sent":
+    case "awaiting_client_signature":
+      return "Chase client signature"
+    case "awaiting_zk_signature":
+      return "ZK admin to approve and sign"
+    case "form_expired":
+      return "Booking form expired; send a new form or follow up"
+    case "signed":
+    case "awaiting_invoice":
+      return "Create and send invoice"
+    case "awaiting_payment":
+      return "Follow up payment"
+    case "paid_confirmed":
+      return "Hand over to fulfilment"
+    case "in_fulfilment":
+      return "Complete fulfilment"
+    case "fulfilled":
+    case "closed_lost":
+    case "cancelled":
+      return "No action — closed"
+  }
 }
 
 /**

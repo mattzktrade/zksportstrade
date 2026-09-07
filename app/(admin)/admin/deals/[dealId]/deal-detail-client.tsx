@@ -14,6 +14,7 @@ import { AdminModalScrim } from "@/components/admin/admin-list-preview"
 import type { DealBasketSupplier } from "@/components/admin/deal-line-basket"
 import { DEAL_NEXT_ACTION_OPTIONS, DEAL_SOURCE_LABELS, DEAL_SOURCES, DEAL_STAGES, DEAL_STAGE_LABELS, canonicalDealStage, dealConfirmedOffPlatform, dealSourceLabel, dealSourceTone, friendlyDealActivitySummary, type CrmAccountOption, type DealPackageOption, type DealStage } from "@/lib/crm/deal-types"
 import { adminPipelineHome, enquiryStageLabel, enquiryStageTone, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
+import { nextActionForDealStage } from "@/lib/crm/deal-workflow"
 import type { DealAddressDraft, DealDetailPageData, DealFulfilmentClient } from "@/lib/crm/deal-detail"
 import type { StaffOption } from "@/lib/crm/lead-types"
 import { formatMoney } from "@/lib/format/money"
@@ -1041,7 +1042,11 @@ export function DealDetailClient({
                   Stage
                   <select
                     value={workflowStage}
-                    onChange={(event) => setWorkflowStage(event.target.value as DealStage)}
+                    onChange={(event) => {
+                      const stage = event.target.value as DealStage
+                      setWorkflowStage(stage)
+                      setWorkflowAction(nextActionForDealStage(stage))
+                    }}
                     className="mt-1 h-9 w-full rounded-md border bg-white px-2 text-[10px]"
                   >
                     {DEAL_STAGES.map((stage) => (

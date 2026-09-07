@@ -173,6 +173,25 @@ function drawRight(
   })
 }
 
+function drawRightWrapped(
+  page: PDFPage,
+  text: string,
+  y: number,
+  font: PDFFont,
+  size: number,
+  color: ReturnType<typeof rgb>,
+  maxWidth: number,
+  lineHeight: number,
+): number {
+  const lines = wrap(text, font, size, maxWidth)
+  let currentY = y
+  for (const line of lines) {
+    drawRight(page, line, currentY, font, size, color)
+    currentY -= lineHeight
+  }
+  return currentY
+}
+
 async function embedBrandLogo(pdf: PDFDocument): Promise<PDFImage | null> {
   try {
     const bytes = await readFile(join(process.cwd(), "public", "images", "image.png"))
@@ -194,7 +213,7 @@ async function embedSignature(
   }
 }
 
-function drawLetterhead(writer: Writer, snapshot: BookingFormSnapshot, logo: PDFImage | null) {
+function drawLetterhead(writer: Writer, snapshot: BookingFormSnapshot, logo: PDFImage | null): number {
   const top = writer.y
   let logoBottom = top
   if (logo) {
@@ -228,17 +247,19 @@ function drawLetterhead(writer: Writer, snapshot: BookingFormSnapshot, logo: PDF
   }
 
   writer.y = Math.min(logoBottom, addressY) - 28
+  const quoteY = writer.y
   writer.page.drawText(`Quote No ${safeText(snapshot.documentRef)}`, {
     x: MARGIN,
-    y: writer.y,
+    y: quoteY,
     size: 16,
     font: writer.bold,
     color: RED,
   })
   writer.y -= 28
+  return quoteY
 }
 
-function drawDateAndBillTo(writer: Writer, snapshot: BookingFormSnapshot) {
+function drawDateAndBillTo(writer: Writer, snapshot: BookingFormSnapshot, quoteY: number) {
   const dateLabel = `Date : ${isoDate(snapshot.createdAt)}`
   writer.page.drawText(dateLabel, {
     x: MARGIN,
@@ -248,34 +269,37 @@ function drawDateAndBillTo(writer: Writer, snapshot: BookingFormSnapshot) {
     color: BLACK,
   })
 
-  const billLines = [
-    snapshot.billTo.accountName,
-    snapshot.billTo.contactName,
-    snapshot.billTo.contactEmail,
-    ...snapshot.billTo.addressLines,
-  ].map(safeText)
-  const billX = 330
-  const billWidth = A4[0] - MARGIN - billX
-  writer.page.drawText("BILL TO:", {
-    x: billX,
-    y: writer.y,
-    size: 10,
-    font: writer.bold,
-    color: RED,
-  })
-  let billY = writer.y - 16
-  for (const line of billLines) {
-    const wrapped = wrap(line, writer.regular, 9, billWidth)
-    for (const part of wrapped) {
-      writer.page.drawText(part, {
-        x: billX,
-        y: billY,
-        size: 9,
-        font: writer.regular,
-        color: BLACK,
-      })
-      billY -= 13
-    }
+  const quoteLabel = `Quote No ${safeText(snapshot.documentRef)}`
+  const quoteWidth = writer.bold.widthOfTextAtSize(quoteLabel, 16)
+  const billMaxWidth = Math.max(140, A4[0] - MARGIN * 2 - quoteWidth - 24)
+  const billEntries: Array<{ text: string; font: PDFFont; size: number; color: ReturnType<typeof rgb>; lineHeight: number }> = [
+    { text: "BILL TO:", font: writer.bold, size: 10, color: RED, lineHeight: 16 },
+    { text: snapshot.billTo.accountName, font: writer.bold, size: 9, color: BLACK, lineHeight: 13 },
+    { text: snapshot.billTo.contactName, font: writer.bold, size: 9, color: BLACK, lineHeight: 13 },
+    { text: snapshot.billTo.contactEmail, font: writer.regular, size: 9, color: BLACK, lineHeight: 13 },
+    ...snapshot.billTo.addressLines.map((line) => ({
+      text: line,
+      font: writer.regular,
+      size: 9,
+      color: BLACK,
+      lineHeight: 13,
+    })),
+  ]
+
+  let billY = quoteY
+  for (const entry of billEntries) {
+    const text = safeText(entry.text).trim()
+    if (!text) continue
+    billY = drawRightWrapped(
+      writer.page,
+      text,
+      billY,
+      entry.font,
+      entry.size,
+      entry.color,
+      billMaxWidth,
+      entry.lineHeight,
+    )
   }
   writer.y = Math.min(writer.y - 32, billY) - 28
 }
@@ -583,8 +607,8 @@ export async function generateBookingFormPdf(
     embedBrandLogo(pdf),
   ])
 
-  drawLetterhead(writer, snapshot, logo)
-  drawDateAndBillTo(writer, snapshot)
+  const quoteY = drawLetterhead(writer, snapshot, logo)
+  drawDateAndBillTo(writer, snapshot, quoteY)
   drawCenteredTitle(writer, snapshot.deal.title)
   drawProductTable(writer, snapshot)
   drawTotals(writer, snapshot)
