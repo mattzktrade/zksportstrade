@@ -425,7 +425,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           "Sales can send it for approval so Ollie and Michel are emailed. That moves the enquiry onto Deals. Only an admin can send it to the client — that send also moves it to Deals and holds stock for 7 days.",
           "The client signs first. Then an admin or finance countersigns.",
           "When both have signed, the order is created and the Xero invoice is sent. You do not raise the invoice by hand.",
-          "If they have not signed after 7 days, the form expires and held stock is released. You can void a form earlier if the deal is off.",
+          "If they have not signed after 7 days, the form expires, held stock is released, and the deal moves to Form Expired on Deals. You can void a form earlier if the deal is off.",
         ],
       },
       {
@@ -435,6 +435,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           "Enquiries — New, quoting / sourcing, and price sent.",
           "Ready to send — sent for approval, waiting for an admin to email the client.",
           "Booking form — form sent, waiting for the client or for ZK to sign.",
+          "Form Expired — the unsigned form timed out. Send a new form or follow up; it does not go back to Enquiries.",
           "Awaiting payment — signed (or invoiced), money not in yet.",
           "Won — paid.",
           "Lost — closed lost or cancelled.",
@@ -675,7 +676,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             q: "The client has not signed.",
-            a: "If the form is still in Ready to send, it was sent for approval and an admin still needs to email it. If it has already gone out, ask an admin to resend it. After 7 days the form expires and held stock comes back. You can void it sooner if the deal is dead.",
+            a: "If the form is still in Ready to send, it was sent for approval and an admin still needs to email it. If it has already gone out, ask an admin to resend it. After 7 days the form expires, held stock comes back, and the deal stays on Deals under Form Expired. You can void it sooner if the deal is dead.",
           },
           {
             q: "How do I make a brochure for a product?",

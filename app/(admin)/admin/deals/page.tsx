@@ -18,6 +18,7 @@ export const dynamic = "force-dynamic"
 const DEAL_BOARD_FILTERS = [
   "ready_to_send",
   "booking_form",
+  "form_expired",
   "awaiting_approval",
   "awaiting_payment",
   "won",

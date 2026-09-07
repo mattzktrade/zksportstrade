@@ -31,6 +31,7 @@ function line(overrides: Partial<DemandPlanningLine>): DemandPlanningLine {
 test("demand outcomes split open, converted, won, and lost", () => {
   assert.equal(demandDealOutcome({ stage: "draft", enquiryStage: "price_sent" }), "open")
   assert.equal(demandDealOutcome({ stage: "awaiting_booking_form_send", enquiryStage: "price_sent" }), "converted")
+  assert.equal(demandDealOutcome({ stage: "form_expired", enquiryStage: "price_sent" }), "converted")
   assert.equal(demandDealOutcome({ stage: "paid_confirmed", enquiryStage: "price_sent" }), "won")
   assert.equal(demandDealOutcome({ stage: "proposal", enquiryStage: "not_interested" }), "lost")
   assert.equal(demandDealOutcome({ stage: "closed_lost", enquiryStage: "follow_up" }), "lost")

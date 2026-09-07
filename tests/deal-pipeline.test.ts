@@ -6,9 +6,12 @@ import {
   ENQUIRY_CONVERT_STAGE,
   ENQUIRY_CRM_STAGES,
   ENQUIRY_PIPELINE_STAGES,
+  ENQUIRY_SELECTABLE_STAGE_GROUPS,
+  ENQUIRY_SKIPAHEAD_STAGES,
   ENQUIRY_STAGE_TABS,
   adminEnquiryListPath,
   adminPipelineHome,
+  createdDealPipeline,
   defaultEnquiryAction,
   enquiryCrmStageFromDeal,
   enquiryDealStage,
@@ -16,14 +19,19 @@ import {
   enquiryLineAvailability,
   enquiryNeedsSourcing,
   enquiryNotesPreview,
+  enquirySelectableStageAllowsHold,
+  enquirySelectableStageLabel,
   enquiryStageLabel,
   enquiryTemperatureFromDeal,
   isDealBoardStage,
   isEnquiryPipelineStage,
+  isEnquirySelectableStage,
+  isEnquirySkipaheadStage,
   isOpenEnquiry,
   nextEnquiryCrmStage,
   resolvedEnquiryTemperature,
   suggestedEnquiryAction,
+  suggestedSelectableStageAction,
   enquiryAttentionReason,
   enquiryNeedsAttention,
 } from "../lib/crm/deal-pipeline"
@@ -37,6 +45,8 @@ test("enquiry stages stay off the deals board", () => {
   assert.equal(isDealBoardStage("awaiting_booking_form_send"), true)
   assert.equal(isDealBoardStage("signed"), true)
   assert.equal(isDealBoardStage("closed_lost"), true)
+  assert.equal(isDealBoardStage("form_expired"), true)
+  assert.equal(isEnquiryPipelineStage("form_expired"), false)
   assert.equal(isEnquiryPipelineStage("booking_form_sent"), false)
 })
 
@@ -71,6 +81,56 @@ test("enquiry CRM stages cover the sales progression without using closed lost",
   assert.notEqual(enquiryDealStage("not_interested", "proposal"), "closed_lost")
   assert.equal(enquiryDealStage("follow_up"), "proposal")
   assert.equal(ENQUIRY_CONVERT_STAGE, "awaiting_booking_form_send")
+})
+
+test("staff can start or jump an enquiry to later deal stages including won/paid", () => {
+  assert.ok(ENQUIRY_SKIPAHEAD_STAGES.includes("paid_confirmed"))
+  assert.ok(ENQUIRY_SKIPAHEAD_STAGES.includes("signed"))
+  assert.ok(ENQUIRY_SKIPAHEAD_STAGES.includes("awaiting_booking_form_send"))
+  assert.equal(isEnquirySkipaheadStage("closed_lost"), false)
+  assert.equal(isEnquirySelectableStage("paid_confirmed"), true)
+  assert.equal(isEnquirySkipaheadStage("paid_confirmed"), true)
+  assert.equal(isEnquirySkipaheadStage("new"), false)
+  assert.equal(enquirySelectableStageLabel("paid_confirmed"), "Won / Paid confirmed")
+  assert.equal(suggestedSelectableStageAction("paid_confirmed"), "Hand over to fulfilment")
+  assert.equal(enquirySelectableStageAllowsHold("new"), true)
+  assert.equal(enquirySelectableStageAllowsHold("awaiting_booking_form_send"), true)
+  assert.equal(enquirySelectableStageAllowsHold("paid_confirmed"), false)
+  assert.equal(enquirySelectableStageAllowsHold("signed"), false)
+  assert.deepEqual(
+    ENQUIRY_SELECTABLE_STAGE_GROUPS.map((group) => group.label),
+    ["Enquiry", "Deal — skip booking form"],
+  )
+  assert.deepEqual(createdDealPipeline({}), {
+    selectableStage: "new",
+    enquiryStage: "new",
+    dealStage: "draft",
+    reserve: false,
+  })
+  assert.deepEqual(createdDealPipeline({ reserve: true }), {
+    selectableStage: "price_sent",
+    enquiryStage: "price_sent",
+    dealStage: "proposal",
+    reserve: true,
+  })
+  assert.deepEqual(createdDealPipeline({ stage: "contacted" }), {
+    selectableStage: "contacted",
+    enquiryStage: "contacted",
+    dealStage: "draft",
+    reserve: false,
+  })
+  assert.deepEqual(createdDealPipeline({ stage: "paid_confirmed", reserve: true }), {
+    selectableStage: "paid_confirmed",
+    enquiryStage: "new",
+    dealStage: "paid_confirmed",
+    reserve: false,
+  })
+  assert.deepEqual(createdDealPipeline({ stage: "awaiting_booking_form_send", reserve: true }), {
+    selectableStage: "awaiting_booking_form_send",
+    enquiryStage: "price_sent",
+    dealStage: "awaiting_booking_form_send",
+    reserve: true,
+  })
 })
 
 test("cold outreach warms when they respond, inbound stays warm", () => {
@@ -136,6 +196,8 @@ test("advance skips sourcing when stock is already owned", () => {
 test("deals board columns start at ready to send", () => {
   assert.equal(DEAL_BOARD_COLUMNS[0]?.id, "ready_to_send")
   assert.ok(DEAL_BOARD_COLUMNS[0]?.stages.includes("awaiting_booking_form_send"))
+  assert.ok(DEAL_BOARD_COLUMNS.some((column) => column.id === "form_expired"))
+  assert.ok(DEAL_BOARD_COLUMNS.some((column) => column.stages.includes("form_expired")))
   assert.ok(!DEAL_BOARD_COLUMNS.some((column) => column.stages.includes("draft")))
   assert.ok(!DEAL_BOARD_COLUMNS.some((column) => column.stages.includes("proposal")))
 })
@@ -221,6 +283,8 @@ test("sales nav and deals list keep enquiries off the later pipeline", () => {
   assert.match(layout, /href: "\/admin\/enquiries"/)
   const dealsClient = readFileSync("app/(admin)/admin/deals/deals-client.tsx", "utf8")
   assert.match(dealsClient, /id: "ready_to_send"/)
+  assert.match(dealsClient, /id: "form_expired"/)
+  assert.match(dealsClient, /Form Expired/)
   assert.doesNotMatch(dealsClient, /id: "new_enquiry"/)
   const enquiriesPage = readFileSync("app/(admin)/admin/enquiries/page.tsx", "utf8")
   assert.match(enquiriesPage, /isEnquiryPipelineStage/)
@@ -234,11 +298,20 @@ test("sales nav and deals list keep enquiries off the later pipeline", () => {
   assert.match(enquiriesClient, /onMovedToDeals/)
   assert.match(enquiriesClient, /kpiFilter === "attention"/)
   assert.match(enquiriesClient, /No owner, or the next step is overdue/)
+  assert.match(enquiriesClient, /EnquirySelectableStageSelect/)
+  assert.match(enquiriesClient, /skip the booking form/)
+  assert.match(enquiriesClient, /updateNativeDealWorkflow/)
   assert.doesNotMatch(enquiriesClient, /Advance stage/)
   assert.doesNotMatch(enquiriesClient, /Convert to Deal/)
   assert.doesNotMatch(enquiriesClient, /Tick several rows/)
   const createModal = readFileSync("components/admin/deal-create-modal.tsx", "utf8")
   assert.match(createModal, /Other options, dates, or anything they were not sure about/)
+  assert.match(createModal, /EnquirySelectableStageSelect/)
+  assert.match(createModal, /Defaults to New/)
+  const createAction = readFileSync("app/(admin)/actions.ts", "utf8")
+  assert.match(createAction, /stage\?: string \| null/)
+  assert.match(createAction, /admin_update_deal_workflow/)
+  assert.match(createAction, /createdDealPipeline/)
   const migration = readFileSync(
     "supabase/migrations/20260904140000_enquiry_stage_and_temperature.sql",
     "utf8",

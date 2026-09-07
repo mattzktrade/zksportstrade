@@ -40,6 +40,12 @@ test("open deals can close and closed deals can be reopened", () => {
 test("deal stage labels match the sales pipeline language", () => {
   assert.equal(DEAL_STAGE_LABELS.proposal, "Price sent")
   assert.equal(DEAL_STAGE_LABELS.awaiting_booking_form_send, "Ready to send")
+  assert.equal(DEAL_STAGE_LABELS.form_expired, "Form Expired")
+  assert.ok(DEAL_STAGES.includes("form_expired"))
+  assert.equal(dealStageIsUnsignedPipeline("form_expired"), true)
+  assert.equal(dealStageCountsAsSold("form_expired"), false)
+  assert.equal(canTransitionDeal("awaiting_client_signature", "form_expired"), true)
+  assert.equal(canTransitionDeal("form_expired", "awaiting_booking_form_send"), true)
   assert.equal(DEAL_STAGE_LABELS.booking_form_sent, "Awaiting client signature")
   assert.equal(DEAL_STAGE_LABELS.awaiting_client_signature, "Awaiting client signature")
   assert.equal(DEAL_STAGES.includes("booking_form_sent"), false)

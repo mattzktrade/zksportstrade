@@ -89,6 +89,7 @@ function formatDay(iso: string | null): string {
 function stageTone(stage: DealStage): "green" | "amber" | "red" | "blue" | "gray" {
   if (["paid_confirmed", "in_fulfilment", "fulfilled"].includes(stage)) return "green"
   if (["closed_lost", "cancelled"].includes(stage)) return "red"
+  if (stage === "form_expired") return "amber"
   if (["awaiting_payment", "awaiting_client_signature", "awaiting_zk_signature", "awaiting_booking_form_send"].includes(stage)) {
     return "amber"
   }

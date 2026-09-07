@@ -21,9 +21,10 @@ import {
   X,
 } from "lucide-react"
 import { toast } from "sonner"
-import { updateEnquiryPipeline, updateEnquiryPipelineBulk } from "@/app/(admin)/actions"
+import { updateEnquiryPipeline, updateEnquiryPipelineBulk, updateNativeDealWorkflow } from "@/app/(admin)/actions"
 import { addDealNote, updateEnquiryNotes } from "@/app/(admin)/admin/deals/deal-edit-actions"
 import { DealCreateModal } from "@/components/admin/deal-create-modal"
+import { EnquirySelectableStageSelect } from "@/components/admin/enquiry-selectable-stage-select"
 import { EventFilter, uniqueEventFilterOptions } from "@/components/admin/event-filter"
 import {
   AdminMobileList,
@@ -63,15 +64,20 @@ import {
   enquiryAttentionReason,
   enquiryNeedsSourcing,
   enquiryNotesPreview,
+  enquirySelectableStageLabel,
   enquiryStageLabel,
   enquiryStageTone,
   enquiryTemperatureFromDeal,
   enquiryTemperatureLabel,
   enquiryTemperatureTone,
+  isDealBoardStage,
+  isEnquiryCrmStage,
   isOpenEnquiry,
   relativeActivityTime,
   suggestedEnquiryAction,
+  suggestedSelectableStageAction,
   type EnquiryCrmStage,
+  type EnquirySelectableStage,
   type EnquiryStageTabId,
   type EnquiryTemperature,
 } from "@/lib/crm/deal-pipeline"
@@ -230,7 +236,7 @@ export function EnquiriesClient({
   })
   const previewRef = useRef<HTMLElement>(null)
   const [showCreate, setShowCreate] = useState(false)
-  const [workflowStage, setWorkflowStage] = useState<EnquiryCrmStage>("new")
+  const [workflowStage, setWorkflowStage] = useState<EnquirySelectableStage>("new")
   const [showLogNote, setShowLogNote] = useState(false)
   const [logNote, setLogNote] = useState("")
   const [notesDraft, setNotesDraft] = useState("")
@@ -378,15 +384,32 @@ export function EnquiriesClient({
     })
   }
 
-  function saveStage(stage: EnquiryCrmStage) {
+  function saveStage(stage: EnquirySelectableStage) {
     if (!selected) return
     startTransition(async () => {
-      const result = await updateEnquiryPipeline({
+      if (isEnquiryCrmStage(stage)) {
+        const result = await updateEnquiryPipeline({
+          dealId: selected.id,
+          enquiryStage: stage,
+          enquiryTemperature: enquiryTemperatureFromDeal(selected),
+          ownerProfileId: selected.owner_profile_id,
+          nextAction: suggestedSelectableStageAction(stage),
+          nextActionDueAt: selected.next_action_due_at,
+        })
+        if (!result.ok) {
+          toast.error(result.message)
+          setWorkflowStage(enquiryCrmStageFromDeal(selected))
+          return
+        }
+        toast.success(result.message)
+        router.refresh()
+        return
+      }
+      const result = await updateNativeDealWorkflow({
         dealId: selected.id,
-        enquiryStage: stage,
-        enquiryTemperature: enquiryTemperatureFromDeal(selected),
+        stage,
         ownerProfileId: selected.owner_profile_id,
-        nextAction: suggestedEnquiryAction(stage),
+        nextAction: suggestedSelectableStageAction(stage),
         nextActionDueAt: selected.next_action_due_at,
       })
       if (!result.ok) {
@@ -394,8 +417,8 @@ export function EnquiriesClient({
         setWorkflowStage(enquiryCrmStageFromDeal(selected))
         return
       }
-      toast.success(result.message)
-      router.refresh()
+      toast.success(`Moved to Deals as ${enquirySelectableStageLabel(stage)}.`)
+      router.push(adminDealPath(selected.id))
     })
   }
 
@@ -461,7 +484,7 @@ export function EnquiriesClient({
   const rangeStart = filtered.length === 0 ? 0 : (currentPage - 1) * ENQUIRY_PAGE_SIZE + 1
   const rangeEnd = Math.min(filtered.length, currentPage * ENQUIRY_PAGE_SIZE)
   const notesDirty = (selected?.notes ?? "") !== notesDraft
-  const nextStep = selected ? suggestedEnquiryAction(workflowStage) : ""
+  const nextStep = selected ? suggestedSelectableStageAction(workflowStage) : ""
 
   return (
     <div className="space-y-3">
@@ -972,21 +995,18 @@ export function EnquiriesClient({
                 {currentCanManageDeals ? (
                   <div className="rounded-lg border border-slate-200 p-3">
                     <h3 className="text-[9px] font-semibold text-slate-800">Stage</h3>
-                    <p className="mt-0.5 text-[8px] text-slate-500">Changing this saves straight away and sets the next step.</p>
-                    <select
+                    <p className="mt-0.5 text-[8px] text-slate-500">
+                      Changing this saves straight away. Won / paid and later deal stages skip the booking form and move the record to Deals.
+                    </p>
+                    <EnquirySelectableStageSelect
                       value={workflowStage}
                       disabled={pending}
-                      onChange={(event) => {
-                        const stage = event.target.value as EnquiryCrmStage
+                      onChange={(stage) => {
                         setWorkflowStage(stage)
                         saveStage(stage)
                       }}
                       className="mt-2 h-10 w-full rounded-md border bg-white px-2 text-[9px]"
-                    >
-                      {ENQUIRY_CRM_STAGES.map((stage) => (
-                        <option key={stage} value={stage}>{ENQUIRY_CRM_STAGE_LABELS[stage]}</option>
-                      ))}
-                    </select>
+                    />
                     <p className="mt-2 text-[10px] font-medium text-slate-800">Next: {nextStep}</p>
                   </div>
                 ) : (
@@ -1071,12 +1091,17 @@ export function EnquiriesClient({
           products={packageOptions}
           suppliers={supplierOptions}
           title="Create new enquiry"
-          description="Log the client, at least one product, and notes for any other options they asked about."
+          description="Log the client, at least one product, and notes. Stage defaults to New; won / paid skips the booking form."
           submitLabel="Create enquiry"
           onClose={() => setShowCreate(false)}
-          onCreated={(dealId) => {
+          onCreated={(dealId, stage) => {
             setShowCreate(false)
-            if (dealId) router.push(adminEnquiryListPath(dealId))
+            if (!dealId) return
+            if (stage && isDealBoardStage(stage)) {
+              router.push(adminDealPath(dealId))
+              return
+            }
+            router.push(adminEnquiryListPath(dealId))
           }}
         />
       ) : null}

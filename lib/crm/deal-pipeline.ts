@@ -1,6 +1,8 @@
 import { adminDealPath } from "@/lib/admin/deal-link"
 import {
   canonicalDealStage,
+  DEAL_STAGE_LABELS,
+  dealStageHoldsPurchasedStock,
   type DealListRow,
   type DealStage,
 } from "@/lib/crm/deal-types"
@@ -14,6 +16,7 @@ export const DEAL_BOARD_STAGES = [
   "booking_form_sent",
   "awaiting_client_signature",
   "awaiting_zk_signature",
+  "form_expired",
   "signed",
   "awaiting_invoice",
   "awaiting_payment",
@@ -55,6 +58,106 @@ export const ENQUIRY_CRM_STAGE_LABELS: Record<EnquiryCrmStage, string> = {
 
 export function isEnquiryCrmStage(value: string | null | undefined): value is EnquiryCrmStage {
   return typeof value === "string" && (ENQUIRY_CRM_STAGES as readonly string[]).includes(value)
+}
+
+/** Deal-board stages staff can pick from Enquiries to skip the booking form. */
+export const ENQUIRY_SKIPAHEAD_STAGES = [
+  "awaiting_booking_form_send",
+  "awaiting_client_signature",
+  "awaiting_zk_signature",
+  "signed",
+  "awaiting_invoice",
+  "awaiting_payment",
+  "paid_confirmed",
+  "in_fulfilment",
+  "fulfilled",
+  "cancelled",
+] as const satisfies readonly DealStage[]
+
+export type EnquirySkipaheadStage = (typeof ENQUIRY_SKIPAHEAD_STAGES)[number]
+export type EnquirySelectableStage = EnquiryCrmStage | EnquirySkipaheadStage
+
+export const ENQUIRY_SELECTABLE_STAGE_GROUPS: ReadonlyArray<{
+  label: string
+  stages: readonly EnquirySelectableStage[]
+}> = [
+  { label: "Enquiry", stages: ENQUIRY_CRM_STAGES },
+  { label: "Deal — skip booking form", stages: ENQUIRY_SKIPAHEAD_STAGES },
+]
+
+export function isEnquirySkipaheadStage(value: string | null | undefined): value is EnquirySkipaheadStage {
+  return typeof value === "string" && (ENQUIRY_SKIPAHEAD_STAGES as readonly string[]).includes(value)
+}
+
+export function isEnquirySelectableStage(value: string | null | undefined): value is EnquirySelectableStage {
+  return isEnquiryCrmStage(value) || isEnquirySkipaheadStage(value)
+}
+
+export function enquirySelectableStageLabel(stage: EnquirySelectableStage | string): string {
+  if (isEnquiryCrmStage(stage)) return ENQUIRY_CRM_STAGE_LABELS[stage]
+  if (isEnquirySkipaheadStage(stage)) return DEAL_STAGE_LABELS[stage]
+  return stage
+}
+
+export function suggestedSelectableStageAction(stage: EnquirySelectableStage): string {
+  if (isEnquiryCrmStage(stage)) return suggestedEnquiryAction(stage)
+  switch (stage) {
+    case "awaiting_booking_form_send":
+      return "Send booking form"
+    case "awaiting_client_signature":
+      return "Chase client signature"
+    case "awaiting_zk_signature":
+      return "ZK admin to approve and sign"
+    case "signed":
+    case "awaiting_invoice":
+      return "Create and send invoice"
+    case "awaiting_payment":
+      return "Follow up payment"
+    case "paid_confirmed":
+      return "Hand over to fulfilment"
+    case "in_fulfilment":
+      return "Complete fulfilment"
+    case "fulfilled":
+    case "cancelled":
+      return "No action — closed"
+  }
+}
+
+export function enquirySelectableStageAllowsHold(stage: EnquirySelectableStage): boolean {
+  return !isEnquirySkipaheadStage(stage) || (!dealStageHoldsPurchasedStock(stage) && stage !== "cancelled")
+}
+
+export function createdDealPipeline(input: {
+  stage?: string | null
+  reserve?: boolean
+}): {
+  selectableStage: EnquirySelectableStage
+  enquiryStage: EnquiryCrmStage
+  dealStage: DealStage
+  reserve: boolean
+} {
+  const requested = input.stage?.trim() || ""
+  let selectable: EnquirySelectableStage = isEnquirySelectableStage(requested)
+    ? requested
+    : input.reserve
+      ? "price_sent"
+      : "new"
+  if (selectable === "new" && input.reserve) selectable = "price_sent"
+  const reserve = Boolean(input.reserve) && enquirySelectableStageAllowsHold(selectable)
+  if (isEnquirySkipaheadStage(selectable)) {
+    return {
+      selectableStage: selectable,
+      enquiryStage: reserve ? "price_sent" : "new",
+      dealStage: selectable,
+      reserve,
+    }
+  }
+  return {
+    selectableStage: selectable,
+    enquiryStage: selectable,
+    dealStage: enquiryDealStage(selectable),
+    reserve,
+  }
 }
 
 export function isEnquiryTemperature(value: string | null | undefined): value is EnquiryTemperature {
@@ -200,6 +303,7 @@ export const ENQUIRY_STAGE_TABS: ReadonlyArray<{
 export type DealBoardPipelineId =
   | "ready_to_send"
   | "booking_form"
+  | "form_expired"
   | "awaiting_payment"
   | "won"
   | "lost"
@@ -221,6 +325,12 @@ export const DEAL_BOARD_COLUMNS: ReadonlyArray<{
     label: "Booking form",
     stages: ["booking_form_sent", "awaiting_client_signature", "awaiting_zk_signature"],
     colour: "border-amber-500",
+  },
+  {
+    id: "form_expired",
+    label: "Form Expired",
+    stages: ["form_expired"],
+    colour: "border-orange-500",
   },
   {
     id: "awaiting_payment",

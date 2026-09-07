@@ -19,7 +19,14 @@ import {
 } from "@/components/admin/deal-line-basket"
 import { type AccountKind } from "@/lib/crm/account-kinds"
 import { DEAL_SOURCE_LABELS, DEAL_SOURCES, type CrmAccountOption } from "@/lib/crm/deal-types"
-import { inboundEnquirySource, type EnquiryTemperature } from "@/lib/crm/deal-pipeline"
+import { EnquirySelectableStageSelect } from "@/components/admin/enquiry-selectable-stage-select"
+import {
+  createdDealPipeline,
+  enquirySelectableStageAllowsHold,
+  inboundEnquirySource,
+  type EnquirySelectableStage,
+  type EnquiryTemperature,
+} from "@/lib/crm/deal-pipeline"
 import { formatMoneyCompact } from "@/lib/format/money"
 import { cn } from "@/lib/utils"
 
@@ -39,7 +46,7 @@ export function DealCreateModal({
   title?: string
   description?: string
   submitLabel?: string
-  onCreated?: (dealId?: string) => void
+  onCreated?: (dealId?: string, stage?: string) => void
   onClose: () => void
 }) {
   const router = useRouter()
@@ -63,7 +70,9 @@ export function DealCreateModal({
   const [notes, setNotes] = useState("")
   const [createSource, setCreateSource] = useState("offline")
   const [enquiryTemperature, setEnquiryTemperature] = useState<EnquiryTemperature>("warm")
+  const [createStage, setCreateStage] = useState<EnquirySelectableStage>("new")
   const [reserve, setReserve] = useState(false)
+  const holdAllowed = enquirySelectableStageAllowsHold(createStage)
 
   const clientAccounts = useMemo(() => {
     const byId = new Map(accountOptions.map((account) => [account.id, account]))
@@ -243,12 +252,19 @@ export function DealCreateModal({
           supplierQuoteAt: line.supplierQuoteAt || null,
         })),
         notes,
-        reserve,
+        reserve: createdDealPipeline({ stage: createStage, reserve }).reserve,
+        stage: createStage,
         source: createSource,
         enquiryTemperature: inboundEnquirySource(createSource) ? "warm" : enquiryTemperature,
       })
       if (!result.ok) {
         toast.error(result.message)
+        if (result.dealId) {
+          onClose()
+          onCreated?.(result.dealId, result.stage)
+          router.refresh()
+          return
+        }
         setAccountId(resolvedAccountId)
         setContactId(resolvedContactId)
         setNewAccountMode(false)
@@ -257,7 +273,7 @@ export function DealCreateModal({
       }
       toast.success(result.message)
       onClose()
-      onCreated?.(result.dealId)
+      onCreated?.(result.dealId, result.stage)
       router.refresh()
     })
   }
@@ -520,11 +536,27 @@ export function DealCreateModal({
               onChange={setCreateLines}
             />
           </div>
-          <div className="mt-4 flex items-center justify-between border-t pt-3">
-            <label className="flex items-center gap-2 text-sm font-medium">
-              <input type="checkbox" checked={reserve} onChange={(event) => setReserve(event.target.checked)} />
-              Place a seven-day hold now
-            </label>
+          <div className="mt-4 flex items-center justify-between gap-4 border-t pt-3">
+            <div>
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input
+                  type="checkbox"
+                  checked={reserve && holdAllowed}
+                  disabled={!holdAllowed}
+                  onChange={(event) => {
+                    const next = event.target.checked
+                    setReserve(next)
+                    if (next && createStage === "new") setCreateStage("price_sent")
+                  }}
+                />
+                Place a seven-day hold now
+              </label>
+              {!holdAllowed ? (
+                <p className="mt-1 text-xs text-slate-500">
+                  Signed and won deals take purchased stock instead of a short hold.
+                </p>
+              ) : null}
+            </div>
             <div className="text-right">
               <p className="text-[10px] uppercase text-slate-400">Total</p>
               <p className="text-lg font-semibold">
@@ -535,6 +567,23 @@ export function DealCreateModal({
               </p>
             </div>
           </div>
+        </div>
+
+        <div className="mt-4">
+          <label className="text-sm">
+            <span className="mb-1 block font-medium">Stage</span>
+            <EnquirySelectableStageSelect
+              value={createStage}
+              onChange={(stage) => {
+                setCreateStage(stage)
+                if (!enquirySelectableStageAllowsHold(stage)) setReserve(false)
+              }}
+              className="h-11 w-full rounded-md border bg-white px-3"
+            />
+            <span className="mt-1.5 block text-xs text-slate-500">
+              Defaults to New. Won / paid and other deal stages skip the booking form.
+            </span>
+          </label>
         </div>
 
         <div className="mt-4 grid gap-4 sm:grid-cols-2">

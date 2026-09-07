@@ -63,10 +63,15 @@ import { deleteWixProductsForPackage } from "@/lib/integrations/wix/delete-produ
 import { deleteSalesforceProductForPackage } from "@/lib/integrations/salesforce/delete-product"
 import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
 import {
+  createdDealPipeline,
+  enquirySelectableStageLabel,
   inboundEnquirySource,
   isEnquiryCrmStage,
+  isEnquirySkipaheadStage,
+  isEnquirySelectableStage,
   isEnquiryTemperature,
   suggestedEnquiryAction,
+  suggestedSelectableStageAction,
   ENQUIRY_CRM_STAGE_LABELS,
 } from "@/lib/crm/deal-pipeline"
 
@@ -4169,6 +4174,7 @@ export async function createNativeDeal(input: {
   source?: string | null
   notes?: string | null
   reserve?: boolean
+  stage?: string | null
   enquiryTemperature?: "warm" | "cold" | null
   lines?: Array<{
     packageId: string
@@ -4179,7 +4185,7 @@ export async function createNativeDeal(input: {
     expectedUnitCost?: number | null
     supplierQuoteAt?: string | null
   }>
-}): Promise<ActionResult & { dealId?: string }> {
+}): Promise<ActionResult & { dealId?: string; stage?: string }> {
   const gate = await requireAdminAction("deals.manage")
   if (!gate.ok) return gate
 
@@ -4212,6 +4218,15 @@ export async function createNativeDeal(input: {
     }
     unitSalePrice = price
   }
+
+  const requestedStage = input.stage?.trim() || ""
+  if (requestedStage && !isEnquirySelectableStage(requestedStage)) {
+    return { ok: false, message: "Selected stage is not valid." }
+  }
+  const pipeline = createdDealPipeline({
+    stage: requestedStage || null,
+    reserve: Boolean(input.reserve),
+  })
 
   const normalizedLines = input.lines?.map((line) => {
     const quoteAt = line.supplierQuoteAt?.trim()
@@ -4246,7 +4261,7 @@ export async function createNativeDeal(input: {
         return { ok: false, message: "One or more deal product lines are incomplete." }
       }
       if (
-        input.reserve &&
+        pipeline.reserve &&
         line.sourcingMode === "brokered" &&
         (!line.supplierId || line.expectedUnitCost == null || !line.supplierQuoteAt)
       ) {
@@ -4260,9 +4275,9 @@ export async function createNativeDeal(input: {
     p_quantity: quantity,
     p_unit_sale_price: unitSalePrice,
     p_source: input.source?.trim() || "offline",
-    p_stage: input.reserve ? "proposal" : "draft",
+    p_stage: pipeline.reserve ? "proposal" : "draft",
     p_notes: input.notes?.trim() || null,
-    p_reserve: Boolean(input.reserve),
+    p_reserve: pipeline.reserve,
   }
   const { data, error } = normalizedLines?.length
     ? await gate.supabase.rpc("admin_create_deal_with_lines", {
@@ -4271,7 +4286,7 @@ export async function createNativeDeal(input: {
         p_source: input.source?.trim() || "offline",
         p_notes: input.notes?.trim() || null,
         p_lines: normalizedLines,
-        p_reserve: Boolean(input.reserve),
+        p_reserve: pipeline.reserve,
         p_hold_days: 7,
       })
     : accountId
@@ -4320,8 +4335,14 @@ export async function createNativeDeal(input: {
   const { error: enquiryError } = await gate.supabase
     .from("deals")
     .update({
-      enquiry_stage: input.reserve ? "price_sent" : "new",
+      enquiry_stage: pipeline.enquiryStage,
       enquiry_temperature: enquiryTemperature,
+      ...(isEnquirySkipaheadStage(pipeline.selectableStage)
+        ? {}
+        : {
+            stage: pipeline.dealStage,
+            next_action: suggestedSelectableStageAction(pipeline.selectableStage),
+          }),
     })
     .eq("id", dealId)
   if (enquiryError) {
@@ -4332,22 +4353,55 @@ export async function createNativeDeal(input: {
       return {
         ok: false,
         message: "Enquiry was created but warm/cold could not be saved. Apply the latest database migration and try again.",
+        dealId,
+        stage: pipeline.dealStage,
+      }
+    }
+  }
+  if (isEnquirySkipaheadStage(pipeline.selectableStage)) {
+    const { error: workflowError } = await gate.supabase.rpc("admin_update_deal_workflow", {
+      p_deal_id: dealId,
+      p_stage: pipeline.dealStage,
+      p_owner_profile_id: gate.profile.id,
+      p_next_action: suggestedSelectableStageAction(pipeline.selectableStage),
+      p_next_action_due_at: null,
+      p_expected_close_date: null,
+      p_loss_reason: null,
+    })
+    if (workflowError) {
+      const message = workflowError.message.toLowerCase()
+      const stockBlocked =
+        message.includes("insufficient_purchased_stock") || message.includes("allocation_incomplete")
+      return {
+        ok: false,
+        message: stockBlocked
+          ? `Enquiry created, but it could not be moved to ${enquirySelectableStageLabel(pipeline.selectableStage)} because there is not enough purchased stock.`
+          : `Enquiry created, but it could not be moved to ${enquirySelectableStageLabel(pipeline.selectableStage)}: ${workflowError.message}`,
+        dealId,
+        stage: "draft",
       }
     }
   }
   revalidatePath("/admin/deals")
   revalidatePath("/admin/enquiries")
+  revalidatePath(`/admin/deals/${encodeURIComponent(dealId)}`)
   revalidatePath("/admin/inventory/sales-list")
   revalidatePath("/admin/catalog")
   if (input.packageId?.trim()) {
     revalidatePath(`/admin/catalog/${encodeURIComponent(input.packageId.trim())}`)
   }
+  const stageLabel = enquirySelectableStageLabel(pipeline.selectableStage)
   return {
     ok: true,
-    message: input.reserve
-      ? "Enquiry created and stock reserved for 7 days."
-      : "Enquiry created.",
+    message: isEnquirySkipaheadStage(pipeline.selectableStage)
+      ? `Deal created at ${stageLabel}.`
+      : pipeline.reserve
+        ? "Enquiry created and stock reserved for 7 days."
+        : pipeline.selectableStage === "new"
+          ? "Enquiry created."
+          : `Enquiry created at ${stageLabel}.`,
     dealId,
+    stage: pipeline.dealStage,
   }
 }
 
@@ -4632,6 +4686,7 @@ const NATIVE_DEAL_STAGES = new Set([
   "booking_form_sent",
   "awaiting_client_signature",
   "awaiting_zk_signature",
+  "form_expired",
   "signed",
   "awaiting_invoice",
   "awaiting_payment",

@@ -155,3 +155,21 @@ test("booking form automation cron still expires first, then sends both new emai
   assert.equal(BOOKING_FORM_FINAL_REMINDER_EVENT, "final_reminder_sent")
   assert.equal(BOOKING_FORM_HOLD_RELEASED_NOTICE_EVENT, "hold_released_notice_sent")
 })
+
+test("expired booking forms move the deal to Form Expired instead of Enquiries", () => {
+  const sql = readFileSync("supabase/migrations/20260907140000_deal_form_expired_stage.sql", "utf8")
+  const expireFn = sql.slice(
+    sql.indexOf("create or replace function public.expire_due_native_booking_forms"),
+    sql.indexOf("create or replace function public.mark_deal_awaiting_booking_form_send"),
+  )
+  assert.match(expireFn, /set stage = 'form_expired'/)
+  assert.doesNotMatch(expireFn, /set stage = 'proposal'/)
+  const markFn = sql.slice(
+    sql.indexOf("create or replace function public.mark_deal_awaiting_booking_form_send"),
+    sql.indexOf("create or replace function public.admin_update_deal_workflow"),
+  )
+  assert.match(markFn, /'form_expired'/)
+  const dealsClient = readFileSync("app/(admin)/admin/deals/deals-client.tsx", "utf8")
+  assert.match(dealsClient, /id: "form_expired"/)
+  assert.match(dealsClient, /Form Expired/)
+})

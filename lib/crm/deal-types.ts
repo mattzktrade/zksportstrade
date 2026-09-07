@@ -6,6 +6,7 @@ export type DealStage =
   | "booking_form_sent"
   | "awaiting_client_signature"
   | "awaiting_zk_signature"
+  | "form_expired"
   | "signed"
   | "awaiting_invoice"
   | "awaiting_payment"
@@ -22,6 +23,7 @@ export const DEAL_STAGES: readonly DealStage[] = [
   "awaiting_booking_form_send",
   "awaiting_client_signature",
   "awaiting_zk_signature",
+  "form_expired",
   "signed",
   "awaiting_invoice",
   "awaiting_payment",
@@ -68,6 +70,7 @@ export const DEAL_UNSIGNED_PIPELINE_STAGES: readonly DealStage[] = [
   "booking_form_sent",
   "awaiting_client_signature",
   "awaiting_zk_signature",
+  "form_expired",
 ]
 
 export function dealStageIsUnsignedPipeline(stage: DealStage | string): boolean {
@@ -297,6 +300,7 @@ export const DEAL_STAGE_LABELS: Record<DealStage, string> = {
   booking_form_sent: "Awaiting client signature",
   awaiting_client_signature: "Awaiting client signature",
   awaiting_zk_signature: "Awaiting ZK signature",
+  form_expired: "Form Expired",
   signed: "Signed",
   awaiting_invoice: "Awaiting invoice",
   awaiting_payment: "Awaiting payment",
@@ -327,6 +331,7 @@ export const DEAL_NEXT_ACTION_OPTIONS = [
   "Approved admin to send booking form",
   "Chase client signature",
   "ZK admin to approve and sign",
+  "Booking form expired; send a new form or follow up",
   "Create and send invoice",
   "Follow up payment",
   "Await Xero payment",
@@ -338,7 +343,7 @@ export const DEAL_NEXT_ACTION_OPTIONS = [
 
 export function friendlyDealActivitySummary(summary: string): string {
   return summary.replace(
-    /\b(draft|sourcing|proposal|awaiting_booking_form_send|booking_form_sent|awaiting_client_signature|awaiting_zk_signature|signed|awaiting_invoice|awaiting_payment|paid_confirmed|in_fulfilment|fulfilled|closed_lost|cancelled)\b/g,
+    /\b(draft|sourcing|proposal|awaiting_booking_form_send|booking_form_sent|awaiting_client_signature|awaiting_zk_signature|form_expired|signed|awaiting_invoice|awaiting_payment|paid_confirmed|in_fulfilment|fulfilled|closed_lost|cancelled)\b/g,
     (stage) => DEAL_STAGE_LABELS[stage as DealStage] ?? stage,
   )
 }

@@ -52,7 +52,7 @@ import {
   type DealStage,
 } from "@/lib/crm/deal-types"
 import type { StaffOption } from "@/lib/crm/lead-types"
-import { adminEnquiryListPath, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
+import { adminEnquiryListPath, isDealBoardStage, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
 import type { BookingFormAdminRow, BookingFormEventRow } from "@/lib/booking-forms/types"
 import { cn } from "@/lib/utils"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
@@ -68,6 +68,7 @@ type PipelineView = "all" | "mine" | "team"
 type PipelineStageId =
   | "ready_to_send"
   | "booking_form"
+  | "form_expired"
   | "awaiting_approval"
   | "awaiting_payment"
   | "won"
@@ -169,6 +170,8 @@ function stageTone(stage: DealStage): "green" | "amber" | "red" | "blue" | "purp
     case "booking_form":
     case "awaiting_approval":
       return "amber"
+    case "form_expired":
+      return "red"
     case "awaiting_payment":
       return "red"
     case "won":
@@ -207,6 +210,12 @@ const PIPELINE_COLUMNS: Array<{
     colour: "border-amber-500",
   },
   {
+    id: "form_expired",
+    label: "Form Expired",
+    stages: ["form_expired"],
+    colour: "border-orange-500",
+  },
+  {
     id: "awaiting_payment",
     label: "Awaiting payment",
     stages: ["signed", "awaiting_invoice", "awaiting_payment"],
@@ -241,6 +250,8 @@ function actionRequired(deal: DealListRow): string {
       return "Chase client signature"
     case "awaiting_zk_signature":
       return "ZK admin to approve and sign"
+    case "form_expired":
+      return "Booking form expired; send a new form or follow up"
     case "signed":
     case "awaiting_invoice":
       return "Create and send invoice"
@@ -661,7 +672,7 @@ export function DealsClient({
     <div className="space-y-3">
       <AdminPageHeader
         title="Deals"
-        description="Booking forms ready to send, in signature, signed, won and lost. Earlier enquiries and prices sent live under Sales → Enquiries."
+        description="Booking forms ready to send, in signature, expired, signed, won and lost. Earlier enquiries and prices sent live under Sales → Enquiries."
       />
 
       <AdminStats className="sm:grid-cols-2 xl:grid-cols-5">
@@ -741,7 +752,7 @@ export function DealsClient({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 border-b border-[#eceef1] p-3 md:grid-cols-3 xl:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 border-b border-[#eceef1] p-3 md:grid-cols-3 xl:grid-cols-6">
           {PIPELINE_COLUMNS.map((column) => {
             const columnDeals = scoped.filter((deal) => column.stages.includes(deal.stage))
             const value = columnDeals.reduce((sum, deal) => sum + deal.total_amount, 0)
@@ -1339,12 +1350,17 @@ export function DealsClient({
           products={createPackageOptions}
           suppliers={supplierOptions}
           title="Create new enquiry"
-          description="New records start in Enquiries. Create a booking form there; sending it for approval or to the client moves it onto Deals."
+          description="New records start in Enquiries unless you pick a later deal stage such as won / paid, which skips the booking form."
           submitLabel="Create enquiry"
           onClose={() => setShowCreate(false)}
-          onCreated={(dealId) => {
+          onCreated={(dealId, stage) => {
             setShowCreate(false)
-            if (dealId) router.push(adminEnquiryListPath(dealId))
+            if (!dealId) return
+            if (stage && isDealBoardStage(stage)) {
+              router.push(adminDealPath(dealId))
+              return
+            }
+            router.push(adminEnquiryListPath(dealId))
           }}
         />
       ) : null}
