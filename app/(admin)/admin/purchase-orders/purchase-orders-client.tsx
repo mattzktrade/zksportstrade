@@ -3,23 +3,25 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowUpDown, Upload } from "lucide-react"
+import { AlertTriangle, ArrowUpDown, CircleDollarSign, Clock3, PackageCheck, Upload } from "lucide-react"
 import { toast } from "sonner"
 import {
   createPurchaseOrder,
   deletePurchaseOrder,
   deletePurchaseOrderDocument,
   getPurchaseOrderDocumentDownloadUrl,
+  setPurchaseOrderContractInvoiceReceived,
   updatePurchaseOrder,
   uploadPurchaseOrderDocument,
 } from "@/app/(admin)/actions"
 import { PurchaseBulkUploadModal } from "@/app/(admin)/admin/purchase-orders/bulk-upload-modal"
 import { adminPackagePath } from "@/lib/admin/package-link"
+import { purchaseOrderHasContractInvoice } from "@/lib/admin/purchase-order-contract-invoice"
 import type { PurchaseOrderProductOption, PurchaseOrderStockLine, PurchaseOrderWithMeta } from "@/lib/admin/purchase-orders"
 import { PurchaseOrderStockEditor, PurchaseOrderDraftLines, emptyDraftPurchaseLine } from "@/app/(admin)/admin/purchase-orders/purchase-order-stock-editor"
 import { adminSupplierPath } from "@/lib/crm/profile-links"
 import { CompanySupplierSelect } from "@/components/admin/company-supplier-select"
-import { AdminDesktopTable, AdminMobileList } from "@/components/admin/admin-page-kit"
+import { AdminDesktopTable, AdminMobileList, AdminStatCard, AdminStats } from "@/components/admin/admin-page-kit"
 import type { CrmCompanyOption } from "@/lib/crm/deals"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 import { pageSearchProps } from "@/lib/browser/laptop-qol"
@@ -27,12 +29,14 @@ import { pageSearchProps } from "@/lib/browser/laptop-qol"
 const STOCK_PREVIEW_LIMIT = 3
 
 type SortKey = "poNumber" | "issuedAt"
+type AttachedFilter = "" | "yes" | "no"
 
 type PoFilters = {
   search: string
   supplier: string
   event: string
   product: string
+  attached: AttachedFilter
 }
 
 const EMPTY_FILTERS: PoFilters = {
@@ -40,6 +44,7 @@ const EMPTY_FILTERS: PoFilters = {
   supplier: "",
   event: "",
   product: "",
+  attached: "",
 }
 
 const DEFAULT_PO_LIST = {
@@ -103,6 +108,7 @@ export function PurchaseOrdersClient({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [listState, setListState] = usePersistedAdminFilters("zk-admin-po-filters-v1", DEFAULT_PO_LIST)
   const { sortKey, sortDescending, ...filters } = listState
+  const [optimisticReceived, setOptimisticReceived] = useState<Record<string, boolean>>({})
 
   // Create form state
   const [newPoNumber, setNewPoNumber] = useState("")
@@ -135,6 +141,28 @@ export function PurchaseOrdersClient({
     el.scrollIntoView({ block: "center" })
   }, [expandedId, initialPo])
 
+  useEffect(() => {
+    setOptimisticReceived((current) => {
+      if (Object.keys(current).length === 0) return current
+      const next = { ...current }
+      let changed = false
+      for (const po of orders) {
+        if (next[po.id] === purchaseOrderHasContractInvoice(po)) {
+          delete next[po.id]
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [orders])
+
+  function contractInvoiceReceived(po: PurchaseOrderWithMeta): boolean {
+    if (Object.prototype.hasOwnProperty.call(optimisticReceived, po.id)) {
+      return optimisticReceived[po.id]!
+    }
+    return purchaseOrderHasContractInvoice(po)
+  }
+
   const supplierOptions = useMemo(() => uniqueSorted(orders.map((o) => o.supplier)), [orders])
   const eventOptions = useMemo(
     () => uniqueSorted(orders.flatMap((o) => o.usage.lines.map((line) => line.eventName))),
@@ -145,12 +173,22 @@ export function PurchaseOrdersClient({
     [orders],
   )
   const filtersActive =
-    Boolean(filters.search.trim()) || Boolean(filters.supplier) || Boolean(filters.event) || Boolean(filters.product)
+    Boolean(filters.search.trim()) ||
+    Boolean(filters.supplier) ||
+    Boolean(filters.event) ||
+    Boolean(filters.product) ||
+    Boolean(filters.attached)
+  const awaitingDocs = orders.filter((order) => !contractInvoiceReceived(order)).length
+  const totalUnits = orders.reduce((sum, order) => sum + order.usage.quantity_purchased, 0)
+  const remainingUnits = orders.reduce((sum, order) => sum + order.usage.quantity_remaining, 0)
 
   const filteredOrders = useMemo(() => {
     const q = filters.search.trim().toLowerCase()
     const matched = orders.filter((o) => {
       if (filters.supplier && o.supplier !== filters.supplier) return false
+      const received = contractInvoiceReceived(o)
+      if (filters.attached === "yes" && !received) return false
+      if (filters.attached === "no" && received) return false
       const previewLines = matchingStockLines(o.usage.lines, filters)
       if ((filters.event || filters.product) && previewLines.length === 0) return false
       if (!q) return true
@@ -176,7 +214,7 @@ export function PurchaseOrdersClient({
       if (!bDate) return -1
       return dir * aDate.localeCompare(bDate)
     })
-  }, [filters, orders, sortDescending, sortKey])
+  }, [filters, optimisticReceived, orders, sortDescending, sortKey])
 
   function toggleSort(next: SortKey) {
     setListState((current) => {
@@ -338,7 +376,44 @@ export function PurchaseOrdersClient({
     })
   }
 
+  function toggleContractInvoiceReceived(po: PurchaseOrderWithMeta, received: boolean) {
+    setOptimisticReceived((current) => ({ ...current, [po.id]: received }))
+    start(async () => {
+      const res = await setPurchaseOrderContractInvoiceReceived({ id: po.id, received })
+      if (!res.ok) {
+        setOptimisticReceived((current) => {
+          const next = { ...current }
+          delete next[po.id]
+          return next
+        })
+        toast.error(res.message)
+        return
+      }
+      router.refresh()
+    })
+  }
+
   return (
+    <div className="space-y-3">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-4">
+        <AdminStatCard icon={PackageCheck} value={orders.length} label="Open purchase orders" tone="blue" />
+        <AdminStatCard
+          icon={Clock3}
+          value={awaitingDocs}
+          label="Awaiting supplier confirmation"
+          tone="amber"
+          hint={filters.attached === "no" ? "Showing POs without a contract" : "Click to filter"}
+          active={filters.attached === "no"}
+          onClick={() =>
+            setListState((current) => ({
+              ...current,
+              attached: current.attached === "no" ? "" : "no",
+            }))
+          }
+        />
+        <AdminStatCard icon={CircleDollarSign} value={totalUnits} label="Purchased units tracked" tone="green" />
+        <AdminStatCard icon={AlertTriangle} value={remainingUnits} label="Units remaining to sell" tone="red" />
+      </AdminStats>
     <div className="overflow-hidden rounded-lg border border-[#eceef1] bg-white">
       <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] p-3">
         <input
@@ -384,6 +459,17 @@ export function PurchaseOrdersClient({
               {product}
             </option>
           ))}
+        </select>
+        <select
+          value={filters.attached}
+          onChange={(e) =>
+            setListState((current) => ({ ...current, attached: e.target.value as AttachedFilter }))
+          }
+          className="h-8 max-w-[190px] rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]"
+        >
+          <option value="">All contracts</option>
+          <option value="yes">Contract attached</option>
+          <option value="no">No contract attached</option>
         </select>
         <select
           value={sortKey}
@@ -553,7 +639,7 @@ export function PurchaseOrdersClient({
                 </button>
               </th>
               <th className="px-3 py-2 font-medium">Supplier</th>
-              <th className="px-3 py-2 font-medium min-w-[8rem]">Contract / invoice</th>
+              <th className="px-3 py-2 font-medium min-w-[9.5rem]">Contract / invoice</th>
               <th className="px-3 py-2 font-medium">
                 <button
                   type="button"
@@ -610,6 +696,8 @@ export function PurchaseOrdersClient({
                   onDelete={() => confirmDelete(po)}
                   onOpenDocument={openDocument}
                   onRemoveDocument={removeDocument}
+                  onToggleContractInvoice={(received) => toggleContractInvoiceReceived(po, received)}
+                  contractInvoiceReceived={contractInvoiceReceived(po)}
                   onRefresh={() => router.refresh()}
                 />
               ))
@@ -639,7 +727,16 @@ export function PurchaseOrdersClient({
                     {formatDate(po.issued_at)}
                   </p>
                 </div>
-                <p className="shrink-0 text-[10px] font-semibold">{stockQuantityTotals(previewLines).remaining} remaining</p>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <p className="text-[10px] font-semibold">{stockQuantityTotals(previewLines).remaining} remaining</p>
+                  <ContractInvoiceReceivedCheckbox
+                    poNumber={po.po_number}
+                    checked={contractInvoiceReceived(po)}
+                    pending={pending}
+                    documentCount={po.documents.length}
+                    onChange={(received) => toggleContractInvoiceReceived(po, received)}
+                  />
+                </div>
               </button>
               <p className="text-[10px] text-slate-600">
                 {groupedPreview.slice(0, 2).map((line) => line.packageName).join(", ") || "Not linked"}
@@ -655,6 +752,16 @@ export function PurchaseOrdersClient({
                     <span className="font-medium text-slate-800">Contract / invoice:</span>{" "}
                     {po.supplier_reference || "—"}
                   </p>
+                  <label className="flex items-center gap-2">
+                    <ContractInvoiceReceivedCheckbox
+                      poNumber={po.po_number}
+                      checked={contractInvoiceReceived(po)}
+                      pending={pending}
+                      documentCount={po.documents.length}
+                      onChange={(received) => toggleContractInvoiceReceived(po, received)}
+                    />
+                    <span className="font-medium text-slate-800">Contract/invoice attached</span>
+                  </label>
                   <p><span className="font-medium text-slate-800">Note:</span> {po.note || "No note"}</p>
                   <PurchaseOrderStockEditor
                     purchaseOrderId={po.id}
@@ -679,6 +786,7 @@ export function PurchaseOrdersClient({
         />
       ) : null}
     </div>
+    </div>
   )
 }
 
@@ -693,6 +801,42 @@ type EditState = {
   setSupplierReference: (v: string) => void
   setIssuedAt: (v: string) => void
   setNote: (v: string) => void
+}
+
+function ContractInvoiceReceivedCheckbox({
+  poNumber,
+  checked,
+  pending,
+  documentCount,
+  onChange,
+}: {
+  poNumber: string
+  checked: boolean
+  pending: boolean
+  documentCount: number
+  onChange: (received: boolean) => void
+}) {
+  const auto = documentCount > 0
+  const overridden = checked !== auto
+  const title = overridden
+    ? checked
+      ? "Manually marked as received. Click to untick."
+      : "Manually unmarked. Click to tick."
+    : auto
+      ? "Ticked because a file is attached. Click to untick if this is not the contract/invoice."
+      : "No file attached. Click to mark as received anyway."
+  return (
+    <input
+      type="checkbox"
+      checked={checked}
+      disabled={pending}
+      title={title}
+      aria-label={`Contract or invoice attached for ${poNumber}`}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => onChange(event.target.checked)}
+      className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-primary disabled:cursor-wait"
+    />
+  )
 }
 
 function matchingStockLines(
@@ -811,6 +955,8 @@ function PurchaseOrderRow({
   onDelete,
   onOpenDocument,
   onRemoveDocument,
+  onToggleContractInvoice,
+  contractInvoiceReceived,
   onRefresh,
 }: {
   po: PurchaseOrderWithMeta
@@ -828,6 +974,8 @@ function PurchaseOrderRow({
   onDelete: () => void
   onOpenDocument: (documentId: string) => void
   onRemoveDocument: (documentId: string) => void
+  onToggleContractInvoice: (received: boolean) => void
+  contractInvoiceReceived: boolean
   onRefresh: () => void
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -873,7 +1021,18 @@ function PurchaseOrderRow({
             </Link>
           ) : po.supplier}
         </td>
-        <td className="px-3 py-2 text-muted-foreground">{po.supplier_reference || "—"}</td>
+        <td className="px-3 py-2 text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <ContractInvoiceReceivedCheckbox
+              poNumber={po.po_number}
+              checked={contractInvoiceReceived}
+              pending={pending}
+              documentCount={po.documents.length}
+              onChange={onToggleContractInvoice}
+            />
+            <span className="min-w-0 truncate">{po.supplier_reference || "—"}</span>
+          </div>
+        </td>
         <td className="px-3 py-2 text-muted-foreground">{formatDate(po.issued_at)}</td>
         <PurchaseOrderStockCells lines={previewLines} preview />
         <td className="px-3 py-2 text-right tabular-nums">{previewTotals.purchased}</td>
@@ -990,7 +1149,16 @@ function PurchaseOrderRow({
                       </div>
                       <div>
                         <dt className="text-muted-foreground">Contract / invoice</dt>
-                        <dd className="font-medium text-foreground">{po.supplier_reference || "—"}</dd>
+                        <dd className="flex items-center gap-2 font-medium text-foreground">
+                          <ContractInvoiceReceivedCheckbox
+                            poNumber={po.po_number}
+                            checked={contractInvoiceReceived}
+                            pending={pending}
+                            documentCount={po.documents.length}
+                            onChange={onToggleContractInvoice}
+                          />
+                          <span>{po.supplier_reference || "—"}</span>
+                        </dd>
                       </div>
                       <div>
                         <dt className="text-muted-foreground">Issued</dt>

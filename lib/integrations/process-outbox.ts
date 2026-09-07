@@ -6,7 +6,8 @@ import { isSalesforceConfigured } from "@/lib/integrations/salesforce/config"
 import { getSalesforceConnectionStatus } from "@/lib/integrations/salesforce/settings-store"
 import { createXeroInvoiceForOrder } from "@/lib/integrations/xero/invoices"
 import { isXeroConfigured } from "@/lib/integrations/xero/config"
-import { getXeroConnectionStatus } from "@/lib/integrations/xero/settings-store"
+import { getXeroConnectionStatus, isXeroRateLimitCooldownActive } from "@/lib/integrations/xero/settings-store"
+import { isXeroRateLimitError, XERO_RATE_LIMIT_USER_MESSAGE } from "@/lib/integrations/xero/rate-limit"
 import { syncPackageCatalogToWix } from "@/lib/integrations/wix/catalog-sync"
 import { createWixProductForPackage } from "@/lib/integrations/wix/create-product"
 import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
@@ -61,11 +62,11 @@ async function recoverStaleProcessingJobs(
 
   for (const row of data ?? []) {
     const attempts = Number(row.attempts ?? 0)
-    const terminal = attempts >= MAX_ATTEMPTS
     const message =
       typeof row.last_error === "string" && row.last_error.trim()
         ? row.last_error.slice(0, 2000)
         : "Sync job timed out while processing."
+    const terminal = attempts >= MAX_ATTEMPTS && !isXeroRateLimitError(message)
 
     await admin
       .from("integration_outbox")
@@ -88,6 +89,59 @@ async function recoverStaleProcessingJobs(
         })
         .eq("id", packageId)
     }
+  }
+}
+
+async function requeueRateLimitedInvoiceJobs(
+  admin: NonNullable<ReturnType<typeof createAdminClient>>,
+): Promise<void> {
+  const { data } = await admin
+    .from("integration_outbox")
+    .select("id, last_error, payload")
+    .eq("event_type", "invoice.create")
+    .eq("status", "failed")
+    .limit(50)
+
+  for (const row of data ?? []) {
+    if (!isXeroRateLimitError(typeof row.last_error === "string" ? row.last_error : "")) continue
+    const payload = row.payload as Record<string, unknown> | null
+    const orderId = typeof payload?.order_id === "string" ? payload.order_id : null
+    if (orderId) {
+      const { data: invoice } = await admin
+        .from("invoices")
+        .select("xero_invoice_id")
+        .eq("order_id", orderId)
+        .maybeSingle()
+      if (invoice?.xero_invoice_id) {
+        await admin
+          .from("integration_outbox")
+          .update({
+            status: "completed",
+            last_error: null,
+            processed_at: new Date().toISOString(),
+          })
+          .eq("id", row.id)
+          .eq("status", "failed")
+        continue
+      }
+      await admin
+        .from("invoices")
+        .update({
+          xero_sync_status: "pending",
+          xero_sync_error: null,
+        })
+        .eq("order_id", orderId)
+    }
+    await admin
+      .from("integration_outbox")
+      .update({
+        status: "pending",
+        attempts: 0,
+        last_error: null,
+        processed_at: null,
+      })
+      .eq("id", row.id)
+      .eq("status", "failed")
   }
 }
 
@@ -118,6 +172,7 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
   }
 
   await recoverStaleProcessingJobs(admin)
+  await requeueRateLimitedInvoiceJobs(admin)
 
   // When Salesforce daily API limit was hit recently, defer SF outbox jobs so retries
   // do not keep burning the remaining quota (and re-writing TotalRequests errors).
@@ -137,6 +192,13 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
     }
   }
 
+  let xeroCooldown = false
+  try {
+    xeroCooldown = await isXeroRateLimitCooldownActive()
+  } catch {
+    xeroCooldown = false
+  }
+
   const { data: rows, error } = await admin
     .from("integration_outbox")
     .select("id, event_type, payload, attempts")
@@ -149,6 +211,7 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
   }
 
   const pending = ((rows ?? []) as OutboxRow[]).filter((row) => {
+    if (xeroCooldown && row.event_type === "invoice.create") return false
     if (!apiCooldown) return true
     return (
       row.event_type !== "product.upsert" &&
@@ -163,10 +226,12 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
       completed: 0,
       failed: 0,
       orphaned: 0,
-      skipped: apiCooldown,
-      message: apiCooldown
-        ? "Salesforce API limit cooldown — deferred Salesforce sync queue jobs."
-        : undefined,
+      skipped: apiCooldown || xeroCooldown,
+      message: xeroCooldown
+        ? "Xero rate limit cooldown — deferred invoice sync jobs."
+        : apiCooldown
+          ? "Salesforce API limit cooldown — deferred Salesforce sync queue jobs."
+          : undefined,
     }
   }
 
@@ -176,6 +241,8 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
   const failures: OutboxFailure[] = []
 
   for (const row of pending) {
+    if (row.event_type === "invoice.create" && xeroCooldown) continue
+
     const { data: claimed } = await admin
       .from("integration_outbox")
       .update({ status: "processing", attempts: row.attempts + 1, processed_at: new Date().toISOString() })
@@ -208,6 +275,8 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
       }
 
       const msg = e instanceof Error ? e.message : String(e)
+      const rateLimited = row.event_type === "invoice.create" && isXeroRateLimitError(e)
+      if (rateLimited) xeroCooldown = true
       failed++
       failures.push({
         event_type: row.event_type,
@@ -221,15 +290,18 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
         "@/lib/integrations/salesforce/format-error"
       )
       // Do not retry API-limit or permanent Supplier Lookup mismatches — each retry burns quota.
+      // Xero 429s stay pending (attempts not consumed) until the shared cooldown expires.
       const terminal =
-        attempts >= MAX_ATTEMPTS ||
-        isSalesforceApiLimitError(e) ||
-        isSalesforceSupplierIdTypeError(e)
+        !rateLimited &&
+        (attempts >= MAX_ATTEMPTS ||
+          isSalesforceApiLimitError(e) ||
+          isSalesforceSupplierIdTypeError(e))
 
       await admin
         .from("integration_outbox")
         .update({
           status: terminal ? "failed" : "pending",
+          ...(rateLimited ? { attempts: row.attempts } : {}),
           last_error: msg.slice(0, 2000),
           processed_at: terminal ? new Date().toISOString() : null,
         })
@@ -279,15 +351,23 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
         await admin
           .from("invoices")
           .update({
-            xero_sync_status: "failed",
-            xero_sync_error: msg.slice(0, 500),
+            xero_sync_status: rateLimited ? "pending" : "failed",
+            xero_sync_error: rateLimited ? XERO_RATE_LIMIT_USER_MESSAGE : msg.slice(0, 500),
           })
           .eq("order_id", orderId)
       }
     }
   }
 
-  return { processed: pending.length, completed, failed, orphaned, skipped: false, failures }
+  return {
+    processed: pending.length,
+    completed,
+    failed,
+    orphaned,
+    skipped: xeroCooldown,
+    message: xeroCooldown ? "Xero rate limit cooldown — deferred remaining invoice sync jobs." : undefined,
+    failures,
+  }
 }
 
 async function handleOutboxEvent(row: OutboxRow): Promise<void> {

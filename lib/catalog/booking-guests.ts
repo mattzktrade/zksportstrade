@@ -51,9 +51,8 @@ export function stepAllowedGuestCount(
   return allowed[Math.max(idx - 1, 0)]
 }
 
-export function maxBookableGuestsFromSellable(sellable: number, totalCapacity: number): number {
-  const s = numericSellable(sellable) ?? 0
-  return Math.max(0, Math.min(s, Math.max(0, Math.floor(totalCapacity))))
+export function maxBookableGuestsFromSellable(sellable: number, _totalCapacity?: number): number {
+  return numericSellable(sellable) ?? 0
 }
 
 export function lowStockGuestHint(sellable: number): string | null {

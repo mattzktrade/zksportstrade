@@ -101,7 +101,6 @@ export function PackageAdminPanel({
   const [description, setDescription] = useState(typeof initial.description === "string" ? initial.description : "")
   const [image, setImage] = useState(initial.image ?? "")
   const [galleryText, setGalleryText] = useState(galleryToText(initial.gallery_images))
-  const [totalCapacity, setTotalCapacity] = useState(String(initial.total_capacity))
   const [includesText, setIncludesText] = useState(includesToText(initial.includes))
   const [tradePrice, setTradePrice] = useState(initial.trade_price != null ? String(initial.trade_price) : "")
   const [duration, setDuration] = useState(initial.duration ?? "")
@@ -128,7 +127,6 @@ export function PackageAdminPanel({
     setDescription(typeof initial.description === "string" ? initial.description : "")
     setImage(initial.image ?? "")
     setGalleryText(galleryToText(initial.gallery_images))
-    setTotalCapacity(String(initial.total_capacity))
     setIncludesText(includesToText(initial.includes))
     setTradePrice(initial.trade_price != null ? String(initial.trade_price) : "")
     setDuration(initial.duration ?? "")
@@ -155,11 +153,6 @@ export function PackageAdminPanel({
         toast.error("Trade price must be a number or empty for enquiry-style pricing.")
         return
       }
-      const cap = Math.floor(Number(totalCapacity))
-      if (!Number.isFinite(cap) || cap < 0) {
-        toast.error("Total capacity must be a non-negative whole number.")
-        return
-      }
 
       const res = await updatePackageFields({
         packageId: initial.id,
@@ -175,7 +168,7 @@ export function PackageAdminPanel({
         image: image.trim() || null,
         gallery_images: linesToList(galleryText),
         currency: (initial.currency || "USD").trim() || "USD",
-        total_capacity: cap,
+        total_capacity: Math.max(0, Math.floor(Number(initial.total_capacity) || 0)),
         duration,
         inventory_group_id: inventoryGroupId.trim() || null,
         inventory_is_standalone: inventoryIsStandalone,
@@ -385,14 +378,6 @@ export function PackageAdminPanel({
             <input
               value={dateRange}
               onChange={(e) => setDateRange(e.target.value)}
-              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            />
-          </label>
-          <label className="block text-xs text-muted-foreground sm:col-span-2 sm:max-w-xs">
-            Total capacity
-            <input
-              value={totalCapacity}
-              onChange={(e) => setTotalCapacity(e.target.value)}
               className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
             />
           </label>

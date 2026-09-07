@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { createNativeEvent, createPackage } from "@/app/(admin)/actions"
+import { createNativeEvent, createPackage, uploadPurchaseOrderDocument } from "@/app/(admin)/actions"
 import { CompanySupplierSelect } from "@/components/admin/company-supplier-select"
 import type { AdminRaceOption } from "@/lib/admin/queries"
 import { adminRaceLabel } from "@/lib/admin/race-label"
@@ -73,7 +73,6 @@ export function CatalogNewPackage({
   const [description, setDescription] = useState("")
   const [image, setImage] = useState("")
   const [galleryText, setGalleryText] = useState("")
-  const [totalCapacity, setTotalCapacity] = useState("150")
   const [includesText, setIncludesText] = useState("")
   const [tradePrice, setTradePrice] = useState("")
   const [isEnquiry, setIsEnquiry] = useState(false)
@@ -84,8 +83,13 @@ export function CatalogNewPackage({
   const [initialQty, setInitialQty] = useState("0")
   const [initialUnitCost, setInitialUnitCost] = useState("")
   const [initialSupplierAccountId, setInitialSupplierAccountId] = useState("")
+  const [initialSupplierReference, setInitialSupplierReference] = useState("")
+  const [initialIssuedAt, setInitialIssuedAt] = useState("")
+  const [initialPoNote, setInitialPoNote] = useState("")
+  const [initialFiles, setInitialFiles] = useState<File[]>([])
   const [duration, setDuration] = useState("")
   const [inventoryIsStandalone, setInventoryIsStandalone] = useState(false)
+  const createFileInputRef = useRef<HTMLInputElement>(null)
 
   const isFormula1 = eventCategory === "formula_1"
   const creatingNewEvent = !isFormula1 && raceId === NEW_EVENT_ID
@@ -102,6 +106,7 @@ export function CatalogNewPackage({
     setDateRange(race.date_range)
     setEventDate(String(race.event_date).slice(0, 10))
     setCircuit(race.name)
+    setImage(race.image ?? "")
   }
 
   function clearEventDefaults() {
@@ -111,6 +116,7 @@ export function CatalogNewPackage({
     setCountryCode("")
     setEventDate("")
     setDateRange("")
+    setImage("")
   }
 
   function resetForm() {
@@ -128,7 +134,6 @@ export function CatalogNewPackage({
     setDescription("")
     setImage("")
     setGalleryText("")
-    setTotalCapacity("150")
     setIncludesText("")
     setTradePrice("")
     setIsEnquiry(false)
@@ -139,6 +144,11 @@ export function CatalogNewPackage({
     setInitialQty("0")
     setInitialUnitCost("")
     setInitialSupplierAccountId("")
+    setInitialSupplierReference("")
+    setInitialIssuedAt("")
+    setInitialPoNote("")
+    setInitialFiles([])
+    if (createFileInputRef.current) createFileInputRef.current.value = ""
     setDuration("")
     setInventoryIsStandalone(false)
     if (firstF1) applyRaceDefaults(firstF1)
@@ -175,11 +185,10 @@ export function CatalogNewPackage({
     setName(t.nameSuffix)
     setDescription(t.description)
     setIncludesText(t.includes.join("\n"))
-    setTotalCapacity(String(t.totalCapacity))
     if (t.requiresBookingApproval != null) {
       setRequiresBookingApproval(t.requiresBookingApproval)
-      setIsEnquiry(t.requiresBookingApproval)
     }
+    setIsEnquiry(false)
   }
 
   useEffect(() => {
@@ -261,11 +270,6 @@ export function CatalogNewPackage({
         toast.error("Trade price must be a number or empty.")
         return
       }
-      const cap = Math.floor(Number(totalCapacity))
-      if (!Number.isFinite(cap) || cap < 0) {
-        toast.error("Total capacity must be a non-negative whole number.")
-        return
-      }
       const qty = Math.floor(Number(initialQty))
       if (!Number.isFinite(qty) || qty < 0) {
         toast.error("Initial stock must be a non-negative whole number.")
@@ -273,6 +277,10 @@ export function CatalogNewPackage({
       }
       if (qty > 0 && !initialSupplierAccountId) {
         toast.error("Select a company as the source.")
+        return
+      }
+      if (qty <= 0 && (initialFiles.length > 0 || initialSupplierReference.trim() || initialIssuedAt.trim())) {
+        toast.error("Add initial stock before attaching a contract/invoice to this product.")
         return
       }
       let initialCost: number | null = null
@@ -283,6 +291,10 @@ export function CatalogNewPackage({
           return
         }
         initialCost = c
+      }
+      if (initialIssuedAt.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(initialIssuedAt.trim())) {
+        toast.error("Issued date must be YYYY-MM-DD.")
+        return
       }
 
       let mult: number | null = null
@@ -342,7 +354,7 @@ export function CatalogNewPackage({
         image: image.trim() || null,
         gallery_images: linesToList(galleryText),
         currency: "USD",
-        total_capacity: cap,
+        total_capacity: 0,
         duration,
         inventory_is_standalone: inventoryIsStandalone,
         includes: linesToList(includesText),
@@ -358,18 +370,39 @@ export function CatalogNewPackage({
         wix_retail_price: manualWix,
         initial_qty_available: qty,
         initial_unit_cost: initialCost,
-        initial_cost_note: null,
+        initial_cost_note: initialPoNote.trim() || null,
         initial_supplier_account_id: initialSupplierAccountId || null,
+        initial_supplier_reference: initialSupplierReference.trim() || null,
+        initial_issued_at: initialIssuedAt.trim() || null,
+        initial_po_note: initialPoNote.trim() || null,
       })
       if (!res.ok) {
         toast.error(res.message)
         return
       }
+      const files = [...initialFiles]
+      let uploadFailed = 0
+      if (res.purchaseOrderId && files.length > 0) {
+        for (const file of files) {
+          const fd = new FormData()
+          fd.set("purchaseOrderId", res.purchaseOrderId)
+          fd.set("file", file)
+          const uploaded = await uploadPurchaseOrderDocument(fd)
+          if (!uploaded.ok) uploadFailed += 1
+        }
+      }
       const msg = res.message ?? "Package created."
       if (/Wix product was not created|Wix API is not configured/i.test(msg)) {
         toast.message(msg, { duration: 12000 })
+      } else if (uploadFailed > 0) {
+        toast.success("Package created, but some attachments failed to upload.")
       } else {
-        toast.success(msg, { duration: 8000 })
+        toast.success(
+          files.length > 0 && res.purchaseOrderId
+            ? "Package created with purchase-order attachments."
+            : msg,
+          { duration: 8000 },
+        )
       }
       resetForm()
       onCreated?.()
@@ -434,7 +467,7 @@ export function CatalogNewPackage({
               ))}
             </select>
             <span className="block text-[11px] text-muted-foreground/80 mt-1">
-              Prefills name, description, inclusions, and capacity for recurring hospitality products.
+            Prefills name, description, and inclusions for recurring hospitality products.
             </span>
           </label>
         ) : null}
@@ -622,19 +655,13 @@ export function CatalogNewPackage({
             placeholder={isFormula1 ? "AE" : "GB"}
           />
         </label>
-
-        <label className="block text-xs text-muted-foreground sm:col-span-2 sm:max-w-xs">
-          Total capacity (suite)
-          <input
-            value={totalCapacity}
-            onChange={(e) => setTotalCapacity(e.target.value)}
-            className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-          />
-        </label>
       </div>
 
       <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pricing &amp; stock</p>
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
+          Adding initial stock creates a purchase order, same as Inventory → Purchase orders. Include the supplier contract or invoice if you have it.
+        </p>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <label className="block text-xs text-muted-foreground">
             Trade price (USD)
@@ -672,6 +699,71 @@ export function CatalogNewPackage({
               />
             </div>
           </label>
+          <label className="block text-xs text-muted-foreground">
+            Contract / invoice
+            <input
+              value={initialSupplierReference}
+              onChange={(e) => setInitialSupplierReference(e.target.value)}
+              placeholder="Supplier invoice or contract no."
+              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+            />
+          </label>
+          <label className="block text-xs text-muted-foreground">
+            Issued date
+            <input
+              type="date"
+              value={initialIssuedAt}
+              onChange={(e) => setInitialIssuedAt(e.target.value)}
+              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+            />
+          </label>
+          <label className="block text-xs text-muted-foreground sm:col-span-2 lg:col-span-2">
+            Purchase order note
+            <input
+              value={initialPoNote}
+              onChange={(e) => setInitialPoNote(e.target.value)}
+              placeholder="Payment terms, contact, anything you need to remember."
+              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+            />
+          </label>
+        </div>
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">Attachments</p>
+          {initialFiles.length > 0 ? (
+            <ul className="space-y-1">
+              {initialFiles.map((file, index) => (
+                <li
+                  key={`${file.name}-${file.size}-${index}`}
+                  className="flex items-center justify-between gap-2 rounded border border-border bg-background px-2 py-1 text-xs"
+                >
+                  <span className="truncate">{file.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setInitialFiles((files) => files.filter((_, i) => i !== index))}
+                    className="text-[10px] font-medium text-destructive hover:underline"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs italic text-muted-foreground">
+              Attach the signed contract or supplier invoice if you have it.
+            </p>
+          )}
+          <input
+            ref={createFileInputRef}
+            type="file"
+            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,image/webp"
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (!file) return
+              setInitialFiles((files) => [...files, file])
+              event.target.value = ""
+            }}
+            className="text-xs"
+          />
         </div>
       </div>
 
@@ -761,12 +853,16 @@ export function CatalogNewPackage({
             )}
           </div>
         ) : null}
-        <CatalogImageField
-          className="sm:col-span-2"
-          label="Primary image"
-          value={image}
-          onChange={setImage}
-        />
+        <div className="sm:col-span-2 space-y-1">
+          <CatalogImageField
+            label="Primary image"
+            value={image}
+            onChange={setImage}
+          />
+          <p className="text-[11px] text-muted-foreground/80">
+            Defaults to the event image. Upload a different photo if this product needs its own.
+          </p>
+        </div>
         <label className="block text-xs text-muted-foreground sm:col-span-2">
           Extra gallery image URLs (one per line)
           <textarea

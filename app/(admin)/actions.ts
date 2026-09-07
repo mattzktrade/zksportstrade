@@ -44,8 +44,10 @@ import {
 import { getCrmCompanyOptions } from "@/lib/crm/deals"
 import {
   generatePurchaseOrderNumber,
+  setPurchaseOrderContractInvoiceReceivedFlag,
   setPurchaseOrderSupplierReference,
 } from "@/lib/admin/purchase-orders"
+import { storedContractInvoiceReceived } from "@/lib/admin/purchase-order-contract-invoice"
 import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
 import { enqueueOpportunityOutcomeServer, enqueueOrderIntegrationsServer } from "@/lib/integrations/enqueue-server"
 import { drainOutboxNow } from "@/lib/integrations/schedule-drain"
@@ -1295,7 +1297,10 @@ export async function createPackage(input: {
   initial_source?: string | null
   /** CRM account to record as the stock source / supplier (creates a PO when initial qty > 0). */
   initial_supplier_account_id?: string | null
-}): Promise<ActionResult> {
+  initial_supplier_reference?: string | null
+  initial_issued_at?: string | null
+  initial_po_note?: string | null
+}): Promise<{ ok: true; message?: string; purchaseOrderId?: string } | { ok: false; message: string }> {
   const gate = await requireAdminAction("inventory.manage")
   if (!gate.ok) return gate
   const { supabase } = gate
@@ -1303,7 +1308,7 @@ export async function createPackage(input: {
   const raceId = input.race_id.trim()
   const { data: race, error: rErr } = await supabase
     .from("races")
-    .select("id, category")
+    .select("id, category, image")
     .eq("id", raceId)
     .maybeSingle()
   if (rErr) return { ok: false, message: rErr.message }
@@ -1352,9 +1357,21 @@ export async function createPackage(input: {
   }
 
   const brochure = sanitizeHttpsUrl(input.brochure_url)
-  const image = normalizeCatalogImageUrl(sanitizeHttpsUrl(input.image))
+  const raceImage = normalizeCatalogImageUrl(
+    sanitizeHttpsUrl(String((race as { image?: string | null }).image ?? "").trim() || null),
+  )
+  const image = normalizeCatalogImageUrl(sanitizeHttpsUrl(input.image)) || raceImage
   const gallery = normalizeCatalogImageUrlList(sanitizeHttpsUrlList(input.gallery_images))
   const cc = input.country_code.trim().toUpperCase().slice(0, 8)
+
+  let issuedAt: string | null = null
+  if (input.initial_issued_at && input.initial_issued_at.trim()) {
+    const issued = input.initial_issued_at.trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(issued)) {
+      return { ok: false, message: "Issued date must be YYYY-MM-DD." }
+    }
+    issuedAt = issued
+  }
 
   let retailMultiplier: number | null = input.retail_price_multiplier ?? null
   if (retailMultiplier != null && (!Number.isFinite(retailMultiplier) || retailMultiplier <= 0)) {
@@ -1524,11 +1541,14 @@ export async function createPackage(input: {
     }
   }
 
+  let createdPurchaseOrderId: string | undefined
   if (qty > 0) {
     const cost = unitCost ?? 0
-    const note = unitCost != null
-      ? (input.initial_cost_note?.trim() || "Initial stock")
-      : "Initial stock — buy price not yet recorded"
+    const note = input.initial_po_note?.trim()
+      ? input.initial_po_note.trim().slice(0, 5000)
+      : unitCost != null
+        ? (input.initial_cost_note?.trim() || "Initial stock")
+        : "Initial stock — buy price not yet recorded"
     const supplierAccountId = input.initial_supplier_account_id?.trim() || ""
     if (!supplierAccountId) {
       await supabase.from("package_inventory").delete().eq("package_id", id)
@@ -1537,6 +1557,7 @@ export async function createPackage(input: {
     }
     const resolved = await resolveOrCreatePurchaseOrderId(supabase, {
       supplierAccountId,
+      issuedAt,
       note,
     })
     if (!resolved.ok) {
@@ -1544,6 +1565,17 @@ export async function createPackage(input: {
       await supabase.from("packages").delete().eq("id", id)
       return resolved
     }
+    const referenced = await setPurchaseOrderSupplierReference(
+      supabase,
+      resolved.id,
+      input.initial_supplier_reference,
+    )
+    if (!referenced.ok) {
+      await supabase.from("package_inventory").delete().eq("package_id", id)
+      await supabase.from("packages").delete().eq("id", id)
+      return referenced
+    }
+    createdPurchaseOrderId = resolved.id
     const { error: layerErr } = await addCostLayerWithSourcePackage(supabase, {
       packageId: id,
       sourcePackageId: id,
@@ -1551,7 +1583,7 @@ export async function createPackage(input: {
       unitCost: cost,
       currency: input.currency.trim() || "USD",
       note,
-      receivedAt: null,
+      receivedAt: issuedAt,
       source: null,
       purchaseOrderId: resolved.id,
     })
@@ -1673,6 +1705,7 @@ export async function createPackage(input: {
   return {
     ok: true,
     message: wixNote ? `Package created. ${wixNote}` : "Package created.",
+    purchaseOrderId: createdPurchaseOrderId,
   }
 }
 
@@ -3398,6 +3431,31 @@ export async function updatePurchaseOrder(input: {
   }
   revalidatePath("/admin/purchase-orders")
   revalidatePath("/admin/catalog")
+  return { ok: true }
+}
+
+export async function setPurchaseOrderContractInvoiceReceived(input: {
+  id: string
+  received: boolean
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  const id = input.id.trim()
+  if (!UUID_RE.test(id)) return { ok: false, message: "Invalid purchase order id." }
+
+  const { count, error: countErr } = await gate.supabase
+    .from("purchase_order_documents")
+    .select("id", { count: "exact", head: true })
+    .eq("purchase_order_id", id)
+  if (countErr) return { ok: false, message: countErr.message }
+
+  const saved = await setPurchaseOrderContractInvoiceReceivedFlag(
+    gate.supabase,
+    id,
+    storedContractInvoiceReceived(input.received, count ?? 0),
+  )
+  if (!saved.ok) return saved
+  revalidatePath("/admin/purchase-orders")
   return { ok: true }
 }
 

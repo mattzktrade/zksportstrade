@@ -1,5 +1,9 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { isXeroConfigured } from "@/lib/integrations/xero/config"
+import {
+  cooldownMsFromRetryAfter,
+  XERO_RATE_LIMIT_COOLDOWN_KEY,
+} from "@/lib/integrations/xero/rate-limit"
 
 const KEY_REFRESH = "xero_refresh_token"
 const KEY_TENANT = "xero_tenant_id"
@@ -51,5 +55,26 @@ export async function getXeroConnectionStatus(): Promise<{
     configured,
     connected: Boolean(refresh && tenant),
     tenantName,
+  }
+}
+
+export async function getXeroRateLimitCooldownUntilMs(): Promise<number | null> {
+  const until = await getIntegrationSetting(XERO_RATE_LIMIT_COOLDOWN_KEY)
+  if (!until) return null
+  const t = new Date(until).getTime()
+  if (!Number.isFinite(t) || t <= Date.now()) return null
+  return t
+}
+
+export async function isXeroRateLimitCooldownActive(): Promise<boolean> {
+  return (await getXeroRateLimitCooldownUntilMs()) != null
+}
+
+export async function markXeroRateLimitCooldown(retryAfterMs?: number | null): Promise<void> {
+  try {
+    const ms = cooldownMsFromRetryAfter(retryAfterMs)
+    await setIntegrationSetting(XERO_RATE_LIMIT_COOLDOWN_KEY, new Date(Date.now() + ms).toISOString())
+  } catch (e) {
+    console.warn("[xero] Failed to persist rate-limit cooldown:", e instanceof Error ? e.message : e)
   }
 }

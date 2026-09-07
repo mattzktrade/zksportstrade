@@ -14,6 +14,11 @@ export type PurchaseOrderRow = {
   supplier_account_id: string | null
   /** Supplier contract / invoice / order number(s). Distinct from the internal PO number. */
   supplier_reference: string | null
+  /**
+   * Manual override for whether a contract/invoice is treated as received.
+   * Null follows attached files; true/false is an explicit tick or untick.
+   */
+  contract_invoice_received: boolean | null
   issued_at: string | null
   note: string | null
   created_at: string
@@ -80,6 +85,10 @@ export function generatePurchaseOrderNumber(): string {
 }
 
 export { purchaseOrderAdminHref } from "@/lib/admin/purchase-order-link"
+export {
+  purchaseOrderHasContractInvoice,
+  storedContractInvoiceReceived,
+} from "@/lib/admin/purchase-order-contract-invoice"
 
 function issuedDateFromReceivedAt(receivedAt: string | null | undefined): string | null {
   if (!receivedAt) return null
@@ -91,11 +100,13 @@ function issuedDateFromReceivedAt(receivedAt: string | null | undefined): string
 }
 
 const PO_COLUMNS =
+  "id, po_number, supplier, supplier_id, supplier_reference, contract_invoice_received, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name, crm_accounts(name))" as const
+const PO_COLUMNS_NO_RECEIVED =
   "id, po_number, supplier, supplier_id, supplier_reference, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name, crm_accounts(name))" as const
 const PO_COLUMNS_NO_REF =
   "id, po_number, supplier, supplier_id, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name, crm_accounts(name))" as const
 const PO_COLUMNS_NO_ACCOUNT =
-  "id, po_number, supplier, supplier_id, supplier_reference, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name)" as const
+  "id, po_number, supplier, supplier_id, supplier_reference, contract_invoice_received, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name)" as const
 const PO_COLUMNS_BARE =
   "id, po_number, supplier, supplier_id, issued_at, note, created_at, updated_at" as const
 
@@ -110,6 +121,7 @@ function mapPurchaseOrderRow(row: {
   supplier: string
   supplier_id: string | null
   supplier_reference?: string | null
+  contract_invoice_received?: boolean | null
   issued_at: string | null
   note: string | null
   created_at: string
@@ -138,6 +150,8 @@ function mapPurchaseOrderRow(row: {
     supplier_id: row.supplier_id,
     supplier_account_id: linked?.crm_account_id ?? null,
     supplier_reference: supplierReference || null,
+    contract_invoice_received:
+      typeof row.contract_invoice_received === "boolean" ? row.contract_invoice_received : null,
     issued_at: normaliseIssuedAt(row.issued_at),
     note: row.note,
     created_at: row.created_at,
@@ -163,6 +177,26 @@ export async function setPurchaseOrderSupplierReference(
   return { ok: false, message: error.message }
 }
 
+export async function setPurchaseOrderContractInvoiceReceivedFlag(
+  supabase: SupabaseClient,
+  id: string,
+  value: boolean | null,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const { error } = await supabase
+    .from("purchase_orders")
+    .update({ contract_invoice_received: value })
+    .eq("id", id)
+  if (!error) return { ok: true }
+  const message = error.message.toLowerCase()
+  if (message.includes("contract_invoice_received")) {
+    return {
+      ok: false,
+      message: "Apply the latest database migration to store contract/invoice received status.",
+    }
+  }
+  return { ok: false, message: error.message }
+}
+
 const PO_DOC_COLUMNS =
   "id, purchase_order_id, file_bucket, file_path, file_name, file_content_type, file_size, uploaded_at" as const
 
@@ -181,6 +215,15 @@ export async function getPurchaseOrders(): Promise<PurchaseOrderRow[]> {
     .order("issued_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
   if (!error && data) return data.map((row) => mapPurchaseOrderRow(row))
+
+  const withoutReceived = await supabase
+    .from("purchase_orders")
+    .select(PO_COLUMNS_NO_RECEIVED)
+    .order("issued_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+  if (!withoutReceived.error && withoutReceived.data) {
+    return withoutReceived.data.map((row) => mapPurchaseOrderRow(row))
+  }
 
   const withoutRef = await supabase
     .from("purchase_orders")
@@ -218,6 +261,15 @@ export async function getPurchaseOrderById(id: string): Promise<PurchaseOrderRow
     .eq("id", id)
     .maybeSingle()
   if (!error && data) return mapPurchaseOrderRow(data)
+
+  const withoutReceived = await supabase
+    .from("purchase_orders")
+    .select(PO_COLUMNS_NO_RECEIVED)
+    .eq("id", id)
+    .maybeSingle()
+  if (!withoutReceived.error && withoutReceived.data) {
+    return mapPurchaseOrderRow(withoutReceived.data)
+  }
 
   const withoutRef = await supabase
     .from("purchase_orders")

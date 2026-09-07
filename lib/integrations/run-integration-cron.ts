@@ -30,15 +30,16 @@ export type IntegrationCronResult = {
 } & Awaited<ReturnType<typeof drainIntegrationOutbox>>
 
 /**
- * Single integration cron tick: expired holds, native booking forms, overdue invoice flags, Wix/Xero outbox.
+ * Single integration cron tick: expired holds, native booking forms, Wix/Xero outbox, then overdue invoice flags.
+ * Invoice creation runs before overdue Xero reconciliation so new deals are not starved by the 60/min cap.
  * Salesforce pull/heal is retired and never runs.
  */
 export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {
   const holds = await releaseExpiredInventoryHoldsAndSync()
   const bookingForms = await processNativeBookingForms()
-  const invoiceReminders = await processNativeInvoiceReminders()
   const dealReservations = await releaseExpiredDealReservations()
   const result = await drainIntegrationOutbox({ maxRounds: 10, skipInventoryPull: true })
+  const invoiceReminders = await processNativeInvoiceReminders()
 
   return {
     holds,

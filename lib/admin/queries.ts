@@ -189,6 +189,7 @@ export type AdminRaceOption = {
   country_code: string
   season: number
   category: EventCategory
+  image: string | null
 }
 
 export async function getAdminRaceOptions(): Promise<AdminRaceOption[]> {
@@ -199,13 +200,14 @@ const getAdminRaceOptionsCached = cache(async (): Promise<AdminRaceOption[]> => 
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("races")
-    .select("id,name,short_name,date_range,event_date,location,country,country_code,season,category")
+    .select("id,name,short_name,date_range,event_date,location,country,country_code,season,category,image")
     .eq("is_archived", false)
     .order("season")
     .order("event_date")
   if (error || !data) return []
   return data.map((row) => ({
     ...row,
+    image: typeof row.image === "string" && row.image.trim() ? row.image.trim() : null,
     category: isEventCategory(String(row.category)) ? row.category : "formula_1",
   })) as AdminRaceOption[]
 })

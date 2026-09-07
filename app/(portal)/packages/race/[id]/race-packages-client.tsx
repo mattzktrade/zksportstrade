@@ -12,7 +12,7 @@ import {
   stepAllowedGuestCount,
 } from "@/lib/catalog/booking-guests"
 import { nameIncludesDurationLabel, packageDurationLabel } from "@/lib/catalog/package-duration"
-import { ArrowLeft, MapPin, Calendar, Users, Check, ArrowRight, ChevronDown, Minus, Plus } from "lucide-react"
+import { ArrowLeft, MapPin, Calendar, Check, ArrowRight, ChevronDown, Minus, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const DEFAULT_PACKAGE_DESCRIPTION =
@@ -170,7 +170,7 @@ function PackageRow({
   const [showFullDetails, setShowFullDetails] = useState(false)
   const isAvailabilityString = typeof pkg.availability === "string"
   const sellable = typeof pkg.availability === "number" ? pkg.availability : 0
-  const maxGuests = isAvailabilityString ? 1 : Math.min(sellable, pkg.totalCapacity)
+  const maxGuests = isAvailabilityString ? 1 : Math.max(0, sellable)
   const [guestCount, setGuestCount] = useState(() =>
     isAvailabilityString ? 1 : clampToAllowedGuestCount(sellable, 1),
   )
@@ -308,17 +308,10 @@ function PackageRow({
                     </p>
                     <h3 className="mt-2 text-xl sm:text-2xl font-bold leading-tight text-foreground">{pkg.name}</h3>
                     {(packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name)) ||
-                    pkg.totalCapacity > 0 ||
                     pkg.brochureUrl ? (
                       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs sm:text-sm text-muted-foreground">
                         {packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name) ? (
                           <span>{packageDurationLabel(pkg.duration)}</span>
-                        ) : null}
-                        {pkg.totalCapacity > 0 ? (
-                          <span className="inline-flex items-center gap-1.5">
-                            <Users className="h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden />
-                            <span>Suite capacity {pkg.totalCapacity}</span>
-                          </span>
                         ) : null}
                         {pkg.brochureUrl ? (
                           <a

@@ -1,6 +1,11 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { reconcileXeroInvoiceForOrder } from "@/lib/integrations/xero/invoices"
+import { isXeroRateLimitError } from "@/lib/integrations/xero/rate-limit"
+import { isXeroRateLimitCooldownActive } from "@/lib/integrations/xero/settings-store"
 import { cancellationEligibleDate, daysOverdue } from "@/lib/crm/deal-finance"
+
+/** Keep overdue Xero GETs well under the 60 calls/minute tenant cap so new invoices can send. */
+export const OVERDUE_XERO_RECONCILE_LIMIT = 15
 
 export type NativeInvoiceReminderResult = {
   overdueInvoices: number
@@ -18,6 +23,9 @@ export async function processNativeInvoiceReminders(): Promise<NativeInvoiceRemi
   if (!admin) {
     return { overdueInvoices: 0, remindersSent: 0, failures: 0, cancellationEligible: 0 }
   }
+  if (await isXeroRateLimitCooldownActive()) {
+    return { overdueInvoices: 0, remindersSent: 0, failures: 0, cancellationEligible: 0 }
+  }
   const now = new Date()
   const today = now.toISOString().slice(0, 10)
   const { data: invoices, error } = await admin
@@ -27,7 +35,7 @@ export async function processNativeInvoiceReminders(): Promise<NativeInvoiceRemi
     .lt("due_date", today)
     .not("xero_invoice_id", "is", null)
     .order("due_date")
-    .limit(200)
+    .limit(OVERDUE_XERO_RECONCILE_LIMIT)
   if (error) throw new Error(error.message)
 
   let failures = 0
@@ -46,6 +54,9 @@ export async function processNativeInvoiceReminders(): Promise<NativeInvoiceRemi
         continue
       }
     } catch (reconcileError) {
+      if (isXeroRateLimitError(reconcileError)) {
+        break
+      }
       failures += 1
       await admin
         .from("invoices")

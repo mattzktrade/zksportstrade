@@ -1,8 +1,15 @@
 import { getXeroConfig, getXeroCredentials, XERO_SCOPES } from "@/lib/integrations/xero/config"
 import {
+  decideXeroInlineRetry,
+  isRetryableXeroStatus,
+  sleep,
+  XERO_RATE_LIMIT_USER_MESSAGE,
+} from "@/lib/integrations/xero/rate-limit"
+import {
   getIntegrationSetting,
   getStoredXeroRefreshToken,
   getStoredXeroTenantId,
+  markXeroRateLimitCooldown,
   saveXeroOAuthTokens,
   setIntegrationSetting,
 } from "@/lib/integrations/xero/settings-store"
@@ -84,6 +91,19 @@ export async function exchangeXeroAuthorizationCode(
   return { refreshToken, tenantId, tenantName }
 }
 
+async function readJsonObject(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text()
+  if (!text) return {}
+  try {
+    const parsed = JSON.parse(text) as unknown
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : { error: text }
+  } catch {
+    return { error: text || res.statusText }
+  }
+}
+
 async function refreshXeroAccessToken(): Promise<{ accessToken: string; tenantId: string }> {
   const refreshToken = await getStoredXeroRefreshToken()
   if (!refreshToken) {
@@ -102,14 +122,34 @@ async function refreshXeroAccessToken(): Promise<{ accessToken: string; tenantId
     client_secret: creds.clientSecret,
   })
 
-  const res = await fetch("https://identity.xero.com/connect/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  })
-  const json = (await res.json()) as Record<string, unknown>
-  if (!res.ok) {
-    const msg = String(json.error_description ?? json.error ?? "Xero token refresh failed")
+  let res: Response | null = null
+  let json: Record<string, unknown> = {}
+  for (let tryIndex = 0; ; tryIndex++) {
+    res = await fetch("https://identity.xero.com/connect/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    })
+    json = await readJsonObject(res)
+    if (res.ok || !isRetryableXeroStatus(res.status)) break
+    const decision = decideXeroInlineRetry({
+      tryIndex,
+      status: res.status,
+      retryAfterHeader: res.headers.get("Retry-After"),
+    })
+    if (!decision.retry) {
+      await markXeroRateLimitCooldown(decision.waitMs)
+      break
+    }
+    await sleep(decision.waitMs)
+  }
+
+  if (!res?.ok) {
+    const msg = String(json.error_description ?? json.error ?? res?.statusText ?? "Xero token refresh failed")
+    if (res?.status === 429 || isRetryableXeroStatus(res?.status ?? 0)) {
+      await markXeroRateLimitCooldown()
+      throw new Error(XERO_RATE_LIMIT_USER_MESSAGE)
+    }
     if (/refresh token has been consumed|invalid_grant/i.test(msg)) {
       throw new Error(
         `${msg} Click Reconnect Xero on Admin → Integrations → Xero, then retry the sync queue.`,
