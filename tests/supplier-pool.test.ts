@@ -4,6 +4,7 @@ import {
   costLayerSupplierPoolKey,
   effectiveCostLayerSupplierId,
   groupSupplierPoolOptions,
+  toPurchasedSupplierPoolKey,
 } from "../lib/inventory/supplier-pool"
 
 test("purchase-order supplier wins over a stale cost-layer supplier id", () => {
@@ -110,4 +111,23 @@ test("layers that still share one supplier company stay in one pool", () => {
   )
   assert.equal(pools.length, 1)
   assert.equal(pools[0]?.purchased, 14)
+})
+
+test("deal-page supplier keys map onto purchased supplier pool keys", () => {
+  assert.equal(
+    toPurchasedSupplierPoolKey({ supplierKey: "sup:abc-id" }),
+    "id:abc-id",
+  )
+  assert.equal(
+    toPurchasedSupplierPoolKey({ supplierKey: "src:canada sport marketing" }),
+    "name:canada sport marketing",
+  )
+  assert.equal(
+    toPurchasedSupplierPoolKey({ supplierKey: "id:abc-id" }),
+    "id:abc-id",
+  )
+  assert.equal(
+    toPurchasedSupplierPoolKey({ supplierId: "abc-id" }),
+    "id:abc-id",
+  )
 })

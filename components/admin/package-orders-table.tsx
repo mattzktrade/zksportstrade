@@ -111,10 +111,17 @@ function ownedAllocatedQuantity(deal: PackageDealSaleRow): number {
     }, 0)
 }
 
-/** Offline signed deals, or portal deals whose purchased stock is already on the deal line. */
+function dealLineCanTakePurchasedSupplier(
+  line: PackageDealSaleRow["lines"][number],
+): boolean {
+  return line.sourcingMode === "owned" || line.sourcingMode === "brokered"
+}
+
+/** Signed deals can be assigned purchased stock, including lines that started as brokered. */
 function dealProjectsSupplierConsumption(deal: PackageDealSaleRow): boolean {
   if (!dealStageHoldsPurchasedStock(deal.stage)) return false
   if (!deal.orderId) return true
+  if (deal.lines.some((line) => line.sourcingMode === "brokered")) return true
   return ownedAllocatedQuantity(deal) > 0
 }
 
@@ -447,29 +454,35 @@ function DealSupplierEditor({
   pending: boolean
   onChange: (lineId: string, supplierKey: string) => void
 }) {
-  const ownedLines = deal.lines.filter((line) => line.sourcingMode === "owned")
-  const brokeredLines = deal.lines.filter((line) => line.sourcingMode === "brokered")
+  const stockLines = deal.lines.filter(dealLineCanTakePurchasedSupplier)
+  const brokeredUnassigned = stockLines.filter(
+    (line) => line.sourcingMode === "brokered" && !(drafts[line.id] ?? line.supplierKey),
+  )
   const selectedKeys = [
     ...new Set(
-      ownedLines
+      stockLines
         .map((line) => drafts[line.id] ?? line.supplierKey)
         .filter((key) => Boolean(key)),
     ),
   ]
   const commonKey = selectedKeys.length === 1 ? selectedKeys[0] : ""
-  const splitAcrossSuppliers = ownedLines.length > 1 && selectedKeys.length !== 1
+  const splitAcrossSuppliers = stockLines.length > 1 && selectedKeys.length !== 1
+  const placeholderName =
+    stockLines.find((line) => line.supplierName)?.supplierName || "Choose supplier…"
 
   return (
     <div className="min-w-[190px] space-y-1.5">
-      {brokeredLines.map((line) => (
-        <p key={line.id}>{line.supplierName || "Brokered supplier"}</p>
-      ))}
-      {ownedLines.length > 0 ? (
+      {brokeredUnassigned.length > 0 ? (
+        <p className="text-[10px] leading-snug text-amber-800 dark:text-amber-200">
+          Brokered stock — assign a purchased supplier to take it from buys.
+        </p>
+      ) : null}
+      {stockLines.length > 0 ? (
         <select
           value={commonKey}
           disabled={pending || supplierPools.length === 0}
           onChange={(event) => {
-            for (const line of ownedLines) onChange(line.id, event.target.value)
+            for (const line of stockLines) onChange(line.id, event.target.value)
           }}
           className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
         >
@@ -477,7 +490,7 @@ function DealSupplierEditor({
             <option value="">
               {splitAcrossSuppliers
                 ? `Split across ${Math.max(selectedKeys.length, 2)} suppliers — choose one`
-                : ownedLines[0]?.supplierName || "Choose supplier…"}
+                : placeholderName}
             </option>
           ) : null}
           {supplierPools.map((supplier) => (
@@ -529,7 +542,7 @@ export function PackageOrdersTable({
         deals.flatMap((deal) =>
           dealProjectsSupplierConsumption(deal)
             ? deal.lines
-                .filter((line) => line.sourcingMode === "owned")
+                .filter((line) => line.sourcingMode === "owned" && line.supplierKey)
                 .map((line) => [line.id, line.supplierKey])
             : [],
         ),
@@ -560,7 +573,7 @@ export function PackageOrdersTable({
       ? deal.lines
           .filter(
             (line) =>
-              line.sourcingMode === "owned" &&
+              dealLineCanTakePurchasedSupplier(line) &&
               supplierDrafts[line.id] &&
               supplierDrafts[line.id] !== line.supplierKey,
           )
@@ -595,9 +608,13 @@ export function PackageOrdersTable({
   for (const deal of deals) {
     if (!dealProjectsSupplierConsumption(deal)) continue
     for (const line of deal.lines) {
-      if (line.sourcingMode !== "owned") continue
+      if (!dealLineCanTakePurchasedSupplier(line)) continue
       const packageDuration = durationByPackageId.get(line.packageId)
-      const draftedSupplierKey = supplierDrafts[line.id] ?? line.supplierKey
+      const draftedSupplierKey =
+        line.sourcingMode === "brokered"
+          ? supplierDrafts[line.id]
+          : (supplierDrafts[line.id] ?? line.supplierKey)
+      if (!draftedSupplierKey && line.sourcingMode === "brokered") continue
       if (draftedSupplierKey) {
         if (!addProjectedConsumption(draftedSupplierKey, packageDuration, line.quantity)) {
           projectedUnassigned += line.quantity

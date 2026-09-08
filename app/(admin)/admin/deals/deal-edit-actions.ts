@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { hasCmsPermission } from "@/lib/auth/permissions"
 import { dealStageHoldsPurchasedStock } from "@/lib/crm/deal-types"
+import { toPurchasedSupplierPoolKey } from "@/lib/inventory/supplier-pool"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { createClient } from "@/lib/supabase/server"
 
@@ -305,7 +306,75 @@ export async function updateDealLineSupplier(input: {
     .maybeSingle()
   if (lineError || !line) return { ok: false, message: "Deal product was not found." }
 
+  const { data: dealRow, error: dealRowError } = await supabase
+    .from("deals")
+    .select("stage, order_id")
+    .eq("id", dealId)
+    .maybeSingle()
+  if (dealRowError || !dealRow) return { ok: false, message: "Deal was not found." }
+
   const clear = !input.supplierKey.trim() || input.supplierKey === "unassigned"
+  if (
+    line.sourcing_mode === "brokered" &&
+    !clear &&
+    dealStageHoldsPurchasedStock(dealRow.stage)
+  ) {
+    let supplierId = input.supplierId?.trim() || null
+    if (input.costLayerId?.trim()) {
+      const { data: layer } = await supabase
+        .from("package_cost_layers")
+        .select("id, supplier_id, purchase_order_id")
+        .eq("id", input.costLayerId.trim())
+        .maybeSingle()
+      if (!layer) return { ok: false, message: "That supplier stock is no longer available." }
+      if (!supplierId) supplierId = layer.supplier_id ?? null
+      if (!supplierId && layer.purchase_order_id) {
+        const { data: po } = await supabase
+          .from("purchase_orders")
+          .select("supplier_id")
+          .eq("id", layer.purchase_order_id)
+          .maybeSingle()
+        supplierId = po?.supplier_id ?? null
+      }
+    }
+    const poolKey = toPurchasedSupplierPoolKey({
+      supplierKey: input.supplierKey,
+      supplierId,
+    })
+    if (poolKey) {
+      const { error } = await supabase.rpc("inventory_reassign_deal_line_to_supplier", {
+        p_deal_line_item_id: lineId,
+        p_supplier_key: poolKey,
+      })
+      if (error) {
+        const message = error.message.toLowerCase()
+        if (
+          message.includes("insufficient_supplier_stock") ||
+          message.includes("insufficient_purchased_stock")
+        ) {
+          return {
+            ok: false,
+            message: "That supplier no longer has enough unallocated stock for this order.",
+          }
+        }
+        if (message.includes("allocation_fulfilment_locked")) {
+          return {
+            ok: false,
+            message: "This supplier is locked because fulfilment has already started.",
+          }
+        }
+        return { ok: false, message: error.message }
+      }
+
+      revalidatePath("/admin/deals", "layout")
+      revalidatePath("/admin/enquiries", "layout")
+      revalidatePath("/admin/catalog", "layout")
+      revalidatePath("/admin/purchase-orders")
+      revalidatePath("/admin")
+      return { ok: true, message: "Supplier allocation updated." }
+    }
+  }
+
   if (line.sourcing_mode !== "brokered") {
     const { error } = await supabase.rpc("inventory_reassign_deal_line", {
       p_deal_line_item_id: lineId,
@@ -332,7 +401,7 @@ export async function updateDealLineSupplier(input: {
     }
 
     revalidatePath("/admin/deals", "layout")
-  revalidatePath("/admin/enquiries", "layout")
+    revalidatePath("/admin/enquiries", "layout")
     revalidatePath("/admin/catalog", "layout")
     revalidatePath("/admin/purchase-orders")
     revalidatePath("/admin")
@@ -381,15 +450,14 @@ export async function updateDealLineSupplier(input: {
     return { ok: false, message: error.message }
   }
 
-  const { data: deal } = await supabase.from("deals").select("order_id").eq("id", dealId).maybeSingle()
-  if (deal?.order_id) {
+  if (dealRow.order_id) {
     await supabase
       .from("order_supplier_fulfilments")
       .update({
         supplier_id: supplierId,
         updated_at: new Date().toISOString(),
       })
-      .eq("order_id", deal.order_id)
+      .eq("order_id", dealRow.order_id)
       .eq("package_id", line.package_id)
   }
 
@@ -495,7 +563,7 @@ export async function swapDealLineSuppliers(input: {
     )
     if (reconcileError) {
       revalidatePath("/admin/deals", "layout")
-  revalidatePath("/admin/enquiries", "layout")
+      revalidatePath("/admin/enquiries", "layout")
       revalidatePath("/admin/catalog", "layout")
       revalidatePath("/admin/purchase-orders")
       revalidatePath("/admin")

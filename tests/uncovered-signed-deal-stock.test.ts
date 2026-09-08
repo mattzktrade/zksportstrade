@@ -43,3 +43,31 @@ test("existing signed shortages are backfilled without duplicating historical ro
   assert.match(sql, /perform public.inventory_sync_deal_line_shortage\(v_line.id\)/)
   assert.match(sql, /and shortage.shortage_type = 'historical_reconciliation'/)
 })
+
+const adoptSql = readFileSync(
+  "supabase/migrations/20260908120000_adopt_brokered_lines_onto_purchased_stock.sql",
+  "utf8",
+).toLowerCase()
+const orderTable = readFileSync("components/admin/package-orders-table.tsx", "utf8")
+const dealEditActions = readFileSync(
+  "app/(admin)/admin/deals/deal-edit-actions.ts",
+  "utf8",
+)
+
+test("assigning purchased stock to a signed brokered deal converts it to owned", () => {
+  assert.match(adoptSql, /v_was_brokered := coalesce\(v_line.sourcing_mode, 'owned'\) = 'brokered'/)
+  assert.match(adoptSql, /set sourcing_mode = 'owned'/)
+  assert.match(adoptSql, /adopted_from_brokered/)
+  assert.match(
+    adoptSql,
+    /coalesce\(line.sourcing_mode, 'owned'\) in \('owned', 'brokered'\)/,
+  )
+  assert.match(dealEditActions, /toPurchasedSupplierPoolKey/)
+  assert.match(dealEditActions, /inventory_reassign_deal_line_to_supplier/)
+})
+
+test("sales list shows a supplier dropdown for signed brokered deals", () => {
+  assert.match(orderTable, /dealLineCanTakePurchasedSupplier/)
+  assert.match(orderTable, /assign a purchased supplier to take it from buys/)
+  assert.doesNotMatch(orderTable, /Brokered supplier/)
+})

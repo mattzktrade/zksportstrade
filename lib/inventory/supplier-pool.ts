@@ -59,6 +59,27 @@ export function costLayerSupplierPoolKey(input: {
   return ""
 }
 
+/** Map deal-page keys (`sup:`, `src:`) onto the purchased supplier pool keys. */
+export function toPurchasedSupplierPoolKey(input: {
+  supplierKey?: string | null
+  supplierId?: string | null
+  supplierName?: string | null
+}): string | null {
+  const key = input.supplierKey?.trim() ?? ""
+  if (key.startsWith("id:") || key.startsWith("name:")) return key
+  if (key.startsWith("sup:")) {
+    const supplierId = key.slice(4).trim()
+    return supplierId ? `id:${supplierId}` : null
+  }
+  if (key.startsWith("src:")) {
+    const supplierName = key.slice(4).trim()
+    return supplierName ? `name:${supplierName}` : null
+  }
+  if (input.supplierId?.trim()) return `id:${input.supplierId.trim()}`
+  const supplierName = input.supplierName?.trim().toLowerCase()
+  return supplierName ? `name:${supplierName}` : null
+}
+
 export function groupSupplierPoolOptions(
   costLayers: readonly SupplierPoolLayer[],
   purchaseOrders: readonly SupplierPoolPurchase[],
