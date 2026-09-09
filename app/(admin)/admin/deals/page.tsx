@@ -7,10 +7,14 @@ import {
 } from "@/lib/inventory/effective-availability"
 import { getCrmAccountOptions, getDealListRows } from "@/lib/crm/deals"
 import { getSalesStaffOptions } from "@/lib/crm/leads"
-import { getBookingFormsForDeals } from "@/lib/booking-forms/queries"
+import {
+  getBookingFormsForDeals,
+  listNativeBookingFormsAwaitingApprovalDealIds,
+} from "@/lib/booking-forms/queries"
 import { hasCmsPermission, canSendNativeBookingForm, canSignNativeBookingForm } from "@/lib/auth/permissions"
 import { getSuppliers } from "@/lib/inventory/suppliers"
 import { adminEnquiryListPath, isDealBoardStage, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
+import { isAwaitingZkApprovalDeal, uniqueDealIds } from "@/lib/admin/deal-link"
 import { DealsClient } from "./deals-client"
 
 export const dynamic = "force-dynamic"
@@ -46,28 +50,39 @@ export default async function DealsPage({
     redirect("/admin/enquiries?stage=price_sent")
   }
 
-  const [initialDeals, packages, accountOptions, staffOptions, bookingForms, suppliers] = await Promise.all([
-    getDealListRows(),
-    getAdminCatalogListRows(),
-    getCrmAccountOptions(),
-    getSalesStaffOptions(),
-    getBookingFormsForDeals(),
-    getSuppliers(),
-  ])
+  const [initialDeals, packages, accountOptions, staffOptions, bookingForms, suppliers, awaitingZkDealIdsRaw] =
+    await Promise.all([
+      getDealListRows(),
+      getAdminCatalogListRows(),
+      getCrmAccountOptions(),
+      getSalesStaffOptions(),
+      getBookingFormsForDeals(),
+      getSuppliers(),
+      listNativeBookingFormsAwaitingApprovalDealIds(),
+    ])
 
+  const awaitingZkDealIds = uniqueDealIds(awaitingZkDealIdsRaw)
   let deals = initialDeals
   const selectedId = initialSelectedId?.trim() || null
-  if (selectedId && !deals.some((deal) => deal.id === selectedId)) {
-    const extra = await getDealListRows({ ids: [selectedId] })
+  const extraIds = [...new Set([selectedId, ...awaitingZkDealIds].filter((id): id is string => Boolean(id)))]
+    .filter((id) => !deals.some((deal) => deal.id === id))
+  if (extraIds.length > 0) {
+    const extra = await getDealListRows({ ids: extraIds })
     if (extra.length > 0) deals = [...extra, ...deals]
   }
 
   const selected = selectedId ? deals.find((deal) => deal.id === selectedId) ?? null : null
-  if (selected && isEnquiryPipelineStage(selected.stage)) {
+  if (
+    selected &&
+    isEnquiryPipelineStage(selected.stage) &&
+    !isAwaitingZkApprovalDeal(selected.id, awaitingZkDealIds)
+  ) {
     redirect(adminEnquiryListPath(selected.id))
   }
 
-  const boardDeals = deals.filter((deal) => isDealBoardStage(deal.stage))
+  const boardDeals = deals.filter(
+    (deal) => isDealBoardStage(deal.stage) || isAwaitingZkApprovalDeal(deal.id, awaitingZkDealIds),
+  )
 
   const packageOptions = packages
     .filter((row) => !row.shell_parent_package_id)
@@ -103,6 +118,7 @@ export default async function DealsPage({
         currentCanManageDeals={hasCmsPermission(profile, "deals.manage")}
         bookingForms={bookingForms.forms}
         bookingFormEvents={bookingForms.events}
+        awaitingZkDealIds={awaitingZkDealIds}
         supplierOptions={suppliers.map((supplier) => ({ id: supplier.id, name: supplier.name }))}
         initialSelectedId={initialSelectedId ?? null}
         initialPipelineFilter={isDealBoardFilter(initialPipeline) ? initialPipeline : ""}

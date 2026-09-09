@@ -115,7 +115,7 @@ export function dealConfirmedOffPlatform(deal: {
   return !deal.order_id && dealStageIsConfirmed(deal.stage)
 }
 
-export const DEAL_SOURCES = ["offline", "website", "portal", "referral", "other"] as const
+export const DEAL_SOURCES = ["offline", "website", "portal", "referral", "marketing", "other"] as const
 export type DealSource = (typeof DEAL_SOURCES)[number]
 
 export const DEAL_SOURCE_LABELS: Record<DealSource, string> = {
@@ -123,6 +123,7 @@ export const DEAL_SOURCE_LABELS: Record<DealSource, string> = {
   website: "Website",
   portal: "Portal",
   referral: "Referral",
+  marketing: "Marketing",
   other: "Other",
 }
 
@@ -142,6 +143,8 @@ export function dealSourceTone(source: string | null | undefined): DealSourceTon
       return "amber"
     case "referral":
       return "purple"
+    case "marketing":
+      return "blue"
     case "other":
       return "blue"
     case "offline":
@@ -176,6 +179,8 @@ export type DealListRow = {
   recent_activities: DealActivityPreview[]
   account_name: string | null
   contact_name: string | null
+  contact_email: string | null
+  contact_phone: string | null
   owner_profile_id: string | null
   owner_name: string | null
   race_name: string | null

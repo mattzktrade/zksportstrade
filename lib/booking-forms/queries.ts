@@ -5,22 +5,36 @@ import type {
   BookingFormEventRow,
 } from "@/lib/booking-forms/types"
 
+const BOOKING_FORM_ADMIN_SELECT =
+  "id, deal_id, document_ref, revision, status, client_name, client_email, sent_at, first_viewed_at, client_signed_at, zk_signed_at, completed_at, client_token_expires_at, reminder_count, last_reminder_at, last_error, unsigned_pdf_path, final_pdf_path, created_at"
+
 export async function getBookingFormsForDeals(): Promise<{
   forms: BookingFormAdminRow[]
   events: BookingFormEventRow[]
 }> {
   noStore()
   const supabase = await createClient()
-  const { data: forms, error } = await supabase
-    .from("booking_forms")
-    .select(
-      "id, deal_id, document_ref, revision, status, client_name, client_email, sent_at, first_viewed_at, client_signed_at, zk_signed_at, completed_at, client_token_expires_at, reminder_count, last_reminder_at, last_error, unsigned_pdf_path, final_pdf_path, created_at",
-    )
-    .order("created_at", { ascending: false })
-    .limit(500)
+  const [{ data: forms, error }, { data: awaitingZkForms }] = await Promise.all([
+    supabase
+      .from("booking_forms")
+      .select(BOOKING_FORM_ADMIN_SELECT)
+      .order("created_at", { ascending: false })
+      .limit(500),
+    supabase
+      .from("booking_forms")
+      .select(BOOKING_FORM_ADMIN_SELECT)
+      .eq("status", "awaiting_zk_signature")
+      .order("created_at", { ascending: false }),
+  ])
   if (error || !forms) return { forms: [], events: [] }
 
-  const formIds = forms.map((form) => String(form.id))
+  const byId = new Map<string, BookingFormAdminRow>()
+  for (const form of forms as BookingFormAdminRow[]) byId.set(String(form.id), form)
+  for (const form of (awaitingZkForms ?? []) as BookingFormAdminRow[]) {
+    byId.set(String(form.id), form)
+  }
+  const merged = [...byId.values()]
+  const formIds = merged.map((form) => String(form.id))
   const { data: events } = formIds.length
     ? await supabase
         .from("booking_form_events")
@@ -31,7 +45,7 @@ export async function getBookingFormsForDeals(): Promise<{
     : { data: [] }
 
   return {
-    forms: forms as BookingFormAdminRow[],
+    forms: merged,
     events: (events ?? []) as BookingFormEventRow[],
   }
 }
@@ -80,9 +94,7 @@ export async function getBookingFormsForDeal(dealId: string): Promise<{
   const supabase = await createClient()
   const { data: forms, error } = await supabase
     .from("booking_forms")
-    .select(
-      "id, deal_id, document_ref, revision, status, client_name, client_email, sent_at, first_viewed_at, client_signed_at, zk_signed_at, completed_at, client_token_expires_at, reminder_count, last_reminder_at, last_error, unsigned_pdf_path, final_pdf_path, created_at",
-    )
+    .select(BOOKING_FORM_ADMIN_SELECT)
     .eq("deal_id", id)
     .order("revision", { ascending: false })
     .limit(1)

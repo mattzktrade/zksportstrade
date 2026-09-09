@@ -47,6 +47,10 @@ test("inline Xero retries wait briefly, then back off to the outbox cooldown", (
   assert.equal(longWait.retry, false)
   assert.equal(longWait.waitMs, 60_000)
 
+  const fourSeconds = decideXeroInlineRetry({ tryIndex: 0, status: 429, retryAfterHeader: "4" })
+  assert.equal(fourSeconds.retry, true)
+  assert.equal(fourSeconds.waitMs, 4000)
+
   const exhausted = decideXeroInlineRetry({ tryIndex: 2, status: 429, retryAfterHeader: "1" })
   assert.equal(exhausted.retry, false)
 })
@@ -75,5 +79,20 @@ test("outbox keeps Xero 429 invoice jobs pending and requeues previously failed 
   assert.match(source, /requeueRateLimitedInvoiceJobs/)
   assert.match(source, /xero_sync_status: rateLimited \? "pending" : "failed"/)
   assert.match(source, /attempts: row\.attempts/)
+  assert.match(source, /preferOrderId/)
+  assert.match(source, /isXeroProcessBudgetExhausted/)
+  assert.match(source, /INVOICE_CREATE_EVENT/)
   assert.doesNotMatch(source, /isXeroRateLimitError\(e\) \|\|/)
+})
+
+test("new invoice creates are drained for that order before other outbox work", () => {
+  const drain = readFileSync("lib/integrations/drain-outbox.ts", "utf8")
+  assert.match(drain, /processIntegrationOutbox\(\{ preferOrderId: options\.orderId \}\)/)
+})
+
+test("overdue Xero reconciliation yields when new invoices are waiting", () => {
+  const source = readFileSync("lib/integrations/process-native-invoice-reminders.ts", "utf8")
+  assert.match(source, /shouldSkipOverdueXeroReconcile/)
+  assert.match(source, /hasPendingInvoiceCreateJobs/)
+  assert.match(source, /INVOICE_CREATE_EVENT/)
 })

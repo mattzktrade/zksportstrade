@@ -57,7 +57,7 @@ import { nextActionForDealStage } from "@/lib/crm/deal-workflow"
 import type { BookingFormAdminRow, BookingFormEventRow } from "@/lib/booking-forms/types"
 import { cn } from "@/lib/utils"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
-import { adminDealPath } from "@/lib/admin/deal-link"
+import { adminDealPath, isAwaitingZkApprovalDeal } from "@/lib/admin/deal-link"
 import { isModifiedClick, openInNewTab, pageSearchProps } from "@/lib/browser/laptop-qol"
 import { adminAccountPath, adminContactPath } from "@/lib/crm/profile-links"
 import Link from "next/link"
@@ -164,8 +164,8 @@ function DealSortTh({
   )
 }
 
-function stageTone(stage: DealStage): "green" | "amber" | "red" | "blue" | "purple" | "gray" {
-  switch (pipelineStageFor(stage).id) {
+function stageTone(stage: DealStage, awaitingZkApproval = false): "green" | "amber" | "red" | "blue" | "purple" | "gray" {
+  switch (pipelineStageFor(stage, awaitingZkApproval).id) {
     case "ready_to_send":
       return "purple"
     case "booking_form":
@@ -184,7 +184,11 @@ function stageTone(stage: DealStage): "green" | "amber" | "red" | "blue" | "purp
   }
 }
 
-function approvalLabel(stage: DealStage): { label: string; tone: "green" | "amber" | "gray" } {
+function approvalLabel(
+  stage: DealStage,
+  awaitingZkApproval: boolean,
+): { label: string; tone: "green" | "amber" | "gray" } {
+  if (awaitingZkApproval) return { label: "Pending", tone: "amber" }
   if (["signed", "awaiting_invoice", "awaiting_payment", "paid_confirmed", "in_fulfilment", "fulfilled"].includes(stage)) {
     return { label: "Approved", tone: "green" }
   }
@@ -231,11 +235,20 @@ const PIPELINE_COLUMNS: Array<{
   { id: "lost", label: "Lost", stages: ["closed_lost", "cancelled"], colour: "border-slate-400" },
 ]
 
-function pipelineStageFor(stage: DealStage) {
+function pipelineStageFor(stage: DealStage, awaitingZkApproval = false) {
+  if (awaitingZkApproval) {
+    return {
+      id: "awaiting_approval" as PipelineStageId,
+      label: "Awaiting ZK approval",
+      stages: ["awaiting_zk_signature"] as DealStage[],
+      colour: "border-amber-500",
+    }
+  }
   return PIPELINE_COLUMNS.find((column) => column.stages.includes(stage)) ?? PIPELINE_COLUMNS[0]
 }
 
-function actionRequired(deal: DealListRow): string {
+function actionRequired(deal: DealListRow, awaitingZkApproval: boolean): string {
+  if (awaitingZkApproval) return nextActionForDealStage("awaiting_zk_signature")
   if (deal.next_action?.trim()) return deal.next_action
   return nextActionForDealStage(deal.stage)
 }
@@ -254,6 +267,7 @@ export function DealsClient({
   currentCanManageDeals,
   bookingForms,
   bookingFormEvents,
+  awaitingZkDealIds = [],
   supplierOptions,
   initialSelectedId = null,
   initialPipelineFilter = "",
@@ -271,6 +285,7 @@ export function DealsClient({
   currentCanManageDeals: boolean
   bookingForms: BookingFormAdminRow[]
   bookingFormEvents: BookingFormEventRow[]
+  awaitingZkDealIds?: string[]
   supplierOptions: DealBasketSupplier[]
   initialSelectedId?: string | null
   initialPipelineFilter?: PipelineStageId | ""
@@ -315,10 +330,15 @@ export function DealsClient({
   const [editNotes, setEditNotes] = useState("")
   const [editLines, setEditLines] = useState<EditLineState[]>([])
 
+  const awaitingZkDealIdSet = new Set(awaitingZkDealIds)
+  function dealNeedsZkApproval(dealId: string, stage: DealStage) {
+    return isAwaitingZkApprovalDeal(dealId, awaitingZkDealIdSet) || stage === "awaiting_zk_signature"
+  }
+
   const scoped = useMemo(() => {
     const q = query.trim().toLowerCase()
     return deals.filter((deal) => {
-      if (isEnquiryPipelineStage(deal.stage)) return false
+      if (isEnquiryPipelineStage(deal.stage) && !dealNeedsZkApproval(deal.id, deal.stage)) return false
       if (view === "mine" && deal.owner_profile_id !== currentProfileId) return false
       if (
         view === "team" &&
@@ -343,16 +363,16 @@ export function DealsClient({
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q))
     })
-  }, [currentProfileId, deals, eventFilter, query, sourceFilter, view])
+  }, [awaitingZkDealIds, currentProfileId, deals, eventFilter, query, sourceFilter, view])
 
   const filtered = useMemo(() => {
     const activePipeline = String(pipelineFilter)
     if (!activePipeline || activePipeline === "new_enquiry" || activePipeline === "price_sent") return scoped
     if (pipelineFilter === "awaiting_approval") {
-      return scoped.filter((deal) => deal.stage === "awaiting_zk_signature")
+      return scoped.filter((deal) => dealNeedsZkApproval(deal.id, deal.stage))
     }
     return scoped.filter((deal) => pipelineStageFor(deal.stage).id === pipelineFilter)
-  }, [pipelineFilter, scoped])
+  }, [awaitingZkDealIds, pipelineFilter, scoped])
 
   const sorted = useMemo(() => {
     const rows = [...filtered]
@@ -381,6 +401,7 @@ export function DealsClient({
   }
 
   const selected = selectedId ? deals.find((deal) => deal.id === selectedId) ?? null : null
+  const selectedNeedsZk = selected ? dealNeedsZkApproval(selected.id, selected.stage) : false
 
   useEffect(() => {
     if (!initialSelectedId) return
@@ -430,7 +451,7 @@ export function DealsClient({
   }, [selected])
   const openDeals = deals.filter((deal) => !["cancelled", "closed_lost", "fulfilled"].includes(deal.stage))
   const pipelineValue = openDeals.reduce((sum, deal) => sum + deal.total_amount, 0)
-  const awaitingApproval = deals.filter((deal) => deal.stage === "awaiting_zk_signature")
+  const awaitingApproval = deals.filter((deal) => dealNeedsZkApproval(deal.id, deal.stage))
   const monthKey = new Date().toISOString().slice(0, 7)
   const closingThisMonth = deals.filter((deal) => deal.expected_close_date?.startsWith(monthKey))
   const wonThisMonth = deals.filter(
@@ -649,7 +670,19 @@ export function DealsClient({
       <AdminStats className="sm:grid-cols-2 xl:grid-cols-5">
         <AdminStatCard icon={UsersRound} value={openDeals.length} label="Open deals" tone="purple" />
         <AdminStatCard icon={ChartNoAxesCombined} value={money(pipelineValue)} label="Pipeline value" tone="blue" />
-        <AdminStatCard icon={Clock3} value={awaitingApproval.length} label="Awaiting ZK approval" tone="amber" />
+        <AdminStatCard
+          icon={Clock3}
+          value={awaitingApproval.length}
+          label="Awaiting ZK approval"
+          tone="amber"
+          active={pipelineFilter === "awaiting_approval"}
+          onClick={() =>
+            setListState((current) => ({
+              ...current,
+              pipelineFilter: current.pipelineFilter === "awaiting_approval" ? "" : "awaiting_approval",
+            }))
+          }
+        />
         <AdminStatCard icon={CalendarCheck} value={closingThisMonth.length} label="Closing this month" tone="green" />
         <AdminStatCard
           icon={Trophy}
@@ -776,8 +809,9 @@ export function DealsClient({
               </thead>
               <tbody className="divide-y divide-[#f0f1f3] text-[9px]">
                 {sorted.map((deal) => {
-                  const approval = approvalLabel(deal.stage)
-                  const pipelineStage = pipelineStageFor(deal.stage)
+                  const awaitingZk = dealNeedsZkApproval(deal.id, deal.stage)
+                  const approval = approvalLabel(deal.stage, awaitingZk)
+                  const pipelineStage = pipelineStageFor(deal.stage, awaitingZk)
                   return (
                     <tr
                       id={`deal-${deal.id}`}
@@ -832,10 +866,10 @@ export function DealsClient({
                       <td className="whitespace-nowrap px-3 py-3"><StatusPill tone={dealSourceTone(deal.source)}>{dealSourceLabel(deal.source)}</StatusPill></td>
                       <td className="whitespace-nowrap px-3 py-3">{deal.owner_name || "—"}</td>
                       <td className="whitespace-nowrap px-3 py-3">
-                        <StatusPill tone={stageTone(deal.stage)}>{pipelineStage.label}</StatusPill>
+                        <StatusPill tone={stageTone(deal.stage, awaitingZk)}>{pipelineStage.label}</StatusPill>
                       </td>
                       <td className="max-w-[120px] px-3 py-3 font-medium text-slate-700">
-                        <p className="truncate" title={actionRequired(deal)}>{actionRequired(deal)}</p>
+                        <p className="truncate" title={actionRequired(deal, awaitingZk)}>{actionRequired(deal, awaitingZk)}</p>
                       </td>
                       <td className="whitespace-nowrap px-3 py-3 font-semibold">{money(deal.total_amount, deal.currency)}</td>
                       <td className="whitespace-nowrap px-3 py-3"><StatusPill tone={approval.tone}>{approval.label}</StatusPill></td>
@@ -850,7 +884,8 @@ export function DealsClient({
           </div>
           <AdminMobileList>
             {sorted.map((deal) => {
-              const pipelineStage = pipelineStageFor(deal.stage)
+              const awaitingZk = dealNeedsZkApproval(deal.id, deal.stage)
+              const pipelineStage = pipelineStageFor(deal.stage, awaitingZk)
               return (
                 <button
                   type="button"
@@ -866,7 +901,7 @@ export function DealsClient({
                   </div>
                   <div className="shrink-0 text-right">
                     <p className="font-semibold">{money(deal.total_amount, deal.currency)}</p>
-                    <div className="mt-1"><StatusPill tone={stageTone(deal.stage)}>{pipelineStage.label}</StatusPill></div>
+                    <div className="mt-1"><StatusPill tone={stageTone(deal.stage, awaitingZk)}>{pipelineStage.label}</StatusPill></div>
                   </div>
                 </button>
               )
@@ -957,9 +992,9 @@ export function DealsClient({
                   <dt className="text-slate-400">Source</dt><dd><StatusPill tone={dealSourceTone(selected.source)}>{dealSourceLabel(selected.source)}</StatusPill></dd>
                   <dt className="text-slate-400">Deal owner</dt><dd>{selected.owner_name || "—"}</dd>
                   <dt className="text-slate-400">Sales stage</dt>
-                  <dd><StatusPill tone={stageTone(selected.stage)}>{pipelineStageFor(selected.stage).label}</StatusPill></dd>
+                  <dd><StatusPill tone={stageTone(selected.stage, selectedNeedsZk)}>{pipelineStageFor(selected.stage, selectedNeedsZk).label}</StatusPill></dd>
                   <dt className="text-slate-400">Workflow status</dt><dd>{DEAL_STAGE_LABELS[selected.stage]}</dd>
-                  <dt className="text-slate-400">Action required</dt><dd className="font-semibold text-primary">{actionRequired(selected)}</dd>
+                  <dt className="text-slate-400">Action required</dt><dd className="font-semibold text-primary">{actionRequired(selected, selectedNeedsZk)}</dd>
                   <dt className="text-slate-400">Deal value</dt><dd className="font-semibold">{money(selected.total_amount, selected.currency)}</dd>
                   <dt className="text-slate-400">Gross profit / Margin</dt>
                   <dd>{selected.gross_profit == null ? "Not costed" : `${money(selected.gross_profit, selected.currency)} (${((selected.margin ?? 0) * 100).toFixed(1)}%)`}</dd>

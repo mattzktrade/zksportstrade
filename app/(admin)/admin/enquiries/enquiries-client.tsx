@@ -10,6 +10,7 @@ import {
   Globe,
   Inbox,
   Maximize2,
+  Megaphone,
   Phone,
   Plus,
   Search,
@@ -88,6 +89,8 @@ import type { BookingFormAdminRow, BookingFormEventRow } from "@/lib/booking-for
 
 function sourceIcon(source: string) {
   switch (source) {
+    case "marketing":
+      return Megaphone
     case "website":
       return Globe
     case "portal":
@@ -108,8 +111,10 @@ function temperatureKind(temperature: EnquiryTemperature): { label: string; clas
 
 function sourceKind(source: string): { label: string; className: string } {
   switch (source) {
-    case "website":
+    case "marketing":
       return { label: "Marketing", className: "bg-blue-50 text-blue-700" }
+    case "website":
+      return { label: "Website", className: "bg-sky-50 text-sky-700" }
     case "portal":
       return { label: "Inbound", className: "bg-emerald-50 text-emerald-700" }
     case "referral":
@@ -119,6 +124,32 @@ function sourceKind(source: string): { label: string; className: string } {
     default:
       return { label: "Other", className: "bg-slate-100 text-slate-600" }
   }
+}
+
+function EnquiryContactDetails({ email, phone }: { email: string | null; phone: string | null }) {
+  if (!email && !phone) return null
+  return (
+    <div className="mt-0.5 space-y-0.5 text-[8px] text-slate-500">
+      {email ? (
+        <a
+          href={`mailto:${email}`}
+          onClick={(event) => event.stopPropagation()}
+          className="block truncate hover:text-primary hover:underline"
+        >
+          {email}
+        </a>
+      ) : null}
+      {phone ? (
+        <a
+          href={`tel:${phone}`}
+          onClick={(event) => event.stopPropagation()}
+          className="block truncate hover:text-primary hover:underline"
+        >
+          {phone}
+        </a>
+      ) : null}
+    </div>
+  )
 }
 
 function EnquiryAvailability({
@@ -257,6 +288,8 @@ export function EnquiriesClient({
         deal.reference,
         deal.account_name,
         deal.contact_name,
+        deal.contact_email,
+        deal.contact_phone,
         deal.race_name,
         deal.line_summary,
         deal.owner_name,
@@ -782,6 +815,7 @@ export function EnquiriesClient({
                         ) : (
                           <p className="text-[8px] text-slate-400">{deal.account_name || "—"}</p>
                         )}
+                        <EnquiryContactDetails email={deal.contact_email} phone={deal.contact_phone} />
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex items-start gap-2">
@@ -887,6 +921,7 @@ export function EnquiriesClient({
                   <div className="min-w-0">
                     <p className="font-semibold text-primary">{deal.reference}</p>
                     <p className="mt-0.5 font-medium text-slate-700">{deal.contact_name || deal.account_name || "—"}</p>
+                    <EnquiryContactDetails email={deal.contact_email} phone={deal.contact_phone} />
                     <p className="mt-1 text-[10px] leading-snug text-slate-600">{enquiryInterestLabel(deal)}</p>
                     {deal.notes ? (
                       <p className="mt-1 text-[9px] leading-snug text-slate-500">{enquiryNotesPreview(deal.notes, 70)}</p>
@@ -922,6 +957,7 @@ export function EnquiriesClient({
                       {selected.contact_name || selected.account_name || "Enquiry"}
                     </h2>
                     <p className="mt-0.5 truncate text-[10px] text-slate-500">{selected.account_name || "—"}</p>
+                    <EnquiryContactDetails email={selected.contact_email} phone={selected.contact_phone} />
                   </div>
                   <Link
                     href={adminDealPath(selected.id)}

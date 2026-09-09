@@ -2,7 +2,7 @@
 
 export const XERO_RATE_LIMIT_COOLDOWN_KEY = "xero_rate_limit_cooldown_until"
 export const XERO_INLINE_MAX_ATTEMPTS = 3
-export const XERO_MAX_INLINE_WAIT_MS = 2500
+export const XERO_MAX_INLINE_WAIT_MS = 5000
 export const XERO_MIN_COOLDOWN_MS = 20_000
 export const XERO_DEFAULT_COOLDOWN_MS = 60_000
 export const XERO_MAX_COOLDOWN_MS = 120_000

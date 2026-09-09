@@ -97,7 +97,7 @@ export async function getDealListRows(options?: { ids?: string[] }): Promise<Dea
   const ids = [...new Set((options?.ids ?? []).map((id) => id.trim()).filter(Boolean))]
   const lineSelect = `
       crm_accounts(name),
-      crm_contacts(full_name),
+      crm_contacts(full_name, email, phone),
       deal_line_items(
         id, package_id, quantity, unit_sale_price, expected_unit_cost,
         sourcing_mode, supplier_id, supplier_quote_at,
@@ -264,7 +264,12 @@ export async function getDealListRows(options?: { ids?: string[] }): Promise<Dea
 
   return data.map((row) => {
     const account = one(row.crm_accounts as { name: string } | { name: string }[] | null)
-    const contact = one(row.crm_contacts as { full_name: string } | { full_name: string }[] | null)
+    const contact = one(
+      row.crm_contacts as
+        | { full_name: string; email: string | null; phone: string | null }
+        | Array<{ full_name: string; email: string | null; phone: string | null }>
+        | null,
+    )
     const lines = (row.deal_line_items ?? []) as Array<{
       id: string
       package_id: string
@@ -401,6 +406,8 @@ export async function getDealListRows(options?: { ids?: string[] }): Promise<Dea
       recent_activities: activitiesByDeal.get(row.id) ?? [],
       account_name: account?.name ?? null,
       contact_name: contact?.full_name ?? null,
+      contact_email: contact?.email ?? null,
+      contact_phone: contact?.phone ?? null,
       owner_profile_id: row.owner_profile_id,
       owner_name: row.owner_profile_id ? ownerName.get(row.owner_profile_id) ?? null : null,
       race_name: lineEvents.length > 0 ? lineEvents.map((event) => event.label).join(", ") : null,

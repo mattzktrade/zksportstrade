@@ -41,6 +41,10 @@ describe("admin help guide", () => {
 
     const leads = searchHelp("leads")
     assert.ok(leads.topics.some((topic) => topic.id === "sales"))
+
+    const meta = searchHelp("meta")
+    assert.ok(meta.topics.some((topic) => topic.id === "sales"))
+    assert.ok(meta.questions.some((item) => /meta/i.test(item.q) || /meta/i.test(item.a)))
   })
 
   it("ignores unknown hashes", () => {

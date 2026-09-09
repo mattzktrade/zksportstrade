@@ -245,7 +245,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             title: "Enquiries",
-            body: "Warm and cold enquiries through contact, sourcing, price sent, and follow-up. Create a booking form on the enquiry. Sending it for approval, or sending it to the client, moves it to Deals. Not interested stays here, not on Deals Lost.",
+            body: "Warm and cold enquiries through contact, sourcing, price sent, and follow-up. Meta marketing leads arrive here automatically. Create a booking form on the enquiry. Sending it for approval, or sending it to the client, moves it to Deals. Not interested stays here, not on Deals Lost.",
             href: "/admin/enquiries",
           },
           {
@@ -357,7 +357,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     nav: "Selling",
     title: "Selling",
     summary: "Accounts, leads, deals, booking forms, and the pipeline.",
-    keywords: ["deal", "deals", "account", "contact", "lead", "leads", "enquiry", "enquiries", "booking form", "sign", "pipeline", "price", "ready to send", "brochure", "pdf", "marketing", "demand", "conversion", "sales tracker"],
+    keywords: ["deal", "deals", "account", "contact", "lead", "leads", "enquiry", "enquiries", "booking form", "sign", "pipeline", "price", "ready to send", "brochure", "pdf", "marketing", "meta", "facebook", "demand", "conversion", "sales tracker"],
     blocks: [
       {
         type: "p",
@@ -461,6 +461,10 @@ export const HELP_TOPICS: HelpTopic[] = [
           {
             q: "A portal or website booking appeared as a deal. Did I do something wrong?",
             a: "No. Every confirmed sale gets a deal so the team works from one list. The invoice is not created twice.",
+          },
+          {
+            q: "Where do Facebook / Meta marketing leads go?",
+            a: "They appear on Sales → Enquiries with source Marketing, the form notes, and the person's email and phone. The agency posts them to our webhook; keep the spreadsheet as a backup until that is stable.",
           },
         ],
       },

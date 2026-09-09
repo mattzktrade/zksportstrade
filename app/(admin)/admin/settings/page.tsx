@@ -3,6 +3,7 @@ import { hasCmsPermission } from "@/lib/auth/permissions"
 import { listCmsStaffUsers } from "@/lib/admin/settings-users"
 import { getXeroConnectionStatus } from "@/lib/integrations/xero/settings-store"
 import { isWixConfigured } from "@/lib/integrations/wix/config"
+import { isMarketingLeadWebhookConfigured } from "@/lib/integrations/marketing-leads/config"
 import { SettingsClient, type SettingsIntegrationCard } from "./settings-client"
 
 export const dynamic = "force-dynamic"
@@ -21,6 +22,7 @@ export default async function SettingsPage({
     getXeroConnectionStatus(),
   ])
   const wix = isWixConfigured()
+  const marketingLeads = isMarketingLeadWebhookConfigured()
 
   const integrations: SettingsIntegrationCard[] = [
     {
@@ -42,6 +44,13 @@ export default async function SettingsPage({
       description: "Website stock, retail prices, and paid consumer orders on zk-sports.com.",
       status: wix ? "API keys configured" : "Not configured",
       connected: wix,
+    },
+    {
+      href: "/admin/integrations/marketing-leads",
+      title: "Marketing leads",
+      description: "Meta Instant Form leads from the agency land on Sales → Enquiries.",
+      status: marketingLeads ? "Webhook secret configured" : "Not configured",
+      connected: marketingLeads,
     },
   ]
 

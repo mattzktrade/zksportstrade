@@ -6,21 +6,46 @@ import { isSalesforceConfigured } from "@/lib/integrations/salesforce/config"
 import { getSalesforceConnectionStatus } from "@/lib/integrations/salesforce/settings-store"
 import { createXeroInvoiceForOrder } from "@/lib/integrations/xero/invoices"
 import { isXeroConfigured } from "@/lib/integrations/xero/config"
-import { getXeroConnectionStatus, isXeroRateLimitCooldownActive } from "@/lib/integrations/xero/settings-store"
-import { isXeroRateLimitError, XERO_RATE_LIMIT_USER_MESSAGE } from "@/lib/integrations/xero/rate-limit"
+import { isXeroProcessBudgetExhausted } from "@/lib/integrations/xero/client"
+import {
+  getXeroConnectionStatus,
+  getXeroRateLimitCooldownUntilMs,
+  isXeroRateLimitCooldownActive,
+} from "@/lib/integrations/xero/settings-store"
+import {
+  isXeroRateLimitError,
+  sleep,
+  XERO_MAX_INLINE_WAIT_MS,
+  XERO_RATE_LIMIT_USER_MESSAGE,
+} from "@/lib/integrations/xero/rate-limit"
 import { syncPackageCatalogToWix } from "@/lib/integrations/wix/catalog-sync"
 import { createWixProductForPackage } from "@/lib/integrations/wix/create-product"
 import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
+import {
+  INVOICE_CREATE_EVENT,
+  INVOICE_CREATE_PER_BATCH,
+  OUTBOX_BATCH_SIZE,
+  isInvoiceCreateEvent,
+  mergePrioritizedOutboxBatch,
+  sortOutboxJobsForProcessing,
+} from "@/lib/integrations/outbox-priority"
 
 const MAX_ATTEMPTS = 8
-const BATCH_SIZE = 20
+const BATCH_SIZE = OUTBOX_BATCH_SIZE
 const STALE_PROCESSING_MS = 10 * 60 * 1000
+const OUTBOX_SELECT = "id, event_type, payload, attempts, created_at"
 
 type OutboxRow = {
   id: string
   event_type: string
   payload: Record<string, unknown>
   attempts: number
+  created_at?: string
+}
+
+export type ProcessOutboxOptions = {
+  /** When set (Retry Xero / new deal), process this order's invoice before the rest of the queue. */
+  preferOrderId?: string
 }
 
 export type OutboxFailure = {
@@ -145,6 +170,95 @@ async function requeueRateLimitedInvoiceJobs(
   }
 }
 
+function applySalesforceApiCooldownFilter(rows: OutboxRow[], apiCooldown: boolean): OutboxRow[] {
+  if (!apiCooldown) return rows
+  return rows.filter(
+    (row) =>
+      row.event_type !== "product.upsert" &&
+      row.event_type !== "inventory.snapshot" &&
+      row.event_type !== "order.placed" &&
+      row.event_type !== "order.outcome",
+  )
+}
+
+async function loadPendingOutboxBatch(
+  admin: NonNullable<ReturnType<typeof createAdminClient>>,
+  input: {
+    xeroCooldown: boolean
+    apiCooldown: boolean
+    preferOrderId?: string
+    pauseInvoices: boolean
+  },
+): Promise<{ rows: OutboxRow[]; error: string | null }> {
+  const skipInvoices = input.xeroCooldown || input.pauseInvoices
+
+  if (input.preferOrderId) {
+    const { data, error } = await admin
+      .from("integration_outbox")
+      .select(OUTBOX_SELECT)
+      .eq("status", "pending")
+      .filter("payload->>order_id", "eq", input.preferOrderId)
+      .order("created_at", { ascending: true })
+      .limit(BATCH_SIZE)
+    if (error) return { rows: [], error: error.message }
+    const sorted = sortOutboxJobsForProcessing((data ?? []) as OutboxRow[])
+    const rows = skipInvoices ? sorted.filter((row) => !isInvoiceCreateEvent(row.event_type)) : sorted
+    return { rows: applySalesforceApiCooldownFilter(rows, input.apiCooldown), error: null }
+  }
+
+  let invoices: OutboxRow[] = []
+  if (!skipInvoices) {
+    const { data, error } = await admin
+      .from("integration_outbox")
+      .select(OUTBOX_SELECT)
+      .eq("status", "pending")
+      .eq("event_type", INVOICE_CREATE_EVENT)
+      .order("created_at", { ascending: true })
+      .limit(INVOICE_CREATE_PER_BATCH)
+    if (error) return { rows: [], error: error.message }
+    invoices = (data ?? []) as OutboxRow[]
+  }
+
+  const { data: otherRows, error: otherError } = await admin
+    .from("integration_outbox")
+    .select(OUTBOX_SELECT)
+    .eq("status", "pending")
+    .neq("event_type", INVOICE_CREATE_EVENT)
+    .order("created_at", { ascending: true })
+    .limit(BATCH_SIZE)
+  if (otherError) return { rows: [], error: otherError.message }
+
+  const merged = mergePrioritizedOutboxBatch({
+    invoices,
+    others: applySalesforceApiCooldownFilter((otherRows ?? []) as OutboxRow[], input.apiCooldown),
+    limit: BATCH_SIZE,
+    invoiceLimit: INVOICE_CREATE_PER_BATCH,
+  })
+  return { rows: merged, error: null }
+}
+
+async function maybeWaitForShortXeroCooldown(preferOrderId?: string): Promise<boolean> {
+  let xeroCooldown = false
+  try {
+    xeroCooldown = await isXeroRateLimitCooldownActive()
+  } catch {
+    return false
+  }
+  if (!xeroCooldown || !preferOrderId) return xeroCooldown
+
+  try {
+    const until = await getXeroRateLimitCooldownUntilMs()
+    const waitMs = until ? until - Date.now() : 0
+    if (waitMs > 0 && waitMs <= XERO_MAX_INLINE_WAIT_MS) {
+      await sleep(waitMs)
+      return await isXeroRateLimitCooldownActive()
+    }
+  } catch {
+    return xeroCooldown
+  }
+  return xeroCooldown
+}
+
 async function assertOrderExistsForOutbox(orderId: string): Promise<void> {
   const admin = createAdminClient()
   if (!admin) throw new Error("Service role not configured.")
@@ -165,7 +279,9 @@ async function assertPackageExistsForOutbox(packageId: string): Promise<void> {
   }
 }
 
-export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
+export async function processIntegrationOutbox(
+  options: ProcessOutboxOptions = {},
+): Promise<ProcessOutboxResult> {
   const admin = createAdminClient()
   if (!admin) {
     return { processed: 0, completed: 0, failed: 0, orphaned: 0, skipped: true, message: "Service role not configured." }
@@ -192,46 +308,35 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
     }
   }
 
-  let xeroCooldown = false
-  try {
-    xeroCooldown = await isXeroRateLimitCooldownActive()
-  } catch {
-    xeroCooldown = false
-  }
+  let xeroCooldown = await maybeWaitForShortXeroCooldown(options.preferOrderId)
+  let pauseInvoices = xeroCooldown || isXeroProcessBudgetExhausted()
 
-  const { data: rows, error } = await admin
-    .from("integration_outbox")
-    .select("id, event_type, payload, attempts")
-    .eq("status", "pending")
-    .order("created_at", { ascending: true })
-    .limit(BATCH_SIZE)
+  const { rows, error } = await loadPendingOutboxBatch(admin, {
+    xeroCooldown,
+    apiCooldown,
+    preferOrderId: options.preferOrderId,
+    pauseInvoices,
+  })
 
   if (error) {
-    return { processed: 0, completed: 0, failed: 0, orphaned: 0, skipped: true, message: error.message }
+    return { processed: 0, completed: 0, failed: 0, orphaned: 0, skipped: true, message: error }
   }
 
-  const pending = ((rows ?? []) as OutboxRow[]).filter((row) => {
-    if (xeroCooldown && row.event_type === "invoice.create") return false
-    if (!apiCooldown) return true
-    return (
-      row.event_type !== "product.upsert" &&
-      row.event_type !== "inventory.snapshot" &&
-      row.event_type !== "order.placed" &&
-      row.event_type !== "order.outcome"
-    )
-  })
+  const pending = rows
   if (pending.length === 0) {
     return {
       processed: 0,
       completed: 0,
       failed: 0,
       orphaned: 0,
-      skipped: apiCooldown || xeroCooldown,
+      skipped: apiCooldown || xeroCooldown || pauseInvoices,
       message: xeroCooldown
         ? "Xero rate limit cooldown — deferred invoice sync jobs."
-        : apiCooldown
-          ? "Salesforce API limit cooldown — deferred Salesforce sync queue jobs."
-          : undefined,
+        : pauseInvoices
+          ? "Xero call budget — deferred remaining invoice sync jobs."
+          : apiCooldown
+            ? "Salesforce API limit cooldown — deferred Salesforce sync queue jobs."
+            : undefined,
     }
   }
 
@@ -241,7 +346,12 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
   const failures: OutboxFailure[] = []
 
   for (const row of pending) {
-    if (row.event_type === "invoice.create" && xeroCooldown) continue
+    if (isInvoiceCreateEvent(row.event_type)) {
+      if (xeroCooldown || pauseInvoices || isXeroProcessBudgetExhausted()) {
+        pauseInvoices = true
+        continue
+      }
+    }
 
     const { data: claimed } = await admin
       .from("integration_outbox")
@@ -260,6 +370,9 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
         .update({ status: "completed", processed_at: new Date().toISOString(), last_error: null })
         .eq("id", row.id)
       completed++
+      if (isInvoiceCreateEvent(row.event_type) && isXeroProcessBudgetExhausted()) {
+        pauseInvoices = true
+      }
     } catch (e) {
       if (e instanceof OutboxOrphanedError) {
         await admin
@@ -275,8 +388,11 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
       }
 
       const msg = e instanceof Error ? e.message : String(e)
-      const rateLimited = row.event_type === "invoice.create" && isXeroRateLimitError(e)
-      if (rateLimited) xeroCooldown = true
+      const rateLimited = isInvoiceCreateEvent(row.event_type) && isXeroRateLimitError(e)
+      if (rateLimited) {
+        xeroCooldown = true
+        pauseInvoices = true
+      }
       failed++
       failures.push({
         event_type: row.event_type,
@@ -364,8 +480,12 @@ export async function processIntegrationOutbox(): Promise<ProcessOutboxResult> {
     completed,
     failed,
     orphaned,
-    skipped: xeroCooldown,
-    message: xeroCooldown ? "Xero rate limit cooldown — deferred remaining invoice sync jobs." : undefined,
+    skipped: xeroCooldown || pauseInvoices,
+    message: xeroCooldown
+      ? "Xero rate limit cooldown — deferred remaining invoice sync jobs."
+      : pauseInvoices
+        ? "Xero call budget — deferred remaining invoice sync jobs."
+        : undefined,
     failures,
   }
 }

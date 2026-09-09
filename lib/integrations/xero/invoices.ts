@@ -1,8 +1,10 @@
 import { sendXeroInvoiceEmail } from "@/lib/email/send-xero-invoice"
 import { enqueueOpportunityOutcomeServer } from "@/lib/integrations/enqueue-server"
 import { attachInvoicePdfToOpportunity } from "@/lib/integrations/salesforce/invoice-file"
-import { xeroFetchInvoicePdf, xeroRequest } from "@/lib/integrations/xero/client"
+import { xeroFetchInvoicePdf, xeroRequest, xeroCallsUsedThisProcess, XERO_PROCESS_CALL_BUDGET } from "@/lib/integrations/xero/client"
+import { isXeroRateLimitCooldownActive } from "@/lib/integrations/xero/settings-store"
 import {
+  getXeroInvoiceItemCode,
   getXeroInvoiceLineDefaults,
   resolveXeroInvoiceCurrency,
 } from "@/lib/integrations/xero/invoice-line-defaults"
@@ -18,7 +20,6 @@ type XeroInvoice = {
   AmountPaid?: number
   Total?: number
 }
-type XeroItem = { Code?: string; Name?: string; IsSold?: boolean }
 type XeroBillingAddress = {
   line1?: string | null
   line2?: string | null
@@ -26,8 +27,6 @@ type XeroBillingAddress = {
   postcode?: string | null
   country?: string | null
 }
-
-let cachedInvoiceItemCode: string | null | undefined
 
 /** Default on; set env to `false` to create DRAFT invoices or skip email. */
 function xeroInvoiceAutoAuthorise(): boolean {
@@ -143,27 +142,11 @@ async function findOrCreateXeroContact(input: {
   return id
 }
 
-async function resolveXeroInvoiceItemCode(): Promise<string | undefined> {
-  if (cachedInvoiceItemCode !== undefined) return cachedInvoiceItemCode ?? undefined
-
-  const preferred = process.env.XERO_INVOICE_ITEM_CODE?.trim() || "1001"
-  try {
-    const res = await xeroRequest<{ Items?: XeroItem[] }>("GET", "/api.xro/2.0/Items")
-    const items = res.Items ?? []
-    const match =
-      items.find((item) => item.Code?.trim().toLowerCase() === preferred.toLowerCase() && item.IsSold !== false) ??
-      items.find((item) => item.Name?.trim().toLowerCase() === "tickets" && item.IsSold !== false)
-    cachedInvoiceItemCode = match?.Code?.trim() || null
-  } catch (e) {
-    cachedInvoiceItemCode = null
-    console.warn("[xero] Invoice item lookup skipped:", e instanceof Error ? e.message : e)
-  }
-
-  return cachedInvoiceItemCode ?? undefined
-}
-
 /** Best-effort: attach Xero invoice PDF to the linked Salesforce Opportunity. */
 async function syncInvoicePdfToSalesforce(orderId: string): Promise<void> {
+  if (await isXeroRateLimitCooldownActive()) return
+  if (xeroCallsUsedThisProcess() + 1 >= XERO_PROCESS_CALL_BUDGET) return
+
   const admin = createAdminClient()
   if (!admin) return
 
@@ -367,7 +350,7 @@ export async function createXeroInvoiceForOrder(
 
   const { accountCode, taxType } = await getXeroInvoiceLineDefaults()
   const currencyCode = await resolveXeroInvoiceCurrency(String(order.currency ?? "USD"))
-  const itemCode = await resolveXeroInvoiceItemCode()
+  const itemCode = await getXeroInvoiceItemCode()
   const autoAuthorise = xeroInvoiceAutoAuthorise()
   const sourceLines = nativeOrderLines?.length
     ? nativeOrderLines

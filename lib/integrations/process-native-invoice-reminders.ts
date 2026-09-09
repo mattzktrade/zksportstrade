@@ -2,16 +2,42 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { reconcileXeroInvoiceForOrder } from "@/lib/integrations/xero/invoices"
 import { isXeroRateLimitError } from "@/lib/integrations/xero/rate-limit"
 import { isXeroRateLimitCooldownActive } from "@/lib/integrations/xero/settings-store"
+import { xeroCallsUsedThisProcess } from "@/lib/integrations/xero/client"
 import { cancellationEligibleDate, daysOverdue } from "@/lib/crm/deal-finance"
+import { INVOICE_CREATE_EVENT } from "@/lib/integrations/outbox-priority"
 
 /** Keep overdue Xero GETs well under the 60 calls/minute tenant cap so new invoices can send. */
 export const OVERDUE_XERO_RECONCILE_LIMIT = 15
+const OVERDUE_RECONCILE_SKIP_AFTER_CALLS = 20
 
 export type NativeInvoiceReminderResult = {
   overdueInvoices: number
   remindersSent: number
   failures: number
   cancellationEligible: number
+}
+
+async function hasPendingInvoiceCreateJobs(
+  admin: NonNullable<ReturnType<typeof createAdminClient>>,
+): Promise<boolean> {
+  const { count, error } = await admin
+    .from("integration_outbox")
+    .select("id", { count: "exact", head: true })
+    .eq("event_type", INVOICE_CREATE_EVENT)
+    .in("status", ["pending", "processing"])
+  if (error) {
+    console.warn("[xero] Pending invoice queue check failed:", error.message)
+    return false
+  }
+  return (count ?? 0) > 0
+}
+
+async function shouldSkipOverdueXeroReconcile(
+  admin: NonNullable<ReturnType<typeof createAdminClient>>,
+): Promise<boolean> {
+  if (await isXeroRateLimitCooldownActive()) return true
+  if (xeroCallsUsedThisProcess() >= OVERDUE_RECONCILE_SKIP_AFTER_CALLS) return true
+  return hasPendingInvoiceCreateJobs(admin)
 }
 
 /**
@@ -23,7 +49,7 @@ export async function processNativeInvoiceReminders(): Promise<NativeInvoiceRemi
   if (!admin) {
     return { overdueInvoices: 0, remindersSent: 0, failures: 0, cancellationEligible: 0 }
   }
-  if (await isXeroRateLimitCooldownActive()) {
+  if (await shouldSkipOverdueXeroReconcile(admin)) {
     return { overdueInvoices: 0, remindersSent: 0, failures: 0, cancellationEligible: 0 }
   }
   const now = new Date()
@@ -48,6 +74,8 @@ export async function processNativeInvoiceReminders(): Promise<NativeInvoiceRemi
       .eq("id", invoice.order_id)
       .maybeSingle()
     if (!order || order.channel !== "native_deal") continue
+    if (await hasPendingInvoiceCreateJobs(admin)) break
+    if (xeroCallsUsedThisProcess() >= OVERDUE_RECONCILE_SKIP_AFTER_CALLS) break
     try {
       const remoteStatus = await reconcileXeroInvoiceForOrder(order.id)
       if (remoteStatus === "PAID" || remoteStatus === "VOIDED" || remoteStatus === "DELETED") {

@@ -152,6 +152,10 @@ test("cold outreach warms when they respond, inbound stays warm", () => {
     resolvedEnquiryTemperature({ source: "website", enquiryStage: "new", temperature: "cold" }),
     "warm",
   )
+  assert.equal(
+    resolvedEnquiryTemperature({ source: "marketing", enquiryStage: "new", temperature: "cold" }),
+    "warm",
+  )
   assert.equal(enquiryTemperatureFromDeal({ enquiry_temperature: "cold" }), "cold")
   assert.equal(enquiryCrmStageFromDeal({ stage: "draft", enquiry_stage: "contacted" }), "contacted")
 })

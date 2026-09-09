@@ -500,3 +500,18 @@ test("booking form send and sign refresh the deal page instead of only the deals
   assert.match(signing, /padRef\.current\?\.toDataURL\(\)/)
 })
 
+test("client signature keeps unsigned deals on Awaiting ZK signature with the form", () => {
+  const sql = readFileSync(
+    "supabase/migrations/20260909130000_sync_deal_stage_awaiting_zk_signature.sql",
+    "utf8",
+  )
+  assert.match(sql, /keep_client_signed_deal_reservations/)
+  assert.match(sql, /record_native_client_signature/)
+  assert.match(sql, /and stage in \(/)
+  assert.match(sql, /set stage = 'awaiting_zk_signature'/)
+  assert.doesNotMatch(sql, /paid_confirmed/)
+  const queries = readFileSync("lib/booking-forms/queries.ts", "utf8")
+  assert.match(queries, /awaiting_zk_signature/)
+  assert.match(queries, /awaitingZkForms/)
+})
+

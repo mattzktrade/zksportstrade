@@ -146,7 +146,7 @@ export function isEnquiryTemperature(value: string | null | undefined): value is
 }
 
 export function inboundEnquirySource(source: string | null | undefined): boolean {
-  return source === "website" || source === "portal" || source === "referral"
+  return source === "website" || source === "portal" || source === "referral" || source === "marketing"
 }
 
 export function isEnquiryPipelineStage(stage: string): boolean {

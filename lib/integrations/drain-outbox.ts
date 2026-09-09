@@ -82,7 +82,7 @@ async function drainIntegrationOutboxInner(
   }
 
   for (let round = 0; round < maxRounds; round++) {
-    last = await processIntegrationOutbox()
+    last = await processIntegrationOutbox({ preferOrderId: options.orderId })
     if (last.skipped) return last
     if (last.processed === 0) break
 

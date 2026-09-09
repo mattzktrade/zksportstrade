@@ -95,6 +95,7 @@ export function nativeStageForSalesforce(
 function nativeSource(raw: string): string {
   const source = raw.trim().toLowerCase()
   if (source.includes("portal")) return "portal"
+  if (source.includes("market") || source.includes("meta") || source.includes("facebook")) return "marketing"
   if (source.includes("web")) return "website"
   if (source.includes("referr")) return "referral"
   if (source.includes("offline") || source.includes("manual")) return "offline"

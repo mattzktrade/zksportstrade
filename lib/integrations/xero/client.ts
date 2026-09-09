@@ -27,7 +27,19 @@ export class XeroApiError extends Error {
 
 let xeroCallMutex: Promise<void> = Promise.resolve()
 let lastXeroCallAt = 0
+let xeroCallsThisProcess = 0
 const XERO_MIN_CALL_GAP_MS = 150
+
+/** Stay under Xero's 60 calls/minute even when cron and a new invoice overlap. */
+export const XERO_PROCESS_CALL_BUDGET = 40
+
+export function xeroCallsUsedThisProcess(): number {
+  return xeroCallsThisProcess
+}
+
+export function isXeroProcessBudgetExhausted(used = xeroCallsThisProcess): boolean {
+  return used >= XERO_PROCESS_CALL_BUDGET
+}
 
 async function withXeroCallGate<T>(fn: () => Promise<T>): Promise<T> {
   const prev = xeroCallMutex
@@ -41,6 +53,7 @@ async function withXeroCallGate<T>(fn: () => Promise<T>): Promise<T> {
     const wait = lastXeroCallAt + XERO_MIN_CALL_GAP_MS - Date.now()
     if (wait > 0) await sleep(wait)
     lastXeroCallAt = Date.now()
+    xeroCallsThisProcess += 1
     return await fn()
   } finally {
     release()

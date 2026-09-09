@@ -32,6 +32,7 @@ export type IntegrationCronResult = {
 /**
  * Single integration cron tick: expired holds, native booking forms, Wix/Xero outbox, then overdue invoice flags.
  * Invoice creation runs before overdue Xero reconciliation so new deals are not starved by the 60/min cap.
+ * New invoice.create jobs are also drained before other outbox work (catalog / Salesforce).
  * Salesforce pull/heal is retired and never runs.
  */
 export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {

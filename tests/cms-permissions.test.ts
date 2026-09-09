@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import { hasCmsPermission, isCmsStaff, isCmsOperator, canPrepareNativeBookingForm, canSendNativeBookingForm, canSignNativeBookingForm } from "../lib/auth/permissions"
 import { readFileSync } from "node:fs"
-import { bookingFormsAwaitingApprovalHref } from "../lib/admin/deal-link"
+import { bookingFormsAwaitingApprovalHref, isAwaitingZkApprovalDeal, uniqueDealIds } from "../lib/admin/deal-link"
 
 describe("CMS role permissions", () => {
   it("treats admin, finance and sales as CMS staff", () => {
@@ -111,5 +111,22 @@ describe("dashboard booking-form approval links", () => {
       "/admin/deals?pipeline=awaiting_approval",
     )
     assert.equal(bookingFormsAwaitingApprovalHref([]), "/admin/deals?pipeline=awaiting_approval")
+  })
+
+  it("matches dashboard booking-form rows to deals, not deal.stage", () => {
+    assert.equal(isAwaitingZkApprovalDeal("deal-1", ["deal-1", "deal-2"]), true)
+    assert.equal(isAwaitingZkApprovalDeal("deal-3", ["deal-1"]), false)
+    assert.equal(isAwaitingZkApprovalDeal("deal-1", new Set(["deal-1"])), true)
+    assert.deepEqual(uniqueDealIds(["deal-1", " deal-1", "", "deal-2"]), ["deal-1", "deal-2"])
+    const dealsPage = readFileSync("app/(admin)/admin/deals/page.tsx", "utf8")
+    assert.match(dealsPage, /listNativeBookingFormsAwaitingApprovalDealIds/)
+    assert.match(dealsPage, /awaitingZkDealIds/)
+    const dealsClient = readFileSync("app/(admin)/admin/deals/deals-client.tsx", "utf8")
+    assert.match(dealsClient, /awaitingZkDealIds/)
+    assert.match(dealsClient, /pipelineFilter === "awaiting_approval"/)
+    assert.doesNotMatch(
+      dealsClient,
+      /awaitingApproval = deals\.filter\(\(deal\) => deal\.stage === "awaiting_zk_signature"\)/,
+    )
   })
 })

@@ -7,7 +7,7 @@ import {
 } from "@/lib/inventory/effective-availability"
 import { getCrmAccountOptions, getDealListRows } from "@/lib/crm/deals"
 import { getSalesStaffOptions } from "@/lib/crm/leads"
-import { getBookingFormsForDeals } from "@/lib/booking-forms/queries"
+import { getBookingFormsForDeals, listNativeBookingFormsAwaitingApprovalDealIds } from "@/lib/booking-forms/queries"
 import { hasCmsPermission, canSendNativeBookingForm, canSignNativeBookingForm } from "@/lib/auth/permissions"
 import { getSuppliers } from "@/lib/inventory/suppliers"
 import {
@@ -17,6 +17,7 @@ import {
   isEnquiryPipelineStage,
   type EnquiryStageTabId,
 } from "@/lib/crm/deal-pipeline"
+import { isAwaitingZkApprovalDeal, uniqueDealIds } from "@/lib/admin/deal-link"
 import { EnquiriesClient } from "./enquiries-client"
 
 export const dynamic = "force-dynamic"
@@ -38,15 +39,18 @@ export default async function EnquiriesPage({
 }) {
   const profile = await requireAdmin()
   const { enquiry: initialSelectedId, stage: stageParam } = await searchParams
-  const [allDeals, packages, accountOptions, staffOptions, suppliers, bookingForms] = await Promise.all([
-    getDealListRows(),
-    getAdminCatalogListRows(),
-    getCrmAccountOptions(),
-    getSalesStaffOptions(),
-    getSuppliers(),
-    getBookingFormsForDeals(),
-  ])
+  const [allDeals, packages, accountOptions, staffOptions, suppliers, bookingForms, awaitingZkDealIdsRaw] =
+    await Promise.all([
+      getDealListRows(),
+      getAdminCatalogListRows(),
+      getCrmAccountOptions(),
+      getSalesStaffOptions(),
+      getSuppliers(),
+      getBookingFormsForDeals(),
+      listNativeBookingFormsAwaitingApprovalDealIds(),
+    ])
 
+  const awaitingZkDealIds = uniqueDealIds(awaitingZkDealIdsRaw)
   const selectedId = initialSelectedId?.trim() || null
   let deals = allDeals
   if (selectedId && !deals.some((deal) => deal.id === selectedId)) {
@@ -55,11 +59,17 @@ export default async function EnquiriesPage({
   }
 
   const selected = selectedId ? deals.find((deal) => deal.id === selectedId) ?? null : null
-  if (selected && isDealBoardStage(selected.stage)) {
+  if (
+    selected &&
+    (isDealBoardStage(selected.stage) || isAwaitingZkApprovalDeal(selected.id, awaitingZkDealIds))
+  ) {
     redirect(adminDealListPath(selected.id))
   }
 
-  const enquiryDeals = deals.filter((deal) => isEnquiryPipelineStage(deal.stage))
+  const enquiryDeals = deals.filter(
+    (deal) =>
+      isEnquiryPipelineStage(deal.stage) && !isAwaitingZkApprovalDeal(deal.id, awaitingZkDealIds),
+  )
   const monthKey = new Date().toISOString().slice(0, 7)
   const convertedThisMonth = deals.filter(
     (deal) =>
