@@ -259,8 +259,9 @@ async function resolveRaceId(
 }
 
 export async function ingestMarketingLead(payload: MarketingLeadPayload): Promise<IngestMarketingLeadResult> {
-  const admin = createAdminClient()
-  if (!admin) return { ok: false, message: "Service role not configured." }
+  const client = createAdminClient()
+  if (!client) return { ok: false, message: "Service role not configured." }
+  const admin: AdminClient = client
 
   const { data: existing } = await admin
     .from("marketing_lead_ingest")

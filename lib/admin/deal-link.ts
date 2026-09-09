@@ -27,8 +27,7 @@ export function isAwaitingZkApprovalDeal(
 ): boolean {
   const id = dealId.trim()
   if (!id) return false
-  if (awaitingDealIds instanceof Set) return awaitingDealIds.has(id)
-  return awaitingDealIds.includes(id)
+  return [...awaitingDealIds].includes(id)
 }
 
 /** Deep-link to the deal that needs ZK signature, or the filtered pipeline if several. */
