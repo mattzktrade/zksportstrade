@@ -84,6 +84,8 @@ export type OperationsGuest = {
   isLeadGuest: boolean
   detailsComplete: boolean
   sortOrder: number
+  attendanceDay?: string | null
+  headshotPath?: string | null
 }
 
 export type OperationsSupplierRow = {
@@ -1026,13 +1028,13 @@ export async function getOperationsSupportingData(): Promise<OperationsSupportin
     supabase
       .from("order_guests")
       .select(
-        "id, order_id, full_name, email, phone, nationality, date_of_birth, dietary_requirements, special_requests, is_lead_guest, details_complete, sort_order",
+        "id, order_id, full_name, email, phone, nationality, date_of_birth, dietary_requirements, special_requests, is_lead_guest, details_complete, sort_order, attendance_day, headshot_path",
       )
       .order("sort_order"),
     supabase
       .from("deal_guests")
       .select(
-        "id, deal_id, full_name, email, phone, nationality, date_of_birth, dietary_requirements, special_requests, is_lead_guest, details_complete, sort_order",
+        "id, deal_id, full_name, email, phone, nationality, date_of_birth, dietary_requirements, special_requests, is_lead_guest, details_complete, sort_order, attendance_day, headshot_path",
       )
       .order("sort_order"),
     supabase
@@ -1206,6 +1208,8 @@ export async function getOperationsSupportingData(): Promise<OperationsSupportin
         isLeadGuest: Boolean(row.is_lead_guest),
         detailsComplete: Boolean(row.details_complete),
         sortOrder: Number(row.sort_order),
+        attendanceDay: (row as { attendance_day?: string | null }).attendance_day ?? null,
+        headshotPath: (row as { headshot_path?: string | null }).headshot_path ?? null,
       })),
       ...(dealGuestRows ?? []).map((row) => ({
         id: String(row.id),
@@ -1221,6 +1225,8 @@ export async function getOperationsSupportingData(): Promise<OperationsSupportin
         isLeadGuest: Boolean(row.is_lead_guest),
         detailsComplete: Boolean(row.details_complete),
         sortOrder: Number(row.sort_order),
+        attendanceDay: (row as { attendance_day?: string | null }).attendance_day ?? null,
+        headshotPath: (row as { headshot_path?: string | null }).headshot_path ?? null,
       })),
     ],
     supplierRows: (supplierRows ?? []).map((row) => ({

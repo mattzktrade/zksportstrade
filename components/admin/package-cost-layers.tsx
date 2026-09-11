@@ -99,6 +99,8 @@ const LINKED_DAY_DURATIONS = new Set([
   "2_day",
 ])
 
+const STOCK_PURCHASED_COLSPAN = 11
+
 export function PackageCostLayers({
   packageId,
   packageCurrency,
@@ -129,6 +131,8 @@ export function PackageCostLayers({
   const [addSupplierAccountId, setAddSupplierAccountId] = useState("")
   const [addPoNumber, setAddPoNumber] = useState("")
   const [addPoIssuedAt, setAddPoIssuedAt] = useState("")
+  const [addGuestDetailsDeadline, setAddGuestDetailsDeadline] = useState("")
+  const [addTicketsReceivedAt, setAddTicketsReceivedAt] = useState("")
   const [addDate, setAddDate] = useState("")
 
   async function refreshInventoryUi() {
@@ -145,6 +149,8 @@ export function PackageCostLayers({
   const [editSupplierAccountId, setEditSupplierAccountId] = useState("")
   const [editPoNumber, setEditPoNumber] = useState("")
   const [editPoIssuedAt, setEditPoIssuedAt] = useState("")
+  const [editGuestDetailsDeadline, setEditGuestDetailsDeadline] = useState("")
+  const [editTicketsReceivedAt, setEditTicketsReceivedAt] = useState("")
   const [editDate, setEditDate] = useState("")
   const [editQty, setEditQty] = useState("")
   const [editCascade, setEditCascade] = useState(true)
@@ -158,6 +164,8 @@ export function PackageCostLayers({
   const [orphanDate, setOrphanDate] = useState("")
   const [orphanPoNumber, setOrphanPoNumber] = useState("")
   const [orphanPoIssuedAt, setOrphanPoIssuedAt] = useState("")
+  const [orphanGuestDetailsDeadline, setOrphanGuestDetailsDeadline] = useState("")
+  const [orphanTicketsReceivedAt, setOrphanTicketsReceivedAt] = useState("")
   const [orphanBlockId, setOrphanBlockId] = useState("")
 
   const [companies, setCompanies] = useState<CrmCompanyOption[]>([])
@@ -393,6 +401,8 @@ export function PackageCostLayers({
     setAddSupplierAccountId("")
     setAddPoNumber("")
     setAddPoIssuedAt("")
+    setAddGuestDetailsDeadline("")
+    setAddTicketsReceivedAt("")
     setAddDate("")
     setAddFulfilmentBlockId("")
     if (addFileRef.current) addFileRef.current.value = ""
@@ -421,6 +431,8 @@ export function PackageCostLayers({
       fd.set("supplierAccountId", addSupplierAccountId)
       if (addPoNumber.trim()) fd.set("poNumber", addPoNumber.trim())
       if (addPoIssuedAt.trim()) fd.set("poIssuedAt", addPoIssuedAt.trim())
+      if (addGuestDetailsDeadline.trim()) fd.set("guestDetailsDeadline", addGuestDetailsDeadline.trim())
+      if (addTicketsReceivedAt.trim()) fd.set("ticketsReceivedAt", addTicketsReceivedAt.trim())
       if (addNote.trim()) fd.set("note", addNote.trim())
       if (addDate.trim()) fd.set("receivedAt", addDate.trim())
       if (addFulfilmentBlockId.trim()) fd.set("fulfilmentBlockId", addFulfilmentBlockId.trim())
@@ -447,6 +459,8 @@ export function PackageCostLayers({
     setEditSupplierAccountId(linkedPo?.supplier_account_id ?? "")
     setEditPoNumber(linkedPo?.po_number ?? "")
     setEditPoIssuedAt(linkedPo?.issued_at ?? "")
+    setEditGuestDetailsDeadline(linkedPo?.guest_details_deadline ?? "")
+    setEditTicketsReceivedAt(linkedPo?.tickets_received_at ?? "")
     setEditDate(formatDateInput(layer.received_at))
     setEditQty(String(layer.quantity))
     setEditCascade(true)
@@ -497,6 +511,8 @@ export function PackageCostLayers({
         purchaseOrderSupplierAccountId: editSupplierAccountId,
         purchaseOrderNumber: editPoNumber.trim() || null,
         purchaseOrderIssuedAt: editPoIssuedAt.trim() || null,
+        purchaseOrderGuestDetailsDeadline: editGuestDetailsDeadline.trim() || null,
+        purchaseOrderTicketsReceivedAt: editTicketsReceivedAt.trim() || null,
         fulfilmentBlockId: blockChanged ? nextBlockId : undefined,
       })
       if (!res.ok) {
@@ -547,6 +563,8 @@ export function PackageCostLayers({
     setOrphanDate("")
     setOrphanPoNumber("")
     setOrphanPoIssuedAt("")
+    setOrphanGuestDetailsDeadline("")
+    setOrphanTicketsReceivedAt("")
     setOrphanBlockId("")
   }
 
@@ -582,6 +600,8 @@ export function PackageCostLayers({
               note: orphanNote.trim() || null,
               poNumber: orphanPoNumber.trim() || null,
               poIssuedAt: orphanPoIssuedAt.trim() || null,
+              guestDetailsDeadline: orphanGuestDetailsDeadline.trim() || null,
+              ticketsReceivedAt: orphanTicketsReceivedAt.trim() || null,
               receivedAt: orphanDate.trim() || null,
               fulfilmentBlockId: orphanBlockId.trim() || null,
             }
@@ -759,11 +779,13 @@ export function PackageCostLayers({
           <p className="text-[10px] text-muted-foreground">
             Sold is portal, website, and signed offline deals (including unpaid). Left follows
             those held units so it matches Sellable. Price sent and unsigned deals do not reduce
-            Sellable — use a hold if the client asks you to keep stock.
+            Sellable — use a hold if the client asks you to keep stock. Deadline is when guest
+            names and headshot photos are due to the supplier. Tickets received is when the
+            supplier delivered the tickets.
           </p>
         )}
         <div className="rounded-lg border border-border overflow-x-auto">
-        <table className="w-full text-xs min-w-[860px]">
+        <table className="w-full text-xs min-w-[1100px]">
           <thead>
             <tr className="bg-muted/40 text-left text-[10px] uppercase tracking-wide text-muted-foreground">
               <th className="px-3 py-2 font-medium">Received</th>
@@ -772,6 +794,18 @@ export function PackageCostLayers({
               <th className="px-3 py-2 font-medium text-right">Left</th>
               <th className="px-3 py-2 font-medium text-right">Buy price</th>
               <th className="px-3 py-2 font-medium">Purchase</th>
+              <th
+                className="px-3 py-2 font-medium whitespace-nowrap"
+                title="When guest names and headshot photos are due to the supplier"
+              >
+                Deadline
+              </th>
+              <th
+                className="px-3 py-2 font-medium whitespace-nowrap"
+                title="When the supplier delivered the tickets"
+              >
+                Tickets received
+              </th>
               <th className="px-3 py-2 font-medium">Block</th>
               <th className="px-3 py-2 font-medium">Note</th>
               <th className="px-3 py-2 font-medium min-w-[11rem]" />
@@ -780,7 +814,7 @@ export function PackageCostLayers({
           <tbody>
             {sortedLayers.length === 0 && !hasOrphanStock ? (
               <tr>
-                <td colSpan={9} className="px-3 py-4 text-center text-muted-foreground">
+                <td colSpan={STOCK_PURCHASED_COLSPAN} className="px-3 py-4 text-center text-muted-foreground">
                   No cost layers yet. Use &ldquo;Add stock purchase&rdquo; below.
                 </td>
               </tr>
@@ -857,6 +891,32 @@ export function PackageCostLayers({
                     </div>
                   ) : (
                     <span className="italic text-amber-800/90 dark:text-amber-200/90">Untracked stock</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                  {orphanEditing && orphanConvert ? (
+                    <input
+                      type="date"
+                      value={orphanGuestDetailsDeadline}
+                      onChange={(e) => setOrphanGuestDetailsDeadline(e.target.value)}
+                      disabled={pending}
+                      className="w-full min-w-[8.5rem] px-2 py-1 rounded border border-border bg-background text-xs"
+                    />
+                  ) : (
+                    <span className="text-muted-foreground/60">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                  {orphanEditing && orphanConvert ? (
+                    <input
+                      type="date"
+                      value={orphanTicketsReceivedAt}
+                      onChange={(e) => setOrphanTicketsReceivedAt(e.target.value)}
+                      disabled={pending}
+                      className="w-full min-w-[8.5rem] px-2 py-1 rounded border border-border bg-background text-xs"
+                    />
+                  ) : (
+                    <span className="text-muted-foreground/60">—</span>
                   )}
                 </td>
                 <td className="px-3 py-2 text-muted-foreground">
@@ -1076,6 +1136,34 @@ export function PackageCostLayers({
                         <span className="text-muted-foreground/60">—</span>
                       )}
                     </td>
+                    <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                      {editing ? (
+                        <input
+                          type="date"
+                          value={editGuestDetailsDeadline}
+                          onChange={(e) => setEditGuestDetailsDeadline(e.target.value)}
+                          className="w-full min-w-[8.5rem] px-2 py-1 rounded border border-border bg-background text-xs"
+                        />
+                      ) : linkedPo?.guest_details_deadline ? (
+                        formatDisplayDate(linkedPo.guest_details_deadline)
+                      ) : (
+                        <span className="text-muted-foreground/60">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                      {editing ? (
+                        <input
+                          type="date"
+                          value={editTicketsReceivedAt}
+                          onChange={(e) => setEditTicketsReceivedAt(e.target.value)}
+                          className="w-full min-w-[8.5rem] px-2 py-1 rounded border border-border bg-background text-xs"
+                        />
+                      ) : linkedPo?.tickets_received_at ? (
+                        formatDisplayDate(linkedPo.tickets_received_at)
+                      ) : (
+                        <span className="text-muted-foreground/60">—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-muted-foreground">
                       {editing ? (
                         fulfilmentBlocks.length > 0 ? (
@@ -1254,6 +1342,30 @@ export function PackageCostLayers({
                     onChange={(e) => setAddPoIssuedAt(e.target.value)}
                     className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
                   />
+                </label>
+                <label className="block text-xs text-muted-foreground">
+                  Deadline (optional)
+                  <input
+                    type="date"
+                    value={addGuestDetailsDeadline}
+                    onChange={(e) => setAddGuestDetailsDeadline(e.target.value)}
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                  />
+                  <span className="mt-1 block text-[10px] leading-relaxed">
+                    When guest names and headshot photos are due to the supplier.
+                  </span>
+                </label>
+                <label className="block text-xs text-muted-foreground">
+                  Tickets received (optional)
+                  <input
+                    type="date"
+                    value={addTicketsReceivedAt}
+                    onChange={(e) => setAddTicketsReceivedAt(e.target.value)}
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                  />
+                  <span className="mt-1 block text-[10px] leading-relaxed">
+                    When the supplier delivered the tickets, if applicable.
+                  </span>
                 </label>
                 <label className="block text-xs text-muted-foreground sm:col-span-2">
                   Attach contract / invoice (optional)

@@ -16,6 +16,9 @@ export type GuestDraft = {
   dietaryRequirements: string
   specialRequests: string
   isLeadGuest: boolean
+  sortOrder?: number
+  attendanceDay?: string | null
+  headshotPath?: string | null
 }
 
 function emptyDraft(isLeadGuest = false): GuestDraft {
@@ -29,6 +32,8 @@ function emptyDraft(isLeadGuest = false): GuestDraft {
     dietaryRequirements: "",
     specialRequests: "",
     isLeadGuest,
+    attendanceDay: null,
+    headshotPath: null,
   }
 }
 
@@ -44,6 +49,9 @@ function fromExisting(guest: OperationsGuest): GuestDraft {
     dietaryRequirements: guest.dietaryRequirements ?? "",
     specialRequests: guest.specialRequests ?? "",
     isLeadGuest: guest.isLeadGuest,
+    sortOrder: guest.sortOrder,
+    attendanceDay: guest.attendanceDay ?? null,
+    headshotPath: guest.headshotPath ?? null,
   }
 }
 
@@ -118,7 +126,17 @@ export function OperationsGuestEditor({
           {drafts.map((draft, index) => (
             <div key={draft.key} className="rounded-lg border border-slate-200 p-3">
               <div className="mb-2 flex items-center justify-between gap-3">
-                <p className="text-[10px] font-semibold text-slate-600">Guest {index + 1}</p>
+                <p className="text-[10px] font-semibold text-slate-600">
+                  Guest {index + 1}
+                  {draft.attendanceDay ? (
+                    <span className="ml-2 font-medium normal-case text-slate-400">
+                      {draft.attendanceDay.replace("_only", "").replace(/^./, (letter) => letter.toUpperCase())}
+                    </span>
+                  ) : null}
+                  {draft.headshotPath ? (
+                    <span className="ml-2 font-medium text-emerald-600">Headshot on file</span>
+                  ) : null}
+                </p>
                 <div className="flex items-center gap-3">
                   <label className="flex items-center gap-1.5 text-[9px] font-medium">
                     <input

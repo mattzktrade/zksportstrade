@@ -393,7 +393,9 @@ export function OperationsClient({
           specialRequests: draft.specialRequests,
           isLeadGuest: draft.isLeadGuest,
           detailsComplete: true,
-          sortOrder: index,
+          sortOrder: draft.sortOrder ?? index,
+          attendanceDay: draft.attendanceDay,
+          headshotPath: draft.headshotPath,
         })),
       })
       if (!result.ok) {

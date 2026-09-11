@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server"
 import { linkPurchaseOrderSupplier } from "@/lib/inventory/suppliers"
 import { resolveLinkedStockLedger } from "@/lib/inventory/linked-stock-ledger"
 
+export { parseOptionalIsoDate } from "@/lib/admin/purchase-order-date"
+
 export type PurchaseOrderRow = {
   id: string
   po_number: string
@@ -20,6 +22,10 @@ export type PurchaseOrderRow = {
    */
   contract_invoice_received: boolean | null
   issued_at: string | null
+  /** Date guest names and headshot photos must be sent to the supplier. */
+  guest_details_deadline: string | null
+  /** Date the supplier delivered the tickets, when applicable. */
+  tickets_received_at: string | null
   note: string | null
   created_at: string
   updated_at: string
@@ -100,13 +106,15 @@ function issuedDateFromReceivedAt(receivedAt: string | null | undefined): string
 }
 
 const PO_COLUMNS =
+  "id, po_number, supplier, supplier_id, supplier_reference, contract_invoice_received, guest_details_deadline, tickets_received_at, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name, crm_accounts(name))" as const
+const PO_COLUMNS_NO_OPS_DATES =
   "id, po_number, supplier, supplier_id, supplier_reference, contract_invoice_received, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name, crm_accounts(name))" as const
 const PO_COLUMNS_NO_RECEIVED =
   "id, po_number, supplier, supplier_id, supplier_reference, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name, crm_accounts(name))" as const
 const PO_COLUMNS_NO_REF =
   "id, po_number, supplier, supplier_id, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name, crm_accounts(name))" as const
 const PO_COLUMNS_NO_ACCOUNT =
-  "id, po_number, supplier, supplier_id, supplier_reference, contract_invoice_received, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name)" as const
+  "id, po_number, supplier, supplier_id, supplier_reference, contract_invoice_received, guest_details_deadline, tickets_received_at, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name)" as const
 const PO_COLUMNS_BARE =
   "id, po_number, supplier, supplier_id, issued_at, note, created_at, updated_at" as const
 
@@ -122,6 +130,8 @@ function mapPurchaseOrderRow(row: {
   supplier_id: string | null
   supplier_reference?: string | null
   contract_invoice_received?: boolean | null
+  guest_details_deadline?: string | null
+  tickets_received_at?: string | null
   issued_at: string | null
   note: string | null
   created_at: string
@@ -153,6 +163,8 @@ function mapPurchaseOrderRow(row: {
     contract_invoice_received:
       typeof row.contract_invoice_received === "boolean" ? row.contract_invoice_received : null,
     issued_at: normaliseIssuedAt(row.issued_at),
+    guest_details_deadline: normaliseIssuedAt(row.guest_details_deadline),
+    tickets_received_at: normaliseIssuedAt(row.tickets_received_at),
     note: row.note,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -197,6 +209,36 @@ export async function setPurchaseOrderContractInvoiceReceivedFlag(
   return { ok: false, message: error.message }
 }
 
+/** Write guest-details deadline and/or tickets-received date. Undefined fields are left unchanged. */
+export async function setPurchaseOrderOpsDates(
+  supabase: SupabaseClient,
+  id: string,
+  input: {
+    guestDetailsDeadline?: string | null
+    ticketsReceivedAt?: string | null
+  },
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const patch: { guest_details_deadline?: string | null; tickets_received_at?: string | null } = {}
+  if (input.guestDetailsDeadline !== undefined) {
+    patch.guest_details_deadline = input.guestDetailsDeadline
+  }
+  if (input.ticketsReceivedAt !== undefined) {
+    patch.tickets_received_at = input.ticketsReceivedAt
+  }
+  if (Object.keys(patch).length === 0) return { ok: true }
+
+  const { error } = await supabase.from("purchase_orders").update(patch).eq("id", id)
+  if (!error) return { ok: true }
+  const message = error.message.toLowerCase()
+  if (message.includes("guest_details_deadline") || message.includes("tickets_received_at")) {
+    return {
+      ok: false,
+      message: "Apply the latest database migration to store guest-details deadlines and tickets received dates.",
+    }
+  }
+  return { ok: false, message: error.message }
+}
+
 const PO_DOC_COLUMNS =
   "id, purchase_order_id, file_bucket, file_path, file_name, file_content_type, file_size, uploaded_at" as const
 
@@ -215,6 +257,15 @@ export async function getPurchaseOrders(): Promise<PurchaseOrderRow[]> {
     .order("issued_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
   if (!error && data) return data.map((row) => mapPurchaseOrderRow(row))
+
+  const withoutOpsDates = await supabase
+    .from("purchase_orders")
+    .select(PO_COLUMNS_NO_OPS_DATES)
+    .order("issued_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+  if (!withoutOpsDates.error && withoutOpsDates.data) {
+    return withoutOpsDates.data.map((row) => mapPurchaseOrderRow(row))
+  }
 
   const withoutReceived = await supabase
     .from("purchase_orders")
@@ -261,6 +312,15 @@ export async function getPurchaseOrderById(id: string): Promise<PurchaseOrderRow
     .eq("id", id)
     .maybeSingle()
   if (!error && data) return mapPurchaseOrderRow(data)
+
+  const withoutOpsDates = await supabase
+    .from("purchase_orders")
+    .select(PO_COLUMNS_NO_OPS_DATES)
+    .eq("id", id)
+    .maybeSingle()
+  if (!withoutOpsDates.error && withoutOpsDates.data) {
+    return mapPurchaseOrderRow(withoutOpsDates.data)
+  }
 
   const withoutReceived = await supabase
     .from("purchase_orders")

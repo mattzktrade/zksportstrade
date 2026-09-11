@@ -152,11 +152,13 @@ type GuestWrite = {
   isLeadGuest: boolean
   detailsComplete?: boolean
   sortOrder: number
+  attendanceDay?: string | null
+  headshotPath?: string | null
 }
 
 function guestPayload(input: GuestWrite) {
   const fullName = blank(input.fullName)
-  return {
+  const payload: Record<string, unknown> = {
     full_name: fullName,
     email: blank(input.email)?.toLowerCase() ?? null,
     phone: blank(input.phone),
@@ -169,6 +171,13 @@ function guestPayload(input: GuestWrite) {
     sort_order: Math.max(0, input.sortOrder || 0),
     updated_at: new Date().toISOString(),
   }
+  if (input.attendanceDay !== undefined) {
+    payload.attendance_day = input.attendanceDay?.trim() || null
+  }
+  if (input.headshotPath !== undefined) {
+    payload.headshot_path = blank(input.headshotPath)
+  }
+  return payload
 }
 
 function missingGuestsTable(message: string): boolean {

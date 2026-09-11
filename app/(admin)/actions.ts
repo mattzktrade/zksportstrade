@@ -45,8 +45,10 @@ import { getCrmCompanyOptions } from "@/lib/crm/deals"
 import {
   generatePurchaseOrderNumber,
   setPurchaseOrderContractInvoiceReceivedFlag,
+  setPurchaseOrderOpsDates,
   setPurchaseOrderSupplierReference,
 } from "@/lib/admin/purchase-orders"
+import { parseOptionalIsoDate } from "@/lib/admin/purchase-order-date"
 import { storedContractInvoiceReceived } from "@/lib/admin/purchase-order-contract-invoice"
 import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
 import { enqueueOpportunityOutcomeServer, enqueueOrderIntegrationsServer } from "@/lib/integrations/enqueue-server"
@@ -2277,12 +2279,19 @@ export async function addStockPurchaseLayer(formData: FormData): Promise<ActionR
 
   const poNumberRaw = String(formData.get("poNumber") ?? "").trim()
   const poIssuedAt = String(formData.get("poIssuedAt") ?? "").trim() || null
+  const guestDetailsDeadlineRaw = String(formData.get("guestDetailsDeadline") ?? "").trim()
+  const ticketsReceivedAtRaw = String(formData.get("ticketsReceivedAt") ?? "").trim()
   const note = String(formData.get("note") ?? "").trim() || null
   const receivedRaw = String(formData.get("receivedAt") ?? "").trim()
   const fulfilmentBlockId = String(formData.get("fulfilmentBlockId") ?? "").trim() || null
   if (fulfilmentBlockId && !UUID_RE.test(fulfilmentBlockId)) {
     return { ok: false, message: "Invalid fulfilment block id." }
   }
+
+  const guestDetailsDeadline = parseOptionalIsoDate(guestDetailsDeadlineRaw || null, "Deadline")
+  if (!guestDetailsDeadline.ok) return guestDetailsDeadline
+  const ticketsReceivedAt = parseOptionalIsoDate(ticketsReceivedAtRaw || null, "Tickets received")
+  if (!ticketsReceivedAt.ok) return ticketsReceivedAt
 
   let received: string | null = null
   if (receivedRaw) {
@@ -2303,6 +2312,25 @@ export async function addStockPurchaseLayer(formData: FormData): Promise<ActionR
     note,
   })
   if (!resolved.ok) return resolved
+
+  if (guestDetailsDeadlineRaw || ticketsReceivedAtRaw) {
+    const dates = await setPurchaseOrderOpsDates(supabase, resolved.id, {
+      guestDetailsDeadline: guestDetailsDeadlineRaw ? guestDetailsDeadline.date : undefined,
+      ticketsReceivedAt: ticketsReceivedAtRaw ? ticketsReceivedAt.date : undefined,
+    })
+    if (!dates.ok) {
+      if (!resolved.linkedExisting) {
+        const { error: cleanupError } = await supabase.from("purchase_orders").delete().eq("id", resolved.id)
+        if (cleanupError) {
+          console.warn(
+            "[addStockPurchaseLayer] failed to remove unused purchase order:",
+            cleanupError.message,
+          )
+        }
+      }
+      return dates
+    }
+  }
 
   const { error } = await addCostLayerWithSourcePackage(supabase, {
     packageId: target.packageId,
@@ -2489,6 +2517,8 @@ export async function updateCostLayer(input: {
   purchaseOrderSupplierAccountId?: string | null
   purchaseOrderNumber?: string | null
   purchaseOrderIssuedAt?: string | null
+  purchaseOrderGuestDetailsDeadline?: string | null
+  purchaseOrderTicketsReceivedAt?: string | null
 }): Promise<ActionResult> {
   const gate = await requireAdminAction()
   if (!gate.ok) return gate
@@ -2526,7 +2556,9 @@ export async function updateCostLayer(input: {
   const purchaseFieldsProvided =
     input.purchaseOrderSupplierAccountId !== undefined ||
     input.purchaseOrderNumber !== undefined ||
-    input.purchaseOrderIssuedAt !== undefined
+    input.purchaseOrderIssuedAt !== undefined ||
+    input.purchaseOrderGuestDetailsDeadline !== undefined ||
+    input.purchaseOrderTicketsReceivedAt !== undefined
 
   if (purchaseFieldsProvided) {
     const supplierAccountId = input.purchaseOrderSupplierAccountId?.trim() ?? ""
@@ -2545,6 +2577,19 @@ export async function updateCostLayer(input: {
     if (layerErr) return { ok: false, message: layerErr.message }
 
     const existingPoId = (layerRow as { purchase_order_id?: string | null } | null)?.purchase_order_id ?? null
+
+    const deadline =
+      input.purchaseOrderGuestDetailsDeadline !== undefined
+        ? parseOptionalIsoDate(input.purchaseOrderGuestDetailsDeadline, "Deadline")
+        : { ok: true as const, date: undefined as string | null | undefined }
+    if (!deadline.ok) return deadline
+    const ticketsReceived =
+      input.purchaseOrderTicketsReceivedAt !== undefined
+        ? parseOptionalIsoDate(input.purchaseOrderTicketsReceivedAt, "Tickets received")
+        : { ok: true as const, date: undefined as string | null | undefined }
+    if (!ticketsReceived.ok) return ticketsReceived
+
+    let poIdForDates = existingPoId
 
     if (existingPoId) {
       const { error: poUpdErr } = await supabase.rpc("admin_update_purchase_order", {
@@ -2565,12 +2610,21 @@ export async function updateCostLayer(input: {
         issuedAt: input.purchaseOrderIssuedAt?.trim() || null,
       })
       if (!resolved.ok) return resolved
+      poIdForDates = resolved.id
       const { error: linkErr } = await supabase.rpc("admin_set_cost_layer_purchase_order", {
         p_layer_id: layerId,
         p_purchase_order_id: resolved.id,
         p_clear: false,
       })
       if (linkErr) return { ok: false, message: linkErr.message }
+    }
+
+    if (poIdForDates && (deadline.date !== undefined || ticketsReceived.date !== undefined)) {
+      const dates = await setPurchaseOrderOpsDates(supabase, poIdForDates, {
+        guestDetailsDeadline: deadline.date,
+        ticketsReceivedAt: ticketsReceived.date,
+      })
+      if (!dates.ok) return dates
     }
   } else if (input.purchaseOrderId !== undefined) {
     const poId = input.purchaseOrderId?.trim() || null
@@ -2757,6 +2811,8 @@ export async function updateOrphanPackageStock(input: {
     note?: string | null
     poNumber?: string | null
     poIssuedAt?: string | null
+    guestDetailsDeadline?: string | null
+    ticketsReceivedAt?: string | null
     receivedAt?: string | null
     fulfilmentBlockId?: string | null
   } | null
@@ -2828,6 +2884,11 @@ export async function updateOrphanPackageStock(input: {
       received = d.toISOString()
     }
 
+    const orphanDeadline = parseOptionalIsoDate(convert.guestDetailsDeadline, "Deadline")
+    if (!orphanDeadline.ok) return orphanDeadline
+    const orphanTickets = parseOptionalIsoDate(convert.ticketsReceivedAt, "Tickets received")
+    if (!orphanTickets.ok) return orphanTickets
+
     // Zero orphan inventory first, then add_cost_layer restores the new qty — avoids double count.
     if (currentAvailable > 0) {
       const { error: clearErr } = await supabase.rpc("adjust_linked_inventory_available", {
@@ -2878,6 +2939,14 @@ export async function updateOrphanPackageStock(input: {
         return { ok: false, message: "Fulfilment block does not belong to this package." }
       }
       return { ok: false, message: linkedDayCostErrorMessage(addErr.message) }
+    }
+
+    if (orphanDeadline.date || orphanTickets.date) {
+      const dates = await setPurchaseOrderOpsDates(supabase, resolved.id, {
+        guestDetailsDeadline: orphanDeadline.date || undefined,
+        ticketsReceivedAt: orphanTickets.date || undefined,
+      })
+      if (!dates.ok) return dates
     }
 
     const { error: bfErr } = await supabase.rpc("admin_backfill_package_order_costs", {
@@ -3273,6 +3342,8 @@ export async function createPurchaseOrder(input: {
   supplierAccountId: string
   supplierReference?: string | null
   issuedAt?: string | null
+  guestDetailsDeadline?: string | null
+  ticketsReceivedAt?: string | null
   note?: string | null
   lines?: Array<{ packageId: string; quantity: number; unitCost: number }>
 }): Promise<PurchaseOrderIdResult> {
@@ -3299,6 +3370,11 @@ export async function createPurchaseOrder(input: {
   }
   const note = input.note?.trim() ? input.note.trim().slice(0, 5000) : null
 
+  const guestDetailsDeadline = parseOptionalIsoDate(input.guestDetailsDeadline, "Deadline")
+  if (!guestDetailsDeadline.ok) return guestDetailsDeadline
+  const ticketsReceivedAt = parseOptionalIsoDate(input.ticketsReceivedAt, "Tickets received")
+  if (!ticketsReceivedAt.ok) return ticketsReceivedAt
+
   const { data, error } = await gate.supabase.rpc("admin_create_purchase_order", {
     p_po_number: poNumber,
     p_supplier: supplier,
@@ -3321,6 +3397,14 @@ export async function createPurchaseOrder(input: {
     input.supplierReference,
   )
   if (!referenced.ok) return referenced
+
+  if (guestDetailsDeadline.date || ticketsReceivedAt.date) {
+    const dates = await setPurchaseOrderOpsDates(gate.supabase, id, {
+      guestDetailsDeadline: guestDetailsDeadline.date || undefined,
+      ticketsReceivedAt: ticketsReceivedAt.date || undefined,
+    })
+    if (!dates.ok) return dates
+  }
 
   const stockLines = new Map<
     string,
@@ -3380,6 +3464,8 @@ export async function updatePurchaseOrder(input: {
   supplierReference?: string | null
   issuedAt?: string | null
   clearIssuedAt?: boolean
+  guestDetailsDeadline?: string | null
+  ticketsReceivedAt?: string | null
   note?: string | null
 }): Promise<ActionResult> {
   const gate = await requireAdminAction()
@@ -3433,6 +3519,23 @@ export async function updatePurchaseOrder(input: {
       input.supplierReference,
     )
     if (!referenced.ok) return referenced
+  }
+  if (input.guestDetailsDeadline !== undefined || input.ticketsReceivedAt !== undefined) {
+    const deadline =
+      input.guestDetailsDeadline !== undefined
+        ? parseOptionalIsoDate(input.guestDetailsDeadline, "Deadline")
+        : { ok: true as const, date: undefined as string | null | undefined }
+    if (!deadline.ok) return deadline
+    const ticketsReceived =
+      input.ticketsReceivedAt !== undefined
+        ? parseOptionalIsoDate(input.ticketsReceivedAt, "Tickets received")
+        : { ok: true as const, date: undefined as string | null | undefined }
+    if (!ticketsReceived.ok) return ticketsReceived
+    const dates = await setPurchaseOrderOpsDates(gate.supabase, id, {
+      guestDetailsDeadline: deadline.date,
+      ticketsReceivedAt: ticketsReceived.date,
+    })
+    if (!dates.ok) return dates
   }
   revalidatePath("/admin/purchase-orders")
   revalidatePath("/admin/catalog")

@@ -476,3 +476,16 @@ test("inventory sold follows committed allocations instead of leftover FIFO rema
   assert.match(costLayerUi, /resolveSoldByCostLayer/)
   assert.doesNotMatch(costLayerUi, /targetLayerRemaining/)
 })
+
+test("signed deals with a linked order still count as needing a supplier when unallocated", () => {
+  assert.match(orderTable, /function dealProjectsSupplierConsumption/)
+  assert.doesNotMatch(
+    orderTable,
+    /if \(!deal\.orderId\) return true/,
+  )
+  assert.match(
+    orderTable,
+    /return deal\.lines\.some\(\(line\) => dealLineCanTakePurchasedSupplier\(line\)\)/,
+  )
+  assert.match(orderTable, /of \$\{requiredQty\} assigned/)
+})

@@ -16,7 +16,9 @@ import type { PurchaseOrderRow } from "@/lib/admin/purchase-orders"
 import { adminPackagePath, type AdminPackageTab } from "@/lib/admin/package-link"
 import { fetchAdminPackageForCatalogExpand } from "@/app/(admin)/actions"
 import { PackageAdminPanel } from "@/components/admin/package-admin-panel"
+import { PackageGuestList } from "@/components/admin/package-guest-list"
 import { PackageOrdersTable } from "@/components/admin/package-orders-table"
+import type { PackageGuestListData } from "@/lib/admin/package-guest-list-model"
 import {
   commitmentSellable,
   linkedPoolSellableForPackage,
@@ -25,10 +27,16 @@ import {
 
 const TABS: { id: AdminPackageTab; label: string }[] = [
   { id: "details", label: "Details" },
+  { id: "guest-list", label: "Guest list" },
   { id: "inventory", label: "Inventory & cost" },
   { id: "visibility", label: "Visibility" },
   { id: "orders", label: "Orders" },
 ]
+
+const EMPTY_GUEST_LIST: PackageGuestListData = {
+  days: [{ id: "all", label: "All days" }],
+  seats: [],
+}
 
 function sellableQty(
   pkg: AdminPackageRow,
@@ -86,6 +94,8 @@ export function PackageDetailClient({
   linkedDayOverview,
   purchaseOrders = [],
   fulfilmentBlocks = [],
+  guestList = EMPTY_GUEST_LIST,
+  canManageGuests = false,
   initialTab = "details",
 }: {
   pkg: AdminPackageRow
@@ -98,6 +108,8 @@ export function PackageDetailClient({
   linkedDayOverview?: LinkedDayPackageOverview
   purchaseOrders?: PurchaseOrderRow[]
   fulfilmentBlocks?: FulfilmentBlockWithUsage[]
+  guestList?: PackageGuestListData
+  canManageGuests?: boolean
   initialTab?: AdminPackageTab
 }) {
   const router = useRouter()
@@ -117,6 +129,10 @@ export function PackageDetailClient({
   useEffect(() => {
     setLiveWixListings(wixListings)
   }, [wixListings])
+
+  useEffect(() => {
+    setActiveTab(initialTab)
+  }, [initialTab])
 
   async function refreshInventory() {
     const full = await fetchAdminPackageForCatalogExpand(livePkg.id)
@@ -179,6 +195,9 @@ export function PackageDetailClient({
             )}
           >
             {t.label}
+            {t.id === "guest-list" && guestList.seats.length > 0 ? (
+              <span className="ml-1.5 text-xs tabular-nums text-muted-foreground">({guestList.seats.length})</span>
+            ) : null}
             {t.id === "orders" && saleCount > 0 ? (
               <span className="ml-1.5 text-xs tabular-nums text-muted-foreground">({saleCount})</span>
             ) : null}
@@ -193,8 +212,12 @@ export function PackageDetailClient({
 
       <div
         className={cn(
-          "rounded-xl border border-border bg-card min-w-0 overflow-hidden",
-          activeTab === "orders" ? "p-3 sm:p-4" : "p-4 sm:p-6",
+          "rounded-xl border border-border bg-card min-w-0",
+          activeTab === "guest-list"
+            ? "overflow-visible p-0"
+            : activeTab === "orders"
+              ? "overflow-hidden p-3 sm:p-4"
+              : "overflow-hidden p-4 sm:p-6",
         )}
       >
         {activeTab === "details" ? (
@@ -226,6 +249,8 @@ export function PackageDetailClient({
             linkedPackages={liveLinkedPackages}
             section="visibility"
           />
+        ) : activeTab === "guest-list" ? (
+          <PackageGuestList data={guestList} canManage={canManageGuests} />
         ) : (
           <PackageOrdersTable
             orders={orders}

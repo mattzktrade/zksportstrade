@@ -12,6 +12,8 @@ import {
   type OperationsEmailHistoryRow,
   type OperationsEmailKind,
 } from "@/lib/operations/emails"
+import { ensureGuestDetailsInvite, loadGuestDetailsBookingContext } from "@/lib/guest-details/invite"
+import { ensureGuestDetailsLinkInBody, guestDetailsTokenFromText } from "@/lib/guest-details/model"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
@@ -146,6 +148,21 @@ async function loadHistory(
   return mapHistory(data, names)
 }
 
+async function lastGuestDetailsEmailBody(
+  admin: NonNullable<ReturnType<typeof createAdminClient>>,
+  dealId: string,
+): Promise<string | null> {
+  const { data } = await admin
+    .from("operations_emails")
+    .select("body_text")
+    .eq("deal_id", dealId)
+    .eq("kind", "guest_details")
+    .order("sent_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  return data?.body_text ? String(data.body_text) : null
+}
+
 export async function previewOperationsEmail(input: {
   dealId: string
   kind: string
@@ -157,12 +174,30 @@ export async function previewOperationsEmail(input: {
   }
   const context = await loadDealContext(input.dealId)
   if (!context) return { ok: false, message: "Deal not found." }
+  let formUrl: string | undefined
+  if (input.kind === "guest_details" && gate.admin) {
+    try {
+      const booking = await loadGuestDetailsBookingContext(gate.admin, input.dealId)
+      const recovered = await lastGuestDetailsEmailBody(gate.admin, input.dealId)
+      const invite = await ensureGuestDetailsInvite({
+        admin: gate.admin,
+        dealId: input.dealId,
+        orderId: booking?.orderId ?? context.orderId,
+        eventDateIso: booking?.eventDate ?? null,
+        recoverFromBody: recovered,
+      })
+      formUrl = invite?.url
+    } catch {
+      formUrl = undefined
+    }
+  }
   const built = buildOperationsEmailDraft({
     kind: input.kind,
     contactName: context.contactName,
     accountName: context.accountName,
     eventLabel: context.eventLabel,
     quantity: context.quantity,
+    formUrl,
   })
   const history = await loadHistory(gate.supabase, input.dealId, input.kind)
   return {
@@ -191,13 +226,30 @@ export async function sendOperationsEmail(input: {
   }
   const toEmail = blank(input.toEmail)?.toLowerCase() ?? ""
   const subject = blank(input.subject)
-  const body = blank(input.body)
+  let body = blank(input.body)
   if (!EMAIL_RE.test(toEmail)) return { ok: false, message: "Enter a valid recipient email." }
   if (!subject) return { ok: false, message: "Subject is required." }
   if (!body) return { ok: false, message: "Email body is required." }
 
   const context = await loadDealContext(input.dealId)
   if (!context) return { ok: false, message: "Deal not found." }
+
+  if (input.kind === "guest_details" && gate.admin) {
+    try {
+      const booking = await loadGuestDetailsBookingContext(gate.admin, input.dealId)
+      const invite = await ensureGuestDetailsInvite({
+        admin: gate.admin,
+        dealId: input.dealId,
+        orderId: booking?.orderId ?? context.orderId,
+        eventDateIso: booking?.eventDate ?? null,
+        preferredToken: guestDetailsTokenFromText(body),
+        recoverFromBody: body,
+      })
+      if (invite) body = ensureGuestDetailsLinkInBody(body, invite.url)
+    } catch {
+      // Keep the drafted body if the invite table is not applied yet.
+    }
+  }
 
   const sent = await sendOperationsClientEmail({ to: toEmail, subject, body })
   if (!sent.ok) {

@@ -26,7 +26,8 @@ export function isPublicApiPath(path: string): boolean {
     path.startsWith("/api/webhooks/") ||
     path.startsWith("/api/cron/") ||
     path.startsWith("/api/integrations/") ||
-    path.startsWith("/api/booking-forms/")
+    path.startsWith("/api/booking-forms/") ||
+    path.startsWith("/api/guest-details/")
   )
 }
 
@@ -36,6 +37,10 @@ export function isSessionlessApiPath(path: string): boolean {
 
 export function isPublicBookingSignerPath(path: string): boolean {
   return path.startsWith("/sign/booking/")
+}
+
+export function isPublicGuestDetailsPath(path: string): boolean {
+  return path.startsWith("/guest-details/")
 }
 
 export function isAuthRoute(path: string): boolean {
@@ -64,6 +69,7 @@ export function isPublicPath(path: string): boolean {
     isUnderAuthPath(path) ||
     isResetPasswordPage(path) ||
     isPublicBookingSignerPath(path) ||
+    isPublicGuestDetailsPath(path) ||
     isPublicApiPath(path)
   )
 }

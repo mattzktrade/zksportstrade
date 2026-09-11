@@ -8,6 +8,7 @@ export type OperationsEmailDraftInput = {
   accountName: string
   eventLabel: string
   quantity: number
+  formUrl?: string | null
 }
 
 export type OperationsEmailDraft = {
@@ -58,6 +59,23 @@ export function buildOperationsEmailDraft(input: OperationsEmailDraftInput): Omi
   const account = input.accountName.trim() || "your company"
 
   if (input.kind === "guest_details") {
+    const formUrl = input.formUrl?.trim() ?? ""
+    const detailsBlock = formUrl
+      ? [
+          "Please complete this guest details form. You only need each guest’s full name and a clear recent headshot. You can save and finish later, or tick one person as the lead guest if the rest of the names are still to follow.",
+          "",
+          formUrl,
+          "",
+          "If the link does not open, reply to this email with the names and photos and I will add them for you.",
+        ]
+      : [
+          "Please reply to this email with the following for each guest:",
+          "• Full name, as it appears on their passport or photo ID",
+          "• Date of birth",
+          "• Nationality",
+          "• Email and mobile number",
+          "• Any dietary requirements, accessibility needs, or other notes we should know",
+        ]
     return {
       kind: input.kind,
       toName: input.contactName.trim() || account,
@@ -69,16 +87,11 @@ export function buildOperationsEmailDraft(input: OperationsEmailDraftInput): Omi
         "",
         `To get tickets and delivery organised for ${event}, I now need guest details for the ${guests} on this booking.`,
         "",
-        "Please reply to this email with the following for each guest:",
-        "• Full name, as it appears on their passport or photo ID",
-        "• Date of birth",
-        "• Nationality",
-        "• Email and mobile number",
-        "• Any dietary requirements, accessibility needs, or other notes we should know",
+        ...detailsBlock,
         "",
         "Once I have this, I can prepare the tickets and send them across ahead of the event.",
         "",
-        "If anything has changed on the booking, or you would rather we collect the names another way, just reply and I will help.",
+        "If anything has changed on the booking, just reply and I will help.",
         "",
         ...JENNY_SIGN_OFF,
       ].join("\n"),
@@ -116,6 +129,13 @@ export function operationsEmailHtml(body: string): string {
   const blocks = escaped
     .trim()
     .split(/\n{2,}/)
-    .map((block) => `<p style="margin:0 0 14px">${block.replaceAll("\n", "<br/>")}</p>`)
+    .map((block) => {
+      const text = block.replaceAll("\n", "<br/>")
+      const url = block.replaceAll("<br/>", "").trim()
+      if (/^https?:\/\/\S+\/guest-details\/[A-Za-z0-9_-]{40,60}\/?$/.test(url)) {
+        return `<p style="margin:0 0 14px"><a href="${url}" style="display:inline-block;background:#F90202;color:#ffffff;padding:12px 18px;border-radius:6px;text-decoration:none;font-weight:700">Complete guest details</a></p>`
+      }
+      return `<p style="margin:0 0 14px">${text}</p>`
+    })
   return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55;color:#111">${blocks.join("")}</div>`
 }

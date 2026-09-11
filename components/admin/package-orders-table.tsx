@@ -99,30 +99,15 @@ function saleIsIncomplete(
   return isOutstandingInvoiceStatus(order?.invoice?.status)
 }
 
-function ownedAllocatedQuantity(deal: PackageDealSaleRow): number {
-  return deal.lines
-    .filter((line) => line.sourcingMode === "owned")
-    .reduce((sum, line) => {
-      const allocated = line.supplierAllocations.reduce(
-        (quantity, allocation) => quantity + allocation.quantity,
-        0,
-      )
-      return sum + allocated
-    }, 0)
-}
-
 function dealLineCanTakePurchasedSupplier(
   line: PackageDealSaleRow["lines"][number],
 ): boolean {
   return line.sourcingMode === "owned" || line.sourcingMode === "brokered"
 }
 
-/** Signed deals can be assigned purchased stock, including lines that started as brokered. */
 function dealProjectsSupplierConsumption(deal: PackageDealSaleRow): boolean {
   if (!dealStageHoldsPurchasedStock(deal.stage)) return false
-  if (!deal.orderId) return true
-  if (deal.lines.some((line) => line.sourcingMode === "brokered")) return true
-  return ownedAllocatedQuantity(deal) > 0
+  return deal.lines.some((line) => dealLineCanTakePurchasedSupplier(line))
 }
 
 function paymentTone(
@@ -467,8 +452,21 @@ function DealSupplierEditor({
   ]
   const commonKey = selectedKeys.length === 1 ? selectedKeys[0] : ""
   const splitAcrossSuppliers = stockLines.length > 1 && selectedKeys.length !== 1
+  const assignedQty = stockLines.reduce((sum, line) => {
+    if (drafts[line.id]) return sum + line.quantity
+    return (
+      sum +
+      line.supplierAllocations.reduce(
+        (quantity, allocation) => quantity + allocation.quantity,
+        0,
+      )
+    )
+  }, 0)
+  const requiredQty = stockLines.reduce((sum, line) => sum + line.quantity, 0)
   const placeholderName =
-    stockLines.find((line) => line.supplierName)?.supplierName || "Choose supplier…"
+    assignedQty > 0 && assignedQty < requiredQty
+      ? `${assignedQty} of ${requiredQty} assigned`
+      : stockLines.find((line) => line.supplierName)?.supplierName || "Choose supplier…"
 
   return (
     <div className="min-w-[190px] space-y-1.5">

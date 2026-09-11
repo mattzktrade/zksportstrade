@@ -31,6 +31,19 @@ test("guest details request uses first name, guest count, and a reply-with-detai
   assert.doesNotMatch(draft.subject, /DL0401/)
 })
 
+test("guest details request with a form URL asks them to complete the form", () => {
+  const draft = buildOperationsEmailDraft({
+    ...base,
+    kind: "guest_details",
+    formUrl: "https://zk.example/guest-details/abcdefghijklmnopqrstuvwxabcdefghijklmnopq",
+  })
+  assert.match(draft.body, /complete this guest details form/)
+  assert.match(draft.body, /save and finish later/)
+  assert.match(draft.body, /lead guest/)
+  assert.match(draft.body, /https:\/\/zk\.example\/guest-details\//)
+  assert.doesNotMatch(draft.body, /Date of birth/)
+})
+
 test("operations intro introduces Jenny and omits supplier ticket receipt", () => {
   const draft = buildOperationsEmailDraft({ ...base, kind: "operations_intro" })
   assert.equal(draft.subject, "Next steps for 2026 Singapore Grand Prix")
@@ -68,4 +81,12 @@ test("html conversion escapes markup and keeps paragraphs", () => {
   assert.match(html, /<p style="margin:0 0 14px">Hi Sarah,<\/p>/)
   assert.match(html, /&lt;Apex&gt;/)
   assert.doesNotMatch(html, /<Apex>/)
+})
+
+test("html conversion turns a guest-details URL paragraph into a button", () => {
+  const url = "https://zk.example/guest-details/abcdefghijklmnopqrstuvwxabcdefghijklmnopq"
+  const html = operationsEmailHtml(`Hi Sarah,\n\n${url}\n\nKind regards,`)
+  assert.match(html, /Complete guest details/)
+  assert.match(html, new RegExp(`href="${url}"`))
+  assert.match(html, /background:#F90202/)
 })

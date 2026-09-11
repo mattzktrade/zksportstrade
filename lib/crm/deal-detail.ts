@@ -226,14 +226,14 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
         ? supabase
             .from("order_guests")
             .select(
-              "id, order_id, full_name, email, phone, nationality, date_of_birth, dietary_requirements, special_requests, is_lead_guest, details_complete, sort_order",
+              "id, order_id, full_name, email, phone, nationality, date_of_birth, dietary_requirements, special_requests, is_lead_guest, details_complete, sort_order, attendance_day, headshot_path",
             )
             .eq("order_id", deal.order_id)
             .order("sort_order")
         : supabase
             .from("deal_guests")
             .select(
-              "id, deal_id, full_name, email, phone, nationality, date_of_birth, dietary_requirements, special_requests, is_lead_guest, details_complete, sort_order",
+              "id, deal_id, full_name, email, phone, nationality, date_of_birth, dietary_requirements, special_requests, is_lead_guest, details_complete, sort_order, attendance_day, headshot_path",
             )
             .eq("deal_id", deal.id)
             .order("sort_order"),
@@ -570,6 +570,8 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
       isLeadGuest: Boolean(row.is_lead_guest),
       detailsComplete: Boolean(row.details_complete),
       sortOrder: Number(row.sort_order),
+      attendanceDay: (row.attendance_day as string | null) ?? null,
+      headshotPath: (row.headshot_path as string | null) ?? null,
     })),
     notes: (noteRows ?? []).map((row) => ({
       id: String(row.id),

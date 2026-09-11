@@ -115,6 +115,8 @@ export function PurchaseOrdersClient({
   const [newSupplierAccountId, setNewSupplierAccountId] = useState("")
   const [newSupplierReference, setNewSupplierReference] = useState("")
   const [newIssuedAt, setNewIssuedAt] = useState("")
+  const [newGuestDetailsDeadline, setNewGuestDetailsDeadline] = useState("")
+  const [newTicketsReceivedAt, setNewTicketsReceivedAt] = useState("")
   const [newNote, setNewNote] = useState("")
   const [newFiles, setNewFiles] = useState<File[]>([])
   const [newLines, setNewLines] = useState(() => [emptyDraftPurchaseLine()])
@@ -125,6 +127,8 @@ export function PurchaseOrdersClient({
   const [editSupplierAccountId, setEditSupplierAccountId] = useState("")
   const [editSupplierReference, setEditSupplierReference] = useState("")
   const [editIssuedAt, setEditIssuedAt] = useState("")
+  const [editGuestDetailsDeadline, setEditGuestDetailsDeadline] = useState("")
+  const [editTicketsReceivedAt, setEditTicketsReceivedAt] = useState("")
   const [editNote, setEditNote] = useState("")
   const scrolledToPo = useRef(false)
 
@@ -230,6 +234,8 @@ export function PurchaseOrdersClient({
     setNewSupplierAccountId("")
     setNewSupplierReference("")
     setNewIssuedAt("")
+    setNewGuestDetailsDeadline("")
+    setNewTicketsReceivedAt("")
     setNewNote("")
     setNewFiles([])
     setNewLines([emptyDraftPurchaseLine()])
@@ -266,6 +272,8 @@ export function PurchaseOrdersClient({
         supplierAccountId: newSupplierAccountId,
         supplierReference: newSupplierReference.trim() || null,
         issuedAt: newIssuedAt.trim() || null,
+        guestDetailsDeadline: newGuestDetailsDeadline.trim() || null,
+        ticketsReceivedAt: newTicketsReceivedAt.trim() || null,
         note: newNote.trim() || null,
         lines,
       })
@@ -299,6 +307,8 @@ export function PurchaseOrdersClient({
     setEditSupplierAccountId(po.supplier_account_id ?? "")
     setEditSupplierReference(po.supplier_reference ?? "")
     setEditIssuedAt(po.issued_at ?? "")
+    setEditGuestDetailsDeadline(po.guest_details_deadline ?? "")
+    setEditTicketsReceivedAt(po.tickets_received_at ?? "")
     setEditNote(po.note ?? "")
     setExpandedId(po.id)
   }
@@ -317,6 +327,8 @@ export function PurchaseOrdersClient({
         supplierReference: editSupplierReference.trim() || null,
         issuedAt: editIssuedAt.trim() || null,
         clearIssuedAt,
+        guestDetailsDeadline: editGuestDetailsDeadline.trim() || null,
+        ticketsReceivedAt: editTicketsReceivedAt.trim() || null,
         note: editNote,
       })
       if (!res.ok) {
@@ -564,6 +576,30 @@ export function PurchaseOrdersClient({
                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
               />
             </label>
+            <label className="block text-xs text-muted-foreground">
+              Deadline
+              <input
+                type="date"
+                value={newGuestDetailsDeadline}
+                onChange={(e) => setNewGuestDetailsDeadline(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+              />
+              <span className="mt-1 block text-[10px] leading-relaxed">
+                When guest names and headshot photos are due to the supplier.
+              </span>
+            </label>
+            <label className="block text-xs text-muted-foreground">
+              Tickets received
+              <input
+                type="date"
+                value={newTicketsReceivedAt}
+                onChange={(e) => setNewTicketsReceivedAt(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+              />
+              <span className="mt-1 block text-[10px] leading-relaxed">
+                When the supplier delivered the tickets, if applicable.
+              </span>
+            </label>
             <label className="block text-xs text-muted-foreground sm:col-span-2 xl:col-span-4">
               Note
               <textarea
@@ -625,7 +661,7 @@ export function PurchaseOrdersClient({
       ) : null}
 
       <AdminDesktopTable>
-        <table className="w-full min-w-[1100px] text-[9px]">
+        <table className="w-full min-w-[1280px] text-[9px]">
           <thead className="bg-[#fafbfc] text-left text-[8px] uppercase tracking-wide text-[#92969e]">
             <tr>
               <th className="px-3 py-2 font-medium">
@@ -650,6 +686,18 @@ export function PurchaseOrdersClient({
                   {sortKey === "issuedAt" ? <span>{sortDescending ? "↓" : "↑"}</span> : null}
                 </button>
               </th>
+              <th
+                className="px-3 py-2 font-medium whitespace-nowrap"
+                title="When guest names and headshot photos are due to the supplier"
+              >
+                Deadline
+              </th>
+              <th
+                className="px-3 py-2 font-medium whitespace-nowrap"
+                title="When the supplier delivered the tickets"
+              >
+                Tickets received
+              </th>
               <th className="px-3 py-2 font-medium min-w-[10rem]">Product</th>
               <th className="px-3 py-2 font-medium min-w-[9rem]">Event</th>
               <th className="px-3 py-2 font-medium text-right">Qty bought</th>
@@ -660,7 +708,7 @@ export function PurchaseOrdersClient({
           <tbody>
             {filteredOrders.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                <td colSpan={11} className="px-3 py-6 text-center text-sm text-muted-foreground">
                   {orders.length === 0
                     ? "No purchase orders yet. Create one with the products you are buying."
                     : "No matching purchase orders."}
@@ -680,11 +728,15 @@ export function PurchaseOrdersClient({
                     supplierAccountId: editSupplierAccountId,
                     supplierReference: editSupplierReference,
                     issuedAt: editIssuedAt,
+                    guestDetailsDeadline: editGuestDetailsDeadline,
+                    ticketsReceivedAt: editTicketsReceivedAt,
                     note: editNote,
                     setPoNumber: setEditPoNumber,
                     setSupplierAccountId: setEditSupplierAccountId,
                     setSupplierReference: setEditSupplierReference,
                     setIssuedAt: setEditIssuedAt,
+                    setGuestDetailsDeadline: setEditGuestDetailsDeadline,
+                    setTicketsReceivedAt: setEditTicketsReceivedAt,
                     setNote: setEditNote,
                   }}
                   companies={companies}
@@ -725,6 +777,8 @@ export function PurchaseOrdersClient({
                   <p className="mt-0.5 text-[8px] text-slate-400">
                     {po.supplier_reference ? `${po.supplier_reference} · ` : ""}
                     {formatDate(po.issued_at)}
+                    {po.guest_details_deadline ? ` · Deadline ${formatDate(po.guest_details_deadline)}` : ""}
+                    {po.tickets_received_at ? ` · Tickets ${formatDate(po.tickets_received_at)}` : ""}
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
@@ -751,6 +805,14 @@ export function PurchaseOrdersClient({
                   <p>
                     <span className="font-medium text-slate-800">Contract / invoice:</span>{" "}
                     {po.supplier_reference || "—"}
+                  </p>
+                  <p>
+                    <span className="font-medium text-slate-800">Deadline:</span>{" "}
+                    {formatDate(po.guest_details_deadline)}
+                  </p>
+                  <p>
+                    <span className="font-medium text-slate-800">Tickets received:</span>{" "}
+                    {formatDate(po.tickets_received_at)}
                   </p>
                   <label className="flex items-center gap-2">
                     <ContractInvoiceReceivedCheckbox
@@ -795,11 +857,15 @@ type EditState = {
   supplierAccountId: string
   supplierReference: string
   issuedAt: string
+  guestDetailsDeadline: string
+  ticketsReceivedAt: string
   note: string
   setPoNumber: (v: string) => void
   setSupplierAccountId: (v: string) => void
   setSupplierReference: (v: string) => void
   setIssuedAt: (v: string) => void
+  setGuestDetailsDeadline: (v: string) => void
+  setTicketsReceivedAt: (v: string) => void
   setNote: (v: string) => void
 }
 
@@ -1034,6 +1100,8 @@ function PurchaseOrderRow({
           </div>
         </td>
         <td className="px-3 py-2 text-muted-foreground">{formatDate(po.issued_at)}</td>
+        <td className="px-3 py-2 text-muted-foreground">{formatDate(po.guest_details_deadline)}</td>
+        <td className="px-3 py-2 text-muted-foreground">{formatDate(po.tickets_received_at)}</td>
         <PurchaseOrderStockCells lines={previewLines} preview />
         <td className="px-3 py-2 text-right tabular-nums">{previewTotals.purchased}</td>
         <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
@@ -1060,7 +1128,7 @@ function PurchaseOrderRow({
       </tr>
       {(expanded || editing) && (
         <tr className="border-t border-border bg-[#fafbfc]">
-          <td colSpan={9} className="px-4 py-4">
+          <td colSpan={11} className="px-4 py-4">
             <div className="space-y-4">
               <PurchaseOrderStockEditor
                 purchaseOrderId={po.id}
@@ -1114,6 +1182,24 @@ function PurchaseOrderRow({
                           className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm"
                         />
                       </label>
+                      <label className="block text-xs text-muted-foreground">
+                        Deadline
+                        <input
+                          type="date"
+                          value={editState.guestDetailsDeadline}
+                          onChange={(e) => editState.setGuestDetailsDeadline(e.target.value)}
+                          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm"
+                        />
+                      </label>
+                      <label className="block text-xs text-muted-foreground">
+                        Tickets received
+                        <input
+                          type="date"
+                          value={editState.ticketsReceivedAt}
+                          onChange={(e) => editState.setTicketsReceivedAt(e.target.value)}
+                          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm"
+                        />
+                      </label>
                       <label className="block text-xs text-muted-foreground sm:col-span-2">
                         Note
                         <textarea
@@ -1163,6 +1249,14 @@ function PurchaseOrderRow({
                       <div>
                         <dt className="text-muted-foreground">Issued</dt>
                         <dd>{formatDate(po.issued_at)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Deadline</dt>
+                        <dd>{formatDate(po.guest_details_deadline)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Tickets received</dt>
+                        <dd>{formatDate(po.tickets_received_at)}</dd>
                       </div>
                       <div className="sm:col-span-2">
                         <dt className="text-muted-foreground">Note</dt>
