@@ -4850,6 +4850,13 @@ export async function updateEnquiryPipeline(input: {
     }
     return { ok: false, message: error.message }
   }
+  if (input.enquiryStage !== "new") {
+    const { stopMarketingOutreach } = await import("@/lib/integrations/marketing-leads/outreach-stop")
+    await stopMarketingOutreach(
+      dealId,
+      input.enquiryStage === "not_interested" ? "not_interested" : "staff",
+    ).catch(() => undefined)
+  }
   revalidatePath("/admin/deals", "layout")
   revalidatePath("/admin/enquiries", "layout")
   return { ok: true, message: "Enquiry updated." }
@@ -4904,6 +4911,18 @@ export async function updateEnquiryPipelineBulk(input: {
       continue
     }
     updated += 1
+  }
+
+  if (input.enquiryStage !== "new") {
+    const { stopMarketingOutreach } = await import("@/lib/integrations/marketing-leads/outreach-stop")
+    await Promise.all(
+      dealIds.map((dealId) =>
+        stopMarketingOutreach(
+          dealId,
+          input.enquiryStage === "not_interested" ? "not_interested" : "staff",
+        ).catch(() => undefined),
+      ),
+    )
   }
 
   revalidatePath("/admin/deals", "layout")

@@ -48,7 +48,7 @@ export default async function SettingsPage({
     {
       href: "/admin/integrations/marketing-leads",
       title: "Marketing leads",
-      description: "Meta Instant Form leads from the agency land on Sales → Enquiries.",
+      description: "Meta Instant Form leads land on Enquiries, then a three-stage email and WhatsApp follow-up can run until they reply.",
       status: marketingLeads ? "Webhook secret configured" : "Not configured",
       connected: marketingLeads,
     },

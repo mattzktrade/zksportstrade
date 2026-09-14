@@ -15,6 +15,7 @@ import {
   normalizeMarketingPhone,
   type MarketingLeadPayload,
 } from "@/lib/integrations/marketing-leads/parse"
+import { enrollMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-enroll"
 
 export type IngestMarketingLeadResult =
   | { ok: true; dealId: string; dealReference: string; duplicate: boolean }
@@ -504,6 +505,12 @@ export async function ingestMarketingLead(payload: MarketingLeadPayload): Promis
         payload,
       })
       .eq("lead_id", payload.leadId)
+
+    try {
+      await enrollMarketingOutreach(String(deal.id))
+    } catch (error) {
+      console.error("[marketing-outreach] enroll failed", error)
+    }
 
     return {
       ok: true,

@@ -3,6 +3,7 @@ import { releaseExpiredInventoryHoldsAndSync } from "@/lib/integrations/release-
 import { releaseExpiredDealReservations } from "@/lib/integrations/release-expired-deal-reservations"
 import { processNativeBookingForms } from "@/lib/integrations/process-native-booking-forms"
 import { processNativeInvoiceReminders } from "@/lib/integrations/process-native-invoice-reminders"
+import { processMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-process"
 import type { SalesforceInventoryPullResult } from "@/lib/integrations/salesforce/pull-inventory-from-salesforce"
 
 const RETIRED_SALESFORCE_PULL: SalesforceInventoryPullResult = {
@@ -27,6 +28,7 @@ export type IntegrationCronResult = {
   salesforceInventory: SalesforceInventoryPullResult
   staleOpenOpportunities: null
   linkedInventoryHeal: { groups: number; packagesFixed: number } | null
+  marketingOutreach: Awaited<ReturnType<typeof processMarketingOutreach>>
 } & Awaited<ReturnType<typeof drainIntegrationOutbox>>
 
 /**
@@ -41,6 +43,23 @@ export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {
   const dealReservations = await releaseExpiredDealReservations()
   const result = await drainIntegrationOutbox({ maxRounds: 10, skipInventoryPull: true })
   const invoiceReminders = await processNativeInvoiceReminders()
+  let marketingOutreach: Awaited<ReturnType<typeof processMarketingOutreach>> = {
+    processed: 0,
+    sent: 0,
+    skipped: 0,
+    failed: 0,
+  }
+  try {
+    marketingOutreach = await processMarketingOutreach()
+  } catch (error) {
+    marketingOutreach = {
+      processed: 0,
+      sent: 0,
+      skipped: 0,
+      failed: 1,
+      message: error instanceof Error ? error.message : "Marketing outreach failed.",
+    }
+  }
 
   return {
     holds,
@@ -51,5 +70,6 @@ export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {
     staleOpenOpportunities: null,
     linkedInventoryHeal: null,
     ...result,
+    marketingOutreach,
   }
 }

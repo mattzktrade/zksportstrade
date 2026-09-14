@@ -10,13 +10,24 @@ import {
   MARKETING_LEAD_EXAMPLE_PAYLOAD,
   marketingLeadCurlExample,
 } from "@/lib/integrations/marketing-leads/contract"
+import { MarketingOutreachEditor } from "./outreach-client"
+import {
+  MARKETING_OUTREACH_EMAIL_REPLY_WEBHOOK_PATH,
+  MARKETING_OUTREACH_EMAIL_REPLY_WEBHOOK_URL,
+  MARKETING_OUTREACH_WHATSAPP_WEBHOOK_PATH,
+  MARKETING_OUTREACH_WHATSAPP_WEBHOOK_URL,
+  isMarketingOutreachEmailConfigured,
+  isWhatsAppCloudConfigured,
+} from "@/lib/integrations/marketing-leads/outreach-config"
+import { loadMarketingOutreachAdmin } from "@/lib/integrations/marketing-leads/outreach-store"
 
 export default async function MarketingLeadsIntegrationPage() {
   await requireCmsPermission("settings.manage")
   const configured = isMarketingLeadWebhookConfigured()
+  const outreach = await loadMarketingOutreachAdmin()
 
   return (
-    <div className="max-w-3xl space-y-6 p-6 lg:p-8">
+    <div className="max-w-5xl space-y-6 p-6 lg:p-8">
       <div>
         <Link href="/admin/settings?tab=integrations" className="text-sm text-muted-foreground hover:text-primary">
           ← Settings
@@ -25,6 +36,34 @@ export default async function MarketingLeadsIntegrationPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           Meta Instant Form leads POST here and land on Sales → Enquiries as marketing enquiries. Keep the
           spreadsheet as a backup until the Zap has been stable for a few days.
+        </p>
+      </div>
+
+      <MarketingOutreachEditor
+        settings={outreach.settings}
+        steps={outreach.steps}
+        missingTables={outreach.missingTables}
+        emailConfigured={isMarketingOutreachEmailConfigured()}
+        whatsappConfigured={isWhatsAppCloudConfigured()}
+      />
+
+      <div className="space-y-2 rounded-xl border border-border bg-card p-4 text-sm">
+        <p className="font-semibold">Sending accounts</p>
+        <p className="text-xs text-muted-foreground">
+          Email goes out through the existing Resend account. WhatsApp uses Meta Cloud API on ZK’s WhatsApp Business
+          number — not a personal phone. Replies stop the sequence so sales can take over.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          WhatsApp webhook: <span className="break-all font-mono">{MARKETING_OUTREACH_WHATSAPP_WEBHOOK_URL}</span>
+          {" "}(<span className="font-mono">{MARKETING_OUTREACH_WHATSAPP_WEBHOOK_PATH}</span> on staging)
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Email-reply webhook: <span className="break-all font-mono">{MARKETING_OUTREACH_EMAIL_REPLY_WEBHOOK_URL}</span>
+          {" "}(<span className="font-mono">{MARKETING_OUTREACH_EMAIL_REPLY_WEBHOOK_PATH}</span> on staging)
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Apply database migration <span className="font-mono">20260914120000_marketing_outreach</span> before
+          follow-up can run. WhatsApp will not send until each stage has an approved Meta template name saved above.
         </p>
       </div>
 

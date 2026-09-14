@@ -18,6 +18,8 @@ import {
   type EnquiryStageTabId,
 } from "@/lib/crm/deal-pipeline"
 import { isAwaitingZkApprovalDeal, uniqueDealIds } from "@/lib/admin/deal-link"
+import { listMarketingOutreachForDeals, loadMarketingOutreachAdmin } from "@/lib/integrations/marketing-leads/outreach-store"
+import { toEnquiryOutreachBadge } from "@/lib/integrations/marketing-leads/outreach-labels"
 import { EnquiriesClient } from "./enquiries-client"
 
 export const dynamic = "force-dynamic"
@@ -96,11 +98,20 @@ export default async function EnquiriesPage({
   const createPackageOptions = packageOptions.filter((option) =>
     packages.some((row) => row.id === option.id && !row.is_hidden),
   )
+  const [outreachSummaries, outreachAdmin] = await Promise.all([
+    listMarketingOutreachForDeals(enquiryDeals.map((deal) => deal.id)),
+    loadMarketingOutreachAdmin(),
+  ])
+  const outreachByDeal = Object.fromEntries(
+    Object.entries(outreachSummaries).map(([id, summary]) => [id, toEnquiryOutreachBadge(summary)]),
+  )
 
   return (
     <div className="mx-auto max-w-[1540px] p-3 sm:p-5 lg:p-7">
       <EnquiriesClient
         deals={enquiryDeals}
+        outreachByDeal={outreachByDeal}
+        outreachSequenceEnabled={outreachAdmin.settings?.enabled === true}
         convertedThisMonth={convertedThisMonth}
         packageOptions={createPackageOptions}
         stockProducts={packageOptions}

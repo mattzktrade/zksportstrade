@@ -15,6 +15,8 @@ describe("session-guard paths", () => {
     assert.equal(isSessionlessApiPath("/api/cron/integration-outbox"), true)
     assert.equal(isSessionlessApiPath("/api/webhooks/xero"), true)
     assert.equal(isSessionlessApiPath("/api/webhooks/marketing-lead"), true)
+    assert.equal(isSessionlessApiPath("/api/webhooks/whatsapp"), true)
+    assert.equal(isSessionlessApiPath("/api/webhooks/marketing-outreach-email"), true)
     assert.equal(isSessionlessApiPath("/api/integrations/xero/connect"), false)
     assert.equal(isSessionlessApiPath("/admin/catalog/spain-test"), false)
   })

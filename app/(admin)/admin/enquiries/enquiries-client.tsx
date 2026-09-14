@@ -86,6 +86,8 @@ import { formatMoneyCompact } from "@/lib/format/money"
 import { cn } from "@/lib/utils"
 import { BookingFormPanel } from "@/app/(admin)/admin/deals/booking-form-panel"
 import type { BookingFormAdminRow, BookingFormEventRow } from "@/lib/booking-forms/types"
+import { stopMarketingOutreachForDeal } from "@/app/(admin)/admin/integrations/marketing-leads/outreach-actions"
+import { marketingFollowUpForEnquiry, type EnquiryOutreachBadge } from "@/lib/integrations/marketing-leads/outreach-labels"
 
 function sourceIcon(source: string) {
   switch (source) {
@@ -124,6 +126,21 @@ function sourceKind(source: string): { label: string; className: string } {
     default:
       return { label: "Other", className: "bg-slate-100 text-slate-600" }
   }
+}
+
+function EnquiryOutreachLine({ outreach }: { outreach?: EnquiryOutreachBadge }) {
+  if (!outreach) return null
+  return (
+    <p
+      className={cn(
+        "mt-1 max-w-[220px] whitespace-normal text-[9px] font-medium leading-snug",
+        outreach.idle ? "text-amber-700" : "text-slate-600",
+      )}
+      title={outreach.label}
+    >
+      {outreach.label}
+    </p>
+  )
 }
 
 function EnquiryContactDetails({ email, phone }: { email: string | null; phone: string | null }) {
@@ -224,6 +241,8 @@ export function EnquiriesClient({
   supplierOptions,
   initialSelectedId = null,
   initialStageTab = "",
+  outreachByDeal = {},
+  outreachSequenceEnabled = false,
 }: {
   deals: DealListRow[]
   convertedThisMonth: number
@@ -240,6 +259,8 @@ export function EnquiriesClient({
   supplierOptions: DealBasketSupplier[]
   initialSelectedId?: string | null
   initialStageTab?: EnquiryStageTabId | ""
+  outreachByDeal?: Record<string, EnquiryOutreachBadge>
+  outreachSequenceEnabled?: boolean
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -316,6 +337,14 @@ export function EnquiriesClient({
   }, [currentPage, filtered])
 
   const selected = selectedId ? deals.find((deal) => deal.id === selectedId) ?? null : null
+  const followUpFor = (deal: DealListRow) =>
+    marketingFollowUpForEnquiry({
+      dealId: deal.id,
+      source: deal.source,
+      outreach: outreachByDeal[deal.id],
+      sequenceEnabled: outreachSequenceEnabled,
+    })
+  const selectedOutreach = selected ? followUpFor(selected) : undefined
   const latestBookingByDeal = useMemo(() => {
     const map = new Map<string, BookingFormAdminRow>()
     for (const form of bookingForms) {
@@ -450,6 +479,18 @@ export function EnquiriesClient({
       }
       toast.success(`Moved to Deals as ${enquirySelectableStageLabel(stage)}.`)
       router.push(adminDealPath(selected.id))
+    })
+  }
+
+  function stopOutreach(dealId: string) {
+    startTransition(async () => {
+      const result = await stopMarketingOutreachForDeal(dealId)
+      if (!result.ok) {
+        toast.error(result.message)
+        return
+      }
+      toast.success(result.message)
+      router.refresh()
     })
   }
 
@@ -846,8 +887,9 @@ export function EnquiriesClient({
                           <p className="mt-1 text-[8px] font-medium text-amber-700">Needs sourcing</p>
                         ) : null}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3">
+                      <td className="px-3 py-3">
                         <StatusPill tone={enquiryStageTone(deal)}>{enquiryStageLabel(deal)}</StatusPill>
+                        <EnquiryOutreachLine outreach={followUpFor(deal)} />
                       </td>
                       <td className="whitespace-nowrap px-3 py-3">
                         <p>{deal.owner_name || "Unassigned"}</p>
@@ -929,6 +971,7 @@ export function EnquiriesClient({
                   </div>
                   <div className="shrink-0 text-right">
                     <StatusPill tone={enquiryStageTone(deal)}>{enquiryStageLabel(deal)}</StatusPill>
+                    <EnquiryOutreachLine outreach={followUpFor(deal)} />
                     {enquiryAttentionReason(deal) ? (
                       <p className="mt-1 text-[8px] font-medium text-red-600">{enquiryAttentionReason(deal)}</p>
                     ) : null}
@@ -982,6 +1025,23 @@ export function EnquiriesClient({
                     {enquiryTemperatureLabel(enquiryTemperatureFromDeal(selected))}
                   </StatusPill>
                 </div>
+
+                {selectedOutreach ? (
+                  <div className="rounded-lg border border-slate-200 p-3">
+                    <h3 className="text-[9px] font-semibold text-slate-800">Marketing follow-up</h3>
+                    <p className="mt-1 text-[10px] font-medium text-slate-800">{selectedOutreach.label}</p>
+                    {currentCanManageDeals && selectedOutreach.status === "active" ? (
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => stopOutreach(selected.id)}
+                        className="mt-2 text-[8px] font-semibold text-primary disabled:text-slate-300"
+                      >
+                        Stop automated messages
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div>
                   <h3 className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Interest</h3>
