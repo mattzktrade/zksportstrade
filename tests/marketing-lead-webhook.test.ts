@@ -59,6 +59,16 @@ describe("marketing lead payload", () => {
     if (!flat.ok) return
     assert.equal(flat.payload.contact.fullName, "Ada Lovelace")
     assert.equal(flat.payload.interest.quantity, 2)
+
+    const range = parseMarketingLeadWebhookBody({
+      leadId: "lead-range",
+      fullName: "Ada Lovelace",
+      email: "ada@example.com",
+      quantity: "4-8 guests",
+    })
+    assert.equal(range.ok, true)
+    if (!range.ok) return
+    assert.equal(range.payload.interest.quantity, 8)
     assert.equal(flat.payload.interest.package, "Silverstone Club")
     assert.ok(flat.payload.answers.some((row) => row.question === "budget" && row.answer === "£10k"))
 

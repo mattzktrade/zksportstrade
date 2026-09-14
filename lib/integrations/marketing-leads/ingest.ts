@@ -1,6 +1,15 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { suggestedEnquiryAction } from "@/lib/crm/deal-pipeline"
 import {
+  marketingEventQueries,
+  marketingPackageQueries,
+  pickMarketingPackage,
+  pickMarketingPackages,
+  pickMarketingRace,
+  type MarketingPackageCandidate,
+  type MarketingRaceCandidate,
+} from "@/lib/integrations/marketing-leads/match"
+import {
   formatMarketingLeadNotes,
   normalizeMarketingAlias,
   normalizeMarketingPhone,
@@ -28,6 +37,7 @@ type PackageRow = {
   name: string
   race_id: string | null
   currency: string | null
+  duration: string | null
   is_hidden: boolean | null
   shell_parent_package_id: string | null
 }
@@ -201,61 +211,139 @@ async function resolveAccountAndContact(
   return { accountId, contactId: String(createdContact.id) }
 }
 
-async function resolvePackage(
+const PACKAGE_SELECT =
+  "id, name, race_id, currency, duration, is_hidden, shell_parent_package_id"
+
+function sellablePackage(row: PackageRow | null): row is PackageRow {
+  return Boolean(row && !row.is_hidden && !row.shell_parent_package_id)
+}
+
+function toPackageCandidate(row: PackageRow): MarketingPackageCandidate {
+  return {
+    id: row.id,
+    name: row.name,
+    race_id: row.race_id,
+    duration: row.duration,
+  }
+}
+
+async function loadRaces(admin: AdminClient): Promise<MarketingRaceCandidate[]> {
+  const { data } = await admin
+    .from("races")
+    .select("id, name, season, location, country, short_name")
+    .limit(500)
+  return ((data ?? []) as MarketingRaceCandidate[]).filter((row) => Boolean(row.id && row.name))
+}
+
+async function loadSellablePackages(admin: AdminClient, raceId: string | null): Promise<PackageRow[]> {
+  let query = admin
+    .from("packages")
+    .select(PACKAGE_SELECT)
+    .eq("is_hidden", false)
+    .is("shell_parent_package_id", null)
+    .limit(4000)
+  if (raceId) query = query.eq("race_id", raceId)
+  const { data } = await query
+  return ((data ?? []) as PackageRow[]).filter((row) => sellablePackage(row))
+}
+
+async function resolveAliasPackage(
   admin: AdminClient,
   payload: MarketingLeadPayload,
 ): Promise<PackageRow | null> {
   const raw = payload.interest.package?.trim() || ""
   if (!raw) return null
   const needle = normalizeMarketingAlias(raw)
-
   const { data: alias } = await admin
     .from("marketing_package_aliases")
     .select("package_id")
     .eq("alias_normalized", needle)
     .maybeSingle()
   if (alias?.package_id) {
-    const { data: mapped } = await admin
-      .from("packages")
-      .select("id, name, race_id, currency, is_hidden, shell_parent_package_id")
-      .eq("id", alias.package_id)
-      .maybeSingle()
-    const row = mapped as PackageRow | null
-    if (row && !row.is_hidden && !row.shell_parent_package_id) return row
+    const { data: mapped } = await admin.from("packages").select(PACKAGE_SELECT).eq("id", alias.package_id).maybeSingle()
+    if (sellablePackage(mapped as PackageRow | null)) return mapped as PackageRow
   }
-
-  const { data: byId } = await admin
-    .from("packages")
-    .select("id, name, race_id, currency, is_hidden, shell_parent_package_id")
-    .eq("id", raw)
-    .maybeSingle()
-  const idRow = byId as PackageRow | null
-  if (idRow && !idRow.is_hidden && !idRow.shell_parent_package_id) return idRow
-
-  const { data: packages } = await admin
-    .from("packages")
-    .select("id, name, race_id, currency, is_hidden, shell_parent_package_id")
-    .eq("is_hidden", false)
-    .is("shell_parent_package_id", null)
-    .limit(4000)
-  const matches = ((packages ?? []) as PackageRow[]).filter(
-    (row) => normalizeMarketingAlias(row.name) === needle,
-  )
-  return matches.length === 1 ? matches[0] : null
+  const { data: byId } = await admin.from("packages").select(PACKAGE_SELECT).eq("id", raw).maybeSingle()
+  if (sellablePackage(byId as PackageRow | null)) return byId as PackageRow
+  return null
 }
 
-async function resolveRaceId(
+async function resolveCatalog(
   admin: AdminClient,
   payload: MarketingLeadPayload,
-  packageRow: PackageRow | null,
-): Promise<string | null> {
-  if (packageRow?.race_id) return packageRow.race_id
-  const eventName = payload.interest.event?.trim() || payload.interest.package?.trim() || ""
-  const needle = normalizeMarketingAlias(eventName)
-  if (!needle) return null
-  const { data: races } = await admin.from("races").select("id, name").limit(500)
-  const matches = (races ?? []).filter((row) => normalizeMarketingAlias(String(row.name)) === needle)
-  return matches.length === 1 ? String(matches[0].id) : null
+): Promise<{ raceId: string | null; packages: PackageRow[] }> {
+  const races = await loadRaces(admin)
+  const race = pickMarketingRace(marketingEventQueries(payload), races)
+  const alias = await resolveAliasPackage(admin, payload)
+  const packageRows = await loadSellablePackages(admin, race?.id ?? alias?.race_id ?? null)
+  if (alias) {
+    return { raceId: race?.id ?? alias.race_id, packages: [alias] }
+  }
+  const exactName = payload.interest.package?.trim() || ""
+  if (exactName) {
+    const needle = normalizeMarketingAlias(exactName)
+    const exact = packageRows.filter((row) => normalizeMarketingAlias(row.name) === needle)
+    if (exact.length === 1) {
+      return { raceId: race?.id ?? exact[0].race_id, packages: exact }
+    }
+  }
+  const matched = pickMarketingPackages(marketingPackageQueries(payload), packageRows.map(toPackageCandidate))
+  const byId = new Map(packageRows.map((row) => [row.id, row]))
+  const packages = matched.map((row) => byId.get(row.id)).filter((row): row is PackageRow => Boolean(row))
+  if (packages.length === 0 && !race && packageRows.length > 0) {
+    const global = await loadSellablePackages(admin, null)
+    const fallback = pickMarketingPackage(
+      marketingPackageQueries(payload),
+      global.map(toPackageCandidate),
+    )
+    const fallbackRow = fallback ? global.find((row) => row.id === fallback.id) ?? null : null
+    return {
+      raceId: fallbackRow?.race_id ?? null,
+      packages: fallbackRow ? [fallbackRow] : [],
+    }
+  }
+  return { raceId: race?.id ?? packages[0]?.race_id ?? null, packages }
+}
+
+async function attachCatalogIfMissing(
+  admin: AdminClient,
+  dealId: string,
+  payload: MarketingLeadPayload,
+): Promise<void> {
+  const { data: deal } = await admin
+    .from("deals")
+    .select("id, race_id, currency")
+    .eq("id", dealId)
+    .maybeSingle()
+  if (!deal) return
+  const { count } = await admin
+    .from("deal_line_items")
+    .select("id", { count: "exact", head: true })
+    .eq("deal_id", dealId)
+  if ((count ?? 0) > 0 && deal.race_id) return
+
+  const catalog = await resolveCatalog(admin, payload)
+  const quantity = payload.interest.quantity && payload.interest.quantity > 0 ? payload.interest.quantity : 1
+  const primary = catalog.packages[0] ?? null
+  const currency = primary?.currency?.trim() || deal.currency || "USD"
+  const raceId = catalog.raceId || deal.race_id
+  if (raceId && raceId !== deal.race_id) {
+    await admin.from("deals").update({ race_id: raceId, currency }).eq("id", dealId)
+  }
+  if ((count ?? 0) > 0 || catalog.packages.length === 0) return
+  const { error } = await admin.from("deal_line_items").insert(
+    catalog.packages.map((row, index) => ({
+      deal_id: dealId,
+      package_id: row.id,
+      quantity,
+      unit_sale_price: 0,
+      currency: row.currency?.trim() || currency,
+      reservation_status: "none",
+      sourcing_mode: "owned",
+      sort_order: index,
+    })),
+  )
+  if (error) throw new Error(error.message)
 }
 
 export async function ingestMarketingLead(payload: MarketingLeadPayload): Promise<IngestMarketingLeadResult> {
@@ -284,7 +372,14 @@ export async function ingestMarketingLead(payload: MarketingLeadPayload): Promis
     }
   }
 
-  if (existing?.deal_id) return duplicateResult(String(existing.deal_id))
+  if (existing?.deal_id) {
+    try {
+      await attachCatalogIfMissing(admin, String(existing.deal_id), payload)
+    } catch {
+      /* Duplicate remains success even if a later catalog attach fails. */
+    }
+    return duplicateResult(String(existing.deal_id))
+  }
 
   if (!existing) {
     const { error: insertError } = await admin.from("marketing_lead_ingest").insert({
@@ -325,12 +420,19 @@ export async function ingestMarketingLead(payload: MarketingLeadPayload): Promis
     .select("id, deal_id")
     .eq("lead_id", payload.leadId)
     .maybeSingle()
-  if (claimed?.deal_id) return duplicateResult(String(claimed.deal_id))
+  if (claimed?.deal_id) {
+    try {
+      await attachCatalogIfMissing(admin, String(claimed.deal_id), payload)
+    } catch {
+      /* Duplicate remains success even if a later catalog attach fails. */
+    }
+    return duplicateResult(String(claimed.deal_id))
+  }
 
   try {
     const { accountId, contactId } = await resolveAccountAndContact(admin, payload)
-    const packageRow = await resolvePackage(admin, payload)
-    const raceId = await resolveRaceId(admin, payload, packageRow)
+    const catalog = await resolveCatalog(admin, payload)
+    const packageRow = catalog.packages[0] ?? null
     const quantity = payload.interest.quantity && payload.interest.quantity > 0 ? payload.interest.quantity : 1
     const notes = formatMarketingLeadNotes(payload)
     const currency = packageRow?.currency?.trim() || "USD"
@@ -349,7 +451,7 @@ export async function ingestMarketingLead(payload: MarketingLeadPayload): Promis
         total_amount: 0,
         notes,
         next_action: suggestedEnquiryAction("new"),
-        race_id: raceId,
+        race_id: catalog.raceId,
       })
       .select("id, reference")
       .single()
@@ -357,17 +459,19 @@ export async function ingestMarketingLead(payload: MarketingLeadPayload): Promis
       throw new Error(dealError?.message || "Could not create enquiry.")
     }
 
-    if (packageRow) {
-      const { error: lineError } = await admin.from("deal_line_items").insert({
-        deal_id: deal.id,
-        package_id: packageRow.id,
-        quantity,
-        unit_sale_price: 0,
-        currency,
-        reservation_status: "none",
-        sourcing_mode: "owned",
-        sort_order: 0,
-      })
+    if (catalog.packages.length > 0) {
+      const { error: lineError } = await admin.from("deal_line_items").insert(
+        catalog.packages.map((row, index) => ({
+          deal_id: deal.id,
+          package_id: row.id,
+          quantity,
+          unit_sale_price: 0,
+          currency: row.currency?.trim() || currency,
+          reservation_status: "none",
+          sourcing_mode: "owned",
+          sort_order: index,
+        })),
+      )
       if (lineError) {
         throw new Error(lineError.message)
       }
@@ -383,6 +487,7 @@ export async function ingestMarketingLead(payload: MarketingLeadPayload): Promis
         campaign: payload.campaign.name,
         formName: payload.campaign.formName,
         package: payload.interest.package,
+        matchedPackageIds: catalog.packages.map((row) => row.id),
         quantity: payload.interest.quantity,
       },
     })

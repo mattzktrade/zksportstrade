@@ -115,17 +115,30 @@ function pick(record: Record<string, unknown> | null, ...keys: string[]): string
   return ""
 }
 
-function parseQuantity(value: unknown): number | null {
+function saneTicketQuantity(value: number): number | null {
+  if (!Number.isFinite(value) || value <= 0) return null
+  const qty = Math.floor(value)
+  if (qty > 200) return null
+  return qty
+}
+
+export function parseMarketingLeadQuantity(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
-    const qty = Math.floor(value)
-    return qty > 0 ? qty : null
+    return saneTicketQuantity(value)
   }
   const text = str(value)
   if (!text) return null
+  const range = text.match(/(\d+)\s*(?:-|–|—|to|or|\/)\s*(\d+)/i)
+  if (range) {
+    return saneTicketQuantity(Math.max(Number(range[1]), Number(range[2])))
+  }
+  const upTo = text.match(/\bup\s*to\s*(\d+)\b/i)
+  if (upTo) return saneTicketQuantity(Number(upTo[1]))
+  const plus = text.match(/(\d+)\s*\+/)
+  if (plus) return saneTicketQuantity(Number(plus[1]))
   const match = text.replace(/,/g, "").match(/(\d+)/)
   if (!match) return null
-  const qty = Number(match[1])
-  return Number.isFinite(qty) && qty > 0 ? Math.floor(qty) : null
+  return saneTicketQuantity(Number(match[1]))
 }
 
 function parseBool(value: unknown): boolean | null {
@@ -242,16 +255,6 @@ export function parseMarketingLeadWebhookBody(body: unknown): MarketingLeadParse
     return { ok: false, error: "Email or phone is required." }
   }
 
-  const quantity =
-    parseQuantity(interestObj?.quantity) ??
-    parseQuantity(root.quantity) ??
-    parseQuantity(root.tickets) ??
-    parseQuantity(root.how_many_tickets) ??
-    parseQuantity(root.number_of_tickets) ??
-    parseQuantity(fields.quantity) ??
-    parseQuantity(fields.tickets) ??
-    parseQuantity(fields.how_many_tickets)
-
   const packageName =
     pick(interestObj, "package", "product") ||
     pick(root, "package", "product") ||
@@ -267,6 +270,24 @@ export function parseMarketingLeadWebhookBody(body: unknown): MarketingLeadParse
   for (const extra of extras) {
     if (answers.some((row) => row.question === extra.question && row.answer === extra.answer)) continue
     answers.push(extra)
+  }
+
+  let quantity =
+    parseMarketingLeadQuantity(interestObj?.quantity) ??
+    parseMarketingLeadQuantity(root.quantity) ??
+    parseMarketingLeadQuantity(root.tickets) ??
+    parseMarketingLeadQuantity(root.how_many_tickets) ??
+    parseMarketingLeadQuantity(root.number_of_tickets) ??
+    parseMarketingLeadQuantity(fields.quantity) ??
+    parseMarketingLeadQuantity(fields.tickets) ??
+    parseMarketingLeadQuantity(fields.how_many_tickets)
+  if (quantity == null) {
+    for (const row of answers) {
+      const hay = `${row.question} ${row.answer}`
+      if (!/guest|ticket|quantit|how many|count/i.test(hay)) continue
+      quantity = parseMarketingLeadQuantity(row.answer) ?? parseMarketingLeadQuantity(row.question)
+      if (quantity != null) break
+    }
   }
 
   return {
