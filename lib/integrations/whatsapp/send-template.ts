@@ -4,6 +4,11 @@ export type WhatsAppTemplateSendResult =
   | { ok: true; id: string | null }
   | { ok: false; skipped?: string; error?: string }
 
+type WhatsAppApiResponse = {
+  messages?: Array<{ id?: string }>
+  error?: { message?: string }
+}
+
 export async function sendWhatsAppTemplate(input: {
   toPhoneDigits: string
   templateName: string
@@ -46,9 +51,9 @@ export async function sendWhatsAppTemplate(input: {
     }),
   })
   const raw = await response.text()
-  let parsed: { messages?: Array<{ id?: string }>; error?: { message?: string } } | null = null
+  let parsed: WhatsAppApiResponse | null = null
   try {
-    parsed = JSON.parse(raw) as typeof parsed
+    parsed = JSON.parse(raw) as WhatsAppApiResponse
   } catch {
     parsed = null
   }
