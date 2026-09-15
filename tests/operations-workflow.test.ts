@@ -34,12 +34,37 @@ test("ticket status collapses supplier/delivery into not ready, ready, or delive
   assert.equal(operationsTicketStatus({ fulfilmentStatus: "confirmed", deliveryStatus: "delivered" }), "delivered")
 })
 
-test("operations table no longer shows an Owner column", () => {
-  const source = readFileSync(join(root, "app/(admin)/admin/operations/operations-client.tsx"), "utf8")
-  assert.match(source, /<th className="px-4 py-2.5 font-medium">Delivery<\/th>/)
+test("operations queue shows next step instead of an Owner column", () => {
+  const source = readFileSync(join(root, "app/(admin)/admin/operations/operations-queue.tsx"), "utf8")
+  assert.match(source, />Next step</)
+  assert.match(source, />Deadline</)
   assert.doesNotMatch(source, />Owner</)
   assert.doesNotMatch(source, /label="Owner"/)
-  assert.match(source, /colSpan=\{8\}/)
+  assert.match(source, /colSpan=\{7\}/)
+})
+
+test("operations workspace has queue, calendar, and templates", () => {
+  const source = readFileSync(join(root, "app/(admin)/admin/operations/operations-client.tsx"), "utf8")
+  assert.match(source, /"calendar"/)
+  assert.match(source, /"templates"/)
+  assert.match(source, /OperationsCalendar/)
+  assert.match(source, /OperationsTemplates/)
+  assert.match(source, /OperationsBoard/)
+})
+
+test("opening a booking from the calendar returns to the calendar tab", () => {
+  const source = readFileSync(join(root, "app/(admin)/admin/operations/operations-client.tsx"), "utf8")
+  assert.match(source, /if \(tab === "calendar"\) params.set\("tab", "calendar"\)/)
+  assert.match(source, /\?tab=calendar/)
+})
+
+test("operations calendar shows named chips and lets staff add items", () => {
+  const source = readFileSync(join(root, "app/(admin)/admin/operations/operations-calendar.tsx"), "utf8")
+  assert.match(source, /Add to calendar/)
+  assert.match(source, /Next 7 days/)
+  assert.match(source, /View all events/)
+  assert.match(source, /operationsCalendarFilterLabel/)
+  assert.match(source, /saveOperationsCalendarEntry/)
 })
 
 test("marking operations delivered also updates paid invoices for My Bookings", () => {

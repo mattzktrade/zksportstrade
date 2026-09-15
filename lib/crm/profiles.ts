@@ -208,7 +208,7 @@ export async function getCrmEntityProfile(
     .select(`
       id, reference, primary_contact_id, stage, total_amount, currency, source, race_id,
       next_action, next_action_due_at, loss_reason, created_at, updated_at,
-      crm_contacts(full_name), races(name, season),
+      crm_contacts!primary_contact_id(full_name), races(name, season),
       deal_line_items(package_id, quantity, packages(name, races(name, season)))
     `)
     .eq("account_id", cleanAccountId)

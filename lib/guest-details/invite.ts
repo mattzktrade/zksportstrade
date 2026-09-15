@@ -58,7 +58,7 @@ export async function loadGuestDetailsBookingContext(
       `
       id, reference, order_id, account_id, primary_contact_id, owner_profile_id,
       crm_accounts(name, email),
-      crm_contacts(full_name, email),
+      crm_contacts!primary_contact_id(full_name, email),
       deal_line_items(
         quantity, sort_order, package_id,
         packages(name, duration, event_date, races(name, season, event_date))

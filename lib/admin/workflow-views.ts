@@ -1,7 +1,14 @@
 import { unstable_noStore as noStore } from "next/cache"
 import { computeOrderProfit, getConsumptionsForOrders } from "@/lib/admin/cost-layers"
 import { isCancelledWorkflowRow } from "@/lib/admin/workflow-status"
-import type { OperationsEmailHistoryRow } from "@/lib/operations/emails"
+import {
+  enrichOperationsBookings,
+  type OperationsAccountContact,
+  type OperationsBookingRow,
+  type OperationsDeliveryProof,
+} from "@/lib/admin/operations-bookings"
+import type { OperationsEmailHistoryRow, OperationsEmailTemplate } from "@/lib/operations/emails"
+import type { OperationsCalendarStaffEntry } from "@/lib/operations/calendar"
 import { isOperationsEmailKind } from "@/lib/operations/emails"
 import type { OperationsStockAllocation, OperationsStockLayer } from "@/lib/operations/stock"
 import { applyUnlinkedDealSalesToRemaining, stockLayerKey, summarizeMappedSuppliers } from "@/lib/operations/stock"
@@ -86,6 +93,10 @@ export type OperationsGuest = {
   sortOrder: number
   attendanceDay?: string | null
   headshotPath?: string | null
+  tableNumber?: string | null
+  ticketNumber?: string | null
+  paddockTour?: string | null
+  ticketStatus?: string | null
 }
 
 export type OperationsSupplierRow = {
@@ -121,6 +132,10 @@ export type OperationsSupportingData = {
   suppliers: Array<{ id: string; name: string }>
   staff: Array<{ id: string; name: string }>
   emails: OperationsEmailHistoryRow[]
+  contacts: OperationsAccountContact[]
+  proofs: OperationsDeliveryProof[]
+  templates: OperationsEmailTemplate[]
+  calendarEntries: OperationsCalendarStaffEntry[]
 }
 
 function one<T>(value: T | T[] | null | undefined): T | null {
@@ -299,7 +314,7 @@ const DEAL_WORKFLOW_SELECT = `
   account_id, primary_contact_id, order_id, salesforce_opportunity_id,
   external_created_at, closed_at, created_at, owner_profile_id,
   next_action, next_action_due_at,
-  crm_accounts(name), crm_contacts(full_name, email),
+  crm_accounts(name), crm_contacts!primary_contact_id(full_name, email),
   deal_line_items(
     package_id, quantity, unit_sale_price, expected_unit_cost, sort_order,
     supplier_id, fulfilment_cost_layer_id,
@@ -581,12 +596,13 @@ export async function getFinanceWorkflowRows(): Promise<WorkflowOrderRow[]> {
   return mergeOrderAndDealRows(orders, deals)
 }
 
-export async function getOperationsWorkflowRows(): Promise<WorkflowOrderRow[]> {
+export async function getOperationsWorkflowRows(): Promise<OperationsBookingRow[]> {
   const [orders, deals] = await Promise.all([
     getWorkflowOrderRows(),
     getUnlinkedDealWorkflowRows(OPERATIONS_DEAL_STAGES),
   ])
-  return mergeOrderAndDealRows(orders, deals).filter((row) => !isCancelledWorkflowRow(row))
+  const rows = mergeOrderAndDealRows(orders, deals).filter((row) => !isCancelledWorkflowRow(row))
+  return enrichOperationsBookings(rows)
 }
 
 function packageLabel(pkg: PackageEmbed | null | undefined, fallback: string): string {
@@ -1028,13 +1044,13 @@ export async function getOperationsSupportingData(): Promise<OperationsSupportin
     supabase
       .from("order_guests")
       .select(
-        "id, order_id, full_name, email, phone, nationality, date_of_birth, dietary_requirements, special_requests, is_lead_guest, details_complete, sort_order, attendance_day, headshot_path",
+        "id, order_id, full_name, email, phone, nationality, date_of_birth, dietary_requirements, special_requests, is_lead_guest, details_complete, sort_order, attendance_day, headshot_path, table_number, ticket_number, paddock_tour, ticket_status",
       )
       .order("sort_order"),
     supabase
       .from("deal_guests")
       .select(
-        "id, deal_id, full_name, email, phone, nationality, date_of_birth, dietary_requirements, special_requests, is_lead_guest, details_complete, sort_order, attendance_day, headshot_path",
+        "id, deal_id, full_name, email, phone, nationality, date_of_birth, dietary_requirements, special_requests, is_lead_guest, details_complete, sort_order, attendance_day, headshot_path, table_number, ticket_number, paddock_tour, ticket_status",
       )
       .order("sort_order"),
     supabase
@@ -1210,6 +1226,10 @@ export async function getOperationsSupportingData(): Promise<OperationsSupportin
         sortOrder: Number(row.sort_order),
         attendanceDay: (row as { attendance_day?: string | null }).attendance_day ?? null,
         headshotPath: (row as { headshot_path?: string | null }).headshot_path ?? null,
+        tableNumber: (row as { table_number?: string | null }).table_number ?? null,
+        ticketNumber: (row as { ticket_number?: string | null }).ticket_number ?? null,
+        paddockTour: (row as { paddock_tour?: string | null }).paddock_tour ?? null,
+        ticketStatus: (row as { ticket_status?: string | null }).ticket_status ?? null,
       })),
       ...(dealGuestRows ?? []).map((row) => ({
         id: String(row.id),
@@ -1227,6 +1247,10 @@ export async function getOperationsSupportingData(): Promise<OperationsSupportin
         sortOrder: Number(row.sort_order),
         attendanceDay: (row as { attendance_day?: string | null }).attendance_day ?? null,
         headshotPath: (row as { headshot_path?: string | null }).headshot_path ?? null,
+        tableNumber: (row as { table_number?: string | null }).table_number ?? null,
+        ticketNumber: (row as { ticket_number?: string | null }).ticket_number ?? null,
+        paddockTour: (row as { paddock_tour?: string | null }).paddock_tour ?? null,
+        ticketStatus: (row as { ticket_status?: string | null }).ticket_status ?? null,
       })),
     ],
     supplierRows: (supplierRows ?? []).map((row) => ({
@@ -1269,6 +1293,10 @@ export async function getOperationsSupportingData(): Promise<OperationsSupportin
         sentAt: String(row.sent_at),
         sentByName: null,
       })),
+    contacts: [] as OperationsAccountContact[],
+    proofs: [] as OperationsDeliveryProof[],
+    templates: [],
+    calendarEntries: [] as OperationsCalendarStaffEntry[],
   }
 }
 

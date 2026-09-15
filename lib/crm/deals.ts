@@ -97,7 +97,7 @@ export async function getDealListRows(options?: { ids?: string[] }): Promise<Dea
   const ids = [...new Set((options?.ids ?? []).map((id) => id.trim()).filter(Boolean))]
   const lineSelect = `
       crm_accounts(name),
-      crm_contacts(full_name, email, phone),
+      crm_contacts!primary_contact_id(full_name, email, phone),
       deal_line_items(
         id, package_id, quantity, unit_sale_price, expected_unit_cost,
         sourcing_mode, supplier_id, supplier_quote_at,
@@ -554,7 +554,7 @@ export async function getDealsForPackages(packageIds: readonly string[]): Promis
         owner_profile_id, race_id, expected_close_date, next_action, next_action_due_at,
         hold_expires_at, do_not_expire, order_id, account_id, primary_contact_id,
         crm_accounts(name),
-        crm_contacts(full_name)
+        crm_contacts!primary_contact_id(full_name)
       )
     `,
     )

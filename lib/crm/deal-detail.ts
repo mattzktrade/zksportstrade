@@ -64,6 +64,7 @@ export type DealDetailPageData = {
   bookingForm: BookingFormAdminRow | null
   bookingEvents: BookingFormEventRow[]
   operationsEmails: OperationsEmailHistoryRow[]
+  operationsContact: { id: string; name: string; email: string | null } | null
 }
 
 function formatAddress(parts: Array<string | null | undefined>): string | null {
@@ -181,7 +182,7 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
           .eq("id", deal.order_id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
-    supabase.from("deals").select("fulfilment_details").eq("id", deal.id).maybeSingle(),
+    supabase.from("deals").select("fulfilment_details, operations_contact_id").eq("id", deal.id).maybeSingle(),
     supabase
       .from("deal_activities")
       .select("id, actor_profile_id, summary, created_at")
@@ -197,7 +198,17 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
         .filter((id): id is string => Boolean(id)),
     ),
   ]
-  const fulfilment = asFulfilment(dealExtra.data?.fulfilment_details)
+  let extraData = dealExtra.data as { fulfilment_details?: unknown; operations_contact_id?: string | null } | null
+  if (dealExtra.error && /operations_contact_id/i.test(dealExtra.error.message)) {
+    const retry = await supabase.from("deals").select("fulfilment_details").eq("id", deal.id).maybeSingle()
+    extraData = retry.data as { fulfilment_details?: unknown; operations_contact_id?: string | null } | null
+  }
+  const fulfilment = asFulfilment(extraData?.fulfilment_details)
+  const operationsContactId = String(extraData?.operations_contact_id ?? "")
+  const opsContact =
+    /^[0-9a-f-]{36}$/i.test(operationsContactId)
+      ? await supabase.from("crm_contacts").select("id, full_name, email").eq("id", operationsContactId).maybeSingle()
+      : { data: null }
 
   const packageIds = [...new Set(deal.lines.map((line) => line.package_id).filter(Boolean))]
   const { data: availabilityRows } = packageIds.length
@@ -582,5 +593,12 @@ export async function getDealDetailPageData(dealId: string): Promise<DealDetailP
     bookingForm: booking.form,
     bookingEvents: booking.events,
     operationsEmails,
+    operationsContact: opsContact.data
+      ? {
+          id: String(opsContact.data.id),
+          name: String(opsContact.data.full_name ?? "").trim() || "Unnamed contact",
+          email: opsContact.data.email ? String(opsContact.data.email) : null,
+        }
+      : null,
   }
 }

@@ -595,7 +595,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     nav: "After the sale",
     title: "After the sale",
     summary: "Guests, suppliers, delivery, invoices, and payment.",
-    keywords: ["operations", "finance", "invoice", "xero", "payment", "overdue", "guests", "delivery", "tickets"],
+    keywords: ["operations", "finance", "invoice", "xero", "payment", "overdue", "guests", "delivery", "tickets", "calendar", "thank-you"],
     blocks: [
       {
         type: "p",
@@ -606,17 +606,27 @@ export const HELP_TOPICS: HelpTopic[] = [
         title: "Operations",
         items: [
           {
-            title: "Awaiting guests",
-            body: "Send the guest request (you can preview the email), then enter names when they come back.",
+            title: "Queue",
+            body: "Signed bookings by next step: guests, supplier, fulfil, then thank-you for direct clients.",
             href: "/admin/operations",
           },
           {
-            title: "Supplier",
-            body: "The system prefers one supplier for the whole party when leftover stock allows. Change it only if you need to.",
+            title: "Guest form",
+            body: "Send the guest details form from the booking board. Names and headshots land here and on the product Guest list.",
           },
           {
-            title: "Delivery",
-            body: "Not ready → Ready → Delivered. Mark delivered when tickets or proof have actually gone.",
+            title: "Proof of delivery",
+            body: "A photo, screenshot, or note is required before a booking is marked fulfilled.",
+          },
+          {
+            title: "Calendar",
+            body: "Month view of race weekends, guest deadlines, collections, and internal tasks you add. Staff can add or amend dates without a second guest list.",
+            href: "/admin/operations?tab=calendar",
+          },
+          {
+            title: "Email templates",
+            body: "Company defaults for guest requests, delivery emails, and the post-event thank-you. Staff can still tweak one send.",
+            href: "/admin/operations?tab=templates",
           },
         ],
       },

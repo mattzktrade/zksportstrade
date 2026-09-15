@@ -255,7 +255,7 @@ export function DealDetailClient({
   canManageDeals: boolean
 }) {
   const router = useRouter()
-  const { deal, client, guests, lines, notes, bookingForm, bookingEvents, operationsEmails } = data
+  const { deal, client, guests, lines, notes, bookingForm, bookingEvents, operationsEmails, operationsContact } = data
   const [pending, startTransition] = useTransition()
   const [noteDraft, setNoteDraft] = useState("")
   const [guestManagerOpen, setGuestManagerOpen] = useState(false)
@@ -707,6 +707,26 @@ export function DealDetailClient({
                     ) : client.contactName
                   }
                 />
+                <Field
+                  label="Operations contact"
+                  value={
+                    operationsContact ? (
+                      deal.account_id ? (
+                        <Link
+                          href={adminContactPath(deal.account_id, operationsContact.id)}
+                          className="text-primary hover:underline"
+                        >
+                          {operationsContact.name}
+                          {operationsContact.email ? ` · ${operationsContact.email}` : ""}
+                        </Link>
+                      ) : (
+                        operationsContact.name
+                      )
+                    ) : (
+                      "Same as primary contact"
+                    )
+                  }
+                />
                 <Field label="Job title" value={client.contactJobTitle} />
                 <Field
                   label="Contact email"
@@ -747,6 +767,14 @@ export function DealDetailClient({
                 Guest details ({guests.length}/{guestQty || "—"})
               </h2>
               <div className="flex items-center gap-2">
+                {canManageOperations ? (
+                  <a
+                    href={`/admin/operations?deal=${deal.id}`}
+                    className="text-[9px] font-semibold text-primary hover:underline"
+                  >
+                    Open in Operations
+                  </a>
+                ) : null}
                 {canManageOperations ? (
                   <button
                     type="button"

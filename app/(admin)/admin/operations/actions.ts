@@ -41,6 +41,20 @@ export async function updateOrderOperations(input: {
   const gate = await operationsGate()
   if (!gate) return { ok: false, message: "Operations permission is required." }
   try {
+    if (input.deliveryStatus === "delivered") {
+      if (!gate.admin) {
+        throw new Error("Service role is required to mark the agent booking as delivered.")
+      }
+      const proof = await gate.admin
+        .from("order_delivery_proofs")
+        .select("id")
+        .eq("order_id", input.orderId)
+        .limit(1)
+        .maybeSingle()
+      if (!proof.data?.id) {
+        return { ok: false, message: "Add a photo, screenshot, or note as proof of delivery before marking fulfilled." }
+      }
+    }
     const { error } = await gate.supabase.rpc("admin_update_order_operations", {
       p_order_id: input.orderId,
       p_fulfilment_status: input.fulfilmentStatus,
@@ -56,10 +70,7 @@ export async function updateOrderOperations(input: {
     })
     if (error) throw new Error(error.message)
     if (input.deliveryStatus === "delivered") {
-      if (!gate.admin) {
-        throw new Error("Service role is required to mark the agent booking as delivered.")
-      }
-      await markOrderInvoicesDelivered(gate.admin, input.orderId)
+      await markOrderInvoicesDelivered(gate.admin!, input.orderId)
     }
     if (gate.admin) {
       await syncDealWorkflowFromOperations(gate.admin, {
@@ -94,6 +105,17 @@ export async function updateDealOperations(input: {
   const dealId = input.dealId.trim()
   if (!/^[0-9a-f-]{36}$/i.test(dealId)) return { ok: false, message: "Invalid deal." }
   try {
+    if (input.deliveryStatus === "delivered") {
+      const { data: deal } = await gate.admin.from("deals").select("order_id").eq("id", dealId).maybeSingle()
+      const orderId = deal?.order_id ? String(deal.order_id) : ""
+      const proofQuery = gate.admin.from("order_delivery_proofs").select("id").limit(1)
+      const proof = UUID_RE.test(orderId)
+        ? await proofQuery.eq("order_id", orderId).maybeSingle()
+        : await proofQuery.eq("deal_id", dealId).maybeSingle()
+      if (!proof.data?.id) {
+        return { ok: false, message: "Add a photo, screenshot, or note as proof of delivery before marking fulfilled." }
+      }
+    }
     const { error } = await gate.admin.from("deal_operations").upsert(
       {
         deal_id: dealId,
