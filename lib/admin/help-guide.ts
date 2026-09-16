@@ -72,7 +72,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           {
             title: "1. Find or add the client",
-            body: "Sales → Accounts. Use the Leads tab for new people to contact. Search first so you do not create a second copy of the same company.",
+            body: "Sales → Accounts. Search first so you do not create a second copy of the same company.",
             href: "/admin/leads",
           },
           {
@@ -102,7 +102,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           {
             role: "If you sell",
             items: [
-              "Live in Accounts (Leads tab for new prospects), Enquiries, Sales list, and Deals.",
+              "Live in Accounts, Enquiries, Sales list, and Deals.",
               "Create enquiries, deals and holds. Prepare booking forms, then notify an admin to send them.",
               "Do not approve random portal users or change website visibility unless you mean to.",
             ],
@@ -150,7 +150,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     nav: "What each page does",
     title: "What each page does",
     summary: "One-line explanations of the left menu, so you know where to click.",
-    keywords: ["menu", "navigation", "pages", "what does", "where", "dashboard", "marketing"],
+    keywords: ["menu", "navigation", "pages", "what does", "where", "dashboard", "marketing", "templates"],
     blocks: [
       {
         type: "p",
@@ -240,7 +240,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           {
             title: "Accounts",
-            body: "Companies and people. The Leads tab is who to contact next. Accounts and Contacts are the full directory.",
+            body: "Companies and people. Accounts and Contacts are the full directory.",
             href: "/admin/leads",
           },
           {
@@ -259,10 +259,16 @@ export const HELP_TOPICS: HelpTopic[] = [
             href: "/admin/sales-tracker",
           },
           {
-            title: "CRM imports",
-            body: "Salesforce contact and opportunity CSVs, plus the sales ledger spreadsheet that fills deal date, paid status and invoice number on existing deals. Unmatched ledger rows can be downloaded for review.",
-            href: "/admin/imports",
+            title: "Templates",
+            body: "Email and WhatsApp follow-up for Meta marketing leads. Edit the three messages and turn automatic sending on or off.",
+            href: "/admin/templates",
           },
+          // CRM imports is hidden from Sales nav. Restore this card if the page is shown again.
+          // {
+          //   title: "CRM imports",
+          //   body: "Salesforce contact and opportunity CSVs, plus the sales ledger spreadsheet that fills deal date, paid status and invoice number on existing deals. Unmatched ledger rows can be downloaded for review.",
+          //   href: "/admin/imports",
+          // },
         ],
       },
       {
@@ -357,7 +363,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     nav: "Selling",
     title: "Selling",
     summary: "Accounts, leads, deals, booking forms, and the pipeline.",
-    keywords: ["deal", "deals", "account", "contact", "lead", "leads", "enquiry", "enquiries", "booking form", "sign", "pipeline", "price", "ready to send", "brochure", "pdf", "marketing", "meta", "facebook", "whatsapp", "follow-up", "demand", "conversion", "sales tracker"],
+    keywords: ["deal", "deals", "account", "contact", "lead", "leads", "enquiry", "enquiries", "booking form", "sign", "pipeline", "price", "ready to send", "brochure", "pdf", "marketing", "meta", "facebook", "whatsapp", "follow-up", "demand", "conversion", "sales tracker", "templates"],
     blocks: [
       {
         type: "p",
@@ -365,12 +371,11 @@ export const HELP_TOPICS: HelpTopic[] = [
       },
       {
         type: "bullets",
-        title: "Leads, accounts, and deals",
+        title: "Accounts and deals",
         items: [
-          "Sales → Accounts is the directory. The Leads tab is the work queue for prospects who have not booked yet.",
-          "New accounts and bulk uploads start as New. Move them to Reach out, Talking, or Later (keep for marketing).",
-          "When they sign a booking or place an order, they become a Client and leave the Leads tab. Enquiries is the early pipeline; Deals is booking forms onwards.",
-          "A new person at a company that already buys from us is just a contact — not a new lead.",
+          "Sales → Accounts is the directory of companies and people.",
+          "New accounts and bulk uploads start as prospects. When they sign a booking or place an order, they become a Client. Enquiries is the early pipeline; Deals is booking forms onwards.",
+          "A new person at a company that already buys from us is just a contact — not a new account.",
         ],
       },
       {
@@ -455,8 +460,8 @@ export const HELP_TOPICS: HelpTopic[] = [
             a: "Accounts is everyone we sell to (companies and people). Agents is only people with an approved trade-portal login.",
           },
           {
-            q: "What is the Leads tab?",
-            a: "It is the list of companies and people who have not booked yet. Work New and Reach out first. Later is for people to keep for marketing. A signed booking or order marks them as a client automatically.",
+            q: "What is a lead versus a client?",
+            a: "A lead is a company or person who has not booked yet. When they sign a booking or place an order, they become a client automatically.",
           },
           {
             q: "A portal or website booking appeared as a deal. Did I do something wrong?",
@@ -464,7 +469,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             q: "Where do Facebook / Meta marketing leads go?",
-            a: "They appear on Sales → Enquiries with source Marketing, the form notes, and the person's email and phone. The agency posts them to our webhook; keep the spreadsheet as a backup until that is stable. Marketing leads can get a three-stage email and WhatsApp follow-up until they reply or someone on the team takes over. Edit the messages in Settings → Integrations → Marketing leads.",
+            a: "They appear on Sales → Enquiries with source Marketing, the form notes, and the person's email and phone. They can get a three-stage email and WhatsApp follow-up until they reply or someone on the team takes over. Edit the messages in Sales → Templates.",
           },
         ],
       },

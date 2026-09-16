@@ -85,6 +85,29 @@ test("checkout terms links open in a new tab", () => {
   }
 })
 
+test("fulfilment plan keeps supplier notes and client collection details on their own sides", () => {
+  const source = readFileSync(join(root, "app/(admin)/admin/operations/operations-board.tsx"), "utf8")
+  assert.match(source, /sm:divide-x/)
+  assert.match(source, /From the supplier/)
+  assert.match(source, /To the client/)
+  assert.match(source, /supplierNotes/)
+  assert.match(source, /Collection details, pickup address/)
+  assert.match(source, /clientDeliveryNeedsDetails/)
+  assert.match(source, /purchaseOrderIds/)
+  const clientBlock = source.slice(source.indexOf("To the client"))
+  assert.match(clientBlock, /Collection \/ meet point/)
+  const supplierBlock = source.slice(0, source.indexOf("To the client"))
+  assert.doesNotMatch(supplierBlock, /Collection \/ meet point/)
+})
+
+test("saving the fulfilment plan copies supplier notes onto linked purchase orders", () => {
+  const source = readFileSync(join(root, "app/(admin)/admin/operations/board-actions.ts"), "utf8")
+  assert.match(source, /applyOpsSupplierNoteToPurchaseOrder/)
+  assert.match(source, /setPurchaseOrderNote/)
+  assert.match(source, /supplier_notes/)
+  assert.match(source, /purchaseOrderIds/)
+})
+
 test("portal deals default to the Admin owner and operations advances deal stage", () => {
   const sql = readFileSync(
     join(root, "supabase/migrations/20260828150000_portal_deal_owner_and_operations_stages.sql"),

@@ -21,10 +21,10 @@ export type OutreachStepInput = {
   whatsappTemplateLanguage: string
 }
 
-async function requireAction(permission: "settings.manage" | "deals.manage") {
+async function requireAction() {
   const profile = await getPortalProfile()
   if (!profile) return { ok: false as const, message: "Not signed in." }
-  if (!hasCmsPermission(profile, permission)) {
+  if (!hasCmsPermission(profile, "deals.manage")) {
     return { ok: false as const, message: "You do not have permission for this action." }
   }
   const supabase = await createClient()
@@ -35,7 +35,7 @@ export async function saveMarketingOutreachSequence(input: {
   enabled: boolean
   steps: OutreachStepInput[]
 }): Promise<{ ok: boolean; message: string }> {
-  const gate = await requireAction("settings.manage")
+  const gate = await requireAction()
   if (!gate.ok) return gate
   if (input.steps.length !== 3) {
     return { ok: false, message: "There must be exactly three stages." }
@@ -69,13 +69,13 @@ export async function saveMarketingOutreachSequence(input: {
     if (error) return { ok: false, message: error.message }
   }
 
-  revalidatePath("/admin/integrations/marketing-leads")
+  revalidatePath("/admin/templates")
   revalidatePath("/admin/enquiries")
-  return { ok: true, message: "Follow-up messages saved." }
+  return { ok: true, message: "Follow-up templates saved." }
 }
 
 export async function stopMarketingOutreachForDeal(dealId: string): Promise<{ ok: boolean; message: string }> {
-  const gate = await requireAction("deals.manage")
+  const gate = await requireAction()
   if (!gate.ok) return gate
   const id = dealId.trim()
   if (!UUID_RE.test(id)) return { ok: false, message: "Enquiry id is not valid." }

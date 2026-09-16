@@ -108,6 +108,31 @@ export function supplierFulfilmentLabel(value: string | null | undefined): strin
   }
 }
 
+export function clientDeliveryNeedsDetails(client: string | null | undefined): boolean {
+  const method = parseClientDeliveryMethod(client)
+  return method === "local_collection" || method === "posted_to_guest" || method === "official_shipment"
+}
+
+export const PURCHASE_ORDER_OPS_NOTE_HEADING = "From operations:"
+
+export function stripOpsSupplierNoteBlock(existing: string | null | undefined): string {
+  return (existing ?? "")
+    .replace(/(?:^|\n+)From operations:\n[\s\S]*$/i, "")
+    .trim()
+}
+
+/** Keep any existing PO note and replace the ops-managed block with the latest supplier notes. */
+export function applyOpsSupplierNoteToPurchaseOrder(
+  existingNote: string | null | undefined,
+  supplierNote: string | null | undefined,
+): string | null {
+  const stripped = stripOpsSupplierNoteBlock(existingNote)
+  const ops = supplierNote?.trim() ?? ""
+  if (!ops) return stripped || null
+  const block = `${PURCHASE_ORDER_OPS_NOTE_HEADING}\n${ops}`
+  return stripped ? `${stripped}\n\n${block}` : block
+}
+
 export function clientDeliveryLabel(value: string | null | undefined): string {
   switch (parseClientDeliveryMethod(value)) {
     case "supplier_handles":
@@ -354,11 +379,7 @@ export function operationsCalendarItems(
   }
   const collection = eventDateIso(row.deliveryDueAt)
   const client = resolvedClientDelivery(row.supplierFulfilmentMethod, row.clientDeliveryMethod)
-  if (
-    collection &&
-    !isOperationsDelivered(row) &&
-    (client === "local_collection" || client === "posted_to_guest" || client === "official_shipment")
-  ) {
+  if (collection && !isOperationsDelivered(row) && clientDeliveryNeedsDetails(client)) {
     items.push({
       date: collection,
       kind: "collection",

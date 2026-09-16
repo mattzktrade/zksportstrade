@@ -22,6 +22,7 @@ export type OperationsBookingRow = WorkflowOrderRow & {
   collectionPoint: string | null
   collectionTime: string | null
   contactOnSite: string | null
+  supplierNotes: string | null
   supplierDetailsSentAt: string | null
   thankYouSkippedAt: string | null
   guestDetailsDeadline: string | null
@@ -81,6 +82,7 @@ type OpsRow = {
   collection_point: string | null
   collection_time: string | null
   contact_on_site: string | null
+  supplier_notes: string | null
   supplier_details_sent_at: string | null
   thank_you_skipped_at: string | null
   delivery_due_at: string | null
@@ -93,9 +95,35 @@ const EMPTY_OPS: OpsRow = {
   collection_point: null,
   collection_time: null,
   contact_on_site: null,
+  supplier_notes: null,
   supplier_details_sent_at: null,
   thank_you_skipped_at: null,
   delivery_due_at: null,
+}
+
+const OPS_SELECT_CORE =
+  "supplier_fulfilment_method, client_delivery_method, delivery_method, collection_point, collection_time, contact_on_site, supplier_details_sent_at, thank_you_skipped_at, delivery_due_at"
+const OPS_SELECT = `${OPS_SELECT_CORE}, supplier_notes`
+
+async function loadOpsRows<Id extends string>(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  table: "order_operations" | "deal_operations",
+  idColumn: Id,
+  ids: string[],
+): Promise<Array<OpsRow & Record<Id, string>>> {
+  const { data, error } = await supabase.from(table).select(`${idColumn}, ${OPS_SELECT}`).in(idColumn, ids)
+  if (!error) return (data ?? []) as Array<OpsRow & Record<Id, string>>
+  if (/supplier_notes/i.test(error.message)) {
+    const retry = await supabase.from(table).select(`${idColumn}, ${OPS_SELECT_CORE}`).in(idColumn, ids)
+    return ((retry.data ?? []) as Array<Omit<OpsRow, "supplier_notes"> & Record<Id, string>>).map((row) => ({
+      ...row,
+      supplier_notes: null,
+    }))
+  }
+  if (/supplier_fulfilment_method|thank_you_skipped/i.test(error.message)) {
+    return [] as Array<OpsRow & Record<Id, string>>
+  }
+  return [] as Array<OpsRow & Record<Id, string>>
 }
 
 export async function enrichOperationsBookings(rows: WorkflowOrderRow[]): Promise<OperationsBookingRow[]> {
@@ -116,30 +144,8 @@ export async function enrichOperationsBookings(rows: WorkflowOrderRow[]): Promis
       if (error && /operations_contact_id/i.test(error.message)) return [] as Array<{ id: string; operations_contact_id: string | null }>
       return (data ?? []) as Array<{ id: string; operations_contact_id: string | null }>
     }),
-    fetchInChunks(orderIds, async (chunk) => {
-      const { data, error } = await supabase
-        .from("order_operations")
-        .select(
-          "order_id, supplier_fulfilment_method, client_delivery_method, delivery_method, collection_point, collection_time, contact_on_site, supplier_details_sent_at, thank_you_skipped_at, delivery_due_at",
-        )
-        .in("order_id", chunk)
-      if (error && /supplier_fulfilment_method|thank_you_skipped/i.test(error.message)) {
-        return [] as Array<OpsRow & { order_id: string }>
-      }
-      return (data ?? []) as Array<OpsRow & { order_id: string }>
-    }),
-    fetchInChunks(dealIds, async (chunk) => {
-      const { data, error } = await supabase
-        .from("deal_operations")
-        .select(
-          "deal_id, supplier_fulfilment_method, client_delivery_method, delivery_method, collection_point, collection_time, contact_on_site, supplier_details_sent_at, thank_you_skipped_at, delivery_due_at",
-        )
-        .in("deal_id", chunk)
-      if (error && /supplier_fulfilment_method|thank_you_skipped/i.test(error.message)) {
-        return [] as Array<OpsRow & { deal_id: string }>
-      }
-      return (data ?? []) as Array<OpsRow & { deal_id: string }>
-    }),
+    fetchInChunks(orderIds, async (chunk) => loadOpsRows(supabase, "order_operations", "order_id", chunk)),
+    fetchInChunks(dealIds, async (chunk) => loadOpsRows(supabase, "deal_operations", "deal_id", chunk)),
     fetchInChunks(accountIds, async (chunk) => {
       const { data } = await supabase.from("crm_accounts").select("id, account_types").in("id", chunk)
       return (data ?? []) as Array<{ id: string; account_types: unknown }>
@@ -282,6 +288,7 @@ export async function enrichOperationsBookings(rows: WorkflowOrderRow[]): Promis
       collectionPoint: blank(ops.collection_point),
       collectionTime: blank(ops.collection_time),
       contactOnSite: blank(ops.contact_on_site),
+      supplierNotes: blank(ops.supplier_notes),
       supplierDetailsSentAt: ops.supplier_details_sent_at,
       thankYouSkippedAt: ops.thank_you_skipped_at,
       deliveryDueAt: ops.delivery_due_at ?? row.deliveryDueAt,

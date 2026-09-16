@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react"
 import { toast } from "sonner"
-import { saveMarketingOutreachSequence } from "./outreach-actions"
+import { saveMarketingOutreachSequence } from "@/app/(admin)/admin/integrations/marketing-leads/outreach-actions"
 import {
   outreachTemplateToMetaBody,
   outreachVarsFromSnapshot,
@@ -19,23 +19,19 @@ const SAMPLE = outreachVarsFromSnapshot({
 })
 
 function stageTitle(stage: number): string {
-  if (stage === 1) return "Stage 1 — straight after the lead arrives"
+  if (stage === 1) return "Stage 1 — when the lead arrives"
   if (stage === 2) return "Stage 2 — if they have not replied"
   return "Stage 3 — last note, then stop"
 }
 
-export function MarketingOutreachEditor({
+export function SalesTemplatesEditor({
   settings,
   steps,
   missingTables,
-  emailConfigured,
-  whatsappConfigured,
 }: {
   settings: MarketingOutreachSettings | null
   steps: MarketingOutreachStep[]
   missingTables: boolean
-  emailConfigured: boolean
-  whatsappConfigured: boolean
 }) {
   const [enabled, setEnabled] = useState(settings?.enabled === true)
   const [drafts, setDrafts] = useState(steps)
@@ -54,8 +50,7 @@ export function MarketingOutreachEditor({
   if (missingTables) {
     return (
       <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-900">
-        Apply database migration <span className="font-mono">20260914120000_marketing_outreach</span> to edit
-        follow-up messages.
+        Follow-up templates are not available yet. Ask an admin to finish the marketing outreach setup.
       </div>
     )
   }
@@ -91,8 +86,7 @@ export function MarketingOutreachEditor({
   if (drafts.length === 0) {
     return (
       <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-900">
-        No follow-up stages were found. Re-apply migration{" "}
-        <span className="font-mono">20260914120000_marketing_outreach</span>.
+        No follow-up stages were found. Ask an admin to check the marketing outreach setup.
       </div>
     )
   }
@@ -101,11 +95,9 @@ export function MarketingOutreachEditor({
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Follow-up sequence</h2>
+          <h2 className="text-lg font-semibold text-foreground">Marketing lead follow-up</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Draft the three messages here. Nothing is sent until you tick the box below, save, and we have the
-            sending accounts set up. Placeholders:{" "}
-            <span className="font-mono text-xs">{"{{first_name}} {{event}} {{package}} {{quantity}}"}</span>
+            Edit the three messages, then turn the sequence on and save. Nothing goes out until that box is ticked.
           </p>
         </div>
         <button
@@ -114,28 +106,19 @@ export function MarketingOutreachEditor({
           onClick={save}
           className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
         >
-          {pending ? "Saving…" : "Save messages"}
+          {pending ? "Saving…" : "Save templates"}
         </button>
-      </div>
-
-      <div className="flex flex-wrap gap-2 text-xs">
-        <span className={`rounded-full px-2 py-1 ${emailConfigured ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>
-          Email {emailConfigured ? "ready (Resend)" : "needs FROM address / Resend"}
-        </span>
-        <span className={`rounded-full px-2 py-1 ${whatsappConfigured ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>
-          WhatsApp {whatsappConfigured ? "API connected" : "waiting for Meta account details"}
-        </span>
       </div>
 
       {!enabled ? (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          Automatic sending is off. New marketing leads will still land on Enquiries, but no email or WhatsApp
-          will go out until you tick the box below, save, and we have connected the sending accounts.
+          Automatic sending is off. New marketing leads still land on Enquiries, but no email or WhatsApp will go out
+          until you tick the box below and save.
         </p>
       ) : (
         <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-          Automatic sending is on. New marketing leads will get these messages until they reply or someone on the
-          team takes over.
+          Automatic sending is on. New marketing leads get these messages until they reply or someone on the team takes
+          over.
         </p>
       )}
 
@@ -209,19 +192,21 @@ export function MarketingOutreachEditor({
               <input
                 value={step.whatsapp_template_name}
                 onChange={(event) => updateStep(step.id, { whatsapp_template_name: event.target.value })}
-                placeholder="Approved Meta template name, e.g. zk_marketing_stage_1"
+                placeholder="Meta template name"
                 className="h-9 w-full rounded-md border px-3 text-sm"
               />
               <input
                 value={step.whatsapp_template_language}
                 onChange={(event) => updateStep(step.id, { whatsapp_template_language: event.target.value })}
-                placeholder="Language code, e.g. en"
+                placeholder="Language, e.g. en"
                 className="h-9 w-full rounded-md border px-3 text-sm"
               />
               <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
                 <p className="font-semibold text-slate-800">Preview</p>
                 <p className="mt-2 whitespace-pre-wrap">{preview[index]?.whatsappBody}</p>
-                <p className="mt-3 font-medium text-slate-800">Copy this into Meta (uses {"{{1}}"} variables)</p>
+                <p className="mt-3 font-medium text-slate-800">
+                  Numbered version for Meta (uses {"{{1}}"} variables)
+                </p>
                 <p className="mt-1 whitespace-pre-wrap font-mono text-[11px]">{preview[index]?.metaBody}</p>
               </div>
             </div>

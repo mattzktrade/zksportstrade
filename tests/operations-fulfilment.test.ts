@@ -4,6 +4,8 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import test from "node:test"
 import {
+  applyOpsSupplierNoteToPurchaseOrder,
+  clientDeliveryNeedsDetails,
   isDirectClientAccount,
   lockedClientDelivery,
   operationsCalendarItems,
@@ -14,6 +16,35 @@ import {
   thankYouDue,
   unpaidCloseToEvent,
 } from "../lib/operations/fulfilment"
+
+test("client collection details only apply to local, posted, and official delivery", () => {
+  assert.equal(clientDeliveryNeedsDetails("local_collection"), true)
+  assert.equal(clientDeliveryNeedsDetails("posted_to_guest"), true)
+  assert.equal(clientDeliveryNeedsDetails("official_shipment"), true)
+  assert.equal(clientDeliveryNeedsDetails("send_digital"), false)
+  assert.equal(clientDeliveryNeedsDetails("supplier_handles"), false)
+  assert.equal(clientDeliveryNeedsDetails(null), false)
+})
+
+test("supplier notes replace the ops block on a purchase order without wiping other text", () => {
+  assert.equal(applyOpsSupplierNoteToPurchaseOrder(null, "Collect at Gate 3, 09:00"), "From operations:\nCollect at Gate 3, 09:00")
+  assert.equal(
+    applyOpsSupplierNoteToPurchaseOrder("Supplier confirmed Friday", "Hotel pickup 8am"),
+    "Supplier confirmed Friday\n\nFrom operations:\nHotel pickup 8am",
+  )
+  assert.equal(
+    applyOpsSupplierNoteToPurchaseOrder(
+      "Supplier confirmed Friday\n\nFrom operations:\nHotel pickup 8am",
+      "Box office, 10:00",
+    ),
+    "Supplier confirmed Friday\n\nFrom operations:\nBox office, 10:00",
+  )
+  assert.equal(
+    applyOpsSupplierNoteToPurchaseOrder("Supplier confirmed Friday\n\nFrom operations:\nHotel pickup 8am", "  "),
+    "Supplier confirmed Friday",
+  )
+  assert.equal(applyOpsSupplierNoteToPurchaseOrder("From operations:\nHotel pickup 8am", ""), null)
+})
 
 const today = "2026-09-15"
 
@@ -189,4 +220,12 @@ test("migration adds ops contact, fulfilment methods, deal-scoped proof, and ema
   assert.match(sql, /after_event/)
   assert.match(sql, /deal_id uuid/)
   assert.match(sql, /alter column invoice_id drop not null/i)
+})
+
+test("migration adds supplier notes on order and deal operations", () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..")
+  const sql = readFileSync(join(root, "supabase/migrations/20260916120000_operations_supplier_notes.sql"), "utf8")
+  assert.match(sql, /order_operations/)
+  assert.match(sql, /deal_operations/)
+  assert.match(sql, /supplier_notes text/)
 })

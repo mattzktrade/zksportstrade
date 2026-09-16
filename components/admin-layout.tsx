@@ -30,6 +30,7 @@ import {
   TrendingUp,
   Inbox,
   CircleHelp,
+  Mail,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useEffect, useState } from "react"
@@ -43,7 +44,12 @@ type NavItem = {
   href?: string
   icon: React.ComponentType<{ className?: string }>
   disabled?: boolean
-  children?: Array<{ name: string; href: string; icon?: React.ComponentType<{ className?: string }> }>
+  children?: Array<{
+    name: string
+    href: string
+    icon?: React.ComponentType<{ className?: string }>
+    hidden?: boolean
+  }>
 }
 
 const navigation: NavItem[] = [
@@ -79,7 +85,9 @@ const navigation: NavItem[] = [
       { name: "Enquiries", href: "/admin/enquiries", icon: Inbox },
       { name: "Deals", href: "/admin/deals", icon: BriefcaseBusiness },
       { name: "Sales tracker", href: "/admin/sales-tracker", icon: TrendingUp },
-      { name: "CRM imports", href: "/admin/imports", icon: FileText },
+      { name: "Templates", href: "/admin/templates", icon: Mail },
+      // Hidden from the sidebar; page still lives at /admin/imports. Set hidden: false to bring it back.
+      { name: "CRM imports", href: "/admin/imports", icon: FileText, hidden: true },
     ],
   },
   { name: "Operations", href: "/admin/operations", icon: Wrench },
@@ -94,6 +102,7 @@ const JUMP_KEYWORDS: Record<string, string> = {
   "/admin/enquiries": "enquiry enquiries sourcing inbound quote pipeline crm",
   "/admin/deals": "pipeline crm sales booking form",
   "/admin/sales-tracker": "sales tracker revenue demand conversion event product stock planning",
+  "/admin/templates": "templates email whatsapp marketing follow-up sequence messages",
   "/admin/catalog/events": "races calendar",
   "/admin/orders": "bookings invoices portal",
   "/admin/finance": "invoices payments xero",
@@ -125,6 +134,7 @@ function adminPageTitle(pathname: string): string {
   if (pathname.startsWith("/admin/deals")) return "Deals"
   if (pathname.startsWith("/admin/leads") || pathname.startsWith("/admin/clients")) return "Accounts"
   if (pathname.startsWith("/admin/sales-tracker")) return "Sales tracker"
+  if (pathname.startsWith("/admin/templates")) return "Templates"
   if (pathname.startsWith("/admin/imports")) return "CRM imports"
   if (pathname.startsWith("/admin/catalog/events")) return "Events"
   if (pathname.startsWith("/admin/catalog")) return "Inventory"
@@ -155,6 +165,7 @@ function navigationFor(canManageSettings: boolean): NavItem[] {
     if (item.href === "/admin/settings" && !canManageSettings) return []
     if (!item.children) return [item]
     const children = item.children.filter((child) => {
+      if (child.hidden) return false
       if (child.href === "/admin/imports" && !canManageSettings) return false
       return true
     })
@@ -192,6 +203,7 @@ export function AdminLayout({
       pathname.startsWith("/admin/enquiries") ||
       pathname.startsWith("/admin/deals") ||
       pathname.startsWith("/admin/sales-tracker") ||
+      pathname.startsWith("/admin/templates") ||
       pathname.startsWith("/admin/imports"),
   })
 

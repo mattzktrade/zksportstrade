@@ -16,6 +16,7 @@ test("guest-details deadline and tickets-received dates live on purchase orders"
   assert.match(types, /guest_details_deadline: string \| null/)
   assert.match(types, /tickets_received_at: string \| null/)
   assert.match(types, /setPurchaseOrderOpsDates/)
+  assert.match(types, /setPurchaseOrderNote/)
 })
 
 test("parseOptionalIsoDate accepts empty, YYYY-MM-DD, and rejects junk", () => {

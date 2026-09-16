@@ -824,7 +824,10 @@ export function PurchaseOrdersClient({
                     />
                     <span className="font-medium text-slate-800">Contract/invoice attached</span>
                   </label>
-                  <p><span className="font-medium text-slate-800">Note:</span> {po.note || "No note"}</p>
+                  <p>
+                    <span className="font-medium text-slate-800">Note:</span>{" "}
+                    {po.note ? <span className="whitespace-pre-wrap">{po.note}</span> : "No note"}
+                  </p>
                   <PurchaseOrderStockEditor
                     purchaseOrderId={po.id}
                     lines={po.usage.lines}
@@ -1260,7 +1263,7 @@ function PurchaseOrderRow({
                       </div>
                       <div className="sm:col-span-2">
                         <dt className="text-muted-foreground">Note</dt>
-                        <dd>{po.note ? po.note : <span className="italic">No note</span>}</dd>
+                        <dd className="whitespace-pre-wrap">{po.note ? po.note : <span className="italic">No note</span>}</dd>
                       </div>
                     </dl>
                   )}

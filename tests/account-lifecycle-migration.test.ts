@@ -38,9 +38,9 @@ test("auto-promotes lead to client from deals and orders, never the reverse", ()
   assert.doesNotMatch(sql, /set lifecycle = 'lead'/)
 })
 
-test("leads tab highlights new rows; accounts and contacts do not use unassigned amber", () => {
-  assert.match(ui, /view === "leads"/)
-  assert.match(ui, /isNew && "bg-amber-50\/70"/)
+test("accounts directory has no leads tab; accounts and contacts do not use unassigned amber", () => {
+  assert.doesNotMatch(ui, /view === "leads"/)
+  assert.doesNotMatch(ui, /\(\["leads", "accounts", "contacts"\]/)
   assert.equal((ui.match(/unassigned && "bg-amber-50\/70"/g) ?? []).length, 0)
   assert.equal((ui.match(/!client\.owner_profile_id && "bg-amber-50\/70"/g) ?? []).length, 0)
 })

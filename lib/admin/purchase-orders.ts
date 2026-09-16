@@ -239,6 +239,16 @@ export async function setPurchaseOrderOpsDates(
   return { ok: false, message: error.message }
 }
 
+export async function setPurchaseOrderNote(
+  supabase: SupabaseClient,
+  id: string,
+  note: string | null,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const { error } = await supabase.from("purchase_orders").update({ note }).eq("id", id)
+  if (!error) return { ok: true }
+  return { ok: false, message: error.message }
+}
+
 const PO_DOC_COLUMNS =
   "id, purchase_order_id, file_bucket, file_path, file_name, file_content_type, file_size, uploaded_at" as const
 

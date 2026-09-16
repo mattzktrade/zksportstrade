@@ -31,11 +31,11 @@ import {
   CLIENT_DELIVERY_METHODS,
   SUPPLIER_FULFILMENT_METHODS,
   clientDeliveryLabel,
+  clientDeliveryNeedsDetails,
   isOperationsDelivered,
   isOperationsPaid,
   lockedClientDelivery,
   operationsBoardStepStatus,
-  parseClientDeliveryMethod,
   parseSupplierFulfilmentMethod,
   supplierFulfilmentLabel,
   supplierNeedsNamesSent,
@@ -88,6 +88,7 @@ export function OperationsBoard({
     collectionTime: row.collectionTime ?? "",
     contactOnSite: row.contactOnSite ?? "",
     deliveryDueAt: row.deliveryDueAt?.slice(0, 10) ?? "",
+    supplierNotes: row.supplierNotes ?? "",
     notes: row.internalNotes ?? "",
   })
   const [proofNote, setProofNote] = useState("")
@@ -104,7 +105,6 @@ export function OperationsBoard({
   const lockedClient = lockedClientDelivery(plan.supplier)
   const clientValue = lockedClient ?? plan.client
   const supplierMethod = parseSupplierFulfilmentMethod(plan.supplier)
-  const clientMethod = parseClientDeliveryMethod(clientValue)
 
   const activeStep = useMemo(() => {
     for (const step of STEPS) {
@@ -136,7 +136,9 @@ export function OperationsBoard({
         collectionTime: plan.collectionTime,
         contactOnSite: plan.contactOnSite,
         deliveryDueAt: plan.deliveryDueAt || null,
+        supplierNotes: plan.supplierNotes,
         internalNotes: plan.notes,
+        purchaseOrderIds: row.purchaseOrders.map((po) => po.id),
       }),
     )
   }
@@ -302,14 +304,14 @@ export function OperationsBoard({
 
           <section className="rounded-lg border bg-white p-4">
             <h3 className="text-[12px] font-semibold">4. Tickets from supplier</h3>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="block text-[11px] font-semibold">
-                From the supplier
+            <div className="mt-3 grid sm:grid-cols-2 sm:divide-x sm:divide-slate-200">
+              <div className="space-y-3 sm:pr-4">
+                <p className="text-[11px] font-semibold">From the supplier</p>
                 <select
                   disabled={!canManage || pending}
                   value={plan.supplier}
                   onChange={(event) => setPlan((current) => ({ ...current, supplier: event.target.value }))}
-                  className="mt-1 h-9 w-full rounded-md border bg-white px-2 font-normal"
+                  className="h-9 w-full rounded-md border bg-white px-2 text-[11px]"
                 >
                   <option value="">Choose…</option>
                   {SUPPLIER_FULFILMENT_METHODS.map((value) => (
@@ -318,14 +320,35 @@ export function OperationsBoard({
                     </option>
                   ))}
                 </select>
-              </label>
-              <label className="block text-[11px] font-semibold">
-                To the client
+                {plan.supplier || plan.supplierNotes ? (
+                  <label className="block text-[11px] font-semibold">
+                    Notes
+                    <textarea
+                      disabled={!canManage || pending}
+                      value={plan.supplierNotes}
+                      onChange={(event) => setPlan((current) => ({ ...current, supplierNotes: event.target.value }))}
+                      placeholder="Collection details, pickup address, times…"
+                      className="mt-1 min-h-20 w-full rounded-md border px-2 py-2 font-normal"
+                    />
+                    {row.purchaseOrders.length > 0 ? (
+                      <span className="mt-1 block text-[10px] font-normal text-slate-400">
+                        Saved onto {row.purchaseOrders.length === 1 ? "the purchase order" : "linked purchase orders"}.
+                      </span>
+                    ) : (
+                      <span className="mt-1 block text-[10px] font-normal text-slate-400">
+                        Saved here, and onto the purchase order once stock is linked.
+                      </span>
+                    )}
+                  </label>
+                ) : null}
+              </div>
+              <div className="mt-4 space-y-3 border-t border-slate-200 pt-4 sm:mt-0 sm:border-t-0 sm:pl-4 sm:pt-0">
+                <p className="text-[11px] font-semibold">To the client</p>
                 <select
                   disabled={!canManage || pending || Boolean(lockedClient)}
                   value={clientValue}
                   onChange={(event) => setPlan((current) => ({ ...current, client: event.target.value }))}
-                  className="mt-1 h-9 w-full rounded-md border bg-white px-2 font-normal"
+                  className="h-9 w-full rounded-md border bg-white px-2 text-[11px]"
                 >
                   <option value="">Choose…</option>
                   {CLIENT_DELIVERY_METHODS.map((value) => (
@@ -334,36 +357,52 @@ export function OperationsBoard({
                     </option>
                   ))}
                 </select>
-              </label>
-            </div>
-            {clientMethod === "local_collection" || clientMethod === "posted_to_guest" || clientMethod === "official_shipment" ? (
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <input
-                  value={plan.collectionPoint}
-                  onChange={(event) => setPlan((current) => ({ ...current, collectionPoint: event.target.value }))}
-                  placeholder="Collection / meet point"
-                  className="h-9 rounded-md border px-2 text-[11px]"
-                />
-                <input
-                  value={plan.collectionTime}
-                  onChange={(event) => setPlan((current) => ({ ...current, collectionTime: event.target.value }))}
-                  placeholder="Time"
-                  className="h-9 rounded-md border px-2 text-[11px]"
-                />
-                <input
-                  type="date"
-                  value={plan.deliveryDueAt}
-                  onChange={(event) => setPlan((current) => ({ ...current, deliveryDueAt: event.target.value }))}
-                  className="h-9 rounded-md border px-2 text-[11px]"
-                />
-                <input
-                  value={plan.contactOnSite}
-                  onChange={(event) => setPlan((current) => ({ ...current, contactOnSite: event.target.value }))}
-                  placeholder="On-site contact"
-                  className="h-9 rounded-md border px-2 text-[11px]"
-                />
+                {clientDeliveryNeedsDetails(clientValue) ? (
+                  <div className="grid gap-2">
+                    <input
+                      disabled={!canManage || pending}
+                      value={plan.collectionPoint}
+                      onChange={(event) => setPlan((current) => ({ ...current, collectionPoint: event.target.value }))}
+                      placeholder="Collection / meet point"
+                      className="h-9 rounded-md border px-2 text-[11px]"
+                    />
+                    <input
+                      disabled={!canManage || pending}
+                      value={plan.collectionTime}
+                      onChange={(event) => setPlan((current) => ({ ...current, collectionTime: event.target.value }))}
+                      placeholder="Time"
+                      className="h-9 rounded-md border px-2 text-[11px]"
+                    />
+                    <input
+                      type="date"
+                      disabled={!canManage || pending}
+                      value={plan.deliveryDueAt}
+                      onChange={(event) => setPlan((current) => ({ ...current, deliveryDueAt: event.target.value }))}
+                      className="h-9 rounded-md border px-2 text-[11px]"
+                    />
+                    <input
+                      disabled={!canManage || pending}
+                      value={plan.contactOnSite}
+                      onChange={(event) => setPlan((current) => ({ ...current, contactOnSite: event.target.value }))}
+                      placeholder="On-site contact"
+                      className="h-9 rounded-md border px-2 text-[11px]"
+                    />
+                  </div>
+                ) : null}
+                {clientValue || plan.notes ? (
+                  <label className="block text-[11px] font-semibold">
+                    Notes
+                    <textarea
+                      disabled={!canManage || pending}
+                      value={plan.notes}
+                      onChange={(event) => setPlan((current) => ({ ...current, notes: event.target.value }))}
+                      placeholder="Anything the client needs to know"
+                      className="mt-1 min-h-20 w-full rounded-md border px-2 py-2 font-normal"
+                    />
+                  </label>
+                ) : null}
               </div>
-            ) : null}
+            </div>
             {canManage ? (
               <button type="button" disabled={pending} onClick={savePlan} className="mt-3 h-9 rounded-md bg-primary px-4 text-[11px] font-semibold text-white">
                 Save fulfilment plan

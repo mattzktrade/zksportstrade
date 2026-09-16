@@ -292,6 +292,8 @@ test("sales nav and deals list keep enquiries off the later pipeline", () => {
   const layout = readFileSync("components/admin-layout.tsx", "utf8")
   assert.match(layout, /name: "Enquiries"/)
   assert.match(layout, /href: "\/admin\/enquiries"/)
+  assert.match(layout, /name: "Templates"/)
+  assert.match(layout, /href: "\/admin\/templates"/)
   const dealsClient = readFileSync("app/(admin)/admin/deals/deals-client.tsx", "utf8")
   assert.match(dealsClient, /id: "ready_to_send"/)
   assert.match(dealsClient, /id: "form_expired"/)

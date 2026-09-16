@@ -2,8 +2,10 @@
 
 import { revalidatePath } from "next/cache"
 import { hasCmsPermission } from "@/lib/auth/permissions"
-import { setPurchaseOrderOpsDates } from "@/lib/admin/purchase-orders"
+import { setPurchaseOrderNote, setPurchaseOrderOpsDates } from "@/lib/admin/purchase-orders"
 import {
+  applyOpsSupplierNoteToPurchaseOrder,
+  clientDeliveryNeedsDetails,
   lockedClientDelivery,
   parseClientDeliveryMethod,
   parseSupplierFulfilmentMethod,
@@ -45,6 +47,7 @@ function todayIso(): string {
 
 function revalidateOps(dealId?: string | null) {
   revalidatePath("/admin/operations")
+  revalidatePath("/admin/purchase-orders")
   revalidatePath("/admin")
   revalidatePath("/admin/deals", "layout")
   revalidatePath("/bookings")
@@ -53,7 +56,7 @@ function revalidateOps(dealId?: string | null) {
 }
 
 function missingColumn(message: string): boolean {
-  return /supplier_fulfilment_method|client_delivery_method|thank_you_skipped|operations_contact_id|deal_id/i.test(
+  return /supplier_fulfilment_method|client_delivery_method|thank_you_skipped|operations_contact_id|deal_id|supplier_notes/i.test(
     message,
   )
 }
@@ -240,7 +243,9 @@ export async function saveFulfilmentPlan(input: {
   collectionTime?: string | null
   contactOnSite?: string | null
   deliveryDueAt?: string | null
+  supplierNotes?: string | null
   internalNotes?: string | null
+  purchaseOrderIds?: string[]
 }): Promise<Result> {
   const gate = await operationsGate()
   if (!gate || !gate.admin) return { ok: false, message: "Operations permission is required." }
@@ -248,17 +253,47 @@ export async function saveFulfilmentPlan(input: {
   if (!ids.ok) return { ok: false, message: ids.error }
   const supplier = parseSupplierFulfilmentMethod(input.supplierFulfilmentMethod)
   const client = lockedClientDelivery(supplier) ?? parseClientDeliveryMethod(input.clientDeliveryMethod)
+  const details = clientDeliveryNeedsDetails(client)
+  const supplierNotes = blank(input.supplierNotes)
   try {
     await writeOpsPatch(gate.admin, gate.profile.id, ids.orderId, ids.dealId, {
       supplier_fulfilment_method: supplier,
       client_delivery_method: client,
-      collection_point: blank(input.collectionPoint),
-      collection_time: blank(input.collectionTime),
-      contact_on_site: blank(input.contactOnSite),
-      delivery_due_at: blank(input.deliveryDueAt),
+      collection_point: details ? blank(input.collectionPoint) : null,
+      collection_time: details ? blank(input.collectionTime) : null,
+      contact_on_site: details ? blank(input.contactOnSite) : null,
+      delivery_due_at: details ? blank(input.deliveryDueAt) : null,
+      supplier_notes: supplierNotes,
       ...(input.internalNotes !== undefined ? { internal_notes: blank(input.internalNotes) } : {}),
       ...(supplier === "names_only" ? { supplier_status: "not_required" } : {}),
     })
+    const poIds = [...new Set((input.purchaseOrderIds ?? []).filter((id) => UUID_RE.test(id)))]
+    if (poIds.length > 0) {
+      const { data: purchaseOrders, error: poLoadError } = await gate.admin
+        .from("purchase_orders")
+        .select("id, note")
+        .in("id", poIds)
+      if (poLoadError) {
+        revalidateOps(ids.dealId)
+        return {
+          ok: false,
+          message: `Fulfilment plan saved, but purchase orders could not be updated: ${poLoadError.message}`,
+        }
+      }
+      for (const po of purchaseOrders ?? []) {
+        const nextNote = applyOpsSupplierNoteToPurchaseOrder(po.note, supplierNotes)
+        const current = blank(po.note)
+        if (nextNote === current) continue
+        const written = await setPurchaseOrderNote(gate.admin, String(po.id), nextNote)
+        if (!written.ok) {
+          revalidateOps(ids.dealId)
+          return {
+            ok: false,
+            message: `Fulfilment plan saved, but the purchase order note could not be updated: ${written.message}`,
+          }
+        }
+      }
+    }
     revalidateOps(ids.dealId)
     return { ok: true, message: "Fulfilment plan saved." }
   } catch (error) {

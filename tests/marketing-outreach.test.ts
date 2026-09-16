@@ -192,4 +192,23 @@ describe("marketing outreach wiring", () => {
     const fn = cron.slice(cron.indexOf("export async function runIntegrationCronJob"))
     assert.ok(fn.indexOf("await processNativeInvoiceReminders") < fn.indexOf("await processMarketingOutreach"))
   })
+
+  it("puts the follow-up editor on Sales → Templates, not Settings", () => {
+    const settings = readFileSync("app/(admin)/admin/settings/page.tsx", "utf8")
+    assert.doesNotMatch(settings, /marketing-leads/)
+    const templatesPage = readFileSync("app/(admin)/admin/templates/page.tsx", "utf8")
+    assert.match(templatesPage, /SalesTemplatesEditor/)
+    assert.match(templatesPage, /How it works/)
+    assert.doesNotMatch(templatesPage, /MARKETING_LEAD_WEBHOOK/)
+    const editor = readFileSync("app/(admin)/admin/templates/templates-client.tsx", "utf8")
+    assert.match(editor, /Send this sequence automatically/)
+    const oldPage = readFileSync("app/(admin)/admin/integrations/marketing-leads/page.tsx", "utf8")
+    assert.match(oldPage, /redirect\("\/admin\/templates"\)/)
+    const actions = readFileSync(
+      "app/(admin)/admin/integrations/marketing-leads/outreach-actions.ts",
+      "utf8",
+    )
+    assert.match(actions, /hasCmsPermission\(profile, "deals\.manage"\)/)
+    assert.match(actions, /revalidatePath\("\/admin\/templates"\)/)
+  })
 })
