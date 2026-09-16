@@ -105,25 +105,29 @@ const OPS_SELECT_CORE =
   "supplier_fulfilment_method, client_delivery_method, delivery_method, collection_point, collection_time, contact_on_site, supplier_details_sent_at, thank_you_skipped_at, delivery_due_at"
 const OPS_SELECT = `${OPS_SELECT_CORE}, supplier_notes`
 
-async function loadOpsRows<Id extends string>(
+async function loadOpsRows(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  table: "order_operations" | "deal_operations",
-  idColumn: Id,
+  kind: "order" | "deal",
   ids: string[],
-): Promise<Array<OpsRow & Record<Id, string>>> {
-  const { data, error } = await supabase.from(table).select(`${idColumn}, ${OPS_SELECT}`).in(idColumn, ids)
-  if (!error) return (data ?? []) as Array<OpsRow & Record<Id, string>>
-  if (/supplier_notes/i.test(error.message)) {
-    const retry = await supabase.from(table).select(`${idColumn}, ${OPS_SELECT_CORE}`).in(idColumn, ids)
-    return ((retry.data ?? []) as Array<Omit<OpsRow, "supplier_notes"> & Record<Id, string>>).map((row) => ({
-      ...row,
-      supplier_notes: null,
-    }))
+): Promise<Array<OpsRow & { order_id?: string; deal_id?: string }>> {
+  const queried =
+    kind === "order"
+      ? await supabase.from("order_operations").select(`order_id, ${OPS_SELECT}`).in("order_id", ids)
+      : await supabase.from("deal_operations").select(`deal_id, ${OPS_SELECT}`).in("deal_id", ids)
+  if (!queried.error) return (queried.data ?? []) as Array<OpsRow & { order_id?: string; deal_id?: string }>
+  if (/supplier_notes/i.test(queried.error.message)) {
+    const retry =
+      kind === "order"
+        ? await supabase.from("order_operations").select(`order_id, ${OPS_SELECT_CORE}`).in("order_id", ids)
+        : await supabase.from("deal_operations").select(`deal_id, ${OPS_SELECT_CORE}`).in("deal_id", ids)
+    return ((retry.data ?? []) as Array<Omit<OpsRow, "supplier_notes"> & { order_id?: string; deal_id?: string }>).map(
+      (row) => ({
+        ...row,
+        supplier_notes: null,
+      }),
+    )
   }
-  if (/supplier_fulfilment_method|thank_you_skipped/i.test(error.message)) {
-    return [] as Array<OpsRow & Record<Id, string>>
-  }
-  return [] as Array<OpsRow & Record<Id, string>>
+  return []
 }
 
 export async function enrichOperationsBookings(rows: WorkflowOrderRow[]): Promise<OperationsBookingRow[]> {
@@ -144,8 +148,8 @@ export async function enrichOperationsBookings(rows: WorkflowOrderRow[]): Promis
       if (error && /operations_contact_id/i.test(error.message)) return [] as Array<{ id: string; operations_contact_id: string | null }>
       return (data ?? []) as Array<{ id: string; operations_contact_id: string | null }>
     }),
-    fetchInChunks(orderIds, async (chunk) => loadOpsRows(supabase, "order_operations", "order_id", chunk)),
-    fetchInChunks(dealIds, async (chunk) => loadOpsRows(supabase, "deal_operations", "deal_id", chunk)),
+    fetchInChunks(orderIds, async (chunk) => loadOpsRows(supabase, "order", chunk)),
+    fetchInChunks(dealIds, async (chunk) => loadOpsRows(supabase, "deal", chunk)),
     fetchInChunks(accountIds, async (chunk) => {
       const { data } = await supabase.from("crm_accounts").select("id, account_types").in("id", chunk)
       return (data ?? []) as Array<{ id: string; account_types: unknown }>
