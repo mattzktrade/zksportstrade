@@ -19,7 +19,10 @@ export default async function EventsPage() {
   ])
   const events =
     eventsResult.error && isMissingRaceCircuitColumnError(eventsResult.error.message)
-      ? (await supabase.from("races").select(withoutCircuit).order("event_date")).data
+      ? ((await supabase.from("races").select(withoutCircuit).order("event_date")).data ?? []).map((row) => ({
+          ...row,
+          circuit: "",
+        }))
       : eventsResult.data
   const packages = packagesResult.data
 

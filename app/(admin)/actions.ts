@@ -1327,10 +1327,12 @@ export async function createPackage(input: {
   const withCircuit =
     "id, name, category, image, circuit, location, country, country_code, event_date, date_range"
   const withoutCircuit = "id, name, category, image, location, country, country_code, event_date, date_range"
-  let { data: race, error: rErr } = await supabase.from("races").select(withCircuit).eq("id", raceId).maybeSingle()
+  const firstRace = await supabase.from("races").select(withCircuit).eq("id", raceId).maybeSingle()
+  let rErr = firstRace.error
+  let race = firstRace.data
   if (rErr && isMissingRaceCircuitColumnError(rErr.message)) {
     const retry = await supabase.from("races").select(withoutCircuit).eq("id", raceId).maybeSingle()
-    race = retry.data
+    race = retry.data ? { ...retry.data, circuit: null } : null
     rErr = retry.error
   }
   if (rErr) return { ok: false, message: rErr.message }
@@ -4319,28 +4321,32 @@ export async function updateNativeEvent(
   if (!checked.ok) return checked
   const value = checked.value
 
-  let existingResult = await gate.supabase
+  const existingSelect = await gate.supabase
     .from("races")
     .select("circuit, location, country, country_code, event_date, date_range")
     .eq("id", id)
     .maybeSingle()
-  if (existingResult.error && isMissingRaceCircuitColumnError(existingResult.error.message)) {
-    existingResult = await gate.supabase
-      .from("races")
-      .select("location, country, country_code, event_date, date_range")
-      .eq("id", id)
-      .maybeSingle()
-  }
-  if (existingResult.error) return { ok: false, message: existingResult.error.message }
-  if (!existingResult.data) return { ok: false, message: "Event not found." }
-  const existing = existingResult.data as {
+  let existingError = existingSelect.error
+  let existingData = existingSelect.data as {
     circuit?: string | null
     location: string
     country: string
     country_code: string
     event_date: string
     date_range: string
+  } | null
+  if (existingError && isMissingRaceCircuitColumnError(existingError.message)) {
+    const retry = await gate.supabase
+      .from("races")
+      .select("location, country, country_code, event_date, date_range")
+      .eq("id", id)
+      .maybeSingle()
+    existingError = retry.error
+    existingData = retry.data ? { ...retry.data, circuit: null } : null
   }
+  if (existingError) return { ok: false, message: existingError.message }
+  if (!existingData) return { ok: false, message: "Event not found." }
+  const existing = existingData
 
   const racePatch = {
     category: value.category,

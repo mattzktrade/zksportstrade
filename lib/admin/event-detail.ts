@@ -115,7 +115,7 @@ export async function getNativeEventDetail(eventId: string): Promise<NativeEvent
   let { data: race, error: raceError } = await supabase.from("races").select(withCircuit).eq("id", id).maybeSingle()
   if (raceError && isMissingRaceCircuitColumnError(raceError.message)) {
     const retry = await supabase.from("races").select(withoutCircuit).eq("id", id).maybeSingle()
-    race = retry.data
+    race = retry.data ? { ...retry.data, circuit: null } : null
     raceError = retry.error
   }
   if (raceError || !race) return null

@@ -217,7 +217,7 @@ const getAdminRaceOptionsCached = cache(async (): Promise<AdminRaceOption[]> => 
       .eq("is_archived", false)
       .order("season")
       .order("event_date")
-    data = retry.data
+    data = retry.data ? retry.data.map((row) => ({ ...row, circuit: "" })) : retry.data
     error = retry.error
   }
   if (error || !data) return []
