@@ -49,6 +49,7 @@ async function upsertRaces(races: Race[]) {
         id: r.id,
         name: r.name,
         short_name: r.shortName,
+        circuit: r.circuit ?? r.location,
         location: r.location,
         country: r.country,
         country_code: r.countryCode,
@@ -77,13 +78,14 @@ async function upsertPackages(packages: Package[], races: Race[], sortOffset: nu
     }
 
     const isEnquiry = typeof pkg.availability === "string"
+    const race = races.find((row) => row.id === raceId)
 
     const { error } = await supabase.from("packages").upsert(
       {
         id: pkg.id,
         race_id: raceId,
         name: pkg.name,
-        circuit: pkg.circuit,
+        circuit: race?.circuit ?? pkg.circuit,
         location: pkg.location,
         country: pkg.country,
         country_code: pkg.countryCode,

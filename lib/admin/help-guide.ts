@@ -416,7 +416,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           "Open Sales list and click the product the client is interested in.",
           "If it already has a brochure, download that PDF and send it.",
-          "If not, click Create brochure. It builds a ZK-branded PDF from the product photos, description, and inclusions.",
+          "If not, click Create brochure. It needs at least 3 unique photos, a short description, and 4 inclusions. Add a track map on the product if you want a third page with the circuit layout. Standard Paddock Club or Champions Club copy can be filled from official programme details when the product name matches.",
           "Send that file to the client. Portal clients cannot create brochures — only the ZK team can.",
           "If you change the photos or copy later, use Recreate brochure so the PDF stays current.",
         ],
@@ -699,7 +699,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             q: "How do I make a brochure for a product?",
-            a: "Sales list → click the product → Create brochure. It uses the photos and copy already on the product. Only the ZK team can do this, not portal clients. If a brochure is already attached, download it, or recreate it after you change the listing.",
+            a: "Sales list → click the product → Create brochure. It needs at least 3 unique photos, a short description, and 4 inclusions on the product. Add a track map if you want a third page with the circuit. Only the ZK team can do this, not portal clients. If a brochure is already attached, download it, or recreate it after you change the listing.",
           },
           {
             q: "Available stock looks too low / too high.",

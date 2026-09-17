@@ -1,4 +1,5 @@
 import type { Package, Race } from "../types/catalog"
+import { resolveRaceCircuit } from "../catalog/race-circuit"
 import { circuitKeyFromRaceId } from "../catalog/season-rollover"
 
 const PADDOCK_INCLUDES = ["Paddock Access", "Gourmet Dining", "Open Bar", "Pit Lane Walk"]
@@ -10,7 +11,11 @@ export function packages2027PaddockEnquire(races2027: Race[]): Package[] {
     return {
       id: `${key}-paddock-club-2027`,
       name: "3 Day Paddock Club",
-      circuit: race.name,
+      circuit: resolveRaceCircuit({
+        id: race.id,
+        circuit: race.circuit,
+        location: race.location,
+      }) || race.name,
       location: race.location,
       country: race.country,
       countryCode: race.countryCode,

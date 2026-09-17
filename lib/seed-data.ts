@@ -1,9 +1,10 @@
 /** Mock catalog seed data � used only by `scripts/seed-catalog.ts`. */
 import type { Booking, Invoice, Package, Race } from "./types/catalog"
+import { officialCircuitNameForRaceId } from "./catalog/race-circuit"
 import { pastPackages2026 } from "./seed-data/past-packages-2026"
 import { livePackages2026 } from "./seed-data/live-packages-2026"
 
-export const races2026: Race[] = [
+const races2026Base: Race[] = [
   {
     id: "australia-2026",
     name: "Australian Grand Prix",
@@ -330,6 +331,11 @@ export const races2026: Race[] = [
     lowestPrice: 7800,
   },
 ]
+
+export const races2026: Race[] = races2026Base.map((race) => ({
+  ...race,
+  circuit: officialCircuitNameForRaceId(race.id) ?? race.location,
+}))
 
 export const packages: Package[] = [...pastPackages2026, ...livePackages2026]
 

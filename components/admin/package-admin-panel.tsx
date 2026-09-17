@@ -17,6 +17,7 @@ import { PackageCostLayers } from "@/components/admin/package-cost-layers"
 import { PackagePortalVisibilityCheckbox } from "@/components/admin/package-portal-visibility"
 import { PackageIntegrationPanel } from "@/components/admin/package-integration-panel"
 import { PackageBrochureActions } from "@/components/admin/package-brochure-actions"
+import { CatalogImageField } from "@/components/admin/catalog-image-field"
 import { LinkedDayInventoryToolbar } from "@/components/admin/linked-day-packages-panel"
 import { FulfilmentBlocksPanel } from "@/components/admin/fulfilment-blocks-panel"
 import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
@@ -29,6 +30,7 @@ import {
   type LinkedSellableMember,
 } from "@/lib/admin/package-sales-breakdown"
 import { PACKAGE_DURATION_OPTIONS, packageDurationLabel } from "@/lib/catalog/package-duration"
+import { packageEventDefaultsFromRace } from "@/lib/catalog/race-circuit"
 
 function linesToList(s: string): string[] {
   return s
@@ -115,6 +117,7 @@ export function PackageAdminPanel({
   const [featured, setFeatured] = useState(initial.featured)
   const [isHidden, setIsHidden] = useState(initial.is_hidden)
   const [brochureUrl, setBrochureUrl] = useState(typeof initial.brochure_url === "string" ? initial.brochure_url : "")
+  const [trackMap, setTrackMap] = useState(typeof initial.track_map === "string" ? initial.track_map : "")
   useEffect(() => {
     setRaceId(initial.race_id)
     setName(initial.name)
@@ -137,6 +140,7 @@ export function PackageAdminPanel({
     setFeatured(initial.featured)
     setIsHidden(initial.is_hidden)
     setBrochureUrl(typeof initial.brochure_url === "string" ? initial.brochure_url : "")
+    setTrackMap(typeof initial.track_map === "string" ? initial.track_map : "")
   }, [initial])
 
   function parsePrice(): number | null {
@@ -180,6 +184,7 @@ export function PackageAdminPanel({
         is_hidden: isHidden,
         sort_order: initial.sort_order,
         brochure_url: brochureUrl.trim() || null,
+        track_map: trackMap.trim() || null,
       })
       if (!res.ok) {
         toast.error(res.message)
@@ -314,7 +319,19 @@ export function PackageAdminPanel({
             {isFormula1Event ? "Race" : "Event"}
             <select
               value={raceId}
-              onChange={(e) => setRaceId(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value
+                setRaceId(next)
+                const race = races.find((r) => r.id === next)
+                if (!race) return
+                const defaults = packageEventDefaultsFromRace(race)
+                setCircuit(defaults.circuit)
+                setLocation(defaults.location)
+                setCountry(defaults.country)
+                setCountryCode(defaults.countryCode)
+                setEventDate(defaults.eventDate)
+                setDateRange(defaults.dateRange)
+              }}
               className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
             >
               {races.map((r) => (
@@ -333,12 +350,15 @@ export function PackageAdminPanel({
             />
           </label>
           <label className="block text-xs text-muted-foreground sm:col-span-2">
-            {isFormula1Event ? "Circuit / listing title" : "Venue / listing title"}
+            {isFormula1Event ? "Circuit" : "Venue"}
             <input
               value={circuit}
               onChange={(e) => setCircuit(e.target.value)}
               className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
             />
+            <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground/90">
+              Shared with the event. Edit it on Inventory → Events to update every product for this race.
+            </span>
           </label>
           <label className="block text-xs text-muted-foreground">
             Location
@@ -444,6 +464,13 @@ export function PackageAdminPanel({
               className="mt-1 w-full min-h-[72px] px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
             />
           </label>
+          <div className="sm:col-span-2 space-y-1">
+            <CatalogImageField label="Track map" value={trackMap} onChange={setTrackMap} />
+            <p className="text-[11px] text-muted-foreground/80 leading-relaxed">
+              Optional circuit layout. Shown on the product page, and added as brochure page 3 when you create a
+              brochure.
+            </p>
+          </div>
           <label className="block text-xs text-muted-foreground sm:col-span-2">
             Description (portal)
             <textarea
@@ -477,13 +504,16 @@ export function PackageAdminPanel({
                 <p className="text-sm font-medium text-foreground">Sales brochure</p>
                 <p className="mt-1 text-xs text-muted-foreground leading-5">
                   Creates a ZK-branded PDF from this product&apos;s photos, description and inclusions.
-                  Only the ZK team can generate it — portal clients just download the finished file.
+                  Needs at least 3 unique photos, a short description, and 4 inclusions. Standard Paddock
+                  Club or Champions Club copy can be filled from official programme details when the name
+                  matches. Only the ZK team can generate it — portal clients just download the finished file.
                 </p>
               </div>
               <PackageBrochureActions
                 packageId={initial.id}
                 brochureUrl={brochureUrl.trim() || null}
                 productName={name.trim() || initial.name}
+                eventName={initial.race_name}
                 onUrlChange={(url) => setBrochureUrl(url)}
               />
             </div>

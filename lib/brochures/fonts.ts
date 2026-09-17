@@ -70,7 +70,7 @@ export async function embedBrochureFonts(pdf: PDFDocument): Promise<BrochureFont
   const embed = async (bytes: Uint8Array | null, fallback: PDFFont) => {
     if (!bytes) return fallback
     try {
-      return await pdf.embedFont(bytes, { subset: true })
+      return await pdf.embedFont(bytes, { subset: false })
     } catch {
       return fallback
     }

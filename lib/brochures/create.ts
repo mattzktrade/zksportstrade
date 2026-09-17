@@ -9,9 +9,11 @@ import {
   type BrochurePackageRow,
 } from "@/lib/brochures/content"
 import { generatePackageBrochurePdf } from "@/lib/brochures/pdf"
+import { enrichBrochureContent } from "@/lib/brochures/enrich"
+import { MIN_BROCHURE_PHOTOS, assessBrochureReadiness } from "@/lib/brochures/readiness"
 import { uploadPackageBrochurePdf } from "@/lib/brochures/storage"
 import { brochureFilename } from "@/lib/brochures/text"
-import type { BrochureCreateResult } from "@/lib/brochures/types"
+import { BrochureInsufficientImagesError, type BrochureCreateResult } from "@/lib/brochures/types"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 async function queueBrochureListingSync(
@@ -87,9 +89,21 @@ export async function createPackageBrochureForId(input: {
     category = typeof race?.category === "string" ? race.category : null
   }
 
-  const content = brochureContentFromPackage(row, raceName, category)
-  const pdf = await generatePackageBrochurePdf(content)
-  const uploaded = await uploadPackageBrochurePdf(id, pdf)
+  const content = enrichBrochureContent(brochureContentFromPackage(row, raceName, category))
+  const ready = assessBrochureReadiness(content)
+  if (!ready.ok) return { ok: false, message: ready.message, code: ready.code }
+
+  let pdf: Uint8Array
+  try {
+    pdf = await generatePackageBrochurePdf(content, { minPhotos: MIN_BROCHURE_PHOTOS })
+  } catch (error) {
+    if (error instanceof BrochureInsufficientImagesError) {
+      return { ok: false, message: error.message, code: error.code }
+    }
+    throw error
+  }
+  const filename = brochureFilename(content.productName, content.raceName)
+  const uploaded = await uploadPackageBrochurePdf(id, pdf, filename)
   if ("error" in uploaded) return { ok: false, message: uploaded.error }
 
   const admin = createAdminClient()
@@ -113,7 +127,7 @@ export async function createPackageBrochureForId(input: {
   return {
     ok: true,
     brochureUrl: uploaded.url,
-    filename: brochureFilename(content.productName, content.productCode),
+    filename,
     replaced: Boolean(existing),
   }
 }

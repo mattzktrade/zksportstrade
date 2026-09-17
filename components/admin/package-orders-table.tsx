@@ -31,6 +31,12 @@ import {
   type SupplierPoolOption,
 } from "@/lib/inventory/supplier-pool"
 import {
+  dealAssignedSupplierSlices,
+  dealIsOversoldUnassigned,
+  dealLineSelectedSupplierKeys,
+  dealUnassignedPurchasedQuantity,
+} from "@/lib/inventory/deal-supplier-split"
+import {
   isPortalCheckoutChannel,
   orderPartyPrimary,
   orderSaleChannelLabel,
@@ -61,11 +67,11 @@ function saleChannelLabel(order: AdminOrderListRow, deal: PackageDealSaleRow | n
   })
 }
 
-function dealReferenceLabel(deal: PackageDealSaleRow): string {
-  if (isPortalDealSource(deal.source) && deal.orderReference?.trim()) {
-    return deal.orderReference.trim()
-  }
-  return deal.reference
+function saleReferenceLabel(
+  deal: PackageDealSaleRow | null | undefined,
+  fallback?: string | null,
+): string {
+  return deal?.reference?.trim() || fallback?.trim() || "—"
 }
 
 function saleQtyLabel(quantity: number, productName: string | null | undefined): string {
@@ -110,6 +116,17 @@ function dealProjectsSupplierConsumption(deal: PackageDealSaleRow): boolean {
   return deal.lines.some((line) => dealLineCanTakePurchasedSupplier(line))
 }
 
+function saleOversoldUnassigned(
+  unassignedQty: number,
+  supplierPools: SupplierPoolOption[],
+  projectedBalances: Record<string, number>,
+): boolean {
+  return dealIsOversoldUnassigned(
+    unassignedQty,
+    supplierPools.map((pool) => projectedBalances[pool.key] ?? 0),
+  )
+}
+
 function paymentTone(
   deal: PackageDealSaleRow | null,
   order?: AdminOrderListRow | null,
@@ -128,10 +145,14 @@ function PaymentStatusCell({
   label,
   tone,
   incomplete,
+  uncovered = false,
+  oversold = false,
 }: {
   label: string
   tone: "green" | "amber" | "red" | "blue" | "gray"
   incomplete: boolean
+  uncovered?: boolean
+  oversold?: boolean
 }) {
   return (
     <td className="px-3 py-3">
@@ -140,6 +161,14 @@ function PaymentStatusCell({
         {incomplete ? (
           <p className="text-[10px] font-semibold leading-snug text-amber-800 dark:text-amber-200">
             Not complete — do not fulfil
+          </p>
+        ) : oversold ? (
+          <p className="text-[10px] font-semibold leading-snug text-amber-800 dark:text-amber-200">
+            Oversold — do not fulfil
+          </p>
+        ) : uncovered ? (
+          <p className="text-[10px] font-semibold leading-snug text-amber-800 dark:text-amber-200">
+            Unassigned — do not fulfil
           </p>
         ) : null}
       </div>
@@ -444,14 +473,9 @@ function DealSupplierEditor({
     (line) => line.sourcingMode === "brokered" && !(drafts[line.id] ?? line.supplierKey),
   )
   const selectedKeys = [
-    ...new Set(
-      stockLines
-        .map((line) => drafts[line.id] ?? line.supplierKey)
-        .filter((key) => Boolean(key)),
-    ),
+    ...new Set(stockLines.flatMap((line) => dealLineSelectedSupplierKeys(line, drafts[line.id]))),
   ]
   const commonKey = selectedKeys.length === 1 ? selectedKeys[0] : ""
-  const splitAcrossSuppliers = stockLines.length > 1 && selectedKeys.length !== 1
   const assignedQty = stockLines.reduce((sum, line) => {
     if (drafts[line.id]) return sum + line.quantity
     return (
@@ -463,17 +487,50 @@ function DealSupplierEditor({
     )
   }, 0)
   const requiredQty = stockLines.reduce((sum, line) => sum + line.quantity, 0)
-  const placeholderName =
-    assignedQty > 0 && assignedQty < requiredQty
+  const supplierNameByKey = new Map(supplierPools.map((supplier) => [supplier.key, supplier.name]))
+  const splitSlices = dealAssignedSupplierSlices(stockLines, drafts, supplierNameByKey)
+  const splitAcrossSuppliers = selectedKeys.length > 1 || splitSlices.length > 1
+  const visibleSlices = splitAcrossSuppliers ? splitSlices : []
+  const unassignedQty = Math.max(0, requiredQty - assignedQty)
+  const oversoldUnassigned = dealIsOversoldUnassigned(
+    unassignedQty,
+    supplierPools.map((pool) => projectedBalances[pool.key] ?? 0),
+  )
+  const placeholderName = oversoldUnassigned
+    ? "No stock left"
+    : assignedQty > 0 && assignedQty < requiredQty
       ? `${assignedQty} of ${requiredQty} assigned`
-      : stockLines.find((line) => line.supplierName)?.supplierName || "Choose supplier…"
+      : "Choose supplier…"
 
   return (
-    <div className="min-w-[190px] space-y-1.5">
+    <div className="min-w-[190px] max-w-[240px] space-y-1">
       {brokeredUnassigned.length > 0 ? (
         <p className="text-[10px] leading-snug text-amber-800 dark:text-amber-200">
           Brokered stock — assign a purchased supplier to take it from buys.
         </p>
+      ) : null}
+      {oversoldUnassigned ? (
+        <p className="text-[10px] font-semibold leading-snug text-amber-800 dark:text-amber-200">
+          Oversold — do not fulfil until more stock is bought.
+        </p>
+      ) : unassignedQty > 0 ? (
+        <p className="text-[10px] font-semibold leading-snug text-amber-800 dark:text-amber-200">
+          Unassigned — do not fulfil
+        </p>
+      ) : null}
+      {visibleSlices.length > 0 ? (
+        <ul className="space-y-0.5 text-xs leading-snug">
+          {visibleSlices.map((slice) => (
+            <li key={slice.name}>
+              <span className="tabular-nums text-muted-foreground">{slice.quantity}×</span> {slice.name}
+            </li>
+          ))}
+          {unassignedQty > 0 ? (
+            <li className="text-amber-800 dark:text-amber-200">
+              <span className="tabular-nums">{unassignedQty}×</span> unassigned
+            </li>
+          ) : null}
+        </ul>
       ) : null}
       {stockLines.length > 0 ? (
         <select
@@ -482,14 +539,13 @@ function DealSupplierEditor({
           onChange={(event) => {
             for (const line of stockLines) onChange(line.id, event.target.value)
           }}
-          className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+          className={cn(
+            "w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs",
+            splitAcrossSuppliers && "text-muted-foreground",
+          )}
         >
           {splitAcrossSuppliers || !commonKey ? (
-            <option value="">
-              {splitAcrossSuppliers
-                ? `Split across ${Math.max(selectedKeys.length, 2)} suppliers — choose one`
-                : placeholderName}
-            </option>
+            <option value="">{splitAcrossSuppliers ? "Move to one supplier" : placeholderName}</option>
           ) : null}
           {supplierPools.map((supplier) => (
             <option key={supplier.key} value={supplier.key}>
@@ -984,10 +1040,23 @@ export function PackageOrdersTable({
               dealByOrderId.get(o.id) ?? (o.deal_id ? dealById.get(o.deal_id) ?? null : null)
             const party = salePartyPrimary(o, linkedDeal)
             const incomplete = saleIsIncomplete(linkedDeal, o)
+            const unassignedQty = linkedDeal
+              ? dealUnassignedPurchasedQuantity(
+                  linkedDeal.lines.filter(dealLineCanTakePurchasedSupplier),
+                  supplierDrafts,
+                )
+              : 0
+            const uncovered = Boolean(
+              linkedDeal && dealProjectsSupplierConsumption(linkedDeal) && unassignedQty > 0,
+            )
+            const oversold =
+              uncovered && saleOversoldUnassigned(unassignedQty, supplierPools, projectedBalances)
             const body = (
               <>
                 <div className="min-w-0">
-                  <p className={cn("font-semibold", href && "text-primary")}>{o.reference}</p>
+                  <p className={cn("font-semibold", href && "text-primary")}>
+                    {saleReferenceLabel(linkedDeal, o.reference)}
+                  </p>
                   <p className="mt-0.5 text-[10px] text-slate-600">
                     {saleChannelLabel(o, linkedDeal)}
                     {party !== "—" ? ` · ${party}` : ""}
@@ -997,6 +1066,10 @@ export function PackageOrdersTable({
                   </p>
                   {incomplete ? (
                     <p className="mt-1 text-[10px] font-semibold text-amber-800">Not complete — do not fulfil</p>
+                  ) : oversold ? (
+                    <p className="mt-1 text-[10px] font-semibold text-amber-800">Oversold — do not fulfil</p>
+                  ) : uncovered ? (
+                    <p className="mt-1 text-[10px] font-semibold text-amber-800">Unassigned — do not fulfil</p>
                   ) : null}
                 </div>
                 <div className="shrink-0 text-right">
@@ -1014,7 +1087,7 @@ export function PackageOrdersTable({
                   href={href}
                   className={cn(
                     "flex items-start justify-between gap-3 px-4 py-3",
-                    incomplete && "bg-amber-50/90 dark:bg-amber-950/20",
+                    (incomplete || uncovered) && "bg-amber-50/90 dark:bg-amber-950/20",
                   )}
                 >
                   {body}
@@ -1026,7 +1099,7 @@ export function PackageOrdersTable({
                 key={o.id}
                 className={cn(
                   "flex items-start justify-between gap-3 px-4 py-3",
-                  incomplete && "bg-amber-50/90 dark:bg-amber-950/20",
+                  (incomplete || uncovered) && "bg-amber-50/90 dark:bg-amber-950/20",
                 )}
               >
                 {body}
@@ -1035,17 +1108,24 @@ export function PackageOrdersTable({
           })}
           {visibleDeals.map((deal) => {
             const incomplete = saleIsIncomplete(deal)
+            const unassignedQty = dealUnassignedPurchasedQuantity(
+              deal.lines.filter(dealLineCanTakePurchasedSupplier),
+              supplierDrafts,
+            )
+            const uncovered = dealStageHoldsPurchasedStock(deal.stage) && unassignedQty > 0
+            const oversold =
+              uncovered && saleOversoldUnassigned(unassignedQty, supplierPools, projectedBalances)
             return (
             <Link
               key={deal.id}
               href={adminDealPath(deal.id)}
               className={cn(
                 "flex items-start justify-between gap-3 px-4 py-3",
-                incomplete && "bg-amber-50/90 dark:bg-amber-950/20",
+                (incomplete || uncovered) && "bg-amber-50/90 dark:bg-amber-950/20",
               )}
             >
               <div className="min-w-0">
-                <p className="font-semibold text-primary">{dealReferenceLabel(deal)}</p>
+                <p className="font-semibold text-primary">{saleReferenceLabel(deal)}</p>
                 <p className="mt-0.5 text-[10px] text-slate-600">
                   {dealChannelLabel(deal)}
                   {deal.accountName ? ` · ${deal.accountName}` : ""}
@@ -1053,6 +1133,10 @@ export function PackageOrdersTable({
                 <p className="mt-0.5 text-[8px] text-slate-400">{dealProductLabel(deal)}</p>
                 {incomplete ? (
                   <p className="mt-1 text-[10px] font-semibold text-amber-800">Not complete — do not fulfil</p>
+                ) : oversold ? (
+                  <p className="mt-1 text-[10px] font-semibold text-amber-800">Oversold — do not fulfil</p>
+                ) : uncovered ? (
+                  <p className="mt-1 text-[10px] font-semibold text-amber-800">Unassigned — do not fulfil</p>
                 ) : null}
               </div>
               <div className="shrink-0 text-right">
@@ -1117,7 +1201,16 @@ function OrderSaleRows({
 }) {
   const dealHref = adminOrderDealPath(order.deal_id) ?? (deal ? adminDealPath(deal.id) : null)
   const incomplete = saleIsIncomplete(deal, order)
+  const unassignedQty = deal
+    ? dealUnassignedPurchasedQuantity(
+        deal.lines.filter(dealLineCanTakePurchasedSupplier),
+        supplierDrafts,
+      )
+    : 0
   const canAssignDealSupplier = Boolean(deal && dealProjectsSupplierConsumption(deal))
+  const uncovered = canAssignDealSupplier && unassignedQty > 0
+  const oversold =
+    uncovered && saleOversoldUnassigned(unassignedQty, supplierPools, projectedBalances)
   const cogs = order.profit.cost_known ? order.profit.cogs : (deal?.cogs ?? null)
   const profit = order.profit.cost_known
     ? order.profit.gross_profit
@@ -1135,17 +1228,17 @@ function OrderSaleRows({
         className={cn(
           "hover:bg-muted/30",
           expanded && "bg-muted/20",
-          incomplete && "border-l-4 border-l-amber-400 bg-amber-50/80 dark:bg-amber-950/20",
+          (incomplete || uncovered) && "border-l-4 border-l-amber-400 bg-amber-50/80 dark:bg-amber-950/20",
         )}
       >
         <td className="px-3 py-3 font-mono text-xs whitespace-nowrap">
           {dealHref ? (
             <Link href={dealHref} className="text-primary hover:underline">
-              {order.reference}
+              {saleReferenceLabel(deal, order.reference)}
             </Link>
           ) : (
             <button type="button" onClick={onToggle} className="text-primary hover:underline">
-              {order.reference}
+              {saleReferenceLabel(deal, order.reference)}
             </button>
           )}
         </td>
@@ -1187,6 +1280,8 @@ function OrderSaleRows({
           label={orderPaymentLabel(order, deal)}
           tone={paymentTone(deal, order)}
           incomplete={incomplete}
+          uncovered={uncovered}
+          oversold={oversold}
         />
         <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
           {formatWhen(order.created_at)}
@@ -1243,16 +1338,23 @@ function DealSaleRows({
   const margin = profit == null || deal.totalAmount <= 0 ? deal.margin : profit / deal.totalAmount
   const incomplete = saleIsIncomplete(deal)
   const canAssignDealSupplier = dealStageHoldsPurchasedStock(deal.stage)
+  const unassignedQty = dealUnassignedPurchasedQuantity(
+    deal.lines.filter(dealLineCanTakePurchasedSupplier),
+    supplierDrafts,
+  )
+  const uncovered = canAssignDealSupplier && unassignedQty > 0
+  const oversold =
+    uncovered && saleOversoldUnassigned(unassignedQty, supplierPools, projectedBalances)
   return (
       <tr
         className={cn(
           "hover:bg-muted/30",
-          incomplete && "border-l-4 border-l-amber-400 bg-amber-50/80 dark:bg-amber-950/20",
+          (incomplete || uncovered) && "border-l-4 border-l-amber-400 bg-amber-50/80 dark:bg-amber-950/20",
         )}
       >
         <td className="px-3 py-3 font-mono text-xs whitespace-nowrap">
           <Link href={adminDealPath(deal.id)} className="text-primary hover:underline">
-            {dealReferenceLabel(deal)}
+            {saleReferenceLabel(deal)}
           </Link>
         </td>
         <td className="px-3 py-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -1295,6 +1397,8 @@ function DealSaleRows({
           label={DEAL_STAGE_LABELS[deal.stage] ?? deal.stage}
           tone={paymentTone(deal)}
           incomplete={incomplete}
+          uncovered={uncovered}
+          oversold={oversold}
         />
         <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
           {formatWhen(deal.createdAt)}

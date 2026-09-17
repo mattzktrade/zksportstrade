@@ -13,7 +13,7 @@ function pushWebpackExternal(config, external) {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   poweredByHeader: false,
-  serverExternalPackages: ["exceljs"],
+  serverExternalPackages: ["exceljs", "sharp"],
   experimental: {
     optimizePackageImports: ["lucide-react"],
     // Keep a just-visited tab in the client router so going back is instant.
@@ -84,6 +84,8 @@ const nextConfig = {
       { protocol: "https", hostname: "static.wixstatic.com", pathname: "/media/**" },
       { protocol: "https", hostname: "assets.quintevents.com", pathname: "/**" },
       { protocol: "https", hostname: "*.supabase.co", pathname: "/storage/v1/object/public/**" },
+      { protocol: "https", hostname: "www.abudhabigp.com", pathname: "/**" },
+      { protocol: "https", hostname: "abudhabigp.com", pathname: "/**" },
     ],
   },
   async headers() {

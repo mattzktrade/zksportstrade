@@ -95,6 +95,9 @@ export function EventDetailClient({ detail }: { detail: NativeEventDetail }) {
         />
         <div className="min-w-0">
           <p className="text-sm font-semibold">{event.shortName || event.name}</p>
+          {event.circuit ? (
+            <p className="mt-1 text-[11px] font-medium text-slate-700">{event.circuit}</p>
+          ) : null}
           <p className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500">
             <MapPin className="h-3.5 w-3.5" />
             {event.location}, {event.country}

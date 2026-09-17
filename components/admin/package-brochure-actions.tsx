@@ -5,22 +5,32 @@ import { Download, FileText, Loader2, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 import { createPackageBrochure } from "@/app/(admin)/admin/catalog/brochure-actions"
 import { cn } from "@/lib/utils"
+import { brochureFilename } from "@/lib/brochures/text"
 
-function brochureDownloadName(productName: string): string {
-  const slug = productName.replaceAll(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "")
-  return `${slug || "package"}-brochure.pdf`
+function brochureDownloadName(url: string | null, productName: string, eventName?: string | null): string {
+  if (url) {
+    try {
+      const last = decodeURIComponent(new URL(url, "https://zk-sports.trade").pathname.split("/").pop() ?? "")
+      if (last.toLowerCase().endsWith(".pdf") && last.toLowerCase() !== "brochure.pdf") return last
+    } catch {
+      /* use generated name */
+    }
+  }
+  return brochureFilename(productName, eventName)
 }
 
 export function PackageBrochureActions({
   packageId,
   brochureUrl,
   productName,
+  eventName,
   compact = false,
   onUrlChange,
 }: {
   packageId: string
   brochureUrl: string | null
   productName: string
+  eventName?: string | null
   compact?: boolean
   onUrlChange?: (url: string) => void
 }) {
@@ -37,7 +47,7 @@ export function PackageBrochureActions({
     const replace = attached
     if (replace) {
       const ok = window.confirm(
-        "Replace the current brochure with a new PDF built from this product's photos, description and inclusions?",
+        "Replace the current brochure with a new ZK-branded PDF from this product's photos, description and inclusions?",
       )
       if (!ok) return
     }
@@ -73,7 +83,7 @@ export function PackageBrochureActions({
           href={liveUrl}
           target="_blank"
           rel="noreferrer"
-          download={brochureDownloadName(productName)}
+          download={brochureDownloadName(liveUrl, productName, eventName)}
           className={cn(
             btn,
             compact ? compactBtn : fullBtn,

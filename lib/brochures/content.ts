@@ -1,10 +1,10 @@
 import { packageDurationLabel } from "@/lib/catalog/package-duration"
 import { isEventCategory, EVENT_CATEGORY_LABELS } from "@/lib/catalog/event-categories"
-import { brochureSafeText } from "@/lib/brochures/text"
+import { brochurePrintText, uniqueImageUrls } from "@/lib/brochures/text"
 import type { BrochureContent } from "@/lib/brochures/types"
 
 const PACKAGE_SELECT =
-  "id, race_id, name, circuit, location, country, date_range, description, image, gallery_images, includes, product_code, brochure_url, duration"
+  "id, race_id, name, circuit, location, country, date_range, description, image, gallery_images, track_map, includes, product_code, brochure_url, duration"
 
 export const BROCHURE_PACKAGE_SELECT = PACKAGE_SELECT
 
@@ -19,6 +19,7 @@ export type BrochurePackageRow = {
   description: string | null
   image: string | null
   gallery_images: unknown
+  track_map: string | null
   includes: unknown
   product_code: string | null
   brochure_url: string | null
@@ -103,13 +104,29 @@ export function brochureDateHeadline(dateRange: string | null): string | null {
   )
   if (match) {
     const month = MONTHS[match[3].toLowerCase()] ?? match[3].toUpperCase()
-    return `${match[1]} TO ${match[2]} ${month} ${match[4]}`
+    const pretty = month.charAt(0) + month.slice(1).toLowerCase()
+    return `${match[1]}-${match[2]} ${pretty} ${match[4]}`
   }
-  return brochureSafeText(raw).toUpperCase()
+  return brochurePrintText(raw)
+}
+
+export function brochureVenueLine(
+  circuit: string | null,
+  location: string | null,
+  eventName: string,
+): string | null {
+  const event = eventName.trim().toLowerCase()
+  for (const candidate of [circuit, location]) {
+    const value = candidate?.trim()
+    if (!value) continue
+    if (event && event.includes(value.toLowerCase())) continue
+    return brochurePrintText(value)
+  }
+  return null
 }
 
 export function splitProductHeadline(name: string): { lead: string; accent: string } {
-  const words = brochureSafeText(name)
+  const words = brochurePrintText(name)
     .toUpperCase()
     .split(/\s+/)
     .filter(Boolean)
@@ -118,28 +135,76 @@ export function splitProductHeadline(name: string): { lead: string; accent: stri
   return { lead: words.slice(0, -1).join(" "), accent: words[words.length - 1] ?? "" }
 }
 
-export function groupBrochureIncludes(
-  items: string[],
-  maxGroups = 4,
-): Array<{ index: string; title: string; bullets: string[] }> {
-  const clean = items.map((item) => brochureSafeText(item)).filter(Boolean)
-  if (clean.length === 0) return []
-  const groupCount = Math.min(maxGroups, clean.length)
-  const base = Math.floor(clean.length / groupCount)
-  const extra = clean.length % groupCount
-  const groups: Array<{ index: string; title: string; bullets: string[] }> = []
-  let offset = 0
-  for (let i = 0; i < groupCount; i += 1) {
-    const len = base + (i < extra ? 1 : 0)
-    const chunk = clean.slice(offset, offset + len)
-    offset += len
-    groups.push({
-      index: String(i + 1).padStart(2, "0"),
-      title: chunk[0] ?? "",
-      bullets: chunk.slice(1),
-    })
+export type BrochureIncludeItem = {
+  index: string
+  title: string
+  detail: string | null
+}
+
+export function formatBrochureIncludes(items: string[], maxItems = 8): BrochureIncludeItem[] {
+  const clean = items.map((item) => brochurePrintText(item)).filter(Boolean)
+  return clean.slice(0, maxItems).map((item, index) => {
+    const split = item.match(/^(.{3,44}?):\s+(.+)$/)
+    if (split) {
+      return {
+        index: String(index + 1).padStart(2, "0"),
+        title: split[1].trim(),
+        detail: split[2].trim(),
+      }
+    }
+    return {
+      index: String(index + 1).padStart(2, "0"),
+      title: item,
+      detail: null,
+    }
+  })
+}
+
+export function isTrackMapImageUrl(url: string): boolean {
+  return /track[\s._-]*map|circuit[\s._-]*map|layout[\s._-]*map/i.test(url)
+}
+
+export function resolveTrackMapUrl(
+  explicit: string | null | undefined,
+  heroUrl: string | null,
+  galleryUrls: string[],
+): string | null {
+  const direct = explicit?.trim()
+  if (direct) return direct
+  for (const url of [heroUrl, ...galleryUrls]) {
+    if (url && isTrackMapImageUrl(url)) return url.trim()
   }
-  return groups
+  return null
+}
+
+export function brochurePhotoUrls(heroUrl: string | null, galleryUrls: string[], trackMapUrl: string | null): string[] {
+  const skip = trackMapUrl?.trim() ?? ""
+  return uniqueImageUrls(heroUrl, galleryUrls).filter((url) => url !== skip && !isTrackMapImageUrl(url))
+}
+
+export function brochureCircuitHeadline(): { lead: string; accent: string } {
+  return splitProductHeadline("The details")
+}
+
+export function brochureCircuitFacts(content: BrochureContent): Array<{ label: string; value: string }> {
+  const facts: Array<{ label: string; value: string }> = []
+  const event = brochurePrintText(content.raceName)
+  if (event) facts.push({ label: "Event", value: event })
+
+  const circuit = brochurePrintText(content.circuit ?? "")
+  if (circuit && circuit.toLowerCase() !== event.toLowerCase()) {
+    facts.push({ label: "Circuit", value: circuit })
+  }
+
+  const placeParts = [content.location, content.country]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))
+    .filter((value, index, all) => all.findIndex((item) => item.toLowerCase() === value.toLowerCase()) === index)
+  const place = brochurePrintText(placeParts.join(", "))
+  if (place) facts.push({ label: "Location", value: place })
+
+  if (content.dateHeadline) facts.push({ label: "Dates", value: content.dateHeadline })
+  return facts
 }
 
 export function brochureContentFromPackage(
@@ -150,6 +215,11 @@ export function brochureContentFromPackage(
   const gallery = asStringList(row.gallery_images)
   const hero = typeof row.image === "string" && row.image.trim() ? row.image.trim() : null
   const resolvedRace = raceName.trim() || row.circuit?.trim() || "Grand Prix"
+  const trackMapUrl = resolveTrackMapUrl(
+    typeof row.track_map === "string" ? row.track_map : null,
+    hero,
+    gallery,
+  )
   return {
     packageId: row.id,
     productName: row.name.trim() || "Hospitality package",
@@ -164,6 +234,7 @@ export function brochureContentFromPackage(
     productCode: row.product_code?.trim() || null,
     heroUrl: hero,
     galleryUrls: gallery,
+    trackMapUrl,
     eventFamily: brochureEventFamily(resolvedRace, category),
     placeHeadline: brochurePlaceHeadline(resolvedRace, row.location, row.country),
     dateHeadline: brochureDateHeadline(row.date_range),

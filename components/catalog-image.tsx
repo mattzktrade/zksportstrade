@@ -3,6 +3,7 @@ import {
   toDisplayImageUrl,
   type CatalogImageVariant,
 } from "@/lib/images/display-image-url"
+import { canOptimizeCatalogImage } from "@/lib/images/next-image-host"
 import { cn } from "@/lib/utils"
 
 type CatalogImageProps = Omit<ImageProps, "src"> & {
@@ -13,6 +14,7 @@ type CatalogImageProps = Omit<ImageProps, "src"> & {
 
 /**
  * Cover-style catalog image: CDN-sized sources + Next.js responsive WebP/AVIF.
+ * Unlisted remote hosts render as a native img so unknown gallery URLs never crash.
  */
 export function CatalogImage({
   src,
@@ -34,6 +36,22 @@ export function CatalogImage({
           ? "100vw"
           : "(max-width: 1024px) 100vw, (max-width: 1280px) 50vw, 33vw"
       : undefined)
+
+  if (!canOptimizeCatalogImage(displaySrc)) {
+    const { width, height, style, loading } = rest
+    return (
+      <img
+        src={displaySrc}
+        alt={alt ?? ""}
+        width={fill ? undefined : width}
+        height={fill ? undefined : height}
+        loading={loading}
+        decoding="async"
+        className={cn(fill && "absolute inset-0 h-full w-full", className)}
+        style={style}
+      />
+    )
+  }
 
   return (
     <Image

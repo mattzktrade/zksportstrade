@@ -1,14 +1,22 @@
 ---
-description: Product brochure PDFs are a first draft; do not polish unless Matt asks to revisit
+description: Product brochure PDFs use a fixed ZK template; do not invent copy or images
 alwaysApply: true
 ---
 
-# Brochure design — revisit later
+# Brochure design
 
-Admin can generate a product brochure PDF from Sales list and the product page. Matt reviewed it on 1 Sep 2026 and said the template is not good enough. Leave this until he asks to revisit.
+Admin can generate a landscape product brochure PDF from Sales list and the product page.
 
-When he does:
-- Target is his landscape dark designs: black/white/ZK red (`#F90202`), diagonal split, condensed all-caps type, full-bleed photography
+Rules:
+- Universal black / white / ZK red (`#F90202`) template in `public/images/brochures/template-bg.png`
+- Do not put the ZK logo lockup, the red ZK mark, or "Official F1 Paddock Club Distributor" on the pages
+- Cover headline is the package name, with the event underneath and the circuit/location as small supporting text
+- Page 2 is titled What's Included and shows the experience copy plus at-a-glance inclusions
+- What's Included uses the 3-photo column when the product has 5 or fewer unique photos, and the 5-photo column (hero plus a 2×2) when it has 6 or more
+- Page 3 is only created when the product has a track map image; title it The Details, show the full map uncropped, and keep location copy factual
+- Black footer bar with a red line along the top and the page number on the right; no zk-sports.com address
+- Photography-led, short readable copy — do not invent itineraries, partner logos, or prices
+- Refuse to generate without at least 3 unique photos; prompt staff to add them
+- Refuse to generate without a short description and at least 4 inclusions, unless the product is a standard F1 Paddock Club or Champions Club programme whose official copy we already store
 - Keep generation CMS-staff only; portal clients may download an attached file, not create one
-- Do not invent itineraries, partner logos, or prices
 - Work lives in `lib/brochures/`, `components/admin/package-brochure-actions.tsx`, and `app/(admin)/admin/catalog/brochure-actions.ts`

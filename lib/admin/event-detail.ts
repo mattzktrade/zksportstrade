@@ -10,6 +10,7 @@ import {
 } from "@/lib/admin/package-sales-breakdown"
 import { getPackageSalesBreakdownByPackage } from "@/lib/admin/package-sales-breakdown-queries"
 import { isEventCategory, type EventCategory } from "@/lib/catalog/event-categories"
+import { officialCircuitNameForRaceId, isMissingRaceCircuitColumnError } from "@/lib/catalog/race-circuit"
 import { packageDurationLabel } from "@/lib/catalog/package-duration"
 import { adminDealPath, adminOrderDealPath } from "@/lib/admin/deal-link"
 import { getDealsForPackages } from "@/lib/crm/deals"
@@ -21,6 +22,7 @@ export type NativeEventDetailEvent = {
   category: EventCategory
   name: string
   shortName: string
+  circuit: string
   location: string
   country: string
   countryCode: string
@@ -106,13 +108,16 @@ export async function getNativeEventDetail(eventId: string): Promise<NativeEvent
   const id = eventId.trim()
   if (!id) return null
   const supabase = await createClient()
-  const { data: race, error: raceError } = await supabase
-    .from("races")
-    .select(
-      "id, name, short_name, location, country, country_code, event_date, date_range, image, season, category, is_archived",
-    )
-    .eq("id", id)
-    .maybeSingle()
+  const withCircuit =
+    "id, name, short_name, circuit, location, country, country_code, event_date, date_range, image, season, category, is_archived"
+  const withoutCircuit =
+    "id, name, short_name, location, country, country_code, event_date, date_range, image, season, category, is_archived"
+  let { data: race, error: raceError } = await supabase.from("races").select(withCircuit).eq("id", id).maybeSingle()
+  if (raceError && isMissingRaceCircuitColumnError(raceError.message)) {
+    const retry = await supabase.from("races").select(withoutCircuit).eq("id", id).maybeSingle()
+    race = retry.data
+    raceError = retry.error
+  }
   if (raceError || !race) return null
 
   const { data: packageRows } = await supabase
@@ -335,6 +340,7 @@ export async function getNativeEventDetail(eventId: string): Promise<NativeEvent
       category: isEventCategory(String(race.category)) ? (race.category as EventCategory) : "other",
       name: String(race.name),
       shortName: String(race.short_name),
+      circuit: String(race.circuit ?? "").trim() || officialCircuitNameForRaceId(String(race.id)) || "",
       location: String(race.location),
       country: String(race.country),
       countryCode: String(race.country_code ?? ""),

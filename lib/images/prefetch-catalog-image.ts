@@ -3,6 +3,7 @@ import {
   toDisplayImageUrl,
   type CatalogImageVariant,
 } from "@/lib/images/display-image-url"
+import { canOptimizeCatalogImage } from "@/lib/images/next-image-host"
 
 const VARIANT_LAYOUT: Record<
   CatalogImageVariant,
@@ -19,6 +20,12 @@ const VARIANT_LAYOUT: Record<
 
 const prefetched = new Set<string>()
 
+function warmBrowserCache(src: string, srcSet?: string) {
+  const img = new window.Image()
+  if (srcSet) img.srcset = srcSet
+  img.src = src
+}
+
 /** Warm the browser + Next image optimizer cache for a catalog URL. */
 export function prefetchCatalogImage(
   src: string | null | undefined,
@@ -30,19 +37,25 @@ export function prefetchCatalogImage(
   if (displaySrc === "/placeholder.svg" || prefetched.has(displaySrc)) return
   prefetched.add(displaySrc)
 
-  const layout = VARIANT_LAYOUT[variant]
-  const { props } = getImageProps({
-    src: displaySrc,
-    alt: "",
-    width: layout.width,
-    height: layout.height,
-    sizes: layout.sizes,
-    quality: 75,
-  })
+  if (!canOptimizeCatalogImage(displaySrc)) {
+    warmBrowserCache(displaySrc)
+    return
+  }
 
-  const img = new window.Image()
-  if (props.srcSet) img.srcset = props.srcSet
-  if (typeof props.src === "string") img.src = props.src
+  const layout = VARIANT_LAYOUT[variant]
+  try {
+    const { props } = getImageProps({
+      src: displaySrc,
+      alt: "",
+      width: layout.width,
+      height: layout.height,
+      sizes: layout.sizes,
+      quality: 75,
+    })
+    warmBrowserCache(typeof props.src === "string" ? props.src : displaySrc, props.srcSet)
+  } catch {
+    warmBrowserCache(displaySrc)
+  }
 }
 
 export function prefetchCatalogImages(

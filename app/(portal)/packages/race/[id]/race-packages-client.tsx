@@ -12,8 +12,15 @@ import {
   stepAllowedGuestCount,
 } from "@/lib/catalog/booking-guests"
 import { nameIncludesDurationLabel, packageDurationLabel } from "@/lib/catalog/package-duration"
-import { ArrowLeft, MapPin, Calendar, Check, ArrowRight, ChevronDown, Minus, Plus } from "lucide-react"
+import {
+  filterPortalPackages,
+  groupPortalPackages,
+  portalPackageDurationFilters,
+  portalPackageFamilyFilters,
+} from "@/lib/catalog/portal-package-list"
+import { ArrowLeft, MapPin, Calendar, Check, ArrowRight, ChevronDown, Minus, Plus, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { pageSearchProps } from "@/lib/browser/laptop-qol"
 
 const DEFAULT_PACKAGE_DESCRIPTION =
   "Experience the ultimate Formula 1 hospitality with this premium package. Enjoy exclusive access to the paddock area, world-class dining, and unforgettable moments with the sport's elite. This package includes all race weekend sessions - Friday practice, Saturday qualifying, and Sunday's main event."
@@ -44,6 +51,26 @@ export function RacePackagesClient({
   highlightPackageId?: string
 }) {
   const [expandedPackage, setExpandedPackage] = useState<string | null>(null)
+  const [search, setSearch] = useState("")
+  const [inStockOnly, setInStockOnly] = useState(false)
+  const [durationFilter, setDurationFilter] = useState("")
+  const [familyFilter, setFamilyFilter] = useState("")
+
+  const durationFilters = useMemo(() => portalPackageDurationFilters(racePackages), [racePackages])
+  const familyFilters = useMemo(() => portalPackageFamilyFilters(racePackages), [racePackages])
+  const filteredPackages = useMemo(
+    () =>
+      filterPortalPackages(racePackages, {
+        query: search,
+        inStockOnly,
+        duration: durationFilter,
+        family: familyFilter,
+      }),
+    [racePackages, search, inStockOnly, durationFilter, familyFilter],
+  )
+  const packageGroups = useMemo(() => groupPortalPackages(filteredPackages), [filteredPackages])
+  const showGroupHeaders = packageGroups.length > 1
+  const filtersActive = Boolean(search.trim() || inStockOnly || durationFilter || familyFilter)
 
   useEffect(() => {
     if (!highlightPackageId) return
@@ -112,18 +139,88 @@ export function RacePackagesClient({
 
         {/* Packages Section */}
         <div>
-          <div className="flex items-center justify-between mb-4 sm:mb-6">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-bold text-foreground">Available Packages</h2>
-              <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-                {racePackages.length} package{racePackages.length !== 1 ? "s" : ""} available
-              </p>
+          <div className="flex flex-col gap-4 mb-4 sm:mb-6">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <h2 className="text-xl sm:text-2xl font-bold text-foreground">Available Packages</h2>
+                <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+                  {filtersActive
+                    ? `${filteredPackages.length} of ${racePackages.length} package${racePackages.length !== 1 ? "s" : ""}`
+                    : `${racePackages.length} package${racePackages.length !== 1 ? "s" : ""}`}
+                </p>
+              </div>
+              {racePackages.length > 0 ? (
+                <div className="relative w-full max-w-md">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="text"
+                    {...pageSearchProps}
+                    placeholder="Search packages..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="w-full rounded-xl border border-border bg-card py-2 pl-10 pr-4 text-sm transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 sm:py-2.5"
+                  />
+                </div>
+              ) : null}
             </div>
+            {racePackages.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setInStockOnly((value) => !value)}
+                  className={cn(
+                    "h-8 rounded-full border px-3 text-xs font-semibold transition-colors",
+                    inStockOnly
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-border bg-card text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  In stock
+                </button>
+                {durationFilters.length > 1
+                  ? durationFilters.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() =>
+                          setDurationFilter((current) => (current === option.value ? "" : option.value))
+                        }
+                        className={cn(
+                          "h-8 rounded-full border px-3 text-xs font-semibold transition-colors",
+                          durationFilter === option.value
+                            ? "border-foreground bg-foreground text-background"
+                            : "border-border bg-card text-muted-foreground hover:bg-muted",
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    ))
+                  : null}
+                {familyFilters.length > 1 ? (
+                  <select
+                    value={familyFilter}
+                    onChange={(e) => setFamilyFilter(e.target.value)}
+                    className="h-8 max-w-[220px] rounded-full border border-border bg-card px-3 text-xs font-semibold text-foreground"
+                  >
+                    <option value="">All types</option>
+                    {familyFilters.map((family) => (
+                      <option key={family} value={family}>
+                        {family}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           {racePackages.length === 0 ? (
             <div className="bg-card border border-border rounded-2xl p-8 sm:p-12 text-center">
               <p className="text-sm sm:text-base text-muted-foreground">No packages available for this race.</p>
+            </div>
+          ) : filteredPackages.length === 0 ? (
+            <div className="bg-card border border-border rounded-2xl p-8 sm:p-12 text-center">
+              <p className="text-sm sm:text-base text-muted-foreground">No packages match that search.</p>
             </div>
           ) : (
             <div className="bg-card rounded-2xl border border-border overflow-hidden">
@@ -137,14 +234,28 @@ export function RacePackagesClient({
 
               {/* Packages List */}
               <div className="divide-y divide-border">
-                {racePackages.map((pkg) => (
-                  <PackageRow
-                    key={pkg.id}
-                    pkg={pkg}
-                    rowId={`package-${pkg.id}`}
-                    isExpanded={expandedPackage === pkg.id}
-                    onToggle={() => setExpandedPackage(expandedPackage === pkg.id ? null : pkg.id)}
-                  />
+                {packageGroups.map((group) => (
+                  <div key={group.family} className="divide-y divide-border">
+                    {showGroupHeaders ? (
+                      <div className="flex items-center justify-between gap-3 bg-muted/50 px-3 py-2.5 sm:px-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          {group.family}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {group.packages.length}
+                        </p>
+                      </div>
+                    ) : null}
+                    {group.packages.map((pkg) => (
+                      <PackageRow
+                        key={pkg.id}
+                        pkg={pkg}
+                        rowId={`package-${pkg.id}`}
+                        isExpanded={expandedPackage === pkg.id}
+                        onToggle={() => setExpandedPackage(expandedPackage === pkg.id ? null : pkg.id)}
+                      />
+                    ))}
+                  </div>
                 ))}
               </div>
             </div>
@@ -187,8 +298,12 @@ function PackageRow({
     const extras = (pkg.galleryImages ?? []).filter(
       (u) => typeof u === "string" && u.trim().length > 0 && u.trim() !== primaryImage,
     )
-    return [primaryImage, ...extras.map((u) => u.trim())]
-  }, [pkg.image, pkg.galleryImages])
+    const images = [primaryImage, ...extras.map((u) => u.trim())]
+    const trackMap = pkg.trackMap?.trim() || ""
+    if (trackMap && !images.includes(trackMap)) images.push(trackMap)
+    return images
+  }, [pkg.image, pkg.galleryImages, pkg.trackMap])
+  const trackMapUrl = pkg.trackMap?.trim() || ""
 
   const preloadGallery = useCallback(() => {
     prefetchCatalogImages(packageImages, "card")
@@ -288,6 +403,7 @@ function PackageRow({
                   selectedIndex={selectedImageIndex}
                   onSelectIndex={setSelectedImageIndex}
                   warmCache
+                  containUrls={trackMapUrl ? [trackMapUrl] : undefined}
                   className="w-full aspect-[16/10] xl:aspect-auto xl:h-[380px]"
                 />
               </div>

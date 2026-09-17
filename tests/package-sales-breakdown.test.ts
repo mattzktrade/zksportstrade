@@ -301,3 +301,33 @@ test("native deal orders count as offline sales, not portal", () => {
   assert.match(orderQueries, /\n  channel,/)
   assert.match(orderQueries, /crm_account_id/)
 })
+
+test("package sales list shows the deal DL reference instead of the ZK order number", () => {
+  const table = readFileSync("components/admin/package-orders-table.tsx", "utf8")
+  assert.match(table, /function saleReferenceLabel/)
+  assert.match(
+    table,
+    /return deal\?\.reference\?\.trim\(\) \|\| fallback\?\.trim\(\) \|\| "—"/,
+  )
+  assert.match(table, /saleReferenceLabel\(deal, order\.reference\)/)
+  assert.match(table, /saleReferenceLabel\(linkedDeal, o\.reference\)/)
+  assert.doesNotMatch(table, /isPortalDealSource\(deal\.source\) && deal\.orderReference/)
+})
+
+test("package sales list shows split supplier quantities as a compact list", () => {
+  const table = readFileSync("components/admin/package-orders-table.tsx", "utf8")
+  assert.match(table, /dealAssignedSupplierSlices/)
+  assert.match(table, /splitSlices.length > 1/)
+  assert.match(table, /Move to one supplier/)
+  assert.match(table, /\{slice.quantity\}×/)
+  assert.doesNotMatch(table, /This booking is split:/)
+  assert.doesNotMatch(table, /Assign to one/)
+  assert.doesNotMatch(table, /stockLines.length > 1 && selectedKeys.length !== 1/)
+})
+
+test("paid uncovered deals warn they are oversold and should not be fulfilled", () => {
+  const table = readFileSync("components/admin/package-orders-table.tsx", "utf8")
+  assert.match(table, /Oversold — do not fulfil until more stock is bought/)
+  assert.match(table, /Unassigned — do not fulfil/)
+  assert.match(table, /No stock left/)
+})

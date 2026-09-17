@@ -15,6 +15,7 @@ import {
 } from "@/lib/catalog/event-categories"
 import { findPackageTemplate, PACKAGE_TEMPLATES } from "@/lib/catalog/package-templates"
 import { PACKAGE_DURATION_OPTIONS } from "@/lib/catalog/package-duration"
+import { packageEventDefaultsFromRace } from "@/lib/catalog/race-circuit"
 import { CatalogImageField } from "@/components/admin/catalog-image-field"
 
 const NEW_EVENT_ID = "__new__"
@@ -73,6 +74,7 @@ export function CatalogNewPackage({
   const [description, setDescription] = useState("")
   const [image, setImage] = useState("")
   const [galleryText, setGalleryText] = useState("")
+  const [trackMap, setTrackMap] = useState("")
   const [includesText, setIncludesText] = useState("")
   const [tradePrice, setTradePrice] = useState("")
   const [isEnquiry, setIsEnquiry] = useState(false)
@@ -100,13 +102,14 @@ export function CatalogNewPackage({
   )
 
   function applyRaceDefaults(race: AdminRaceOption) {
-    setLocation(race.location)
-    setCountry(race.country)
-    setCountryCode(race.country_code)
-    setDateRange(race.date_range)
-    setEventDate(String(race.event_date).slice(0, 10))
-    setCircuit(race.name)
-    setImage(race.image ?? "")
+    const defaults = packageEventDefaultsFromRace(race)
+    setLocation(defaults.location)
+    setCountry(defaults.country)
+    setCountryCode(defaults.countryCode)
+    setDateRange(defaults.dateRange)
+    setEventDate(defaults.eventDate)
+    setCircuit(defaults.circuit)
+    setImage(defaults.image)
   }
 
   function clearEventDefaults() {
@@ -252,6 +255,10 @@ export function CatalogNewPackage({
           toast.error("Location, country, and country code are required for a new event.")
           return
         }
+        if (!circuit.trim()) {
+          toast.error(isFormula1 ? "Circuit is required." : "Venue is required.")
+          return
+        }
         if (!eventDate.trim() || !dateRange.trim()) {
           toast.error("Event date and date range are required for a new event.")
           return
@@ -263,6 +270,10 @@ export function CatalogNewPackage({
       }
       if (isFormula1 && !duration.trim()) {
         toast.error("Choose a duration (linked day splits).")
+        return
+      }
+      if (!circuit.trim()) {
+        toast.error(isFormula1 ? "Circuit is required." : "Venue is required.")
         return
       }
       const price = parsePrice()
@@ -326,6 +337,7 @@ export function CatalogNewPackage({
           category: eventCategory,
           name: newEventName.trim(),
           shortName: newEventShortName.trim(),
+          circuit: circuit.trim(),
           location: location.trim(),
           country: country.trim(),
           countryCode: countryCode.trim(),
@@ -344,7 +356,7 @@ export function CatalogNewPackage({
       const res = await createPackage({
         race_id: packageRaceId,
         name: name.trim(),
-        circuit: circuit.trim() || newEventName.trim() || name.trim(),
+        circuit: circuit.trim(),
         location: location.trim(),
         country: country.trim(),
         country_code: countryCode.trim(),
@@ -353,6 +365,7 @@ export function CatalogNewPackage({
         description: description.trim(),
         image: image.trim() || null,
         gallery_images: linesToList(galleryText),
+        track_map: trackMap.trim() || null,
         currency: "USD",
         total_capacity: 0,
         duration,
@@ -597,12 +610,12 @@ export function CatalogNewPackage({
         </label>
 
         <label className="block text-xs text-muted-foreground">
-          {isFormula1 ? "Circuit / listing title" : "Venue / listing title"}
+          {isFormula1 ? "Circuit" : "Venue"}
           <input
             value={circuit}
             onChange={(e) => setCircuit(e.target.value)}
             className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            placeholder={isFormula1 ? undefined : "All England Lawn Tennis Club"}
+            placeholder={isFormula1 ? "Albert Park Circuit" : "All England Lawn Tennis Club"}
           />
         </label>
 
@@ -872,6 +885,12 @@ export function CatalogNewPackage({
             placeholder="https://…"
           />
         </label>
+        <div className="sm:col-span-2 space-y-1">
+          <CatalogImageField label="Track map" value={trackMap} onChange={setTrackMap} />
+          <p className="text-[11px] text-muted-foreground/80">
+            Optional circuit layout. Shown on the product page and as brochure page 3.
+          </p>
+        </div>
         <label className="block text-xs text-muted-foreground sm:col-span-2">
           Description (portal package detail)
           <textarea

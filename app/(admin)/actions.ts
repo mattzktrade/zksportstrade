@@ -12,6 +12,13 @@ import { generatePackageIdFromRaceAndName } from "@/lib/catalog/generate-package
 import { isPaddockClubPackageName } from "@/lib/catalog/paddock-club"
 import { inferPackageDurationFromName, isValidPackageDuration } from "@/lib/catalog/package-duration"
 import { isEventCategory, type EventCategory } from "@/lib/catalog/event-categories"
+import {
+  eventSharedFieldsChanged,
+  isMissingRaceCircuitColumnError,
+  officialCircuitNameForRaceId,
+  packageEventDefaultsFromRace,
+  resolvePackageCircuitInput,
+} from "@/lib/catalog/race-circuit"
 import { sendBookingApprovalRejectedEmail } from "@/lib/email/send-booking-approval-rejected"
 import { executeBookingApproval } from "@/lib/booking-approval/execute-approval"
 import { mapPlaceOrderError } from "@/lib/orders/place-order-errors"
@@ -707,6 +714,7 @@ export async function updatePackageFields(input: {
   requires_booking_approval?: boolean
   sort_order: number
   brochure_url: string | null
+  track_map?: string | null
 }): Promise<ActionResult> {
   const gate = await requireAdminAction()
   if (!gate.ok) return gate
@@ -725,6 +733,7 @@ export async function updatePackageFields(input: {
   const brochure = sanitizeHttpsUrl(input.brochure_url)
   const image = normalizeCatalogImageUrl(sanitizeHttpsUrl(input.image))
   const gallery = normalizeCatalogImageUrlList(sanitizeHttpsUrlList(input.gallery_images))
+  const trackMap = normalizeCatalogImageUrl(sanitizeHttpsUrl(input.track_map))
   const desc = input.description.trim()
   const cc = input.country_code.trim().toUpperCase().slice(0, 8)
 
@@ -772,6 +781,7 @@ export async function updatePackageFields(input: {
       featured: input.featured,
       sort_order: Math.floor(Number(input.sort_order)) || 0,
       brochure_url: brochure,
+      track_map: trackMap,
     })
     .eq("id", id)
 
@@ -1285,6 +1295,7 @@ export async function createPackage(input: {
   requires_booking_approval?: boolean
   sort_order: number
   brochure_url: string | null
+  track_map?: string | null
   product_code?: string | null
   /**
    * Optional pre-existing Salesforce Product2 Id (18-char, starts with 01t).
@@ -1313,13 +1324,60 @@ export async function createPackage(input: {
   const { supabase } = gate
 
   const raceId = input.race_id.trim()
-  const { data: race, error: rErr } = await supabase
-    .from("races")
-    .select("id, category, image")
-    .eq("id", raceId)
-    .maybeSingle()
+  const withCircuit =
+    "id, name, category, image, circuit, location, country, country_code, event_date, date_range"
+  const withoutCircuit = "id, name, category, image, location, country, country_code, event_date, date_range"
+  let { data: race, error: rErr } = await supabase.from("races").select(withCircuit).eq("id", raceId).maybeSingle()
+  if (rErr && isMissingRaceCircuitColumnError(rErr.message)) {
+    const retry = await supabase.from("races").select(withoutCircuit).eq("id", raceId).maybeSingle()
+    race = retry.data
+    rErr = retry.error
+  }
   if (rErr) return { ok: false, message: rErr.message }
   if (!race) return { ok: false, message: "Event not found." }
+
+  const raceRow = race as {
+    id: string
+    name?: string | null
+    category?: string | null
+    image?: string | null
+    circuit?: string | null
+    location?: string | null
+    country?: string | null
+    country_code?: string | null
+    event_date?: string | null
+    date_range?: string | null
+  }
+  const eventDefaults = packageEventDefaultsFromRace({
+    id: raceId,
+    name: String(raceRow.name ?? ""),
+    circuit: raceRow.circuit ?? null,
+    location: String(raceRow.location ?? ""),
+    country: String(raceRow.country ?? ""),
+    country_code: String(raceRow.country_code ?? ""),
+    event_date: String(raceRow.event_date ?? ""),
+    date_range: String(raceRow.date_range ?? ""),
+    image: raceRow.image ?? null,
+  })
+  const circuit = resolvePackageCircuitInput(input.circuit, {
+    id: raceId,
+    name: String(raceRow.name ?? ""),
+    circuit: raceRow.circuit ?? null,
+    location: String(raceRow.location ?? ""),
+  })
+  const location = input.location.trim() || eventDefaults.location
+  const country = input.country.trim() || eventDefaults.country
+  const eventDate = input.event_date.trim() || eventDefaults.eventDate
+  const dateRange = input.date_range.trim() || eventDefaults.dateRange
+  if (!circuit) {
+    return {
+      ok: false,
+      message:
+        String(raceRow.category ?? "formula_1") === "formula_1"
+          ? "Circuit is required. Set it on the event, then create the product."
+          : "Venue is required. Set it on the event, then create the product.",
+    }
+  }
 
   const manualId = input.id?.trim().toLowerCase().replace(/\s+/g, "-") ?? ""
   let id = manualId || generatePackageIdFromRaceAndName(raceId, input.name.trim())
@@ -1369,7 +1427,8 @@ export async function createPackage(input: {
   )
   const image = normalizeCatalogImageUrl(sanitizeHttpsUrl(input.image)) || raceImage
   const gallery = normalizeCatalogImageUrlList(sanitizeHttpsUrlList(input.gallery_images))
-  const cc = input.country_code.trim().toUpperCase().slice(0, 8)
+  const trackMap = normalizeCatalogImageUrl(sanitizeHttpsUrl(input.track_map))
+  const cc = (input.country_code.trim() || eventDefaults.countryCode).toUpperCase().slice(0, 8)
 
   let issuedAt: string | null = null
   if (input.initial_issued_at && input.initial_issued_at.trim()) {
@@ -1427,15 +1486,16 @@ export async function createPackage(input: {
     id,
     race_id: raceId,
     name: input.name.trim(),
-    circuit: input.circuit.trim(),
-    location: input.location.trim(),
-    country: input.country.trim(),
+    circuit,
+    location,
+    country,
     country_code: cc,
-    event_date: input.event_date.trim(),
-    date_range: input.date_range.trim(),
+    event_date: eventDate,
+    date_range: dateRange,
     description: input.description.trim(),
     image,
     gallery_images: gallery,
+    track_map: trackMap,
     currency: (input.currency.trim() || "USD").slice(0, 8),
     total_capacity: cap,
     is_enquiry: input.is_enquiry,
@@ -4106,6 +4166,7 @@ export type NativeEventInput = {
   category: EventCategory
   name: string
   shortName: string
+  circuit: string
   location: string
   country: string
   countryCode: string
@@ -4127,7 +4188,10 @@ function nativeEventId(name: string, season: number): string {
   return `${slug}-${season}`
 }
 
-function validateNativeEvent(input: NativeEventInput):
+function validateNativeEvent(
+  input: NativeEventInput,
+  raceId?: string,
+):
   | { ok: true; value: NativeEventInput }
   | { ok: false; message: string } {
   const name = input.name.trim()
@@ -4143,9 +4207,20 @@ function validateNativeEvent(input: NativeEventInput):
   }
   const image = sanitizeHttpsUrl(input.image) ?? "/placeholder.svg"
   const season = Math.floor(Number(input.season))
+  const generatedId = nativeEventId(name, Number.isFinite(season) ? season : 0)
+  const circuit =
+    input.circuit.trim() ||
+    officialCircuitNameForRaceId(raceId?.trim() || generatedId) ||
+    ""
 
   if (!isEventCategory(category)) return { ok: false, message: "Select a valid event category." }
   if (!name || !shortName) return { ok: false, message: "Event name and short name are required." }
+  if (!circuit) {
+    return {
+      ok: false,
+      message: category === "formula_1" ? "Circuit is required." : "Venue is required.",
+    }
+  }
   if (!location || !country || !countryCode) {
     return { ok: false, message: "Location, country and country code are required." }
   }
@@ -4159,16 +4234,33 @@ function validateNativeEvent(input: NativeEventInput):
 
   return {
     ok: true,
-    value: { category, name, shortName, location, country, countryCode, eventDate, dateRange, image, season },
+    value: {
+      category,
+      name,
+      shortName,
+      circuit,
+      location,
+      country,
+      countryCode,
+      eventDate,
+      dateRange,
+      image,
+      season,
+    },
   }
 }
 
-function revalidateNativeEventPaths(): void {
+function revalidateNativeEventPaths(raceId?: string): void {
   revalidatePath("/admin/catalog/events")
   revalidatePath("/admin/catalog")
   revalidatePath("/admin/inventory/sales-list")
   revalidatePath("/packages")
   revalidatePath("/")
+  const id = raceId?.trim()
+  if (id) {
+    revalidatePath(`/admin/catalog/events/${encodeURIComponent(id)}`)
+    revalidatePackagePaths(id)
+  }
 }
 
 export async function createNativeEvent(
@@ -4186,11 +4278,12 @@ export async function createNativeEvent(
   const { data: existing } = await gate.supabase.from("races").select("id").eq("id", id).maybeSingle()
   if (existing) return { ok: false, message: "An event with this name and season already exists." }
 
-  const { error } = await gate.supabase.from("races").insert({
+  const insertRow = {
     id,
     category: value.category,
     name: value.name,
     short_name: value.shortName,
+    circuit: value.circuit,
     location: value.location,
     country: value.country,
     country_code: value.countryCode,
@@ -4200,10 +4293,16 @@ export async function createNativeEvent(
     season: value.season,
     is_archived: false,
     updated_at: new Date().toISOString(),
-  })
+  }
+  let { error } = await gate.supabase.from("races").insert(insertRow)
+  if (error && isMissingRaceCircuitColumnError(error.message)) {
+    const { circuit: _circuit, ...withoutCircuit } = insertRow
+    const retry = await gate.supabase.from("races").insert(withoutCircuit)
+    error = retry.error
+  }
   if (error) return { ok: false, message: error.message }
 
-  revalidateNativeEventPaths()
+  revalidateNativeEventPaths(id)
   return { ok: true, message: "Event created.", eventId: id }
 }
 
@@ -4216,29 +4315,95 @@ export async function updateNativeEvent(
   const id = raceId.trim()
   if (!id) return { ok: false, message: "Event ID is missing." }
 
-  const checked = validateNativeEvent(input)
+  const checked = validateNativeEvent(input, id)
   if (!checked.ok) return checked
   const value = checked.value
-  const { error } = await gate.supabase
+
+  let existingResult = await gate.supabase
     .from("races")
-    .update({
-      category: value.category,
-      name: value.name,
-      short_name: value.shortName,
-      location: value.location,
-      country: value.country,
-      country_code: value.countryCode,
-      event_date: value.eventDate,
-      date_range: value.dateRange,
-      image: value.image,
-      season: value.season,
-      updated_at: new Date().toISOString(),
-    })
+    .select("circuit, location, country, country_code, event_date, date_range")
     .eq("id", id)
+    .maybeSingle()
+  if (existingResult.error && isMissingRaceCircuitColumnError(existingResult.error.message)) {
+    existingResult = await gate.supabase
+      .from("races")
+      .select("location, country, country_code, event_date, date_range")
+      .eq("id", id)
+      .maybeSingle()
+  }
+  if (existingResult.error) return { ok: false, message: existingResult.error.message }
+  if (!existingResult.data) return { ok: false, message: "Event not found." }
+  const existing = existingResult.data as {
+    circuit?: string | null
+    location: string
+    country: string
+    country_code: string
+    event_date: string
+    date_range: string
+  }
+
+  const racePatch = {
+    category: value.category,
+    name: value.name,
+    short_name: value.shortName,
+    circuit: value.circuit,
+    location: value.location,
+    country: value.country,
+    country_code: value.countryCode,
+    event_date: value.eventDate,
+    date_range: value.dateRange,
+    image: value.image,
+    season: value.season,
+    updated_at: new Date().toISOString(),
+  }
+  let { error } = await gate.supabase.from("races").update(racePatch).eq("id", id)
+  if (error && isMissingRaceCircuitColumnError(error.message)) {
+    const { circuit: _circuit, ...withoutCircuit } = racePatch
+    const retry = await gate.supabase.from("races").update(withoutCircuit).eq("id", id)
+    error = retry.error
+  }
   if (error) return { ok: false, message: error.message }
 
-  revalidateNativeEventPaths()
-  return { ok: true, message: "Event updated." }
+  const sharedChanged = eventSharedFieldsChanged(
+    {
+      circuit: existing.circuit,
+      location: String(existing.location ?? ""),
+      country: String(existing.country ?? ""),
+      country_code: String(existing.country_code ?? ""),
+      event_date: String(existing.event_date ?? ""),
+      date_range: String(existing.date_range ?? ""),
+    },
+    value,
+  )
+  if (sharedChanged) {
+    const { error: pkgUpdateError } = await gate.supabase
+      .from("packages")
+      .update({
+        circuit: value.circuit,
+        location: value.location,
+        country: value.country,
+        country_code: value.countryCode,
+        event_date: value.eventDate,
+        date_range: value.dateRange,
+      })
+      .eq("race_id", id)
+    if (pkgUpdateError) return { ok: false, message: pkgUpdateError.message }
+
+    const { data: pkgs, error: pkgErr } = await gate.supabase.from("packages").select("id").eq("race_id", id)
+    if (pkgErr) return { ok: false, message: pkgErr.message }
+    for (const pkg of pkgs ?? []) {
+      const enq = await enqueueProductUpsert(gate.supabase, String(pkg.id))
+      if (!enq.ok) return { ok: false, message: enq.message }
+    }
+  }
+
+  revalidateNativeEventPaths(id)
+  return {
+    ok: true,
+    message: sharedChanged
+      ? "Event updated. Circuit, location, country, and dates were copied to every product for this event."
+      : "Event updated.",
+  }
 }
 
 export async function setNativeEventArchived(
@@ -4256,7 +4421,7 @@ export async function setNativeEventArchived(
   })
   if (error) return { ok: false, message: error.message }
 
-  revalidateNativeEventPaths()
+  revalidateNativeEventPaths(id)
   return {
     ok: true,
     message: archived

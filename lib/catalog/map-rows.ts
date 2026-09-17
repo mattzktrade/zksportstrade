@@ -6,6 +6,7 @@ type DbRace = {
   id: string
   name: string
   short_name: string
+  circuit?: string | null
   location: string
   country: string
   country_code: string
@@ -44,6 +45,7 @@ type DbPackage = {
   brochure_url?: string | null
   description?: string | null
   gallery_images?: unknown
+  track_map?: string | null
   product_code?: string | null
   salesforce_product_id?: string | null
   retail_price_multiplier?: number | null
@@ -86,6 +88,8 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     typeof brochureRaw === "string" && brochureRaw.trim().length > 0 ? brochureRaw.trim() : null
   const description = typeof p.description === "string" ? p.description : ""
   const galleryImages = parseGalleryImages(p.gallery_images)
+  const trackMapRaw = typeof p.track_map === "string" ? p.track_map.trim() : ""
+  const trackMap = trackMapRaw ? toDisplayImageUrl(trackMapRaw) : null
   const requiresBookingApproval = packageRequiresBookingApproval({
     name: p.name,
     requiresBookingApproval: p.requires_booking_approval,
@@ -111,6 +115,7 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     includes,
     description: description.trim() ? description : null,
     galleryImages: galleryImages.length > 0 ? galleryImages : undefined,
+    trackMap,
     featured: p.featured,
     brochureUrl,
     raceId: p.race_id,
@@ -146,6 +151,7 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     includes,
     description: description.trim() ? description : null,
     galleryImages: galleryImages.length > 0 ? galleryImages : undefined,
+    trackMap,
     featured: p.featured,
     brochureUrl,
     raceId: p.race_id,
@@ -164,6 +170,7 @@ export function mapRaceRow(r: DbRace, packages: Package[]): Race {
     id: r.id,
     name: r.name,
     shortName: r.short_name,
+    circuit: r.circuit?.trim() || undefined,
     location: r.location,
     country: r.country,
     countryCode: r.country_code,

@@ -32,6 +32,7 @@ import {
 } from "@/lib/integrations/salesforce/inventory-snapshot"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { isEventCategory, type EventCategory } from "@/lib/catalog/event-categories"
+import { officialCircuitNameForRaceId, isMissingRaceCircuitColumnError } from "@/lib/catalog/race-circuit"
 import { retailPriceFromTrade } from "@/lib/integrations/retail-price"
 import { getSalesforceConnectionStatus, getStoredInstanceUrl } from "@/lib/integrations/salesforce/settings-store"
 
@@ -182,6 +183,7 @@ export type AdminRaceOption = {
   id: string
   name: string
   short_name: string
+  circuit: string
   date_range: string
   event_date: string
   location: string
@@ -198,15 +200,42 @@ export async function getAdminRaceOptions(): Promise<AdminRaceOption[]> {
 
 const getAdminRaceOptionsCached = cache(async (): Promise<AdminRaceOption[]> => {
   const supabase = await createClient()
-  const { data, error } = await supabase
+  const withCircuit =
+    "id,name,short_name,circuit,date_range,event_date,location,country,country_code,season,category,image"
+  const withoutCircuit =
+    "id,name,short_name,date_range,event_date,location,country,country_code,season,category,image"
+  let { data, error } = await supabase
     .from("races")
-    .select("id,name,short_name,date_range,event_date,location,country,country_code,season,category,image")
+    .select(withCircuit)
     .eq("is_archived", false)
     .order("season")
     .order("event_date")
+  if (error && isMissingRaceCircuitColumnError(error.message)) {
+    const retry = await supabase
+      .from("races")
+      .select(withoutCircuit)
+      .eq("is_archived", false)
+      .order("season")
+      .order("event_date")
+    data = retry.data
+    error = retry.error
+  }
   if (error || !data) return []
+  const { data: packageCircuits } = await supabase.from("packages").select("race_id, circuit")
+  const circuitByRace = new Map<string, string>()
+  for (const row of packageCircuits ?? []) {
+    const value = String((row as { circuit?: string | null }).circuit ?? "").trim()
+    const raceId = String((row as { race_id?: string }).race_id ?? "")
+    if (value && raceId && !circuitByRace.has(raceId)) circuitByRace.set(raceId, value)
+  }
   return data.map((row) => ({
     ...row,
+    circuit:
+      (typeof (row as { circuit?: string }).circuit === "string" &&
+        (row as { circuit?: string }).circuit?.trim()) ||
+      circuitByRace.get(String(row.id)) ||
+      officialCircuitNameForRaceId(String(row.id)) ||
+      "",
     image: typeof row.image === "string" && row.image.trim() ? row.image.trim() : null,
     category: isEventCategory(String(row.category)) ? row.category : "formula_1",
   })) as AdminRaceOption[]

@@ -15,6 +15,12 @@ test("new package paddock templates no longer auto-tick enquiry", () => {
   assert.match(src, /setIsEnquiry\(false\)/)
 })
 
+test("new package circuit field is labelled Circuit and comes from the event", () => {
+  const src = readFileSync("app/(admin)/admin/catalog/catalog-new-package.tsx", "utf8")
+  assert.doesNotMatch(src, /Circuit \/ listing title/)
+  assert.match(src, /isFormula1 \? "Circuit" : "Venue"/)
+})
+
 test("portal package details no longer show suite capacity", () => {
   const src = readFileSync("app/(portal)/packages/race/[id]/race-packages-client.tsx", "utf8")
   assert.doesNotMatch(src, /Suite capacity/)

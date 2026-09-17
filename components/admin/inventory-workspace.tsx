@@ -812,12 +812,6 @@ export function InventoryWorkspace({
                             >
                               {row.name}
                             </Link>
-                            {sanitizeHttpsUrl(row.brochure_url) ? (
-                              <p className="mt-0.5 inline-flex items-center gap-1 text-[8px] text-[#8b8f97]">
-                                <FileText className="h-3 w-3" />
-                                Brochure ready
-                              </p>
-                            ) : null}
                           </div>
                         </div>
                       </td>
@@ -894,12 +888,6 @@ export function InventoryWorkspace({
                       <p className="font-semibold text-primary">{row.name}</p>
                       <p className="mt-0.5 font-medium text-slate-700">{row.race_name}</p>
                       <p className="mt-0.5 text-[8px] text-slate-400">{row.date_range || row.location || "—"}</p>
-                      {sanitizeHttpsUrl(row.brochure_url) ? (
-                        <p className="mt-0.5 inline-flex items-center gap-1 text-[8px] text-[#8b8f97]">
-                          <FileText className="h-3 w-3" />
-                          Brochure ready
-                        </p>
-                      ) : null}
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="font-semibold">{money(row.trade_price, row.currency)}</p>
@@ -969,6 +957,7 @@ export function InventoryWorkspace({
                       packageId={selected.id}
                       brochureUrl={selectedBrochure}
                       productName={selected.name}
+                      eventName={selected.race_name}
                       compact
                       onUrlChange={() => router.refresh()}
                     />

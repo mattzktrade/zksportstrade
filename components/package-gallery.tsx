@@ -13,6 +13,7 @@ export function PackageGallery({
   onSelectIndex,
   warmCache = false,
   className,
+  containUrls,
 }: {
   images: string[]
   alt: string
@@ -21,8 +22,11 @@ export function PackageGallery({
   /** When true, prefetch optimized variants (e.g. on expand or row hover). */
   warmCache?: boolean
   className?: string
+  /** Image URLs that should sit inside the frame instead of being cropped. */
+  containUrls?: string[]
 }) {
   const count = images.length
+  const contain = new Set((containUrls ?? []).map((url) => url.trim()).filter(Boolean))
 
   useEffect(() => {
     if (!warmCache || count === 0) return
@@ -49,7 +53,8 @@ export function PackageGallery({
           priority={i === 0}
           loading={i <= 2 ? "eager" : "lazy"}
           className={cn(
-            "object-cover transition-opacity duration-150",
+            "transition-opacity duration-150",
+            contain.has(src) ? "object-contain bg-black" : "object-cover",
             i === selectedIndex ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none",
           )}
           aria-hidden={i !== selectedIndex}

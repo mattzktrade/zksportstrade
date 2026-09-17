@@ -3,7 +3,7 @@
 import { Fragment, useMemo, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Archive, ArrowUpDown, CalendarDays, CheckCircle2, MapPin, Pencil, Plus, RotateCcw, Search } from "lucide-react"
+import { Archive, ArrowUpDown, CalendarDays, CheckCircle2, Pencil, Plus, RotateCcw, Search } from "lucide-react"
 import { toast } from "sonner"
 import {
   createNativeEvent,
@@ -27,6 +27,7 @@ export type NativeEventRow = {
   category: EventCategory
   name: string
   short_name: string
+  circuit: string
   location: string
   country: string
   country_code: string
@@ -42,6 +43,7 @@ const EMPTY_EVENT: NativeEventInput = {
   category: "formula_1",
   name: "",
   shortName: "",
+  circuit: "",
   location: "",
   country: "",
   countryCode: "",
@@ -56,6 +58,7 @@ function toInput(event: NativeEventRow): NativeEventInput {
     category: event.category,
     name: event.name,
     shortName: event.short_name,
+    circuit: event.circuit,
     location: event.location,
     country: event.country,
     countryCode: event.country_code,
@@ -99,6 +102,7 @@ export function EventsClient({ events }: { events: NativeEventRow[] }) {
       return !q || [
         event.name,
         event.short_name,
+        event.circuit,
         event.location,
         event.country,
         String(event.season),
@@ -185,7 +189,30 @@ export function EventsClient({ events }: { events: NativeEventRow[] }) {
           {([
             ["name", "Event name", "Singapore Grand Prix"],
             ["shortName", "Short name", "Singapore GP"],
-            ["location", "Location / circuit", "Marina Bay"],
+          ] as const).map(([key, label, placeholder]) => (
+            <label key={key} className="text-sm">
+              <span className="mb-1.5 block font-medium text-slate-700">{label}</span>
+              <input
+                value={String(form[key])}
+                onChange={(event) => update(key, event.target.value)}
+                placeholder={placeholder}
+                className="h-10 w-full rounded-md border bg-white px-3 text-sm outline-none focus:border-primary/50"
+              />
+            </label>
+          ))}
+          <label className="text-sm">
+            <span className="mb-1.5 block font-medium text-slate-700">
+              {form.category === "formula_1" ? "Circuit" : "Venue"}
+            </span>
+            <input
+              value={form.circuit}
+              onChange={(event) => update("circuit", event.target.value)}
+              placeholder={form.category === "formula_1" ? "Albert Park Circuit" : "All England Lawn Tennis Club"}
+              className="h-10 w-full rounded-md border bg-white px-3 text-sm outline-none focus:border-primary/50"
+            />
+          </label>
+          {([
+            ["location", "Location", "Melbourne"],
             ["country", "Country", "Singapore"],
             ["countryCode", "Country code", "SG"],
             ["dateRange", "Display date range", "09 – 11 Oct"],
@@ -214,6 +241,9 @@ export function EventsClient({ events }: { events: NativeEventRow[] }) {
             <input type="number" min={2020} max={2100} value={form.season} onChange={(event) => update("season", Number(event.target.value))} className="h-10 w-full rounded-md border bg-white px-3 text-sm" />
           </label>
         </div>
+        <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
+          Circuit, location, country, and dates are copied to every product for this event, including new products created from race templates.
+        </p>
         <div className="mt-5 flex justify-end">
           <button type="button" disabled={pending} onClick={save} className="h-10 rounded-md bg-primary px-5 text-sm font-semibold text-white disabled:opacity-50">
             {pending ? "Saving…" : editingId ? "Save event" : "Create event"}
@@ -283,7 +313,7 @@ export function EventsClient({ events }: { events: NativeEventRow[] }) {
                 <th className="px-4 py-3 font-medium">Category</th>
                 <th className="px-4 py-3 font-medium">Season</th>
                 <th className="px-4 py-3 font-medium">Dates</th>
-                <th className="px-4 py-3 font-medium">Location</th>
+                <th className="px-4 py-3 font-medium">Circuit</th>
                 <th className="px-4 py-3 font-medium">Products</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Actions</th>
@@ -305,7 +335,10 @@ export function EventsClient({ events }: { events: NativeEventRow[] }) {
                   <td className="px-4 py-3.5"><StatusPill tone="blue">{EVENT_CATEGORY_LABELS[event.category]}</StatusPill></td>
                   <td className="px-4 py-3.5">{event.season}</td>
                   <td className="px-4 py-3.5"><p>{event.date_range}</p><p className="text-xs text-slate-500">{event.event_date}</p></td>
-                  <td className="px-4 py-3.5"><span className="flex items-center gap-1.5"><MapPin className="h-4 w-4 text-slate-500" />{event.location}, {event.country}</span></td>
+                  <td className="px-4 py-3.5">
+                    <p>{event.circuit || "—"}</p>
+                    <p className="text-xs text-slate-500">{event.location}, {event.country}</p>
+                  </td>
                   <td className="px-4 py-3.5">
                     <Link href={adminEventPath(event.id)} className="font-semibold hover:text-primary hover:underline">
                       {event.product_count}
@@ -340,7 +373,7 @@ export function EventsClient({ events }: { events: NativeEventRow[] }) {
             <div key={event.id} className="space-y-2 px-4 py-3">
               <Link href={adminEventPath(event.id)} className="block">
                 <p className="font-semibold text-primary">{event.name}</p>
-                <p className="mt-0.5 text-[10px] text-slate-600">{event.date_range || event.event_date} · {event.location}</p>
+                <p className="mt-0.5 text-[10px] text-slate-600">{event.date_range || event.event_date} · {event.circuit || event.location}</p>
               </Link>
               <div className="flex flex-wrap items-center gap-2">
                 <StatusPill tone="blue">{EVENT_CATEGORY_LABELS[event.category]}</StatusPill>

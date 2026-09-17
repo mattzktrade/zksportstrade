@@ -20,6 +20,27 @@ export function brochureSafeText(value: string): string {
     .trim()
 }
 
+/** Visible print copy: drop legal marks that render as ugly (R)/(TM) in the PDF. */
+export function brochurePrintText(value: string): string {
+  return brochureSafeText(value)
+    .replace(/\(TM\)/gi, "")
+    .replace(/\(R\)/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([.,!?:;])/g, "$1")
+    .trim()
+}
+
+/** Body and list copy: readable sentence case instead of shouting all-caps. */
+export function brochureReadable(value: string): string {
+  const text = brochurePrintText(value)
+  if (!text) return text
+  if (text === text.toUpperCase() && /[A-Z]/.test(text) && text.length > 3) {
+    const lower = text.toLowerCase()
+    return lower.charAt(0).toUpperCase() + lower.slice(1)
+  }
+  return text
+}
+
 export function splitLongToken(token: string, font: PDFFont, size: number, maxWidth: number): string[] {
   const parts: string[] = []
   let current = ""
@@ -91,14 +112,20 @@ export function fitTitle(
   }
 }
 
-export function brochureFilename(productName: string, productCode: string | null): string {
-  const fromCode = (productCode ?? "").trim().toLowerCase()
-  const source = fromCode || productName
-  const slug = source
+export function brochureNameSlug(value: string): string {
+  return brochurePrintText(value)
     .toLowerCase()
+    .replace(/\bformula\s*1\b/g, " ")
+    .replace(/\bf1\b/g, " ")
+    .replace(/\bgrand prix\b/g, "gp")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 72)
+}
+
+export function brochureFilename(productName: string, raceName?: string | null): string {
+  const event = brochureNameSlug(raceName ?? "").slice(0, 40)
+  const product = brochureNameSlug(productName).slice(0, 48)
+  const slug = [event, product].filter(Boolean).join("-").replace(/-{2,}/g, "-").slice(0, 90)
   return `${slug || "package"}-brochure.pdf`
 }
 

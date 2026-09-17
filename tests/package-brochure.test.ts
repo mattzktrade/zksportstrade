@@ -4,16 +4,23 @@ import { describe, it } from "node:test"
 import { PDFDocument } from "pdf-lib"
 import {
   brochureContentFromPackage,
+  brochureCircuitFacts,
   brochureDateHeadline,
   brochureEventFamily,
+  brochurePhotoUrls,
   brochurePlaceHeadline,
-  groupBrochureIncludes,
+  brochureVenueLine,
+  formatBrochureIncludes,
+  resolveTrackMapUrl,
   splitProductHeadline,
 } from "../lib/brochures/content"
-import { brochureImageFetchUrl } from "../lib/brochures/images"
-import { generatePackageBrochurePdf } from "../lib/brochures/pdf"
-import { brochureFilename, brochureSafeText, uniqueImageUrls } from "../lib/brochures/text"
-import type { BrochureContent } from "../lib/brochures/types"
+import { enrichBrochureContent, officialProgrammeTemplate } from "../lib/brochures/enrich"
+import { brochureImageFetchUrl, compressBrochureImageBytes } from "../lib/brochures/images"
+import { brochurePagePlan, generatePackageBrochurePdf, includedPhotoSlots } from "../lib/brochures/pdf"
+import { assessBrochureReadiness } from "../lib/brochures/readiness"
+import { brochureFilename, brochurePrintText, brochureSafeText, uniqueImageUrls } from "../lib/brochures/text"
+import { packageBrochureStoragePath } from "../lib/brochures/storage"
+import { BrochureInsufficientImagesError, type BrochureContent } from "../lib/brochures/types"
 
 const sample: BrochureContent = {
   packageId: "pkg-test",
@@ -35,16 +42,37 @@ const sample: BrochureContent = {
   ],
   productCode: "AD-LEG-3D",
   heroUrl: "/images/circuits/abudhabi.jpg",
-  galleryUrls: ["/images/circuits/abudhabi.jpg", "/images/circuits/vegas.jpg"],
+  galleryUrls: ["/images/circuits/singapore.jpg", "/images/circuits/vegas.jpg"],
+  trackMapUrl: null,
   eventFamily: "FORMULA 1",
   placeHeadline: "ABU DHABI",
   dateHeadline: "4 TO 6 DECEMBER 2026",
 }
 
 describe("package brochures", () => {
-  it("builds a download filename from the product name", () => {
-    assert.equal(brochureFilename("3 Day Legend Paddock Club", null), "3-day-legend-paddock-club-brochure.pdf")
-    assert.equal(brochureFilename("Ignored", "AD LEG 3D"), "ad-leg-3d-brochure.pdf")
+  it("builds a download filename from the event and package name", () => {
+    assert.equal(
+      brochureFilename("3 Day Champions Club", "Abu Dhabi Grand Prix 2026"),
+      "abu-dhabi-gp-2026-3-day-champions-club-brochure.pdf",
+    )
+    assert.equal(brochureFilename("3 Day Legend Paddock Club"), "3-day-legend-paddock-club-brochure.pdf")
+    assert.equal(
+      packageBrochureStoragePath("abudhabi-champions-club-2026", "abu-dhabi-gp-2026-3-day-champions-club-brochure.pdf"),
+      "abudhabi-champions-club-2026/abu-dhabi-gp-2026-3-day-champions-club-brochure.pdf",
+    )
+  })
+
+  it("uses the same cover / what's included layout for every product", () => {
+    assert.deepEqual(brochurePagePlan(false), ["cover", "included"])
+    assert.deepEqual(brochurePagePlan(true), ["cover", "included", "details"])
+    assert.equal(includedPhotoSlots(3), 3)
+    assert.equal(includedPhotoSlots(5), 3)
+    assert.equal(includedPhotoSlots(6), 5)
+    assert.equal(includedPhotoSlots(10), 5)
+    const pdfSource = readFileSync("lib/brochures/pdf.ts", "utf8")
+    assert.match(pdfSource, /splitProductHeadline\(content\.productName\)/)
+    assert.doesNotMatch(pdfSource, /placeHeadline/)
+    assert.doesNotMatch(pdfSource, /drawStory/)
   })
 
   it("dedupes hero and gallery urls", () => {
@@ -59,6 +87,7 @@ describe("package brochures", () => {
       brochureSafeText("Paddock Club\u2122 \u2014 the weekend\u2019s view"),
       "Paddock Club(TM) - the weekend's view",
     )
+    assert.equal(brochurePrintText("F1® Paddock Club™ access"), "F1 Paddock Club access")
   })
 
   it("asks Wix for a JPEG large enough to print", () => {
@@ -67,14 +96,40 @@ describe("package brochures", () => {
     const out = brochureImageFetchUrl(url, 1800)
     assert.match(out, /w_1800/)
     assert.match(out, /enc_jpg/)
+    const map = brochureImageFetchUrl(url, 2200, { fit: "contain" })
+    assert.match(map, /\/v1\/fit\//)
+    assert.doesNotMatch(map, /\/v1\/fill\//)
+  })
+
+  it("recompresses catalog photos to print-sized JPEGs", async () => {
+    const src = readFileSync("public/images/circuits/singapore.jpg")
+    const out = await compressBrochureImageBytes(src, 800)
+    assert.equal(out[0], 0xff)
+    assert.equal(out[1], 0xd8)
+    assert.ok(out.length < src.length || out.length < 250_000)
   })
 
   it("builds cover headlines from the race, not the package price", () => {
     assert.equal(brochureEventFamily("Abu Dhabi Grand Prix 2026", "formula_1"), "FORMULA 1")
     assert.equal(brochurePlaceHeadline("Abu Dhabi Grand Prix 2026", "Abu Dhabi", "UAE"), "ABU DHABI")
-    assert.equal(brochureDateHeadline("4-6 Dec 2026"), "4 TO 6 DECEMBER 2026")
+    assert.equal(brochureDateHeadline("4-6 Dec 2026"), "4-6 December 2026")
+    assert.equal(brochureVenueLine("Yas Marina Circuit", "Abu Dhabi", "Abu Dhabi Grand Prix 2026"), "Yas Marina Circuit")
+    assert.equal(brochureVenueLine(null, "Abu Dhabi", "Abu Dhabi Grand Prix 2026"), null)
     assert.deepEqual(splitProductHeadline("Marsa Box"), { lead: "MARSA", accent: "BOX" })
-    assert.equal(groupBrochureIncludes(["Dining", "Open bar", "Host", "Pit walk"]).length, 4)
+    assert.equal(formatBrochureIncludes(["Dining", "Open bar", "Host", "Pit walk"]).length, 4)
+    assert.equal(formatBrochureIncludes(["Premium Views: Watch the start"]).at(0)?.title, "Premium Views")
+    assert.equal(
+      resolveTrackMapUrl(null, "/images/hero.jpg", ["/images/gallery.jpg", "/images/yas-track-map.png"]),
+      "/images/yas-track-map.png",
+    )
+    assert.deepEqual(
+      brochurePhotoUrls("/images/hero.jpg", ["/images/yas-track-map.png", "/images/suite.jpg"], "/images/yas-track-map.png"),
+      ["/images/hero.jpg", "/images/suite.jpg"],
+    )
+    assert.deepEqual(
+      brochureCircuitFacts(sample).map((fact) => fact.label),
+      ["Event", "Circuit", "Location", "Dates"],
+    )
   })
 
   it("maps package rows without including a trade price", () => {
@@ -90,6 +145,7 @@ describe("package brochures", () => {
         description: "Night race hospitality.",
         image: "/images/circuits/singapore.jpg",
         gallery_images: ["/images/circuits/singapore.jpg"],
+        track_map: null,
         includes: ["Suite access", "Champagne"],
         product_code: "SIN-CHAMP",
         brochure_url: null,
@@ -102,16 +158,81 @@ describe("package brochures", () => {
     assert.equal(content.heroUrl, "/images/circuits/singapore.jpg")
     assert.equal(content.eventFamily, "FORMULA 1")
     assert.equal(content.placeHeadline, "SINGAPORE")
-    assert.equal(content.dateHeadline, "9 TO 11 OCTOBER 2026")
+    assert.equal(content.dateHeadline, "9-11 October 2026")
+    assert.equal(content.trackMapUrl, null)
     assert.equal("tradePrice" in content, false)
     assert.equal("trade_price" in content, false)
+  })
+
+  it("refuses a brochure without enough unique photos or copy", () => {
+    const tooFewPhotos = assessBrochureReadiness({
+      ...sample,
+      galleryUrls: ["/images/circuits/abudhabi.jpg"],
+    })
+    assert.equal(tooFewPhotos.ok, false)
+    if (!tooFewPhotos.ok) assert.equal(tooFewPhotos.code, "insufficient_images")
+
+    const tooThin = assessBrochureReadiness({
+      ...sample,
+      description: "Nice suite.",
+      includes: ["Access"],
+    })
+    assert.equal(tooThin.ok, false)
+    if (!tooThin.ok) assert.equal(tooThin.code, "insufficient_content")
+
+    assert.equal(assessBrochureReadiness(sample).ok, true)
+  })
+
+  it("fills standard Paddock Club copy from official programme details only", () => {
+    const filled = enrichBrochureContent({
+      ...sample,
+      description: null,
+      includes: [],
+    })
+    assert.equal(filled.copyEnriched, true)
+    assert.ok((filled.description ?? "").length > 70)
+    assert.ok(filled.includes.length >= 4)
+    assert.match(filled.includes[0] ?? "", /3-Day/)
+    assert.equal(assessBrochureReadiness(filled).ok, true)
+
+    const oneDay = enrichBrochureContent({
+      ...sample,
+      productName: "1 Day Paddock Club",
+      durationLabel: "1 day package",
+      description: null,
+      includes: [],
+    })
+    assert.match(oneDay.includes[0] ?? "", /1-Day/)
+    assert.doesNotMatch(oneDay.includes.join(" "), /3-Day/)
+
+    const unknown = enrichBrochureContent({
+      ...sample,
+      productName: "Private Yacht Deck",
+      description: null,
+      includes: [],
+    })
+    assert.equal(unknown.copyEnriched, undefined)
+    assert.equal(unknown.description, null)
+    assert.equal(unknown.includes.length, 0)
+    assert.equal(assessBrochureReadiness(unknown).ok, false)
+
+    assert.equal(
+      officialProgrammeTemplate({
+        ...sample,
+        productName: "House 44 Paddock Club",
+        location: "Monaco",
+        raceName: "Monaco Grand Prix 2026",
+        country: "Monaco",
+      }),
+      null,
+    )
   })
 
   it("renders a landscape branded PDF from product copy and photos", async () => {
     const bytes = await generatePackageBrochurePdf(sample)
     assert.equal(Buffer.from(bytes).subarray(0, 4).toString(), "%PDF")
     const pdf = await PDFDocument.load(bytes)
-    assert.ok(pdf.getPageCount() >= 2)
+    assert.equal(pdf.getPageCount(), 2)
     const size = pdf.getPage(0).getSize()
     assert.ok(size.width > size.height)
     assert.match(pdf.getTitle() ?? "", /Legend Paddock Club/)
@@ -119,9 +240,40 @@ describe("package brochures", () => {
     const asString = Buffer.from(bytes).toString("latin1")
     assert.doesNotMatch(asString, /888888/)
     assert.doesNotMatch(asString, /Create brochure/)
+    assert.doesNotMatch(asString, /OFFICIAL F1 PADDOCK/)
+    assert.doesNotMatch(asString, /PADDOCK CLUB DISTRIBUTOR/)
+    assert.doesNotMatch(asString, /zk-sports\.com/)
   })
 
-  it("still renders when photos, description and inclusions are missing", async () => {
+  it("adds a circuit page only when a track map image loads", async () => {
+    const withMap = await generatePackageBrochurePdf({
+      ...sample,
+      trackMapUrl: "/images/circuits/vegas.jpg",
+    })
+    assert.equal((await PDFDocument.load(withMap)).getPageCount(), 3)
+
+    const missingMap = await generatePackageBrochurePdf({
+      ...sample,
+      trackMapUrl: "/images/circuits/does-not-exist.jpg",
+    })
+    assert.equal((await PDFDocument.load(missingMap)).getPageCount(), 2)
+  })
+
+  it("still uses two pages when the 5-photo What's Included layout is selected", async () => {
+    const bytes = await generatePackageBrochurePdf({
+      ...sample,
+      galleryUrls: [
+        "/images/circuits/singapore.jpg",
+        "/images/circuits/vegas.jpg",
+        "/images/circuits/mexico.jpg",
+        "/images/circuits/austin.jpg",
+        "/images/circuits/monza.jpg",
+      ],
+    })
+    assert.equal((await PDFDocument.load(bytes)).getPageCount(), 2)
+  })
+
+  it("still draws the template if optional copy is missing, but blocks when photos are required", async () => {
     const bytes = await generatePackageBrochurePdf({
       ...sample,
       description: null,
@@ -130,9 +282,16 @@ describe("package brochures", () => {
       galleryUrls: [],
     })
     const pdf = await PDFDocument.load(bytes)
-    assert.ok(pdf.getPageCount() >= 2)
-    const size = pdf.getPage(0).getSize()
-    assert.ok(size.width > size.height)
+    assert.equal(pdf.getPageCount(), 2)
+
+    await assert.rejects(
+      () =>
+        generatePackageBrochurePdf(
+          { ...sample, heroUrl: null, galleryUrls: [] },
+          { minPhotos: 3 },
+        ),
+      (error: unknown) => error instanceof BrochureInsufficientImagesError,
+    )
   })
 
   it("keeps generation in the admin catalog action and public download in the portal", () => {

@@ -18,13 +18,25 @@ const WIX_MEDIA_BASE =
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 const FETCH_TIMEOUT_MS = 12_000
+const JPEG_QUALITY = 80
 
-export function brochureImageFetchUrl(url: string, width: number): string {
+function jpegMagic(bytes: Uint8Array): boolean {
+  return bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+}
+
+export function brochureImageFetchUrl(
+  url: string,
+  width: number,
+  options?: { fit?: "cover" | "contain" },
+): string {
   const trimmed = url.trim()
   if (trimmed.startsWith("/")) return trimmed
   const match = trimmed.match(WIX_MEDIA_BASE)
   if (match) {
     const file = match[1]
+    if (options?.fit === "contain") {
+      return `https://static.wixstatic.com/media/${file}/v1/fit/w_${width},h_${width},al_c,q_90,enc_png/${file}`
+    }
     const height = Math.max(1, Math.round(width * 0.66))
     return `https://static.wixstatic.com/media/${file}/v1/fill/w_${width},h_${height},al_c,q_82,usm_0.66_1.00_0.01,enc_jpg/${file}`
   }
@@ -32,7 +44,32 @@ export function brochureImageFetchUrl(url: string, width: number): string {
 }
 
 function isJpeg(bytes: Uint8Array): boolean {
-  return bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+  return jpegMagic(bytes)
+}
+
+/** Downscale and re-encode so print-quality photos do not blow the PDF past storage limits. */
+export async function compressBrochureImageBytes(
+  bytes: Uint8Array,
+  maxEdge: number,
+): Promise<Uint8Array> {
+  if (bytes.length === 0) return bytes
+  try {
+    const sharpMod = await import("sharp")
+    const sharp = sharpMod.default
+    const out = await sharp(bytes, { failOn: "none" })
+      .rotate()
+      .resize({
+        width: maxEdge,
+        height: maxEdge,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })
+      .toBuffer()
+    return out.length > 0 ? new Uint8Array(out) : bytes
+  } catch {
+    return jpegMagic(bytes) || isPng(bytes) ? bytes : new Uint8Array()
+  }
 }
 
 function isPng(bytes: Uint8Array): boolean {
@@ -102,10 +139,16 @@ async function fetchRemoteImage(url: string): Promise<Uint8Array | null> {
   }
 }
 
-export async function loadImageBytes(url: string, width: number): Promise<Uint8Array | null> {
-  const fetchUrl = brochureImageFetchUrl(url, width)
-  if (fetchUrl.startsWith("/")) return readLocalPublicFile(fetchUrl)
-  return fetchRemoteImage(fetchUrl)
+export async function loadImageBytes(
+  url: string,
+  width: number,
+  options?: { fit?: "cover" | "contain" },
+): Promise<Uint8Array | null> {
+  const fetchUrl = brochureImageFetchUrl(url, width, options)
+  const raw = fetchUrl.startsWith("/") ? await readLocalPublicFile(fetchUrl) : await fetchRemoteImage(fetchUrl)
+  if (!raw) return null
+  const compressed = await compressBrochureImageBytes(raw, width)
+  return compressed.length > 0 ? compressed : null
 }
 
 export async function embedRasterImage(pdf: PDFDocument, bytes: Uint8Array): Promise<PDFImage | null> {
@@ -118,16 +161,40 @@ export async function embedRasterImage(pdf: PDFDocument, bytes: Uint8Array): Pro
   return null
 }
 
+export async function embedPublicImage(
+  pdf: PDFDocument,
+  ...segments: string[]
+): Promise<PDFImage | null> {
+  try {
+    const bytes = await readFile(join(process.cwd(), "public", ...segments))
+    return await embedRasterImage(pdf, bytes)
+  } catch {
+    return null
+  }
+}
+
 export async function embedLogo(
   pdf: PDFDocument,
   filename: string,
 ): Promise<PDFImage | null> {
-  try {
-    const bytes = await readFile(join(process.cwd(), "public", "images", filename))
-    return await pdf.embedPng(bytes)
-  } catch {
-    return null
-  }
+  return embedPublicImage(pdf, "images", filename)
+}
+
+export function drawImageContain(
+  page: PDFPage,
+  image: PDFImage,
+  box: { x: number; y: number; width: number; height: number },
+  pad = 0,
+) {
+  const innerW = Math.max(1, box.width - pad * 2)
+  const innerH = Math.max(1, box.height - pad * 2)
+  const scale = Math.min(innerW / image.width, innerH / image.height)
+  const width = image.width * scale
+  const height = image.height * scale
+  const x = box.x + pad + (innerW - width) / 2
+  const y = box.y + pad + (innerH - height) / 2
+  page.drawImage(image, { x, y, width, height })
+  return { x, y, width, height }
 }
 
 export function drawImageCover(

@@ -1,184 +1,54 @@
-/**
- * First-draft landscape brochure. Matt wants this design revisited before
- * we treat it as a finished sales asset — see .cursor/rules/brochure-design.mdc.
- */
-import { PDFDocument, PDFFont, PDFImage, PDFPage, rgb, type RGB } from "pdf-lib"
-import { BRAND_BLACK, BRAND_RED } from "@/lib/branding"
-import { groupBrochureIncludes, splitProductHeadline } from "@/lib/brochures/content"
-import { embedBrochureFonts, type BrochureFonts } from "@/lib/brochures/fonts"
+import { PDFDocument, type PDFImage, type PDFPage } from "pdf-lib"
 import {
-  clipPolygon,
-  drawImageCoverUnclipped,
-  embedLogo,
-  embedRasterImage,
-  endClip,
-  loadImageBytes,
-  polygonPath,
-} from "@/lib/brochures/images"
-import { brochureSafeText, fitTitle, truncateLines, uniqueImageUrls, wrapText } from "@/lib/brochures/text"
-import type { BrochureContent } from "@/lib/brochures/types"
+  brochureCircuitFacts,
+  brochureCircuitHeadline,
+  brochurePhotoUrls,
+  brochureVenueLine,
+  formatBrochureIncludes,
+  splitProductHeadline,
+} from "@/lib/brochures/content"
+import { BrochureInsufficientImagesError, type BrochureContent } from "@/lib/brochures/types"
+import { embedBrochureFonts, type BrochureFonts } from "@/lib/brochures/fonts"
+import { drawImageContain, embedPublicImage, embedRasterImage, loadImageBytes } from "@/lib/brochures/images"
+import {
+  BLACK,
+  COVER_TYPE,
+  FOOTER_H,
+  FRAME,
+  HEADING,
+  MARGIN,
+  MUTED,
+  PAGE,
+  PAGE_H,
+  PAGE_W,
+  RAIL,
+  RED,
+  TAGLINE,
+  WHITE,
+  coverPhotoPoints,
+  coverTextPanelPoints,
+  drawBackground,
+  drawChrome,
+  drawDiagonalPhoto,
+  drawPhotoTile,
+  drawSectionHeading,
+  fillPolygon,
+  safeDrawText,
+  strokeDiagonal,
+} from "@/lib/brochures/template"
+import { brochurePrintText, brochureReadable, fitTitle, truncateLines, wrapText } from "@/lib/brochures/text"
 
-const PAGE: [number, number] = [841.89, 595.28]
-const PAGE_W = PAGE[0]
-const PAGE_H = PAGE[1]
-const WHITE = rgb(1, 1, 1)
-const MUTED = rgb(0.72, 0.72, 0.72)
-const MAX_PHOTOS = 5
-const TAGLINE = "EXCLUSIVE.  |  ELEVATED.  |  UNFORGETTABLE."
-const LEFT_PAD = 40
-
-function hexToRgb(hex: string): RGB {
-  const n = hex.replace("#", "")
-  return rgb(
-    Number.parseInt(n.slice(0, 2), 16) / 255,
-    Number.parseInt(n.slice(2, 4), 16) / 255,
-    Number.parseInt(n.slice(4, 6), 16) / 255,
-  )
-}
-
-const BLACK = hexToRgb(BRAND_BLACK)
-const RED = hexToRgb(BRAND_RED)
-
-function safeDrawText(
-  page: PDFPage,
-  text: string,
-  opts: { x: number; y: number; size: number; font: PDFFont; color: RGB },
-) {
-  if (!text) return
-  page.drawText(text, opts)
-}
-
-function drawTracked(
-  page: PDFPage,
-  text: string,
-  opts: { x: number; y: number; size: number; font: PDFFont; color: RGB; tracking?: number },
-) {
-  const tracking = opts.tracking ?? 1.4
-  let x = opts.x
-  for (const char of brochureSafeText(text).toUpperCase()) {
-    if (!char.trim() && char !== " ") continue
-    page.drawText(char, { x, y: opts.y, size: opts.size, font: opts.font, color: opts.color })
-    x += opts.font.widthOfTextAtSize(char, opts.size) + tracking
-  }
-  return x
-}
-
-function drawLogo(
-  page: PDFPage,
-  logo: PDFImage | null,
-  box: { x: number; y: number; maxWidth: number; maxHeight: number },
-) {
-  if (!logo) return
-  const scale = Math.min(box.maxHeight / logo.height, box.maxWidth / logo.width)
-  page.drawImage(logo, {
-    x: box.x,
-    y: box.y,
-    width: logo.width * scale,
-    height: logo.height * scale,
-  })
-}
-
-function drawPin(page: PDFPage, x: number, y: number, size = 9) {
-  const cx = x + size * 0.42
-  const cy = y + size * 0.48
-  page.drawCircle({ x: cx, y: cy, size: size * 0.26, color: RED })
-  page.drawSvgPath(
-    `M ${x + size * 0.16} ${y + size * 0.42} L ${cx} ${y} L ${x + size * 0.68} ${y + size * 0.42} Z`,
-    { color: RED },
-  )
-}
-
-function coverSplit() {
-  return {
-    topX: PAGE_W * 0.42,
-    botX: PAGE_W * 0.33,
-  }
-}
-
-function storySplit() {
-  return {
-    topX: PAGE_W * 0.46,
-    botX: PAGE_W * 0.34,
-  }
-}
-
-function leftPanelPoints(topX: number, botX: number) {
-  return [
-    { x: 0, y: 0 },
-    { x: 0, y: PAGE_H },
-    { x: topX, y: PAGE_H },
-    { x: botX, y: 0 },
-  ]
-}
-
-function rightPanelPoints(topX: number, botX: number) {
-  return [
-    { x: topX, y: PAGE_H },
-    { x: PAGE_W, y: PAGE_H },
-    { x: PAGE_W, y: 0 },
-    { x: botX, y: 0 },
-  ]
-}
-
-function fillPanel(page: PDFPage, points: Array<{ x: number; y: number }>, color: RGB) {
-  page.drawSvgPath(polygonPath(points), { color })
-}
-
-function strokeDiagonal(page: PDFPage, topX: number, botX: number) {
-  page.drawLine({
-    start: { x: topX, y: PAGE_H },
-    end: { x: botX, y: 0 },
-    thickness: 2.1,
-    color: RED,
-  })
-}
-
-function photoOrBlack(
-  page: PDFPage,
-  photo: PDFImage | undefined,
-  points: Array<{ x: number; y: number }>,
-) {
-  if (!photo) {
-    fillPanel(page, points, BLACK)
-    return
-  }
-  clipPolygon(page, points)
-  drawImageCoverUnclipped(page, photo, { x: 0, y: 0, width: PAGE_W, height: PAGE_H })
-  endClip(page)
-}
-
-function parallelogram(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  skew = 14,
-) {
-  return [
-    { x: x + skew, y: y + height },
-    { x: x + width, y: y + height },
-    { x: x + width - skew, y: y },
-    { x: x, y: y },
-  ]
-}
-
-function drawSkewPhoto(
-  page: PDFPage,
-  photo: PDFImage,
-  box: { x: number; y: number; width: number; height: number },
-) {
-  const points = parallelogram(box.x, box.y, box.width, box.height)
-  clipPolygon(page, points)
-  drawImageCoverUnclipped(page, photo, box)
-  endClip(page)
-  page.drawSvgPath(polygonPath(points), { borderColor: RED, borderWidth: 1.15 })
-}
+const SECTION_TOP = PAGE_H - 40
+const PHOTO_BOTTOM = FOOTER_H + 16
+const TEXT_COL_W = 300
+const INCLUDED_PHOTO_X = 372
 
 async function embedPhotos(pdf: PDFDocument, content: BrochureContent): Promise<PDFImage[]> {
-  const urls = uniqueImageUrls(content.heroUrl, content.galleryUrls).slice(0, MAX_PHOTOS)
+  const urls = brochurePhotoUrls(content.heroUrl, content.galleryUrls, content.trackMapUrl)
+  const slots = includedPhotoSlots(urls.length)
   const photos: PDFImage[] = []
-  for (const [index, url] of urls.entries()) {
-    const bytes = await loadImageBytes(url, index === 0 ? 2000 : 1400)
+  for (const [index, url] of urls.slice(0, 1 + slots).entries()) {
+    const bytes = await loadImageBytes(url, index === 0 ? 1600 : 1200)
     if (!bytes) continue
     const image = await embedRasterImage(pdf, bytes)
     if (image) photos.push(image)
@@ -186,258 +56,274 @@ async function embedPhotos(pdf: PDFDocument, content: BrochureContent): Promise<
   return photos
 }
 
-function circuitLine(content: BrochureContent): string {
-  return brochureSafeText(content.circuit || content.location || content.placeHeadline).toUpperCase()
+async function embedTrackMap(pdf: PDFDocument, content: BrochureContent): Promise<PDFImage | null> {
+  const url = content.trackMapUrl?.trim()
+  if (!url) return null
+  const bytes = await loadImageBytes(url, 1600, { fit: "contain" })
+  if (!bytes) return null
+  return embedRasterImage(pdf, bytes)
 }
 
-function drawLocationRow(
-  page: PDFPage,
-  fonts: BrochureFonts,
-  circuit: string,
-  x: number,
-  y: number,
-  maxWidth: number,
-) {
-  drawPin(page, x, y - 1, 10)
-  const text = wrapText(circuit, fonts.condensedMedium, 9, maxWidth - 18)
-  safeDrawText(page, text[0] ?? "", {
-    x: x + 16,
+function leftTextX() {
+  return MARGIN + RAIL + 6
+}
+
+/** Same page sequence for every product: cover, what's included, optional track-map details. */
+export function brochurePagePlan(hasTrackMap: boolean): Array<"cover" | "included" | "details"> {
+  return hasTrackMap ? ["cover", "included", "details"] : ["cover", "included"]
+}
+
+/** 5-photo What's Included column when the product has 6+ unique photos; otherwise the 3-photo column. */
+export function includedPhotoSlots(totalPhotos: number): 3 | 5 {
+  return totalPhotos >= 6 ? 5 : 3
+}
+
+function drawCover(page: PDFPage, content: BrochureContent, fonts: BrochureFonts, photos: PDFImage[]) {
+  const points = coverPhotoPoints()
+  drawDiagonalPhoto(page, photos[0], points)
+  fillPolygon(page, coverTextPanelPoints(), BLACK)
+  strokeDiagonal(page, points)
+
+  const x = leftTextX()
+  const textWidth = PAGE_W * 0.4 - 10
+  let y = PAGE_H - 62
+
+  safeDrawText(page, content.eventFamily.toUpperCase(), {
+    x,
     y,
-    size: 9,
+    size: COVER_TYPE.kickerSize,
     font: fonts.condensedMedium,
-    color: WHITE,
+    color: RED,
   })
-}
 
-function drawCover(page: PDFPage, content: BrochureContent, fonts: BrochureFonts, photos: PDFImage[], whiteLogo: PDFImage | null) {
-  page.drawRectangle({ x: 0, y: 0, width: PAGE_W, height: PAGE_H, color: BLACK })
-  const split = coverSplit()
-  photoOrBlack(page, photos[0], rightPanelPoints(split.topX, split.botX))
-  fillPanel(page, leftPanelPoints(split.topX, split.botX), BLACK)
-  strokeDiagonal(page, split.topX, split.botX)
-
-  drawLogo(page, whiteLogo, { x: LEFT_PAD, y: PAGE_H - 52, maxWidth: 148, maxHeight: 26 })
-
-  const textWidth = Math.min(split.botX, split.topX) - LEFT_PAD - 28
-  const family = fitTitle(content.eventFamily, fonts.condensed, textWidth, 46, 26, 2)
-  const place = fitTitle(content.placeHeadline, fonts.condensed, textWidth, 46, 26, 2)
-  let y = 338
-  for (const line of family.lines) {
-    safeDrawText(page, line, { x: LEFT_PAD, y, size: family.size, font: fonts.condensed, color: WHITE })
-    y -= family.size * 0.92
+  const parts = splitProductHeadline(content.productName)
+  y -= HEADING.kickerToTitle + COVER_TYPE.titleSize
+  if (parts.lead) {
+    const lead = fitTitle(parts.lead, fonts.condensed, textWidth, COVER_TYPE.titleSize, COVER_TYPE.titleMin, 3)
+    for (const line of lead.lines) {
+      safeDrawText(page, line, { x, y, size: lead.size, font: fonts.condensed, color: WHITE })
+      y -= lead.size * HEADING.titleLeading
+    }
   }
-  y -= 4
-  for (const line of place.lines) {
-    safeDrawText(page, line, { x: LEFT_PAD, y, size: place.size, font: fonts.condensed, color: RED })
-    y -= place.size * 0.92
+  const accent = fitTitle(parts.accent, fonts.condensed, textWidth, COVER_TYPE.titleSize, COVER_TYPE.titleMin, 2)
+  for (const line of accent.lines) {
+    safeDrawText(page, line, { x, y, size: accent.size, font: fonts.condensed, color: RED })
+    y -= accent.size * HEADING.titleLeading
   }
 
-  y -= 10
-  page.drawRectangle({ x: LEFT_PAD, y: y + 8, width: 54, height: 1.4, color: RED })
-  y -= 8
-  drawLocationRow(page, fonts, circuitLine(content), LEFT_PAD, y, textWidth)
+  y -= HEADING.titleToRule
+  page.drawRectangle({ x, y: y + 10, width: HEADING.ruleW, height: HEADING.ruleH, color: RED })
+  y -= HEADING.ruleToContent
+
+  const eventLine = wrapText(brochurePrintText(content.raceName), fonts.sansMedium, COVER_TYPE.eventSize, textWidth)
+  for (const line of eventLine.slice(0, 2)) {
+    safeDrawText(page, line, { x, y, size: COVER_TYPE.eventSize, font: fonts.sansMedium, color: WHITE })
+    y -= 22
+  }
+
+  const venue = brochureVenueLine(content.circuit, content.location, content.raceName)
+  if (venue) {
+    y -= 2
+    const venueLines = wrapText(venue, fonts.sans, COVER_TYPE.metaSize, textWidth)
+    safeDrawText(page, venueLines[0] ?? "", { x, y, size: COVER_TYPE.metaSize, font: fonts.sans, color: MUTED })
+    y -= 18
+  }
   if (content.dateHeadline) {
-    y -= 16
-    safeDrawText(page, content.dateHeadline, {
-      x: LEFT_PAD,
-      y,
-      size: 9,
-      font: fonts.sans,
-      color: WHITE,
-    })
+    safeDrawText(page, content.dateHeadline, { x, y, size: COVER_TYPE.metaSize, font: fonts.sans, color: MUTED })
   }
 
-  const tagWidth = fonts.sansMedium.widthOfTextAtSize(TAGLINE, 7.5)
-  safeDrawText(page, TAGLINE, {
-    x: PAGE_W - 36 - tagWidth,
-    y: 24,
-    size: 7.5,
+  const tag = brochurePrintText(TAGLINE)
+  const tagWidth = fonts.sansMedium.widthOfTextAtSize(tag, 9)
+  page.drawRectangle({
+    x: PAGE_W - 28 - tagWidth - 16,
+    y: FOOTER_H + 16,
+    width: tagWidth + 16,
+    height: 22,
+    color: BLACK,
+    opacity: 0.62,
+  })
+  safeDrawText(page, tag, {
+    x: PAGE_W - 28 - tagWidth - 8,
+    y: FOOTER_H + 23,
+    size: 9,
     font: fonts.sansMedium,
     color: WHITE,
   })
 }
 
-function drawStory(page: PDFPage, content: BrochureContent, fonts: BrochureFonts, photo: PDFImage | undefined, whiteLogo: PDFImage | null) {
-  page.drawRectangle({ x: 0, y: 0, width: PAGE_W, height: PAGE_H, color: BLACK })
-  const split = storySplit()
-  photoOrBlack(page, photo, rightPanelPoints(split.topX, split.botX))
-  fillPanel(page, leftPanelPoints(split.topX, split.botX), BLACK)
-  strokeDiagonal(page, split.topX, split.botX)
-  drawLogo(page, whiteLogo, { x: LEFT_PAD, y: PAGE_H - 52, maxWidth: 132, maxHeight: 22 })
-
-  const textWidth = Math.min(split.botX, split.topX) - LEFT_PAD - 24
-  const parts = splitProductHeadline(content.productName)
-  let y = 430
-  if (parts.lead) {
-    const lead = fitTitle(parts.lead, fonts.condensed, textWidth, 36, 20, 3)
-    for (const line of lead.lines) {
-      safeDrawText(page, line, { x: LEFT_PAD, y, size: lead.size, font: fonts.condensed, color: WHITE })
-      y -= lead.size * 0.9
-    }
-    y -= 2
-  }
-  const accent = fitTitle(parts.accent, fonts.condensed, textWidth, 36, 20, 2)
-  for (const line of accent.lines) {
-    safeDrawText(page, line, { x: LEFT_PAD, y, size: accent.size, font: fonts.condensed, color: RED })
-    y -= accent.size * 0.9
-  }
-
-  y -= 18
-  const body = content.description?.trim()
-    ? content.description
-    : `${content.productName} at ${content.raceName}. An exclusive ZK hospitality experience.`
-  const lines = truncateLines(wrapText(body, fonts.sans, 10, textWidth), 10)
-  for (const line of lines) {
-    safeDrawText(page, line, { x: LEFT_PAD, y, size: 10, font: fonts.sans, color: WHITE })
-    y -= 14.5
-  }
-
-  y -= 12
-  page.drawRectangle({ x: LEFT_PAD, y: y + 8, width: 48, height: 1.3, color: RED })
-  y -= 6
-  drawLocationRow(page, fonts, circuitLine(content), LEFT_PAD, y, textWidth)
-}
-
-function drawIncludes(
+function drawIncluded(
   page: PDFPage,
   content: BrochureContent,
   fonts: BrochureFonts,
   photos: PDFImage[],
-  whiteLogo: PDFImage | null,
+  slots: 3 | 5,
 ) {
-  page.drawRectangle({ x: 0, y: 0, width: PAGE_W, height: PAGE_H, color: BLACK })
-  drawLogo(page, whiteLogo, { x: LEFT_PAD, y: PAGE_H - 48, maxWidth: 120, maxHeight: 20 })
+  const x = leftTextX()
+  const heading = splitProductHeadline("What's included")
 
-  const groups = groupBrochureIncludes(content.includes)
-  const hasPhotos = photos.length > 0
-  const leftWidth = hasPhotos ? PAGE_W * 0.28 : PAGE_W * 0.34
-  const photoX = PAGE_W * 0.3
-  const photoW = PAGE_W * 0.2
-  const listX = hasPhotos ? PAGE_W * 0.54 : PAGE_W * 0.4
-  const listW = PAGE_W - listX - 36
-
-  page.drawLine({
-    start: { x: leftWidth + 10, y: PAGE_H - 36 },
-    end: { x: leftWidth - 8, y: 28 },
-    thickness: 1.4,
-    color: RED,
+  let y = drawSectionHeading(page, fonts, {
+    x,
+    top: SECTION_TOP,
+    maxWidth: TEXT_COL_W,
+    kicker: "The experience",
+    lead: heading.lead,
+    accent: heading.accent,
   })
 
-  let y = PAGE_H - 88
-  const kicker = brochureSafeText(content.productName).toUpperCase()
-  drawTracked(page, kicker.slice(0, 42), {
-    x: LEFT_PAD,
-    y,
-    size: 8,
-    font: fonts.condensedMedium,
-    color: RED,
-    tracking: 1.8,
-  })
-  y -= 36
-  safeDrawText(page, "WHAT'S", {
-    x: LEFT_PAD,
-    y,
-    size: 30,
-    font: fonts.condensed,
-    color: WHITE,
-  })
-  y -= 30
-  safeDrawText(page, "INCLUDED", {
-    x: LEFT_PAD,
-    y,
-    size: 30,
-    font: fonts.condensed,
-    color: WHITE,
-  })
-  y -= 18
-  page.drawRectangle({ x: LEFT_PAD, y: y + 10, width: 46, height: 1.3, color: RED })
-  y -= 8
-  if (content.description) {
-    const intro = truncateLines(wrapText(content.description, fonts.sans, 8.5, leftWidth - 22), 8)
-    for (const line of intro) {
-      safeDrawText(page, line, { x: LEFT_PAD, y, size: 8.5, font: fonts.sans, color: MUTED })
-      y -= 12.2
-    }
+  const story = content.description?.trim()
+    ? brochureReadable(content.description)
+    : brochurePrintText(content.productName)
+  const lines = truncateLines(wrapText(story, fonts.sans, 11.5, TEXT_COL_W), 6)
+  for (const line of lines) {
+    safeDrawText(page, line, { x, y, size: 11.5, font: fonts.sans, color: WHITE })
+    y -= 17
   }
 
-  if (hasPhotos) {
-    const count = Math.min(photos.length, Math.max(groups.length, 1), 4)
-    const gap = 10
-    const available = PAGE_H - 72
-    const height = Math.min(118, (available - gap * (count - 1)) / count)
-    let photoY = PAGE_H - 48 - height
-    for (let i = 0; i < count; i += 1) {
-      const photo = photos[i]
-      if (photo) {
-        drawSkewPhoto(page, photo, { x: photoX, y: photoY, width: photoW, height })
-      }
-      photoY -= height + gap
-    }
-  }
-
-  if (groups.length === 0) {
-    safeDrawText(page, "Inclusions will be confirmed with your ZK specialist.", {
-      x: listX,
-      y: PAGE_H - 120,
+  const glance = formatBrochureIncludes(content.includes, 4)
+  if (glance.length && y > FOOTER_H + 150) {
+    y -= 18
+    safeDrawText(page, "AT A GLANCE", {
+      x,
+      y,
       size: 10,
-      font: fonts.sans,
-      color: WHITE,
+      font: fonts.condensedMedium,
+      color: RED,
     })
+    y -= 22
+    for (const item of glance) {
+      page.drawRectangle({ x, y: y + 4, width: 12, height: 2.4, color: RED })
+      const glanceLines = wrapText(brochureReadable(item.title), fonts.sansMedium, 11, TEXT_COL_W - 22)
+      let lineY = y
+      for (const line of glanceLines.slice(0, 2)) {
+        safeDrawText(page, line, {
+          x: x + 20,
+          y: lineY,
+          size: 11,
+          font: fonts.sansMedium,
+          color: WHITE,
+        })
+        lineY -= 15
+      }
+      y = lineY - 8
+    }
+  }
+
+  drawIncludedPhotos(page, photos, slots)
+}
+
+function drawIncludedPhotos(page: PDFPage, photos: PDFImage[], slots: 3 | 5) {
+  const photoX = INCLUDED_PHOTO_X
+  const photoW = PAGE_W - FRAME - photoX
+  const top = SECTION_TOP
+  const bottom = PHOTO_BOTTOM
+  const gap = 8
+
+  if (slots === 5 && photos.length >= 5) {
+    const largeH = (top - bottom - gap * 2) * 0.5
+    const gridH = top - bottom - largeH - gap
+    const cellH = (gridH - gap) / 2
+    const cellW = (photoW - gap) / 2
+    drawPhotoTile(page, photos[0], { x: photoX, y: top - largeH, width: photoW, height: largeH })
+    const row2Y = bottom + cellH + gap
+    drawPhotoTile(page, photos[1], { x: photoX, y: row2Y, width: cellW, height: cellH })
+    drawPhotoTile(page, photos[2], { x: photoX + cellW + gap, y: row2Y, width: cellW, height: cellH })
+    drawPhotoTile(page, photos[3], { x: photoX, y: bottom, width: cellW, height: cellH })
+    drawPhotoTile(page, photos[4], { x: photoX + cellW + gap, y: bottom, width: cellW, height: cellH })
     return
   }
 
-  const blockGap = 16
-  const usable = PAGE_H - 80
-  const blockH = Math.min(120, (usable - blockGap * (groups.length - 1)) / groups.length)
-  let blockY = PAGE_H - 52
-  for (const group of groups) {
-    const top = blockY
-    safeDrawText(page, group.index, {
-      x: listX,
-      y: top - 22,
-      size: 20,
-      font: fonts.condensed,
-      color: RED,
-    })
-    const titleLines = wrapText(group.title.toUpperCase(), fonts.condensed, 11, listW - 48)
-    let textY = top - 18
-    for (const line of titleLines.slice(0, 2)) {
-      safeDrawText(page, line, {
-        x: listX + 46,
-        y: textY,
-        size: 11,
-        font: fonts.condensed,
-        color: WHITE,
-      })
-      textY -= 13
-    }
-    for (const bullet of group.bullets.slice(0, 3)) {
-      const wrapped = wrapText(bullet, fonts.sans, 8.5, listW - 58)
-      for (const line of wrapped.slice(0, 2)) {
-        safeDrawText(page, line, {
-          x: listX + 46,
-          y: textY,
-          size: 8.5,
-          font: fonts.sans,
-          color: MUTED,
-        })
-        textY -= 11.5
-      }
-    }
-    page.drawRectangle({
-      x: listX,
-      y: top - blockH + 6,
-      width: listW,
-      height: 0.8,
-      color: RED,
-    })
-    blockY -= blockH + blockGap
+  const stack = photos.slice(0, 3)
+  if (stack.length === 0) return
+  if (stack.length === 1) {
+    drawPhotoTile(page, stack[0], { x: photoX, y: bottom, width: photoW, height: top - bottom })
+    return
   }
+  if (stack.length === 2) {
+    const largeH = (top - bottom - gap) * 0.62
+    drawPhotoTile(page, stack[0], { x: photoX, y: top - largeH, width: photoW, height: largeH })
+    drawPhotoTile(page, stack[1], {
+      x: photoX,
+      y: bottom,
+      width: photoW,
+      height: top - largeH - gap - bottom,
+    })
+    return
+  }
+  const largeH = (top - bottom - gap) * 0.62
+  const smallH = top - largeH - gap - bottom
+  const smallW = (photoW - gap) / 2
+  drawPhotoTile(page, stack[0], { x: photoX, y: top - largeH, width: photoW, height: largeH })
+  drawPhotoTile(page, stack[1], { x: photoX, y: bottom, width: smallW, height: smallH })
+  drawPhotoTile(page, stack[2], { x: photoX + smallW + gap, y: bottom, width: smallW, height: smallH })
 }
 
-export async function generatePackageBrochurePdf(content: BrochureContent): Promise<Uint8Array> {
+function drawCircuit(page: PDFPage, content: BrochureContent, fonts: BrochureFonts, map: PDFImage) {
+  const x = leftTextX()
+  const detailsColW = 236
+  const heading = brochureCircuitHeadline()
+
+  let y = drawSectionHeading(page, fonts, {
+    x,
+    top: SECTION_TOP,
+    maxWidth: detailsColW,
+    kicker: "The circuit",
+    lead: heading.lead,
+    accent: heading.accent,
+  })
+
+  const facts = brochureCircuitFacts(content)
+  const location = facts.find((fact) => fact.label === "Location")?.value
+  if (location) {
+    const intro = wrapText(`Located in ${location}.`, fonts.sans, 12, detailsColW)
+    for (const line of intro.slice(0, 3)) {
+      safeDrawText(page, line, { x, y, size: 12, font: fonts.sans, color: WHITE })
+      y -= 18
+    }
+    y -= 10
+  }
+
+  for (const fact of facts.filter((item) => item.label !== "Location")) {
+    safeDrawText(page, fact.label.toUpperCase(), {
+      x,
+      y,
+      size: 10,
+      font: fonts.condensedMedium,
+      color: RED,
+    })
+    y -= 16
+    const values = wrapText(fact.value, fonts.sansMedium, 13, detailsColW)
+    for (const line of values.slice(0, 2)) {
+      safeDrawText(page, line, { x, y, size: 13, font: fonts.sansMedium, color: WHITE })
+      y -= 18
+    }
+    y -= 10
+  }
+
+  const border = 3
+  const mapX = x + detailsColW + 18
+  const mapBox = {
+    x: mapX,
+    y: PHOTO_BOTTOM + 6,
+    width: PAGE_W - 14 - mapX,
+    height: PAGE_H - 32 - (PHOTO_BOTTOM + 6),
+  }
+  const drawn = drawImageContain(page, map, mapBox, border + 3)
+  page.drawRectangle({
+    x: drawn.x,
+    y: drawn.y,
+    width: drawn.width,
+    height: drawn.height,
+    borderColor: RED,
+    borderWidth: border,
+  })
+}
+
+export async function generatePackageBrochurePdf(
+  content: BrochureContent,
+  options?: { minPhotos?: number },
+): Promise<Uint8Array> {
   const pdf = await PDFDocument.create()
-  pdf.setTitle(`${brochureSafeText(content.productName)} · ${brochureSafeText(content.raceName)}`)
+  pdf.setTitle(`${brochurePrintText(content.productName)} · ${brochurePrintText(content.raceName)}`)
   pdf.setAuthor("ZK Sports & Entertainment")
   pdf.setSubject("Hospitality brochure")
   pdf.setCreator("ZK Sports Trade")
@@ -445,22 +331,32 @@ export async function generatePackageBrochurePdf(content: BrochureContent): Prom
   pdf.setKeywords(["ZK Sports", content.productName, content.raceName].filter(Boolean))
 
   const fonts = await embedBrochureFonts(pdf)
-  const [whiteLogo, photos] = await Promise.all([
-    embedLogo(pdf, "ZK white logo.png"),
+  const [background, photos, trackMap] = await Promise.all([
+    embedPublicImage(pdf, "images", "brochures", "template-bg.png"),
     embedPhotos(pdf, content),
+    embedTrackMap(pdf, content),
   ])
 
-  const cover = pdf.addPage(PAGE)
-  drawCover(cover, content, fonts, photos, whiteLogo)
-
-  const story = pdf.addPage(PAGE)
-  drawStory(story, content, fonts, photos[1] ?? photos[0], whiteLogo)
-
-  if (content.includes.length > 0 || photos.length > 1) {
-    const included = pdf.addPage(PAGE)
-    const includePhotos = photos.length > 1 ? photos.slice(1) : photos
-    drawIncludes(included, content, fonts, includePhotos, whiteLogo)
+  const minPhotos = options?.minPhotos ?? 0
+  if (minPhotos > 0 && photos.length < minPhotos) {
+    throw new BrochureInsufficientImagesError(photos.length, minPhotos)
   }
 
-  return pdf.save()
+  const pages = brochurePagePlan(Boolean(trackMap))
+  const pageCount = pages.length
+  const chrome = (page: PDFPage, index: number) => drawChrome(page, fonts, { pageIndex: index, pageCount })
+
+  for (const [index, kind] of pages.entries()) {
+    const page = pdf.addPage(PAGE)
+    drawBackground(page, background)
+    if (kind === "cover") drawCover(page, content, fonts, photos)
+    else if (kind === "included") {
+      const totalPhotos = brochurePhotoUrls(content.heroUrl, content.galleryUrls, content.trackMapUrl).length
+      drawIncluded(page, content, fonts, photos.slice(1), includedPhotoSlots(totalPhotos))
+    }
+    else if (trackMap) drawCircuit(page, content, fonts, trackMap)
+    chrome(page, index + 1)
+  }
+
+  return pdf.save({ useObjectStreams: false })
 }

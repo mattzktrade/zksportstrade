@@ -22,6 +22,8 @@ export interface Package {
   description?: string | null
   /** Extra gallery image URLs (primary `image` is always first slide) */
   galleryImages?: string[]
+  /** Circuit / track map shown on the product page and as brochure page 3 when set */
+  trackMap?: string | null
   featured?: boolean
   /** When true, hidden from the agent portal until an admin shows it again. */
   isHidden?: boolean
@@ -46,6 +48,8 @@ export interface Race {
   id: string
   name: string
   shortName: string
+  /** Track or venue name (e.g. Albert Park Circuit). Distinct from the Grand Prix title. */
+  circuit?: string
   location: string
   country: string
   countryCode: string
