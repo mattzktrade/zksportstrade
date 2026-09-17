@@ -1,4 +1,5 @@
 import { sendXeroInvoiceEmail } from "@/lib/email/send-xero-invoice"
+import { loadDealClientCcEmails } from "@/lib/booking-forms/deal-cc-emails"
 import { enqueueOpportunityOutcomeServer } from "@/lib/integrations/enqueue-server"
 import { attachInvoicePdfToOpportunity } from "@/lib/integrations/salesforce/invoice-file"
 import { xeroFetchInvoicePdf, xeroRequest, xeroCallsUsedThisProcess, XERO_PROCESS_CALL_BUDGET } from "@/lib/integrations/xero/client"
@@ -477,6 +478,7 @@ export async function createXeroInvoiceForOrder(
 
   if (xeroInvoiceEmailOnCreate() && xeroInv.Status === "AUTHORISED" && !inv.invoice_emailed_at) {
     const packageName = invoiceLines.map((line) => line.packageName).join(", ")
+    const extraCc = await loadDealClientCcEmails(admin, order.deal_id)
     const emailResult = await sendXeroInvoiceEmail({
       agentEmail: billingEmail,
       agentName: billToName,
@@ -489,6 +491,7 @@ export async function createXeroInvoiceForOrder(
       totalAmount: Number(order.total_amount),
       currency: order.currency,
       dueDate,
+      extraCc,
     })
     if (!emailResult.ok) {
       console.warn(
@@ -566,6 +569,7 @@ export async function resendXeroInvoiceForOrder(orderId: string): Promise<void> 
     lines?.map((line) => String(line.description)).filter(Boolean).join(", ") || "Package"
   const guests =
     lines?.reduce((sum, line) => sum + Number(line.quantity ?? 0), 0) || Number(order.guests)
+  const extraCc = await loadDealClientCcEmails(admin, order.deal_id)
   const result = await sendXeroInvoiceEmail({
     agentEmail: recipientEmail,
     agentName: recipientName,
@@ -578,6 +582,7 @@ export async function resendXeroInvoiceForOrder(orderId: string): Promise<void> 
     totalAmount: Number(order.total_amount),
     currency: order.currency,
     dueDate: invoice.due_date ?? new Date().toISOString().slice(0, 10),
+    extraCc,
   })
   if (!result.ok) throw new Error(result.error ?? result.skipped ?? "Invoice email failed.")
   await admin

@@ -12,6 +12,7 @@ import {
   readBookingFormSigningToken,
   saveBookingFormSigningToken,
 } from "@/lib/booking-forms/signing-token"
+import { snapshotClientCcEmails } from "@/lib/booking-forms/cc-emails"
 import type { BookingFormSnapshot } from "@/lib/booking-forms/types"
 import {
   sendNativeBookingFormFinalReminder,
@@ -79,6 +80,7 @@ function emailFields(snapshot: BookingFormSnapshot) {
     documentRef: snapshot.documentRef,
     eventName: snapshot.deal.title,
     totalLabel: totalLabel(snapshot),
+    ccEmails: snapshotClientCcEmails(snapshot),
   }
 }
 

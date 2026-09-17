@@ -19,6 +19,7 @@ type BookingFormEmail = {
   signingUrl: string
   expiresAt: string
   pdf?: Uint8Array
+  ccEmails?: string[]
 }
 
 type EmailResult = { ok: boolean; skipped?: string; error?: string }
@@ -33,9 +34,20 @@ function escapeHtml(value: string): string {
 
 const BOOKING_FORM_CC = [DEFAULT_BOOKINGS_CC, DEFAULT_CHELLEY_CC] as const
 
-export function bookingFormCc(to: string[]): string[] {
-  const exclude = new Set(to.map((email) => email.trim().toLowerCase()))
-  return BOOKING_FORM_CC.filter((email) => !exclude.has(email.toLowerCase()))
+export function bookingFormCc(to: string[], extraCc: string[] = []): string[] {
+  const exclude = new Set(to.map((email) => email.trim().toLowerCase()).filter(Boolean))
+  const extras: string[] = []
+  const extraSet = new Set<string>()
+  for (const raw of extraCc) {
+    const email = raw.trim().toLowerCase()
+    if (!email.includes("@") || exclude.has(email) || extraSet.has(email)) continue
+    extraSet.add(email)
+    extras.push(email)
+  }
+  const internal = BOOKING_FORM_CC.filter(
+    (email) => !exclude.has(email.toLowerCase()) && !extraSet.has(email.toLowerCase()),
+  )
+  return [...extras, ...internal]
 }
 
 async function send(input: {
@@ -117,7 +129,7 @@ export function sendNativeBookingFormEmail(input: BookingFormEmail) {
   const to = [input.recipientEmail]
   return send({
     to,
-    cc: bookingFormCc(to),
+    cc: bookingFormCc(to, input.ccEmails),
     subject: `Signature requested: ${input.eventName} — ${input.documentRef}`,
     html: signingEmailHtml(input, false),
     attachments: bookingPdfAttachment(input),
@@ -128,7 +140,7 @@ export function sendManualNativeBookingFormEmail(input: BookingFormEmail) {
   const to = [input.recipientEmail]
   return send({
     to,
-    cc: bookingFormCc(to),
+    cc: bookingFormCc(to, input.ccEmails),
     subject: `Booking form: ${input.eventName} — ${input.documentRef}`,
     html: manualBookingEmailHtml(input),
     attachments: bookingPdfAttachment(input),
@@ -139,7 +151,7 @@ export function sendNativeBookingFormReminder(input: BookingFormEmail) {
   const to = [input.recipientEmail]
   return send({
     to,
-    cc: bookingFormCc(to),
+    cc: bookingFormCc(to, input.ccEmails),
     subject: `Reminder: booking form expires soon — ${input.documentRef}`,
     html: signingEmailHtml(input, true),
   })
@@ -168,7 +180,7 @@ export function sendNativeBookingFormFinalReminder(input: BookingFormEmail) {
   const to = [input.recipientEmail]
   return send({
     to,
-    cc: bookingFormCc(to),
+    cc: bookingFormCc(to, input.ccEmails),
     subject: `Please sign now — stock will be released in 1 hour — ${input.documentRef}`,
     html: finalReminderEmailHtml(input),
   })
@@ -181,6 +193,7 @@ type HoldReleasedEmail = {
   documentRef: string
   eventName: string
   totalLabel: string
+  ccEmails?: string[]
 }
 
 function holdReleasedEmailHtml(input: HoldReleasedEmail): string {
@@ -200,7 +213,7 @@ export function sendNativeBookingFormHoldReleased(input: HoldReleasedEmail) {
   const to = [input.recipientEmail]
   return send({
     to,
-    cc: bookingFormCc(to),
+    cc: bookingFormCc(to, input.ccEmails),
     subject: `Stock is no longer held — ${input.documentRef}`,
     html: holdReleasedEmailHtml(input),
   })
@@ -214,11 +227,12 @@ export function sendCompletedBookingFormEmail(input: {
   documentRef: string
   eventName: string
   pdf: Uint8Array
+  ccEmails?: string[]
 }) {
   const to = [input.clientEmail]
   return send({
     to,
-    cc: bookingFormCc(to),
+    cc: bookingFormCc(to, input.ccEmails),
     subject: `Completed booking form — ${input.documentRef}`,
     html: [
       `<p>Hi ${escapeHtml(input.clientName)},</p>`,

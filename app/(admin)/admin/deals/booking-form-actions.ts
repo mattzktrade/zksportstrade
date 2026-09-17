@@ -43,6 +43,8 @@ import {
   type BookingFormEdits,
   type BookingFormSendMode,
 } from "@/lib/booking-forms/edits"
+import { snapshotClientCcEmails, type BookingFormAccountEmailOption } from "@/lib/booking-forms/cc-emails"
+import { loadAccountEmailOptions } from "@/lib/booking-forms/deal-cc-emails"
 import type { BookingFormSnapshot } from "@/lib/booking-forms/types"
 import {
   sendCompletedBookingFormEmail,
@@ -59,7 +61,12 @@ type Result =
   | { ok: false; message: string }
 type UrlResult = { ok: true; url: string } | { ok: false; message: string }
 type SnapshotResult =
-  | { ok: true; snapshot: BookingFormSnapshot; edits: BookingFormEdits }
+  | {
+      ok: true
+      snapshot: BookingFormSnapshot
+      edits: BookingFormEdits
+      accountEmails: BookingFormAccountEmailOption[]
+    }
   | { ok: false; message: string }
 type PdfPreviewResult =
   | { ok: true; pdfBase64: string; filename: string }
@@ -77,6 +84,18 @@ function totalLabel(snapshot: BookingFormSnapshot): string {
     }).format(snapshot.total)
   } catch {
     return `${snapshot.currency} ${snapshot.total.toFixed(2)}`
+  }
+}
+
+function bookingFormEmailFields(snapshot: BookingFormSnapshot) {
+  return {
+    recipientEmail: snapshot.billTo.contactEmail,
+    recipientName: snapshot.billTo.contactName,
+    accountName: snapshot.billTo.accountName,
+    documentRef: snapshot.documentRef,
+    eventName: snapshot.deal.title,
+    totalLabel: totalLabel(snapshot),
+    ccEmails: snapshotClientCcEmails(snapshot),
   }
 }
 
@@ -264,12 +283,7 @@ async function sendPersistedForm(
     }
   }
   const emailInput = {
-    recipientEmail: snapshot.billTo.contactEmail,
-    recipientName: snapshot.billTo.contactName,
-    accountName: snapshot.billTo.accountName,
-    documentRef: snapshot.documentRef,
-    eventName: snapshot.deal.title,
-    totalLabel: totalLabel(snapshot),
+    ...bookingFormEmailFields(snapshot),
     signingUrl: signingUrl(token),
     expiresAt: expiresAt.toISOString(),
     pdf,
@@ -322,7 +336,12 @@ export async function previewNativeBookingFormSnapshot(input: {
         throw new Error("That booking form does not belong to this deal.")
       }
       const snapshot = form.snapshot_data as BookingFormSnapshot
-      return { ok: true, snapshot, edits: snapshotToEdits(snapshot) }
+      return {
+        ok: true,
+        snapshot,
+        edits: snapshotToEdits(snapshot),
+        accountEmails: await loadAccountEmailOptions(gate.supabase, snapshot.billTo.accountId),
+      }
     }
     const now = new Date()
     const { snapshot } = await buildBookingFormSnapshot(
@@ -331,7 +350,12 @@ export async function previewNativeBookingFormSnapshot(input: {
       generateDocumentRef(now),
       now,
     )
-    return { ok: true, snapshot, edits: snapshotToEdits(snapshot) }
+    return {
+      ok: true,
+      snapshot,
+      edits: snapshotToEdits(snapshot),
+      accountEmails: await loadAccountEmailOptions(gate.supabase, snapshot.billTo.accountId),
+    }
   } catch (error) {
     return { ok: false, message: errorMessage(error) }
   }
@@ -533,12 +557,7 @@ export async function resendNativeBookingForm(bookingFormId: string): Promise<Re
     })
 
     const email = await sendNativeBookingFormEmail({
-      recipientEmail: snapshot.billTo.contactEmail,
-      recipientName: snapshot.billTo.contactName,
-      accountName: snapshot.billTo.accountName,
-      documentRef: snapshot.documentRef,
-      eventName: snapshot.deal.title,
-      totalLabel: totalLabel(snapshot),
+      ...bookingFormEmailFields(snapshot),
       signingUrl: signingUrl(token),
       expiresAt: form.client_token_expires_at,
     })
@@ -716,6 +735,7 @@ export async function signNativeBookingFormAsAdmin(input: {
       documentRef: snapshot.documentRef,
       eventName: snapshot.deal.title,
       pdf: finalPdf,
+      ccEmails: snapshotClientCcEmails(snapshot),
     })
     if (!email.ok) {
       const detail = email.error ?? email.skipped ?? "Completion email failed."

@@ -50,6 +50,8 @@ export type BookingFormSnapshot = {
     contactEmail: string
     addressLines: string[]
   }
+  /** Extra client recipients for booking-form and invoice emails. Not shown on the PDF. */
+  ccEmails?: string[]
   lines: BookingFormLineSnapshot[]
   currency: string
   subtotal: number

@@ -33,12 +33,27 @@ export function getBookingConfirmationCc(excludeEmail: string): string[] {
   return exclusiveCc(DEFAULT_BOOKINGS_CC, excludeEmail)
 }
 
-/**
- * CC for invoice and payment-reminder emails: finance@ only.
+/** CC for invoice and payment-reminder emails: finance@ only.
  * Ignores Vercel leftovers such as XERO_INVOICE_CC so they cannot put matt@ on invoice mail.
  */
 export function getInvoiceFinanceCc(excludeEmail: string): string[] {
   return exclusiveCc(DEFAULT_FINANCE_CC, excludeEmail)
+}
+
+export function invoiceEmailCc(to: string, extraCc: string[] = []): string[] {
+  const finance = getInvoiceFinanceCc(to)
+  const exclude = new Set(
+    [to, ...finance].map((email) => email.trim().toLowerCase()).filter(Boolean),
+  )
+  const extras: string[] = []
+  const seen = new Set<string>()
+  for (const raw of extraCc) {
+    const email = raw.trim().toLowerCase()
+    if (!email.includes("@") || exclude.has(email) || seen.has(email)) continue
+    seen.add(email)
+    extras.push(email)
+  }
+  return [...extras, ...finance]
 }
 
 /** CC for operations introduction and guest-details emails: jenny@ only. */

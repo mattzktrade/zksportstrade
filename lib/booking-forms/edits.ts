@@ -1,3 +1,4 @@
+import { normalizeClientCcEmails } from "@/lib/booking-forms/cc-emails"
 import { applyInclusiveVat, defaultNoVat } from "@/lib/booking-forms/line-tax"
 import { BOOKING_TERMS } from "@/lib/booking-forms/template"
 import type { BookingFormSnapshot } from "@/lib/booking-forms/types"
@@ -28,6 +29,8 @@ export type BookingFormEdits = {
   billToAccountName: string
   billToContactName: string
   billToContactEmail: string
+  /** Extra people who receive the booking form email and later invoice. Not signers. */
+  ccEmails: string[]
   billToAddress: string
   sellerLegalName: string
   sellerAddress: string
@@ -88,6 +91,7 @@ export function snapshotToEdits(snapshot: BookingFormSnapshot): BookingFormEdits
     billToAccountName: snapshot.billTo.accountName,
     billToContactName: snapshot.billTo.contactName,
     billToContactEmail: snapshot.billTo.contactEmail,
+    ccEmails: snapshot.ccEmails ?? [],
     billToAddress: snapshot.billTo.addressLines.join("\n"),
     sellerLegalName: snapshot.seller.legalName,
     sellerAddress: snapshot.seller.addressLines.join("\n"),
@@ -125,6 +129,7 @@ export function applyBookingFormEdits(
   const dealTitle = clean(edits.dealTitle, 240, "Document title")
   const contactEmail = clean(edits.billToContactEmail, 240, "Signer email").toLowerCase()
   if (!EMAIL_RE.test(contactEmail)) throw new Error("Enter a valid signer email address.")
+  const ccEmails = normalizeClientCcEmails(edits.ccEmails ?? [], contactEmail)
 
   const nextLines =
     edits.lines.length === base.lines.length
@@ -174,7 +179,7 @@ export function applyBookingFormEdits(
   if (!edits.terms.length) throw new Error("The booking form needs terms and conditions.")
   if (edits.terms.length > 40) throw new Error("Too many terms sections.")
 
-  return {
+  const next: BookingFormSnapshot = {
     ...base,
     deal: {
       ...base.deal,
@@ -213,4 +218,7 @@ export function applyBookingFormEdits(
       paragraphs: paragraphsFromBody(section.body),
     })),
   }
+  if (ccEmails.length) next.ccEmails = ccEmails
+  else delete next.ccEmails
+  return next
 }

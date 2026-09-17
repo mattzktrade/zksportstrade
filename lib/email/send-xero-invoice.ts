@@ -1,5 +1,5 @@
 import { Resend } from "resend"
-import { getInvoiceFinanceCc, getResendApiKey, getResendFromAddress } from "@/lib/email/config"
+import { getResendApiKey, getResendFromAddress, invoiceEmailCc } from "@/lib/email/config"
 import { xeroFetchInvoicePdf } from "@/lib/integrations/xero/client"
 
 export type XeroInvoiceEmailPayload = {
@@ -14,6 +14,7 @@ export type XeroInvoiceEmailPayload = {
   totalAmount: number
   currency: string
   dueDate: string
+  extraCc?: string[]
 }
 
 function escapeHtml(s: string): string {
@@ -57,7 +58,7 @@ export async function sendXeroInvoiceEmail(
     return { ok: false, skipped: "RESEND_API_KEY or ORDER_EMAIL_FROM not configured" }
   }
 
-  const cc = getInvoiceFinanceCc(p.agentEmail)
+  const cc = invoiceEmailCc(p.agentEmail, p.extraCc)
   let pdf: ArrayBuffer
   try {
     pdf = await xeroFetchInvoicePdf(p.xeroInvoiceId)

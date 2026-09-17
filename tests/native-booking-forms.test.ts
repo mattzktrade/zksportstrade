@@ -8,6 +8,10 @@ import {
   snapshotToEdits,
 } from "../lib/booking-forms/edits"
 import {
+  normalizeClientCcEmails,
+  snapshotClientCcEmails,
+} from "../lib/booking-forms/cc-emails"
+import {
   bookingLineTax,
   generateSigningToken,
   sha256,
@@ -209,6 +213,28 @@ test("booking form edits can rename parties, products and terms without changing
   assert.equal(next.lines[0].description, "Custom hospitality description")
   assert.equal(next.terms[0].heading, "Special introduction")
   assert.equal(next.terms[0].paragraphs.length, 2)
+  assert.equal(next.ccEmails, undefined)
+})
+
+test("booking form CC emails are saved on the snapshot and excluded from the signer and PDF", () => {
+  const snapshot = testSnapshot()
+  const edits = snapshotToEdits(snapshot)
+  assert.deepEqual(edits.ccEmails, [])
+  edits.ccEmails = ["ops@agency.com", "  Finance@Agency.com ", edits.billToContactEmail, "ops@agency.com"]
+  const next = applyBookingFormEdits(snapshot, edits)
+  assert.deepEqual(next.ccEmails, ["ops@agency.com", "finance@agency.com"])
+  assert.deepEqual(snapshotClientCcEmails(next), ["ops@agency.com", "finance@agency.com"])
+  assert.deepEqual(normalizeClientCcEmails(["OPS@agency.com", "signer@example.com"], "signer@example.com"), [
+    "ops@agency.com",
+  ])
+  assert.throws(
+    () => applyBookingFormEdits(snapshot, { ...edits, ccEmails: ["not-an-email"] }),
+    /valid CC email/,
+  )
+  const cleared = applyBookingFormEdits(snapshot, { ...edits, ccEmails: [] })
+  assert.equal(cleared.ccEmails, undefined)
+  const pdfSource = readFileSync("lib/booking-forms/pdf.ts", "utf8")
+  assert.doesNotMatch(pdfSource, /ccEmails/)
 })
 
 test("new accounts can omit postcode and booking forms still render the rest of the address", () => {
@@ -319,34 +345,43 @@ test("no-VAT is the default edit and 5% included VAT does not change the total",
   assert.equal(Buffer.from(noVatPdf).subarray(0, 4).toString(), "%PDF")
 })
 
-test("booking form emails CC bookings and Chelley", () => {
+test("booking form emails CC bookings, Chelley, and any extra client addresses", () => {
   assert.equal(DEFAULT_BOOKINGS_CC, "bookings@zk-sports.com")
   assert.equal(DEFAULT_CHELLEY_CC, "chelley@zk-sports.com")
   assert.deepEqual(bookingFormCc(["client@example.com"]), [DEFAULT_BOOKINGS_CC, DEFAULT_CHELLEY_CC])
   assert.deepEqual(bookingFormCc(["client@example.com", DEFAULT_BOOKINGS_CC]), [DEFAULT_CHELLEY_CC])
   assert.deepEqual(bookingFormCc(["client@example.com", DEFAULT_CHELLEY_CC]), [DEFAULT_BOOKINGS_CC])
   assert.deepEqual(bookingFormCc([DEFAULT_BOOKINGS_CC, DEFAULT_CHELLEY_CC]), [])
+  assert.deepEqual(
+    bookingFormCc(["client@example.com"], ["ops@agency.com", "client@example.com", DEFAULT_BOOKINGS_CC]),
+    ["ops@agency.com", DEFAULT_BOOKINGS_CC, DEFAULT_CHELLEY_CC],
+  )
   const source = readFileSync("lib/email/send-booking-form.ts", "utf8")
   const functionSource = (name: string) => {
     const start = source.indexOf(`export function ${name}`)
     const next = source.indexOf("export function ", start + 1)
     return source.slice(start, next === -1 ? undefined : next)
   }
-  assert.match(functionSource("sendNativeBookingFormEmail"), /cc: bookingFormCc\(to\)/)
-  assert.match(functionSource("sendManualNativeBookingFormEmail"), /cc: bookingFormCc\(to\)/)
-  assert.match(functionSource("sendNativeBookingFormReminder"), /cc: bookingFormCc\(to\)/)
-  assert.match(functionSource("sendNativeBookingFormFinalReminder"), /cc: bookingFormCc\(to\)/)
-  assert.match(functionSource("sendNativeBookingFormHoldReleased"), /cc: bookingFormCc\(to\)/)
+  assert.match(functionSource("sendNativeBookingFormEmail"), /cc: bookingFormCc\(to, input\.ccEmails\)/)
+  assert.match(functionSource("sendManualNativeBookingFormEmail"), /cc: bookingFormCc\(to, input\.ccEmails\)/)
+  assert.match(functionSource("sendNativeBookingFormReminder"), /cc: bookingFormCc\(to, input\.ccEmails\)/)
+  assert.match(functionSource("sendNativeBookingFormFinalReminder"), /cc: bookingFormCc\(to, input\.ccEmails\)/)
+  assert.match(functionSource("sendNativeBookingFormHoldReleased"), /cc: bookingFormCc\(to, input\.ccEmails\)/)
   assert.match(source, /stock is no longer held/)
   assert.match(source, /contact the team again to extend/)
   assert.match(source, /stock hold will be released/)
   assert.doesNotMatch(functionSource("sendNativeBookingFormHoldReleased"), /signingUrl/)
-  assert.match(functionSource("sendCompletedBookingFormEmail"), /cc: bookingFormCc\(to\)/)
+  assert.match(functionSource("sendCompletedBookingFormEmail"), /cc: bookingFormCc\(to, input\.ccEmails\)/)
   assert.match(functionSource("sendCompletedBookingFormEmail"), /const to = \[input\.clientEmail\]/)
   assert.doesNotMatch(functionSource("sendCompletedBookingFormEmail"), /adminEmail\.toLowerCase/)
   const clientSignedStart = source.indexOf("export async function sendClientSignedBookingFormNotification")
   const clientSigned = source.slice(clientSignedStart, source.indexOf("export async function sendBookingFormReadyToSendNotification"))
   assert.match(clientSigned, /cc: bookingFormCc\(recipients\)/)
+  const actions = readFileSync("app/(admin)/admin/deals/booking-form-actions.ts", "utf8")
+  assert.match(actions, /ccEmails: snapshotClientCcEmails\(snapshot\)/)
+  assert.match(actions, /loadAccountEmailOptions/)
+  const automation = readFileSync("lib/integrations/process-native-booking-forms.ts", "utf8")
+  assert.match(automation, /ccEmails: snapshotClientCcEmails\(snapshot\)/)
 })
 
 test("client-signed booking form alerts go only to Ollie and Michel by default", () => {
@@ -373,6 +408,10 @@ test("booking form signing page uses a product table, colour logo, and client si
   assert.match(editor, /noVat/)
   assert.match(editor, /Send for approval/)
   assert.match(editor, /onNotify/)
+  assert.match(editor, /CC emails/)
+  assert.match(editor, /People on this account/)
+  assert.match(editor, /Add another email/)
+  assert.match(editor, /accountEmails/)
   const panel = readFileSync("app/(admin)/admin/deals/booking-form-panel.tsx", "utf8")
   assert.match(panel, /Copy signing link/)
   assert.match(panel, /getNativeBookingFormSigningUrl/)

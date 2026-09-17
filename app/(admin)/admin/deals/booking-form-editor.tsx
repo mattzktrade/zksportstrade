@@ -9,6 +9,12 @@ import {
   previewNativeBookingFormSnapshot,
 } from "./booking-form-actions"
 import {
+  EMAIL_RE,
+  MAX_CLIENT_CC_EMAILS,
+  splitCcInput,
+  type BookingFormAccountEmailOption,
+} from "@/lib/booking-forms/cc-emails"
+import {
   standardTermEdits,
   type BookingFormEdits,
   type BookingFormSendMode,
@@ -45,6 +51,168 @@ function Section({
   )
 }
 
+function signerEmail(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function CcEmailsField({
+  ccEmails,
+  signer,
+  accountEmails,
+  onChange,
+}: {
+  ccEmails: string[]
+  signer: string
+  accountEmails: BookingFormAccountEmailOption[]
+  onChange: (emails: string[]) => void
+}) {
+  const [draft, setDraft] = useState("")
+  const signerNormalized = signerEmail(signer)
+  const selected = new Set(ccEmails.map((email) => email.toLowerCase()))
+  const accountOptions = accountEmails.filter((option) => option.email !== signerNormalized)
+  const extraEmails = ccEmails.filter(
+    (email) =>
+      email.toLowerCase() !== signerNormalized &&
+      !accountOptions.some((option) => option.email === email.toLowerCase()),
+  )
+
+  function setEmails(next: string[]) {
+    const seen = new Set<string>()
+    const emails: string[] = []
+    for (const value of next) {
+      const email = value.trim().toLowerCase()
+      if (!email || email === signerNormalized || seen.has(email) || !EMAIL_RE.test(email)) continue
+      seen.add(email)
+      emails.push(email)
+      if (emails.length >= MAX_CLIENT_CC_EMAILS) break
+    }
+    onChange(emails)
+  }
+
+  function toggleAccountEmail(email: string, checked: boolean) {
+    if (checked) {
+      if (ccEmails.length >= MAX_CLIENT_CC_EMAILS && !selected.has(email)) {
+        toast.error(`You can CC at most ${MAX_CLIENT_CC_EMAILS} extra addresses.`)
+        return
+      }
+      setEmails([...ccEmails, email])
+      return
+    }
+    setEmails(ccEmails.filter((value) => value.toLowerCase() !== email))
+  }
+
+  function addTypedEmails() {
+    const parts = splitCcInput(draft)
+    if (!parts.length) return
+    const next = [...ccEmails]
+    const seen = new Set(next.map((email) => email.toLowerCase()))
+    const rejected: string[] = []
+    for (const part of parts) {
+      const email = part.toLowerCase()
+      if (email === signerNormalized) {
+        rejected.push(`${part} is already the signer`)
+        continue
+      }
+      if (!EMAIL_RE.test(email)) {
+        rejected.push(`${part} is not a valid email`)
+        continue
+      }
+      if (seen.has(email)) continue
+      if (next.length >= MAX_CLIENT_CC_EMAILS) {
+        rejected.push(`limit of ${MAX_CLIENT_CC_EMAILS} extra addresses reached`)
+        break
+      }
+      seen.add(email)
+      next.push(email)
+    }
+    setEmails(next)
+    if (rejected.length && next.length === ccEmails.length) {
+      toast.error(rejected[0])
+      return
+    }
+    setDraft("")
+    if (rejected.length) toast.error(rejected[0])
+  }
+
+  return (
+    <div>
+      <p className="text-sm font-semibold">CC emails</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">
+        Optional. These people also receive the booking form email and the invoice after signing.
+        They cannot sign.
+      </p>
+      {accountOptions.length ? (
+        <div className="mt-3 space-y-2">
+          <p className="text-xs font-semibold text-slate-500">People on this account</p>
+          {accountOptions.map((option) => (
+            <label
+              key={option.email}
+              className="flex items-start gap-3 rounded-md border border-slate-200 px-3 py-2"
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(option.email)}
+                onChange={(event) => toggleAccountEmail(option.email, event.target.checked)}
+                className="mt-1 h-4 w-4 accent-[#F90202]"
+              />
+              <span>
+                <span className="block text-sm font-semibold">{option.label}</span>
+                <span className="block text-xs text-slate-500">{option.email}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+      <label className="mt-3 block text-sm font-semibold">
+        Add another email
+        <span className="mt-2 flex gap-2">
+          <input
+            type="text"
+            inputMode="email"
+            autoComplete="off"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault()
+                addTypedEmails()
+              }
+            }}
+            placeholder="name@company.com"
+            className="h-11 min-w-0 flex-1 rounded-md border px-3 font-normal"
+          />
+          <button
+            type="button"
+            onClick={addTypedEmails}
+            className="inline-flex h-11 shrink-0 items-center gap-1 rounded-md border px-3 text-sm font-semibold"
+          >
+            <Plus className="h-4 w-4" /> Add
+          </button>
+        </span>
+      </label>
+      {extraEmails.length ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {extraEmails.map((email) => (
+            <span
+              key={email}
+              className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold"
+            >
+              {email}
+              <button
+                type="button"
+                onClick={() => setEmails(ccEmails.filter((value) => value.toLowerCase() !== email))}
+                aria-label={`Remove ${email}`}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export function BookingFormEditor({
   dealId,
   reissueFromId,
@@ -65,6 +233,7 @@ export function BookingFormEditor({
   onSend: (edits: BookingFormEdits, sendMode: BookingFormSendMode) => void
 }) {
   const [edits, setEdits] = useState<BookingFormEdits | null>(null)
+  const [accountEmails, setAccountEmails] = useState<BookingFormAccountEmailOption[]>([])
   const [loading, setLoading] = useState(true)
   const [previewing, setPreviewing] = useState(false)
 
@@ -81,7 +250,8 @@ export function BookingFormEditor({
         onClose()
         return
       }
-      setEdits(result.edits)
+      setEdits({ ...result.edits, ccEmails: result.edits.ccEmails ?? [] })
+      setAccountEmails(result.accountEmails ?? [])
       setLoading(false)
     })
     return () => {
@@ -141,7 +311,7 @@ export function BookingFormEditor({
             <p className="text-sm text-slate-500">Loading booking form…</p>
           ) : (
             <>
-              <Section title="Bill to" hint="This is who the form is addressed to and who receives the email.">
+              <Section title="Bill to" hint="This is who the form is addressed to and who receives the email. Use CC for extra recipients.">
                 <label className="block text-sm font-semibold">
                   Document title
                   <input
@@ -178,6 +348,12 @@ export function BookingFormEditor({
                     className={inputClass}
                   />
                 </label>
+                <CcEmailsField
+                  ccEmails={edits.ccEmails ?? []}
+                  signer={edits.billToContactEmail}
+                  accountEmails={accountEmails}
+                  onChange={(emails) => update("ccEmails", emails)}
+                />
                 <label className="block text-sm font-semibold">
                   Billing address
                   <textarea

@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 import { cancellationEligibleDate, daysOverdue } from "../lib/crm/deal-finance"
-import { DEFAULT_FINANCE_CC, DEFAULT_BOOKINGS_CC, DEFAULT_OPERATIONS_CC, NEVER_CC_ADDRESSES, getInvoiceFinanceCc, getBookingConfirmationCc, getOperationsEmailCc } from "../lib/email/config"
+import { DEFAULT_FINANCE_CC, DEFAULT_BOOKINGS_CC, DEFAULT_OPERATIONS_CC, NEVER_CC_ADDRESSES, getInvoiceFinanceCc, getBookingConfirmationCc, getOperationsEmailCc, invoiceEmailCc } from "../lib/email/config"
 import { invoiceDisplayStatus, pickPreferredInvoice } from "../lib/invoices/status"
 
 test("native invoice cancellation becomes eligible 28 days after due date", () => {
@@ -19,6 +19,11 @@ test("invoice emails only CC finance", () => {
     assert.deepEqual(getInvoiceFinanceCc("agent@example.com"), [DEFAULT_FINANCE_CC])
     assert.deepEqual(getInvoiceFinanceCc(DEFAULT_FINANCE_CC), [])
     assert.deepEqual(getInvoiceFinanceCc("matt@zk-sports.com"), [DEFAULT_FINANCE_CC])
+    assert.deepEqual(invoiceEmailCc("agent@example.com"), [DEFAULT_FINANCE_CC])
+    assert.deepEqual(invoiceEmailCc("agent@example.com", ["ops@agency.com", "agent@example.com", DEFAULT_FINANCE_CC]), [
+      "ops@agency.com",
+      DEFAULT_FINANCE_CC,
+    ])
     assert.equal(NEVER_CC_ADDRESSES.has("matt@zk-sports.com"), true)
   } finally {
     if (previousInvoiceCc === undefined) delete process.env.XERO_INVOICE_CC
@@ -29,6 +34,11 @@ test("invoice emails only CC finance", () => {
   const configSource = readFileSync("lib/email/config.ts", "utf8")
   assert.doesNotMatch(configSource, /process\.env\.XERO_INVOICE_CC/)
   assert.doesNotMatch(configSource, /process\.env\.ORDER_CONFIRMATION_CC/)
+  const invoiceSource = readFileSync("lib/email/send-xero-invoice.ts", "utf8")
+  assert.match(invoiceSource, /invoiceEmailCc\(p\.agentEmail, p\.extraCc\)/)
+  const xeroSource = readFileSync("lib/integrations/xero/invoices.ts", "utf8")
+  assert.match(xeroSource, /loadDealClientCcEmails/)
+  assert.match(xeroSource, /extraCc/)
 })
 
 test("booking confirmations CC bookings and operations emails CC Jenny", () => {
