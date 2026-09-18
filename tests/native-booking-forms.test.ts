@@ -259,7 +259,7 @@ function firstPageTextPlacements(pdf: PDFDocument): Array<{ x: number; y: number
   const contents = pdf.getPages()[0].node.Contents()
   const refs =
     contents && typeof contents === "object" && "array" in contents
-      ? (contents as { array: unknown[] }).array
+      ? (contents as unknown as { array: unknown[] }).array
       : [contents]
   let content = ""
   for (const ref of refs) {

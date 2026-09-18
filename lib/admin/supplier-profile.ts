@@ -116,6 +116,18 @@ export async function getSupplierProfile(supplierId: string): Promise<SupplierPr
     .eq("id", id)
     .maybeSingle()
   if (error || !supplier) return null
+  const supplierName = supplier.name
+
+  type SupplierPoRow = {
+    id: string
+    po_number: string
+    issued_at: string | null
+    note: string | null
+    created_at: string
+    payment_due_date?: string | null
+    paid_at?: string | null
+    purchase_order_documents: Array<{ id: string }> | null
+  }
 
   const PO_PROFILE_SELECT =
     "id, po_number, issued_at, note, created_at, payment_due_date, paid_at, purchase_order_documents(id)"
@@ -123,10 +135,20 @@ export async function getSupplierProfile(supplierId: string): Promise<SupplierPr
     "id, po_number, issued_at, note, created_at, purchase_order_documents(id)"
 
   async function loadSupplierPurchaseOrders(select: string) {
-    return Promise.all([
+    const [linked, legacy] = await Promise.all([
       supabase.from("purchase_orders").select(select).eq("supplier_id", id),
-      supabase.from("purchase_orders").select(select).is("supplier_id", null).ilike("supplier", supplier.name),
+      supabase.from("purchase_orders").select(select).is("supplier_id", null).ilike("supplier", supplierName),
     ])
+    return {
+      linked: {
+        data: Array.isArray(linked.data) ? (linked.data as unknown as SupplierPoRow[]) : null,
+        error: linked.error,
+      },
+      legacy: {
+        data: Array.isArray(legacy.data) ? (legacy.data as unknown as SupplierPoRow[]) : null,
+        error: legacy.error,
+      },
+    }
   }
 
   const [{ data: directLayers }, { data: legacyLayers }, { data: dealLines }, { data: coverageRows }] =
@@ -139,7 +161,7 @@ export async function getSupplierProfile(supplierId: string): Promise<SupplierPr
         .from("package_cost_layers")
         .select(COST_LAYER_PROFILE_SELECT)
         .is("supplier_id", null)
-        .ilike("source", supplier.name),
+        .ilike("source", supplierName),
       supabase
         .from("deal_line_items")
         .select(`
@@ -151,27 +173,14 @@ export async function getSupplierProfile(supplierId: string): Promise<SupplierPr
       supabase.from("supplier_event_coverage").select("race_id").eq("supplier_id", id),
     ])
 
-  let [{ data: linkedPos, error: linkedPoError }, { data: legacyPos, error: legacyPoError }] =
-    await loadSupplierPurchaseOrders(PO_PROFILE_SELECT)
-  const poLoadError = linkedPoError || legacyPoError
+  let { linked, legacy } = await loadSupplierPurchaseOrders(PO_PROFILE_SELECT)
+  const poLoadError = linked.error || legacy.error
   if (poLoadError && /payment_due_date|paid_at/i.test(poLoadError.message)) {
-    ;[{ data: linkedPos }, { data: legacyPos }] = await loadSupplierPurchaseOrders(PO_PROFILE_SELECT_NO_PAYMENT)
+    ;({ linked, legacy } = await loadSupplierPurchaseOrders(PO_PROFILE_SELECT_NO_PAYMENT))
   }
 
-  const poById = new Map<
-    string,
-    {
-      id: string
-      po_number: string
-      issued_at: string | null
-      note: string | null
-      created_at: string
-      payment_due_date?: string | null
-      paid_at?: string | null
-      purchase_order_documents: Array<{ id: string }> | null
-    }
-  >()
-  for (const po of [...(linkedPos ?? []), ...(legacyPos ?? [])]) poById.set(po.id, po)
+  const poById = new Map<string, SupplierPoRow>()
+  for (const po of [...(linked.data ?? []), ...(legacy.data ?? [])]) poById.set(po.id, po)
   const poIds = [...poById.keys()]
   const { data: poLayers } = poIds.length
     ? await supabase
