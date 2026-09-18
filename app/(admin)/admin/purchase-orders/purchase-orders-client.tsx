@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, ArrowUpDown, CircleDollarSign, Clock3, PackageCheck, Upload } from "lucide-react"
+import { AlertTriangle, ArrowUpDown, CircleAlert, CircleDollarSign, Clock3, PackageCheck, Upload } from "lucide-react"
 import { toast } from "sonner"
 import {
   createPurchaseOrder,
@@ -11,25 +11,36 @@ import {
   deletePurchaseOrderDocument,
   getPurchaseOrderDocumentDownloadUrl,
   setPurchaseOrderContractInvoiceReceived,
+  setPurchaseOrderPaid,
   updatePurchaseOrder,
   uploadPurchaseOrderDocument,
 } from "@/app/(admin)/actions"
 import { PurchaseBulkUploadModal } from "@/app/(admin)/admin/purchase-orders/bulk-upload-modal"
 import { adminPackagePath } from "@/lib/admin/package-link"
 import { purchaseOrderHasContractInvoice } from "@/lib/admin/purchase-order-contract-invoice"
+import {
+  calendarTodayIso,
+  purchaseOrderIsPaid,
+  purchaseOrderPaymentKind,
+  purchaseOrderPaymentLabel,
+  purchaseOrderPaymentTone,
+  type PurchaseOrderPaymentFilter,
+} from "@/lib/admin/purchase-order-payment"
 import type { PurchaseOrderProductOption, PurchaseOrderStockLine, PurchaseOrderWithMeta } from "@/lib/admin/purchase-orders"
 import { PurchaseOrderStockEditor, PurchaseOrderDraftLines, emptyDraftPurchaseLine } from "@/app/(admin)/admin/purchase-orders/purchase-order-stock-editor"
 import { adminSupplierPath } from "@/lib/crm/profile-links"
 import { CompanySupplierSelect } from "@/components/admin/company-supplier-select"
-import { AdminDesktopTable, AdminMobileList, AdminStatCard, AdminStats } from "@/components/admin/admin-page-kit"
+import { AdminDesktopTable, AdminMobileList, AdminStatCard, AdminStats, StatusPill } from "@/components/admin/admin-page-kit"
 import type { CrmCompanyOption } from "@/lib/crm/deals"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 import { pageSearchProps } from "@/lib/browser/laptop-qol"
 
 const STOCK_PREVIEW_LIMIT = 3
+const PO_TABLE_COLSPAN = 12
 
-type SortKey = "poNumber" | "issuedAt"
+type SortKey = "poNumber" | "issuedAt" | "paymentDue"
 type AttachedFilter = "" | "yes" | "no"
+type PaymentFilter = "" | PurchaseOrderPaymentFilter
 
 type PoFilters = {
   search: string
@@ -37,6 +48,7 @@ type PoFilters = {
   event: string
   product: string
   attached: AttachedFilter
+  payment: PaymentFilter
 }
 
 const EMPTY_FILTERS: PoFilters = {
@@ -45,6 +57,7 @@ const EMPTY_FILTERS: PoFilters = {
   event: "",
   product: "",
   attached: "",
+  payment: "",
 }
 
 const DEFAULT_PO_LIST = {
@@ -92,11 +105,13 @@ export function PurchaseOrdersClient({
   companies,
   products,
   initialPo = null,
+  initialPayment = null,
 }: {
   orders: PurchaseOrderWithMeta[]
   companies: CrmCompanyOption[]
   products: PurchaseOrderProductOption[]
   initialPo?: string | null
+  initialPayment?: PurchaseOrderPaymentFilter | null
 }) {
   const router = useRouter()
   const [pending, start] = useTransition()
@@ -106,9 +121,16 @@ export function PurchaseOrdersClient({
     resolveInitialExpandedId(orders, initialPo),
   )
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [listState, setListState] = usePersistedAdminFilters("zk-admin-po-filters-v1", DEFAULT_PO_LIST)
+  const [listState, setListState] = usePersistedAdminFilters(
+    "zk-admin-po-filters-v1",
+    DEFAULT_PO_LIST,
+    initialPayment
+      ? { override: { payment: initialPayment, sortKey: "paymentDue" as SortKey, sortDescending: false } }
+      : undefined,
+  )
   const { sortKey, sortDescending, ...filters } = listState
   const [optimisticReceived, setOptimisticReceived] = useState<Record<string, boolean>>({})
+  const [optimisticPaidAt, setOptimisticPaidAt] = useState<Record<string, string | null>>({})
 
   // Create form state
   const [newPoNumber, setNewPoNumber] = useState("")
@@ -117,6 +139,8 @@ export function PurchaseOrdersClient({
   const [newIssuedAt, setNewIssuedAt] = useState("")
   const [newGuestDetailsDeadline, setNewGuestDetailsDeadline] = useState("")
   const [newTicketsReceivedAt, setNewTicketsReceivedAt] = useState("")
+  const [newPaymentDueDate, setNewPaymentDueDate] = useState("")
+  const [newPaidAt, setNewPaidAt] = useState("")
   const [newNote, setNewNote] = useState("")
   const [newFiles, setNewFiles] = useState<File[]>([])
   const [newLines, setNewLines] = useState(() => [emptyDraftPurchaseLine()])
@@ -129,6 +153,8 @@ export function PurchaseOrdersClient({
   const [editIssuedAt, setEditIssuedAt] = useState("")
   const [editGuestDetailsDeadline, setEditGuestDetailsDeadline] = useState("")
   const [editTicketsReceivedAt, setEditTicketsReceivedAt] = useState("")
+  const [editPaymentDueDate, setEditPaymentDueDate] = useState("")
+  const [editPaidAt, setEditPaidAt] = useState("")
   const [editNote, setEditNote] = useState("")
   const scrolledToPo = useRef(false)
 
@@ -160,11 +186,31 @@ export function PurchaseOrdersClient({
     })
   }, [orders])
 
+  useEffect(() => {
+    setOptimisticPaidAt((current) => {
+      if (Object.keys(current).length === 0) return current
+      const next = { ...current }
+      let changed = false
+      for (const po of orders) {
+        if (Object.prototype.hasOwnProperty.call(next, po.id) && next[po.id] === po.paid_at) {
+          delete next[po.id]
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [orders])
+
   function contractInvoiceReceived(po: PurchaseOrderWithMeta): boolean {
     if (Object.prototype.hasOwnProperty.call(optimisticReceived, po.id)) {
       return optimisticReceived[po.id]!
     }
     return purchaseOrderHasContractInvoice(po)
+  }
+
+  function withPayment(po: PurchaseOrderWithMeta): PurchaseOrderWithMeta {
+    if (!Object.prototype.hasOwnProperty.call(optimisticPaidAt, po.id)) return po
+    return { ...po, paid_at: optimisticPaidAt[po.id] ?? null }
   }
 
   const supplierOptions = useMemo(() => uniqueSorted(orders.map((o) => o.supplier)), [orders])
@@ -181,8 +227,11 @@ export function PurchaseOrdersClient({
     Boolean(filters.supplier) ||
     Boolean(filters.event) ||
     Boolean(filters.product) ||
-    Boolean(filters.attached)
+    Boolean(filters.attached) ||
+    Boolean(filters.payment)
   const awaitingDocs = orders.filter((order) => !contractInvoiceReceived(order)).length
+  const overduePayments = orders.filter((order) => purchaseOrderPaymentKind(withPayment(order)) === "overdue").length
+  const unpaidPayments = orders.filter((order) => !purchaseOrderIsPaid(withPayment(order))).length
   const totalUnits = orders.reduce((sum, order) => sum + order.usage.quantity_purchased, 0)
   const remainingUnits = orders.reduce((sum, order) => sum + order.usage.quantity_remaining, 0)
 
@@ -193,6 +242,10 @@ export function PurchaseOrdersClient({
       const received = contractInvoiceReceived(o)
       if (filters.attached === "yes" && !received) return false
       if (filters.attached === "no" && received) return false
+      const paymentKind = purchaseOrderPaymentKind(withPayment(o))
+      if (filters.payment === "paid" && paymentKind !== "paid") return false
+      if (filters.payment === "unpaid" && paymentKind === "paid") return false
+      if (filters.payment === "overdue" && paymentKind !== "overdue") return false
       const previewLines = matchingStockLines(o.usage.lines, filters)
       if ((filters.event || filters.product) && previewLines.length === 0) return false
       if (!q) return true
@@ -211,6 +264,18 @@ export function PurchaseOrdersClient({
     const dir = sortDescending ? -1 : 1
     return [...matched].sort((a, b) => {
       if (sortKey === "poNumber") return dir * comparePoNumber(a.po_number, b.po_number)
+      if (sortKey === "paymentDue") {
+        const rank = (po: PurchaseOrderWithMeta) => {
+          const paid = purchaseOrderIsPaid(withPayment(po))
+          const due = po.payment_due_date ?? ""
+          if (!paid && due) return `0-${due}`
+          if (!paid) return "1-"
+          return `2-${withPayment(po).paid_at ?? ""}`
+        }
+        const cmp = rank(a).localeCompare(rank(b))
+        if (cmp !== 0) return dir * cmp
+        return dir * comparePoNumber(a.po_number, b.po_number)
+      }
       const aDate = a.issued_at ?? ""
       const bDate = b.issued_at ?? ""
       if (!aDate && !bDate) return dir * comparePoNumber(a.po_number, b.po_number)
@@ -218,7 +283,7 @@ export function PurchaseOrdersClient({
       if (!bDate) return -1
       return dir * aDate.localeCompare(bDate)
     })
-  }, [filters, optimisticReceived, orders, sortDescending, sortKey])
+  }, [filters, optimisticPaidAt, optimisticReceived, orders, sortDescending, sortKey])
 
   function toggleSort(next: SortKey) {
     setListState((current) => {
@@ -236,6 +301,8 @@ export function PurchaseOrdersClient({
     setNewIssuedAt("")
     setNewGuestDetailsDeadline("")
     setNewTicketsReceivedAt("")
+    setNewPaymentDueDate("")
+    setNewPaidAt("")
     setNewNote("")
     setNewFiles([])
     setNewLines([emptyDraftPurchaseLine()])
@@ -274,6 +341,8 @@ export function PurchaseOrdersClient({
         issuedAt: newIssuedAt.trim() || null,
         guestDetailsDeadline: newGuestDetailsDeadline.trim() || null,
         ticketsReceivedAt: newTicketsReceivedAt.trim() || null,
+        paymentDueDate: newPaymentDueDate.trim() || null,
+        paidAt: newPaidAt.trim() || null,
         note: newNote.trim() || null,
         lines,
       })
@@ -309,6 +378,8 @@ export function PurchaseOrdersClient({
     setEditIssuedAt(po.issued_at ?? "")
     setEditGuestDetailsDeadline(po.guest_details_deadline ?? "")
     setEditTicketsReceivedAt(po.tickets_received_at ?? "")
+    setEditPaymentDueDate(po.payment_due_date ?? "")
+    setEditPaidAt(withPayment(po).paid_at ?? "")
     setEditNote(po.note ?? "")
     setExpandedId(po.id)
   }
@@ -329,6 +400,8 @@ export function PurchaseOrdersClient({
         clearIssuedAt,
         guestDetailsDeadline: editGuestDetailsDeadline.trim() || null,
         ticketsReceivedAt: editTicketsReceivedAt.trim() || null,
+        paymentDueDate: editPaymentDueDate.trim() || null,
+        paidAt: editPaidAt.trim() || null,
         note: editNote,
       })
       if (!res.ok) {
@@ -405,9 +478,32 @@ export function PurchaseOrdersClient({
     })
   }
 
+  function togglePaid(po: PurchaseOrderWithMeta, paid: boolean) {
+    const paidOn = paid ? calendarTodayIso() : null
+    setOptimisticPaidAt((current) => ({ ...current, [po.id]: paidOn }))
+    if (editingId === po.id) setEditPaidAt(paidOn ?? "")
+    start(async () => {
+      const res = await setPurchaseOrderPaid({
+        id: po.id,
+        paid,
+        paidAt: paidOn,
+      })
+      if (!res.ok) {
+        setOptimisticPaidAt((current) => {
+          const next = { ...current }
+          delete next[po.id]
+          return next
+        })
+        toast.error(res.message)
+        return
+      }
+      router.refresh()
+    })
+  }
+
   return (
     <div className="space-y-3">
-      <AdminStats className="sm:grid-cols-2 xl:grid-cols-4">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-5">
         <AdminStatCard icon={PackageCheck} value={orders.length} label="Open purchase orders" tone="blue" />
         <AdminStatCard
           icon={Clock3}
@@ -421,6 +517,27 @@ export function PurchaseOrdersClient({
               ...current,
               attached: current.attached === "no" ? "" : "no",
             }))
+          }
+        />
+        <AdminStatCard
+          icon={CircleAlert}
+          value={overduePayments}
+          label="Overdue to pay"
+          tone="red"
+          hint={
+            filters.payment === "overdue"
+              ? "Showing overdue purchase orders"
+              : unpaidPayments > 0
+                ? `${unpaidPayments} unpaid in total. Click to filter overdue.`
+                : "Click to filter"
+          }
+          active={filters.payment === "overdue"}
+          onClick={() =>
+            setListState((current) =>
+              current.payment === "overdue"
+                ? { ...current, payment: "" }
+                : { ...current, payment: "overdue", sortKey: "paymentDue", sortDescending: false },
+            )
           }
         />
         <AdminStatCard icon={CircleDollarSign} value={totalUnits} label="Purchased units tracked" tone="green" />
@@ -484,6 +601,18 @@ export function PurchaseOrdersClient({
           <option value="no">No contract attached</option>
         </select>
         <select
+          value={filters.payment}
+          onChange={(e) =>
+            setListState((current) => ({ ...current, payment: e.target.value as PaymentFilter }))
+          }
+          className="h-8 max-w-[170px] rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]"
+        >
+          <option value="">All payments</option>
+          <option value="unpaid">Unpaid</option>
+          <option value="overdue">Overdue</option>
+          <option value="paid">Paid</option>
+        </select>
+        <select
           value={sortKey}
           onChange={(e) => {
             const next = e.target.value as SortKey
@@ -492,6 +621,7 @@ export function PurchaseOrdersClient({
           className="h-8 rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]"
         >
           <option value="issuedAt">Sort: Issue date</option>
+          <option value="paymentDue">Sort: Payment due</option>
           <option value="poNumber">Sort: Internal PO #</option>
         </select>
         <button
@@ -600,6 +730,30 @@ export function PurchaseOrdersClient({
                 When the supplier delivered the tickets, if applicable.
               </span>
             </label>
+            <label className="block text-xs text-muted-foreground">
+              Payment due
+              <input
+                type="date"
+                value={newPaymentDueDate}
+                onChange={(e) => setNewPaymentDueDate(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+              />
+              <span className="mt-1 block text-[10px] leading-relaxed">
+                When this supplier invoice needs to be paid.
+              </span>
+            </label>
+            <label className="block text-xs text-muted-foreground">
+              Paid on
+              <input
+                type="date"
+                value={newPaidAt}
+                onChange={(e) => setNewPaidAt(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+              />
+              <span className="mt-1 block text-[10px] leading-relaxed">
+                Leave blank until we have paid. Tick Paid on the list afterwards if easier.
+              </span>
+            </label>
             <label className="block text-xs text-muted-foreground sm:col-span-2 xl:col-span-4">
               Note
               <textarea
@@ -661,7 +815,7 @@ export function PurchaseOrdersClient({
       ) : null}
 
       <AdminDesktopTable>
-        <table className="w-full min-w-[1280px] text-[9px]">
+        <table className="w-full min-w-[1380px] text-[9px]">
           <thead className="bg-[#fafbfc] text-left text-[8px] uppercase tracking-wide text-[#92969e]">
             <tr>
               <th className="px-3 py-2 font-medium">
@@ -676,6 +830,17 @@ export function PurchaseOrdersClient({
               </th>
               <th className="px-3 py-2 font-medium">Supplier</th>
               <th className="px-3 py-2 font-medium min-w-[9.5rem]">Contract / invoice</th>
+              <th className="px-3 py-2 font-medium min-w-[8.5rem]">
+                <button
+                  type="button"
+                  onClick={() => toggleSort("paymentDue")}
+                  className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-[#62666e]"
+                  title="Tick to mark paid. Set a payment due date when you edit the purchase order."
+                >
+                  Payment
+                  {sortKey === "paymentDue" ? <span>{sortDescending ? "↓" : "↑"}</span> : null}
+                </button>
+              </th>
               <th className="px-3 py-2 font-medium">
                 <button
                   type="button"
@@ -708,17 +873,19 @@ export function PurchaseOrdersClient({
           <tbody>
             {filteredOrders.length === 0 ? (
               <tr>
-                <td colSpan={11} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                <td colSpan={PO_TABLE_COLSPAN} className="px-3 py-6 text-center text-sm text-muted-foreground">
                   {orders.length === 0
                     ? "No purchase orders yet. Create one with the products you are buying."
                     : "No matching purchase orders."}
                 </td>
               </tr>
             ) : (
-              filteredOrders.map((po) => (
+              filteredOrders.map((po) => {
+                const paymentPo = withPayment(po)
+                return (
                 <PurchaseOrderRow
                   key={po.id}
-                  po={po}
+                  po={paymentPo}
                   previewLines={matchingStockLines(po.usage.lines, filters)}
                   expanded={expandedId === po.id}
                   onToggle={() => setExpandedId((cur) => (cur === po.id ? null : po.id))}
@@ -730,6 +897,8 @@ export function PurchaseOrdersClient({
                     issuedAt: editIssuedAt,
                     guestDetailsDeadline: editGuestDetailsDeadline,
                     ticketsReceivedAt: editTicketsReceivedAt,
+                    paymentDueDate: editPaymentDueDate,
+                    paidAt: editPaidAt,
                     note: editNote,
                     setPoNumber: setEditPoNumber,
                     setSupplierAccountId: setEditSupplierAccountId,
@@ -737,6 +906,8 @@ export function PurchaseOrdersClient({
                     setIssuedAt: setEditIssuedAt,
                     setGuestDetailsDeadline: setEditGuestDetailsDeadline,
                     setTicketsReceivedAt: setEditTicketsReceivedAt,
+                    setPaymentDueDate: setEditPaymentDueDate,
+                    setPaidAt: setEditPaidAt,
                     setNote: setEditNote,
                   }}
                   companies={companies}
@@ -749,10 +920,12 @@ export function PurchaseOrdersClient({
                   onOpenDocument={openDocument}
                   onRemoveDocument={removeDocument}
                   onToggleContractInvoice={(received) => toggleContractInvoiceReceived(po, received)}
+                  onTogglePaid={(paid) => togglePaid(po, paid)}
                   contractInvoiceReceived={contractInvoiceReceived(po)}
                   onRefresh={() => router.refresh()}
                 />
-              ))
+                )
+              })
             )}
           </tbody>
         </table>
@@ -768,6 +941,8 @@ export function PurchaseOrdersClient({
           filteredOrders.map((po) => {
             const previewLines = matchingStockLines(po.usage.lines, filters)
             const groupedPreview = groupedStockLines(previewLines)
+            const paymentPo = withPayment(po)
+            const paymentKind = purchaseOrderPaymentKind(paymentPo)
             return (
             <div key={`mobile-${po.id}`} className="space-y-2 px-4 py-3">
               <button type="button" onClick={() => setExpandedId((cur) => (cur === po.id ? null : po.id))} className="flex w-full items-start justify-between gap-3 text-left">
@@ -783,20 +958,31 @@ export function PurchaseOrdersClient({
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   <p className="text-[10px] font-semibold">{stockQuantityTotals(previewLines).remaining} remaining</p>
-                  <ContractInvoiceReceivedCheckbox
-                    poNumber={po.po_number}
-                    checked={contractInvoiceReceived(po)}
-                    pending={pending}
-                    documentCount={po.documents.length}
-                    onChange={(received) => toggleContractInvoiceReceived(po, received)}
-                  />
+                  <StatusPill tone={purchaseOrderPaymentTone(paymentKind)}>
+                    {purchaseOrderPaymentLabel(paymentPo, formatDate)}
+                  </StatusPill>
                 </div>
               </button>
               <p className="text-[10px] text-slate-600">
                 {groupedPreview.slice(0, 2).map((line) => line.packageName).join(", ") || "Not linked"}
                 {groupedPreview.length > 2 ? ` +${groupedPreview.length - 2} more` : ""}
               </p>
-              <div className="flex flex-wrap gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <PurchaseOrderPaidCheckbox
+                  poNumber={po.po_number}
+                  checked={purchaseOrderIsPaid(paymentPo)}
+                  pending={pending}
+                  onChange={(paid) => togglePaid(po, paid)}
+                />
+                <span className="text-[10px] font-medium text-slate-700">Paid</span>
+                <ContractInvoiceReceivedCheckbox
+                  poNumber={po.po_number}
+                  checked={contractInvoiceReceived(po)}
+                  pending={pending}
+                  documentCount={po.documents.length}
+                  onChange={(received) => toggleContractInvoiceReceived(po, received)}
+                />
+                <span className="text-[10px] font-medium text-slate-700">Contract</span>
                 <button type="button" onClick={() => startEdit(po)} disabled={pending} className="text-[11px] font-medium text-primary disabled:opacity-50">Edit</button>
                 <button type="button" onClick={() => confirmDelete(po)} disabled={pending} className="text-[11px] font-medium text-destructive disabled:opacity-50">Delete</button>
               </div>
@@ -805,6 +991,14 @@ export function PurchaseOrdersClient({
                   <p>
                     <span className="font-medium text-slate-800">Contract / invoice:</span>{" "}
                     {po.supplier_reference || "—"}
+                  </p>
+                  <p>
+                    <span className="font-medium text-slate-800">Payment due:</span>{" "}
+                    {formatDate(po.payment_due_date)}
+                  </p>
+                  <p>
+                    <span className="font-medium text-slate-800">Paid on:</span>{" "}
+                    {formatDate(paymentPo.paid_at)}
                   </p>
                   <p>
                     <span className="font-medium text-slate-800">Deadline:</span>{" "}
@@ -862,6 +1056,8 @@ type EditState = {
   issuedAt: string
   guestDetailsDeadline: string
   ticketsReceivedAt: string
+  paymentDueDate: string
+  paidAt: string
   note: string
   setPoNumber: (v: string) => void
   setSupplierAccountId: (v: string) => void
@@ -869,7 +1065,67 @@ type EditState = {
   setIssuedAt: (v: string) => void
   setGuestDetailsDeadline: (v: string) => void
   setTicketsReceivedAt: (v: string) => void
+  setPaymentDueDate: (v: string) => void
+  setPaidAt: (v: string) => void
   setNote: (v: string) => void
+}
+
+function PurchaseOrderPaidCheckbox({
+  poNumber,
+  checked,
+  pending,
+  onChange,
+}: {
+  poNumber: string
+  checked: boolean
+  pending: boolean
+  onChange: (paid: boolean) => void
+}) {
+  return (
+    <input
+      type="checkbox"
+      checked={checked}
+      disabled={pending}
+      title={checked ? "Paid. Click to mark unpaid." : "Click to mark as paid today."}
+      aria-label={`Paid for ${poNumber}`}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => onChange(event.target.checked)}
+      className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-primary disabled:cursor-wait"
+    />
+  )
+}
+
+function PurchaseOrderPaymentCell({
+  po,
+  pending,
+  onTogglePaid,
+}: {
+  po: PurchaseOrderWithMeta
+  pending: boolean
+  onTogglePaid: (paid: boolean) => void
+}) {
+  const kind = purchaseOrderPaymentKind(po)
+  const paid = kind === "paid"
+  return (
+    <div className="flex items-start gap-2">
+      <PurchaseOrderPaidCheckbox
+        poNumber={po.po_number}
+        checked={paid}
+        pending={pending}
+        onChange={onTogglePaid}
+      />
+      <div className="min-w-0">
+        <StatusPill tone={purchaseOrderPaymentTone(kind)}>
+          {purchaseOrderPaymentLabel(po, formatDate)}
+        </StatusPill>
+        {kind === "overdue" && po.payment_due_date ? (
+          <p className="mt-0.5 text-[8px] font-medium text-red-600">Due {formatDate(po.payment_due_date)}</p>
+        ) : paid && po.paid_at ? (
+          <p className="mt-0.5 text-[8px] text-muted-foreground">{formatDate(po.paid_at)}</p>
+        ) : null}
+      </div>
+    </div>
+  )
 }
 
 function ContractInvoiceReceivedCheckbox({
@@ -1025,6 +1281,7 @@ function PurchaseOrderRow({
   onOpenDocument,
   onRemoveDocument,
   onToggleContractInvoice,
+  onTogglePaid,
   contractInvoiceReceived,
   onRefresh,
 }: {
@@ -1044,12 +1301,14 @@ function PurchaseOrderRow({
   onOpenDocument: (documentId: string) => void
   onRemoveDocument: (documentId: string) => void
   onToggleContractInvoice: (received: boolean) => void
+  onTogglePaid: (paid: boolean) => void
   contractInvoiceReceived: boolean
   onRefresh: () => void
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [uploading, setUploading] = useState(false)
   const previewTotals = stockQuantityTotals(previewLines)
+  const overdue = purchaseOrderPaymentKind(po) === "overdue"
 
   async function handleFileChosen(file: File) {
     setUploading(true)
@@ -1072,7 +1331,10 @@ function PurchaseOrderRow({
 
   return (
     <>
-      <tr id={`po-${po.id}`} className="border-t border-border align-top">
+      <tr
+        id={`po-${po.id}`}
+        className={overdue ? "border-t border-border align-top bg-red-50/50" : "border-t border-border align-top"}
+      >
         <td className="px-3 py-2 font-medium">
           <button
             type="button"
@@ -1101,6 +1363,9 @@ function PurchaseOrderRow({
             />
             <span className="min-w-0 truncate">{po.supplier_reference || "—"}</span>
           </div>
+        </td>
+        <td className="px-3 py-2">
+          <PurchaseOrderPaymentCell po={po} pending={pending} onTogglePaid={onTogglePaid} />
         </td>
         <td className="px-3 py-2 text-muted-foreground">{formatDate(po.issued_at)}</td>
         <td className="px-3 py-2 text-muted-foreground">{formatDate(po.guest_details_deadline)}</td>
@@ -1131,7 +1396,7 @@ function PurchaseOrderRow({
       </tr>
       {(expanded || editing) && (
         <tr className="border-t border-border bg-[#fafbfc]">
-          <td colSpan={11} className="px-4 py-4">
+          <td colSpan={PO_TABLE_COLSPAN} className="px-4 py-4">
             <div className="space-y-4">
               <PurchaseOrderStockEditor
                 purchaseOrderId={po.id}
@@ -1203,6 +1468,24 @@ function PurchaseOrderRow({
                           className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm"
                         />
                       </label>
+                      <label className="block text-xs text-muted-foreground">
+                        Payment due
+                        <input
+                          type="date"
+                          value={editState.paymentDueDate}
+                          onChange={(e) => editState.setPaymentDueDate(e.target.value)}
+                          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm"
+                        />
+                      </label>
+                      <label className="block text-xs text-muted-foreground">
+                        Paid on
+                        <input
+                          type="date"
+                          value={editState.paidAt}
+                          onChange={(e) => editState.setPaidAt(e.target.value)}
+                          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm"
+                        />
+                      </label>
                       <label className="block text-xs text-muted-foreground sm:col-span-2">
                         Note
                         <textarea
@@ -1260,6 +1543,16 @@ function PurchaseOrderRow({
                       <div>
                         <dt className="text-muted-foreground">Tickets received</dt>
                         <dd>{formatDate(po.tickets_received_at)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Payment</dt>
+                        <dd>
+                          <PurchaseOrderPaymentCell po={po} pending={pending} onTogglePaid={onTogglePaid} />
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Payment due</dt>
+                        <dd>{formatDate(po.payment_due_date)}</dd>
                       </div>
                       <div className="sm:col-span-2">
                         <dt className="text-muted-foreground">Note</dt>

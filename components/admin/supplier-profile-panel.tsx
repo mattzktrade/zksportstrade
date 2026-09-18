@@ -20,6 +20,11 @@ import {
 import { adminDealPath } from "@/lib/admin/deal-link"
 import { adminPackagePath } from "@/lib/admin/package-link"
 import { purchaseOrderAdminHref } from "@/lib/admin/purchase-order-link"
+import {
+  purchaseOrderPaymentKind,
+  purchaseOrderPaymentLabel,
+  purchaseOrderPaymentTone,
+} from "@/lib/admin/purchase-order-payment"
 import type { SupplierProfile } from "@/lib/admin/supplier-profile"
 import { DEAL_STAGE_LABELS, type DealStage } from "@/lib/crm/deal-types"
 import { adminAccountPath } from "@/lib/crm/profile-links"
@@ -265,6 +270,7 @@ export function SupplierProfilePanel({
                   <tr>
                     <th className="px-4 py-2 font-medium">PO #</th>
                     <th className="px-4 py-2 font-medium">Issued</th>
+                    <th className="px-4 py-2 font-medium">Payment</th>
                     <th className="px-4 py-2 font-medium">Products</th>
                     <th className="px-4 py-2 text-right font-medium">Bought</th>
                     <th className="px-4 py-2 text-right font-medium">Remaining</th>
@@ -280,6 +286,21 @@ export function SupplierProfilePanel({
                         </Link>
                       </td>
                       <td className="px-4 py-3 text-slate-500">{date(po.issuedAt)}</td>
+                      <td className="px-4 py-3">
+                        <StatusPill
+                          tone={purchaseOrderPaymentTone(
+                            purchaseOrderPaymentKind({
+                              payment_due_date: po.paymentDueDate,
+                              paid_at: po.paidAt,
+                            }),
+                          )}
+                        >
+                          {purchaseOrderPaymentLabel(
+                            { payment_due_date: po.paymentDueDate, paid_at: po.paidAt },
+                            date,
+                          )}
+                        </StatusPill>
+                      </td>
                       <td className="max-w-[280px] px-4 py-3">
                         <p className="truncate">{po.products.join(", ") || "Not linked"}</p>
                       </td>
@@ -290,7 +311,7 @@ export function SupplierProfilePanel({
                   ))}
                   {purchaseOrders.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-[9px] text-slate-400">
+                      <td colSpan={7} className="px-4 py-12 text-center text-[9px] text-slate-400">
                         No purchase orders linked to this supplier.
                       </td>
                     </tr>
@@ -305,6 +326,21 @@ export function SupplierProfilePanel({
                     <p className="font-semibold text-primary">{po.poNumber}</p>
                     <p className="mt-0.5 text-[10px] text-slate-600">{po.products.join(", ") || "Not linked"}</p>
                     <p className="mt-0.5 text-[8px] text-slate-400">{date(po.issuedAt)}</p>
+                    <div className="mt-1">
+                      <StatusPill
+                        tone={purchaseOrderPaymentTone(
+                          purchaseOrderPaymentKind({
+                            payment_due_date: po.paymentDueDate,
+                            paid_at: po.paidAt,
+                          }),
+                        )}
+                      >
+                        {purchaseOrderPaymentLabel(
+                          { payment_due_date: po.paymentDueDate, paid_at: po.paidAt },
+                          date,
+                        )}
+                      </StatusPill>
+                    </div>
                   </div>
                   <p className="shrink-0 text-[10px] font-semibold">{po.unitsRemaining} remaining</p>
                 </Link>

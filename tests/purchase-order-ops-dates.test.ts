@@ -46,7 +46,8 @@ test("stock purchased table and purchase orders both show deadline and tickets r
   assert.match(poClient, />\s*Tickets received\s*</)
   assert.match(poClient, /guestDetailsDeadline/)
   assert.match(poClient, /ticketsReceivedAt/)
-  assert.match(poClient, /colSpan=\{11\}/)
+  assert.match(poClient, /colSpan=\{PO_TABLE_COLSPAN\}/)
+  assert.match(poClient, /const PO_TABLE_COLSPAN = 12/)
 
   const actions = readFileSync("app/(admin)/actions.ts", "utf8")
   assert.match(actions, /setPurchaseOrderOpsDates/)

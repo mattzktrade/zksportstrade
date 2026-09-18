@@ -26,6 +26,10 @@ export type PurchaseOrderRow = {
   guest_details_deadline: string | null
   /** Date the supplier delivered the tickets, when applicable. */
   tickets_received_at: string | null
+  /** Date the supplier invoice is due to be paid. */
+  payment_due_date: string | null
+  /** Date we paid the supplier. Null means still unpaid. */
+  paid_at: string | null
   note: string | null
   created_at: string
   updated_at: string
@@ -106,6 +110,8 @@ function issuedDateFromReceivedAt(receivedAt: string | null | undefined): string
 }
 
 const PO_COLUMNS =
+  "id, po_number, supplier, supplier_id, supplier_reference, contract_invoice_received, guest_details_deadline, tickets_received_at, payment_due_date, paid_at, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name, crm_accounts(name))" as const
+const PO_COLUMNS_NO_PAYMENT =
   "id, po_number, supplier, supplier_id, supplier_reference, contract_invoice_received, guest_details_deadline, tickets_received_at, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name, crm_accounts(name))" as const
 const PO_COLUMNS_NO_OPS_DATES =
   "id, po_number, supplier, supplier_id, supplier_reference, contract_invoice_received, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name, crm_accounts(name))" as const
@@ -114,7 +120,7 @@ const PO_COLUMNS_NO_RECEIVED =
 const PO_COLUMNS_NO_REF =
   "id, po_number, supplier, supplier_id, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name, crm_accounts(name))" as const
 const PO_COLUMNS_NO_ACCOUNT =
-  "id, po_number, supplier, supplier_id, supplier_reference, contract_invoice_received, guest_details_deadline, tickets_received_at, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name)" as const
+  "id, po_number, supplier, supplier_id, supplier_reference, contract_invoice_received, guest_details_deadline, tickets_received_at, payment_due_date, paid_at, issued_at, note, created_at, updated_at, suppliers(crm_account_id, name)" as const
 const PO_COLUMNS_BARE =
   "id, po_number, supplier, supplier_id, issued_at, note, created_at, updated_at" as const
 
@@ -132,6 +138,8 @@ function mapPurchaseOrderRow(row: {
   contract_invoice_received?: boolean | null
   guest_details_deadline?: string | null
   tickets_received_at?: string | null
+  payment_due_date?: string | null
+  paid_at?: string | null
   issued_at: string | null
   note: string | null
   created_at: string
@@ -165,6 +173,8 @@ function mapPurchaseOrderRow(row: {
     issued_at: normaliseIssuedAt(row.issued_at),
     guest_details_deadline: normaliseIssuedAt(row.guest_details_deadline),
     tickets_received_at: normaliseIssuedAt(row.tickets_received_at),
+    payment_due_date: normaliseIssuedAt(row.payment_due_date),
+    paid_at: normaliseIssuedAt(row.paid_at),
     note: row.note,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -239,6 +249,36 @@ export async function setPurchaseOrderOpsDates(
   return { ok: false, message: error.message }
 }
 
+/** Write payment due date and/or paid-on date. Undefined fields are left unchanged. */
+export async function setPurchaseOrderPayment(
+  supabase: SupabaseClient,
+  id: string,
+  input: {
+    paymentDueDate?: string | null
+    paidAt?: string | null
+  },
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const patch: { payment_due_date?: string | null; paid_at?: string | null } = {}
+  if (input.paymentDueDate !== undefined) {
+    patch.payment_due_date = input.paymentDueDate
+  }
+  if (input.paidAt !== undefined) {
+    patch.paid_at = input.paidAt
+  }
+  if (Object.keys(patch).length === 0) return { ok: true }
+
+  const { error } = await supabase.from("purchase_orders").update(patch).eq("id", id)
+  if (!error) return { ok: true }
+  const message = error.message.toLowerCase()
+  if (message.includes("payment_due_date") || message.includes("paid_at")) {
+    return {
+      ok: false,
+      message: "Apply the latest database migration to store purchase order payment dates.",
+    }
+  }
+  return { ok: false, message: error.message }
+}
+
 export async function setPurchaseOrderNote(
   supabase: SupabaseClient,
   id: string,
@@ -267,6 +307,15 @@ export async function getPurchaseOrders(): Promise<PurchaseOrderRow[]> {
     .order("issued_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
   if (!error && data) return data.map((row) => mapPurchaseOrderRow(row))
+
+  const withoutPayment = await supabase
+    .from("purchase_orders")
+    .select(PO_COLUMNS_NO_PAYMENT)
+    .order("issued_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+  if (!withoutPayment.error && withoutPayment.data) {
+    return withoutPayment.data.map((row) => mapPurchaseOrderRow(row))
+  }
 
   const withoutOpsDates = await supabase
     .from("purchase_orders")
@@ -322,6 +371,15 @@ export async function getPurchaseOrderById(id: string): Promise<PurchaseOrderRow
     .eq("id", id)
     .maybeSingle()
   if (!error && data) return mapPurchaseOrderRow(data)
+
+  const withoutPayment = await supabase
+    .from("purchase_orders")
+    .select(PO_COLUMNS_NO_PAYMENT)
+    .eq("id", id)
+    .maybeSingle()
+  if (!withoutPayment.error && withoutPayment.data) {
+    return mapPurchaseOrderRow(withoutPayment.data)
+  }
 
   const withoutOpsDates = await supabase
     .from("purchase_orders")

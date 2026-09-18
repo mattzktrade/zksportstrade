@@ -59,8 +59,8 @@ export const HELP_TOPICS: HelpTopic[] = [
         title: "Your first ten minutes",
         items: [
           "Log in with the email and password you were given. You should land on Dashboard.",
-          "Look at the coloured cards at the top. They are jobs waiting: new portal users, forms to sign, overdue invoices, and similar.",
-          "Check “My tasks” if you have any. Those are deals assigned to you.",
+          "Check Dashboard for jobs waiting today. Admins see approvals and sales; operations staff and Chelley see deadlines, stock, and supplier payments; sales staff see unassigned enquiries, their pipeline, and their own sales.",
+          "Check the dashboard queues and any tasks assigned to you.",
           "Use the search bar at the top to jump to an order, client, contact, deal, or event. Click the result to open it.",
           "Use the left menu to move around. On a phone, open it with the menu button at the top left.",
           "Come back to Help whenever you need. Search at the top of this page for words like deal, hold, or invoice.",
@@ -162,7 +162,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           {
             title: "Dashboard",
-            body: "Your starting point. Team queues plus your own next actions. Click a card to open the real page.",
+            body: "Your starting point. Admins see sales and approvals. Operations staff and Chelley see deadlines, stock, and supplier payments. Sales staff see unassigned enquiries, pipeline, and their own confirmed sales. Click through to the real page.",
             href: "/admin",
           },
         ],
@@ -224,7 +224,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             title: "Purchase orders",
-            body: "Stock we bought from suppliers. This is how available quantity goes up.",
+            body: "Stock we bought from suppliers. Tick Paid when we have paid, and set a payment due date so overdue invoices stay visible.",
             href: "/admin/purchase-orders",
           },
           {

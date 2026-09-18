@@ -2,6 +2,7 @@ import nextDynamic from "next/dynamic"
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { getCrmCompanyOptions } from "@/lib/crm/deals"
 import { getPurchaseOrderProductOptions, getPurchaseOrdersWithMeta } from "@/lib/admin/purchase-orders"
+import { isPurchaseOrderPaymentFilter } from "@/lib/admin/purchase-order-payment"
 import { PageLoadingSpinner } from "@/components/page-loading-spinner"
 import { AdminPageHeader } from "@/components/admin/admin-page-kit"
 
@@ -13,12 +14,12 @@ const PurchaseOrdersClient = nextDynamic(
 )
 
 type Props = {
-  searchParams: Promise<{ po?: string }>
+  searchParams: Promise<{ po?: string; payment?: string }>
 }
 
 export default async function AdminPurchaseOrdersPage({ searchParams }: Props) {
   await requireAdmin()
-  const { po } = await searchParams
+  const { po, payment } = await searchParams
   const [orders, companies, products] = await Promise.all([
     getPurchaseOrdersWithMeta(),
     getCrmCompanyOptions(),
@@ -29,13 +30,14 @@ export default async function AdminPurchaseOrdersPage({ searchParams }: Props) {
     <div className="mx-auto max-w-[1540px] space-y-3 p-3 sm:p-4 lg:p-5">
       <AdminPageHeader
         title="Inventory"
-        description="Purchase orders — track all stock purchased from suppliers"
+        description="Purchase orders — track stock bought from suppliers, and whether we have paid them"
       />
       <PurchaseOrdersClient
         orders={orders}
         companies={companies}
         products={products}
         initialPo={po ?? null}
+        initialPayment={isPurchaseOrderPaymentFilter(payment) ? payment : null}
       />
     </div>
   )

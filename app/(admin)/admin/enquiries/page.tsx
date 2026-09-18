@@ -34,13 +34,21 @@ function parseStageTab(value: string | undefined): EnquiryStageTabId | "" {
   return STAGE_TABS.has(value as EnquiryStageTabId) ? (value as EnquiryStageTabId) : ""
 }
 
+function parseOwnerFilter(value: string | undefined): string {
+  const raw = value?.trim() ?? ""
+  if (!raw) return ""
+  if (raw === "unassigned") return "unassigned"
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw)) return raw
+  return ""
+}
+
 export default async function EnquiriesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ enquiry?: string; stage?: string }>
+  searchParams: Promise<{ enquiry?: string; stage?: string; owner?: string }>
 }) {
   const profile = await requireAdmin()
-  const { enquiry: initialSelectedId, stage: stageParam } = await searchParams
+  const { enquiry: initialSelectedId, stage: stageParam, owner: ownerParam } = await searchParams
   const [allDeals, packages, accountOptions, staffOptions, suppliers, bookingForms, awaitingZkDealIdsRaw] =
     await Promise.all([
       getDealListRows(),
@@ -126,6 +134,7 @@ export default async function EnquiriesPage({
         supplierOptions={suppliers.map((supplier) => ({ id: supplier.id, name: supplier.name }))}
         initialSelectedId={selectedId}
         initialStageTab={parseStageTab(stageParam)}
+        initialOwnerFilter={parseOwnerFilter(ownerParam)}
       />
     </div>
   )

@@ -15,7 +15,7 @@ import {
   Users,
 } from "lucide-react"
 import { toast } from "sonner"
-import { isCancelledWorkflowRow } from "@/lib/admin/workflow-status"
+import { isCancelledWorkflowRow, type FinanceStatusFilter } from "@/lib/admin/workflow-status"
 import type { WorkflowOrderRow } from "@/lib/admin/workflow-views"
 import {
   compareUpcomingEvent,
@@ -139,16 +139,20 @@ export function WorkflowTrackerClient({
   rows,
   mode,
   canManage = false,
+  initialStatus,
 }: {
   rows: WorkflowOrderRow[]
   mode: "finance" | "sales"
   canManage?: boolean
+  initialStatus?: FinanceStatusFilter
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [listState, setListState] = usePersistedAdminFilters(`zk-admin-${mode}-tracker-filters-v1`, {
+  const [listState, setListState] = usePersistedAdminFilters(
+    `zk-admin-${mode}-tracker-filters-v1`,
+    {
     search: "",
-    status: "all",
+    status: "all" as FinanceStatusFilter | string,
     channel: "all",
     owner: "all",
     period: "all",
@@ -156,7 +160,9 @@ export function WorkflowTrackerClient({
     eventKey: "all",
     sortKey: "eventDate" as SortKey,
     sortDir: "asc" as "asc" | "desc",
-  })
+    },
+    initialStatus ? { override: { status: initialStatus } } : undefined,
+  )
   const { search, status, channel, owner, period, eventScope, eventKey, sortKey, sortDir } = listState
   const owners = useMemo(
     () => [...new Set(rows.map((row) => row.ownerName).filter(Boolean))].sort() as string[],

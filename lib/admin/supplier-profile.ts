@@ -43,6 +43,8 @@ export type SupplierProfilePurchaseOrder = {
   unitsPurchased: number
   unitsRemaining: number
   products: string[]
+  paymentDueDate: string | null
+  paidAt: string | null
 }
 
 export type SupplierProfile = {
@@ -115,17 +117,20 @@ export async function getSupplierProfile(supplierId: string): Promise<SupplierPr
     .maybeSingle()
   if (error || !supplier) return null
 
-  const [{ data: linkedPos }, { data: legacyPos }, { data: directLayers }, { data: legacyLayers }, { data: dealLines }, { data: coverageRows }] =
+  const PO_PROFILE_SELECT =
+    "id, po_number, issued_at, note, created_at, payment_due_date, paid_at, purchase_order_documents(id)"
+  const PO_PROFILE_SELECT_NO_PAYMENT =
+    "id, po_number, issued_at, note, created_at, purchase_order_documents(id)"
+
+  async function loadSupplierPurchaseOrders(select: string) {
+    return Promise.all([
+      supabase.from("purchase_orders").select(select).eq("supplier_id", id),
+      supabase.from("purchase_orders").select(select).is("supplier_id", null).ilike("supplier", supplier.name),
+    ])
+  }
+
+  const [{ data: directLayers }, { data: legacyLayers }, { data: dealLines }, { data: coverageRows }] =
     await Promise.all([
-      supabase
-        .from("purchase_orders")
-        .select("id, po_number, issued_at, note, created_at, purchase_order_documents(id)")
-        .eq("supplier_id", id),
-      supabase
-        .from("purchase_orders")
-        .select("id, po_number, issued_at, note, created_at, purchase_order_documents(id)")
-        .is("supplier_id", null)
-        .ilike("supplier", supplier.name),
       supabase
         .from("package_cost_layers")
         .select(COST_LAYER_PROFILE_SELECT)
@@ -146,6 +151,13 @@ export async function getSupplierProfile(supplierId: string): Promise<SupplierPr
       supabase.from("supplier_event_coverage").select("race_id").eq("supplier_id", id),
     ])
 
+  let [{ data: linkedPos, error: linkedPoError }, { data: legacyPos, error: legacyPoError }] =
+    await loadSupplierPurchaseOrders(PO_PROFILE_SELECT)
+  const poLoadError = linkedPoError || legacyPoError
+  if (poLoadError && /payment_due_date|paid_at/i.test(poLoadError.message)) {
+    ;[{ data: linkedPos }, { data: legacyPos }] = await loadSupplierPurchaseOrders(PO_PROFILE_SELECT_NO_PAYMENT)
+  }
+
   const poById = new Map<
     string,
     {
@@ -154,6 +166,8 @@ export async function getSupplierProfile(supplierId: string): Promise<SupplierPr
       issued_at: string | null
       note: string | null
       created_at: string
+      payment_due_date?: string | null
+      paid_at?: string | null
       purchase_order_documents: Array<{ id: string }> | null
     }
   >()
@@ -291,6 +305,8 @@ export async function getSupplierProfile(supplierId: string): Promise<SupplierPr
         unitsPurchased: usage?.purchased ?? 0,
         unitsRemaining: usage?.remaining ?? 0,
         products: [...(usage?.products ?? new Set<string>())].sort(),
+        paymentDueDate: po.payment_due_date?.slice(0, 10) ?? null,
+        paidAt: po.paid_at?.slice(0, 10) ?? null,
       }
     })
     .sort((a, b) => (b.issuedAt ?? "").localeCompare(a.issuedAt ?? ""))

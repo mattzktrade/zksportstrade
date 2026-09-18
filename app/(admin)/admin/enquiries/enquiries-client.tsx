@@ -241,6 +241,7 @@ export function EnquiriesClient({
   supplierOptions,
   initialSelectedId = null,
   initialStageTab = "",
+  initialOwnerFilter = "",
   outreachByDeal = {},
   outreachSequenceEnabled = false,
 }: {
@@ -259,11 +260,20 @@ export function EnquiriesClient({
   supplierOptions: DealBasketSupplier[]
   initialSelectedId?: string | null
   initialStageTab?: EnquiryStageTabId | ""
+  initialOwnerFilter?: string
   outreachByDeal?: Record<string, EnquiryOutreachBadge>
   outreachSequenceEnabled?: boolean
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
+  const listOverride =
+    initialStageTab || initialOwnerFilter
+      ? {
+          ...(initialStageTab ? { stageTab: initialStageTab, kpiFilter: "" as const } : {}),
+          ...(initialOwnerFilter ? { ownerFilter: initialOwnerFilter } : {}),
+          page: 1,
+        }
+      : undefined
   const [listState, setListState] = usePersistedAdminFilters("zk-admin-enquiries-filters-v2", {
     stageTab: "" as EnquiryStageTabId | "",
     kpiFilter: "" as "" | "attention" | "open",
@@ -273,7 +283,7 @@ export function EnquiriesClient({
     ownerFilter: "",
     eventFilter: [] as string[],
     page: 1,
-  }, initialStageTab ? { override: { stageTab: initialStageTab, page: 1, kpiFilter: "" as const } } : undefined)
+  }, listOverride ? { override: listOverride } : undefined)
   const { stageTab, kpiFilter, query, sourceFilter, temperatureFilter, ownerFilter, eventFilter, page } = listState
   const {
     isDesktop,

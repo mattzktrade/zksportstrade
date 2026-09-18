@@ -53,8 +53,10 @@ import {
   generatePurchaseOrderNumber,
   setPurchaseOrderContractInvoiceReceivedFlag,
   setPurchaseOrderOpsDates,
+  setPurchaseOrderPayment,
   setPurchaseOrderSupplierReference,
 } from "@/lib/admin/purchase-orders"
+import { calendarTodayIso } from "@/lib/admin/purchase-order-payment"
 import { parseOptionalIsoDate } from "@/lib/admin/purchase-order-date"
 import { storedContractInvoiceReceived } from "@/lib/admin/purchase-order-contract-invoice"
 import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
@@ -3406,6 +3408,8 @@ export async function createPurchaseOrder(input: {
   issuedAt?: string | null
   guestDetailsDeadline?: string | null
   ticketsReceivedAt?: string | null
+  paymentDueDate?: string | null
+  paidAt?: string | null
   note?: string | null
   lines?: Array<{ packageId: string; quantity: number; unitCost: number }>
 }): Promise<PurchaseOrderIdResult> {
@@ -3436,6 +3440,10 @@ export async function createPurchaseOrder(input: {
   if (!guestDetailsDeadline.ok) return guestDetailsDeadline
   const ticketsReceivedAt = parseOptionalIsoDate(input.ticketsReceivedAt, "Tickets received")
   if (!ticketsReceivedAt.ok) return ticketsReceivedAt
+  const paymentDueDate = parseOptionalIsoDate(input.paymentDueDate, "Payment due")
+  if (!paymentDueDate.ok) return paymentDueDate
+  const paidAt = parseOptionalIsoDate(input.paidAt, "Paid on")
+  if (!paidAt.ok) return paidAt
 
   const { data, error } = await gate.supabase.rpc("admin_create_purchase_order", {
     p_po_number: poNumber,
@@ -3466,6 +3474,13 @@ export async function createPurchaseOrder(input: {
       ticketsReceivedAt: ticketsReceivedAt.date || undefined,
     })
     if (!dates.ok) return dates
+  }
+  if (paymentDueDate.date || paidAt.date) {
+    const payment = await setPurchaseOrderPayment(gate.supabase, id, {
+      paymentDueDate: paymentDueDate.date || undefined,
+      paidAt: paidAt.date || undefined,
+    })
+    if (!payment.ok) return payment
   }
 
   const stockLines = new Map<
@@ -3528,6 +3543,8 @@ export async function updatePurchaseOrder(input: {
   clearIssuedAt?: boolean
   guestDetailsDeadline?: string | null
   ticketsReceivedAt?: string | null
+  paymentDueDate?: string | null
+  paidAt?: string | null
   note?: string | null
 }): Promise<ActionResult> {
   const gate = await requireAdminAction()
@@ -3599,8 +3616,47 @@ export async function updatePurchaseOrder(input: {
     })
     if (!dates.ok) return dates
   }
+  if (input.paymentDueDate !== undefined || input.paidAt !== undefined) {
+    const due =
+      input.paymentDueDate !== undefined
+        ? parseOptionalIsoDate(input.paymentDueDate, "Payment due")
+        : { ok: true as const, date: undefined as string | null | undefined }
+    if (!due.ok) return due
+    const paid =
+      input.paidAt !== undefined
+        ? parseOptionalIsoDate(input.paidAt, "Paid on")
+        : { ok: true as const, date: undefined as string | null | undefined }
+    if (!paid.ok) return paid
+    const payment = await setPurchaseOrderPayment(gate.supabase, id, {
+      paymentDueDate: due.date,
+      paidAt: paid.date,
+    })
+    if (!payment.ok) return payment
+  }
   revalidatePath("/admin/purchase-orders")
   revalidatePath("/admin/catalog")
+  return { ok: true }
+}
+
+export async function setPurchaseOrderPaid(input: {
+  id: string
+  paid: boolean
+  paidAt?: string | null
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  const id = input.id.trim()
+  if (!UUID_RE.test(id)) return { ok: false, message: "Invalid purchase order id." }
+
+  const paidAt = input.paid
+    ? parseOptionalIsoDate(input.paidAt?.trim() || calendarTodayIso(), "Paid on")
+    : { ok: true as const, date: null as string | null }
+  if (!paidAt.ok) return paidAt
+
+  const saved = await setPurchaseOrderPayment(gate.supabase, id, { paidAt: paidAt.date })
+  if (!saved.ok) return saved
+  revalidatePath("/admin/purchase-orders")
+  revalidatePath("/admin/suppliers")
   return { ok: true }
 }
 
