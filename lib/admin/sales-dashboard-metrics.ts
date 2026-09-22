@@ -7,7 +7,6 @@ import {
   monthKeyUtc,
   monthLabelFromKey,
   percentChange,
-  pickReportingCurrency,
   shiftMonthKey,
   type DashboardSaleRow,
 } from "@/lib/admin/admin-dashboard-metrics"
@@ -221,13 +220,7 @@ export function buildSalesDashboardView(input: {
     (row) => row.ownerId === input.ownerId && isConfirmedSale(row),
   )
   const openOwned = ownedDeals.filter((deal) => dealStageIsOpenPipeline(deal.stage))
-  const currency = pickReportingCurrency(
-    [
-      ...ownedConfirmed.map((row) => ({ currency: row.currency, total: row.total })),
-      ...openOwned.map((deal) => ({ currency: deal.currency, total: deal.total_amount })),
-    ],
-    "GBP",
-  )
+  const currency = "USD"
   const thisMonth = monthSalesTotals(ownedConfirmed, monthKey, currency)
   const lastMonth = monthSalesTotals(ownedConfirmed, previousMonthKey, currency)
   const newPipeline = monthNewPipeline(openOwned, monthKey, currency)

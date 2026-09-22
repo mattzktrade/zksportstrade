@@ -27,7 +27,7 @@ function deal(overrides: Partial<SalesDashboardDeal> = {}): SalesDashboardDeal {
     source: overrides.source ?? "website",
     owner_profile_id: overrides.owner_profile_id === undefined ? OWNER : overrides.owner_profile_id,
     total_amount: overrides.total_amount ?? 25000,
-    currency: overrides.currency ?? "GBP",
+    currency: overrides.currency ?? "USD",
     created_at: overrides.created_at ?? "2026-09-10T12:00:00.000Z",
     race_name: overrides.race_name ?? "Singapore Grand Prix 2026",
     line_summary: overrides.line_summary ?? "Paddock Club",
@@ -44,7 +44,7 @@ function sale(overrides: Partial<SalesDashboardSale> = {}): SalesDashboardSale {
     accountName: overrides.accountName ?? "Apex Group",
     eventPackage: overrides.eventPackage ?? "Monaco GP 2026 · Paddock Club",
     total: overrides.total ?? 180000,
-    currency: overrides.currency ?? "GBP",
+    currency: overrides.currency ?? "USD",
     createdAt: overrides.createdAt ?? "2026-09-10T12:00:00.000Z",
     paidAt: overrides.paidAt ?? "2026-09-10T12:00:00.000Z",
     ownerName: overrides.ownerName ?? "Lara Ahmed",
@@ -184,6 +184,7 @@ test("sales dashboard uses the salesperson's live records only", () => {
   })
 
   assert.equal(view.title, "Sales Dashboard")
+  assert.equal(view.currency, "USD")
   assert.equal(view.unassignedCount, 1)
   assert.equal(view.unassigned[0]?.reference, "DL0847")
   assert.equal(view.unassigned[0]?.source, "Website")
@@ -217,6 +218,7 @@ test("conversion is omitted when the salesperson has no won or closed-lost deals
     sales: [],
   })
   assert.equal(view.conversionRate, null)
+  assert.equal(view.currency, "USD")
   assert.equal(view.revenue, 0)
   assert.equal(view.unassignedCount, 0)
   assert.equal(view.pipelineValue, 10000)
@@ -233,11 +235,24 @@ test("empty monthly performance hides the fake £2M chart scale", () => {
     sales: [],
   })
   assert.equal(salesChartHasValues(empty.months), false)
+  assert.equal(empty.currency, "USD")
   const ui = readFileSync("components/admin/sales-role-dashboard.tsx", "utf8")
   assert.match(ui, /No confirmed sales or new pipeline in the last 6 months/)
   assert.match(ui, /salesChartHasValues/)
   assert.match(ui, /minmax\(0,1fr\)/)
   assert.doesNotMatch(ui, /No prior month to compare/)
+})
+
+test("sales dashboard stays in USD even when the only records are GBP", () => {
+  const view = buildSalesDashboardView({
+    ownerId: OWNER,
+    now: new Date("2026-09-18T12:00:00.000Z"),
+    deals: [deal({ enquiry_stage: "contacted", total_amount: 10000, currency: "GBP" })],
+    sales: [sale({ total: 180000, currency: "GBP" })],
+  })
+  assert.equal(view.currency, "USD")
+  assert.equal(view.revenue, 0)
+  assert.equal(view.pipelineValue, 0)
 })
 
 test("sales dashboard page is wired for sales staff and uses live ZK stages", () => {
@@ -249,6 +264,8 @@ test("sales dashboard page is wired for sales staff and uses live ZK stages", ()
   assert.match(page, /isSalesDashboardUser/)
   assert.match(page, /SalesRoleDashboard/)
   assert.match(metrics, /Sales Dashboard/)
+  assert.match(metrics, /const currency = "USD"/)
+  assert.doesNotMatch(metrics, /"GBP"/)
   assert.match(metrics, /\/admin\/enquiries\?stage=new&owner=unassigned/)
   assert.match(ui, /\{data\.title\}/)
   assert.match(ui, /New unassigned enquiries/)
