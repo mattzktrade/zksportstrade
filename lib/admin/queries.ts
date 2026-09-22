@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server"
 import { isOutstandingInvoiceStatus } from "@/lib/invoices/status"
 import type { PortalProfile } from "@/lib/types/profile"
 import { CATALOG_LIST_PACKAGE_COLUMNS, INVENTORY_COLUMNS, PACKAGE_COLUMNS } from "@/lib/catalog/columns"
+import { guestGuideFieldsFor, loadGuestGuideFields } from "@/lib/catalog/guest-guide-fields"
 import type { DbInventory, DbPackage } from "@/lib/catalog/map-rows"
 import {
   getCostLayerQuantityTotalsByPackage,
@@ -451,6 +452,7 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
     salesByPkg,
     sfInventoryByProduct,
     fulfilmentSold,
+    guestGuideById,
     { data: canonical },
   ] = await Promise.all([
     supabase.from("races").select("id,name,season").eq("id", row.race_id).maybeSingle(),
@@ -458,6 +460,7 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
     getPackageSalesBreakdownByPackage([id]),
     getSalesforceInventorySnapshotsForPackages([row]),
     loadFulfilmentSoldByCostLayer(supabase, [id]),
+    loadGuestGuideFields(supabase, [id], { includeContent: true }),
     supabase
       .from("inventory_availability")
       .select("*")
@@ -475,8 +478,11 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
     (sum, layer) => sum + Math.max(0, Math.floor(Number(layer.quantity) || 0)),
     0,
   )
+  const guestGuide = guestGuideFieldsFor(guestGuideById, id)
   const packageRow: AdminPackageRow = {
     ...row,
+    guest_guide_url: guestGuide.guest_guide_url,
+    guest_guide: guestGuide.guest_guide,
     inventory: (inv as DbInventory | null) ?? null,
     race_name: raceName,
     cost_layers: layers,
@@ -557,6 +563,7 @@ export async function getAdminCatalogListRows(options?: {
       : [],
     featured: Boolean(p.featured),
     brochure_url: typeof p.brochure_url === "string" ? p.brochure_url : null,
+    guest_guide_url: typeof p.guest_guide_url === "string" ? p.guest_guide_url : null,
     description: typeof p.description === "string" ? p.description : null,
     gallery_images: Array.isArray(p.gallery_images)
       ? p.gallery_images.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
@@ -622,7 +629,7 @@ export async function getAdminPackageRows(
   const invBy = new Map((inv ?? []).map((i: DbInventory) => [i.package_id, i]))
   const packageIds = (packages as DbPackage[]).map((p) => p.id)
   const includeCostLayers = options?.includeCostLayers === true
-  const [layersByPkg, layerTotalsByPkg, salesByPkg, sfInventoryByProduct, availabilityRows] = await Promise.all([
+  const [layersByPkg, layerTotalsByPkg, salesByPkg, sfInventoryByProduct, availabilityRows, guestGuideById] = await Promise.all([
     includeCostLayers ? getCostLayersByPackage(packageIds) : Promise.resolve(new Map<string, CostLayerRow[]>()),
     includeCostLayers ? Promise.resolve(new Map<string, { quantity_purchased: number; quantity_remaining: number }>()) : getCostLayerQuantityTotalsByPackage(packageIds),
     getPackageSalesBreakdownByPackage(packageIds),
@@ -630,6 +637,7 @@ export async function getAdminPackageRows(
       ? getSalesforceInventorySnapshotsForPackages(packages as DbPackage[])
       : Promise.resolve(new Map<string, SfInventorySnapshot>()),
     getNativePackageAvailability(packageIds),
+    loadGuestGuideFields(supabase, packageIds, { includeContent: false }),
   ])
   const availabilityByPackage = new Map(
     availabilityRows.map((availability) => [availability.package_id, availability]),
@@ -639,8 +647,11 @@ export async function getAdminPackageRows(
     const totals = layerTotalsByPkg.get(p.id)
     const summary = includeCostLayers ? summarizePackageCost(p.currency || "USD", layers) : null
     if (summary) summary.package_id = p.id
+    const guestGuide = guestGuideFieldsFor(guestGuideById, p.id)
     const packageRow: AdminPackageRow = {
       ...p,
+      guest_guide_url: guestGuide.guest_guide_url,
+      guest_guide: guestGuide.guest_guide,
       inventory: invBy.get(p.id) ?? null,
       race_name: raceName.get(p.race_id) ?? p.race_id,
       cost_layers: layers,

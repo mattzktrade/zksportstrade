@@ -424,7 +424,8 @@ function PackageRow({
                     </p>
                     <h3 className="mt-2 text-xl sm:text-2xl font-bold leading-tight text-foreground">{pkg.name}</h3>
                     {(packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name)) ||
-                    pkg.brochureUrl ? (
+                    pkg.brochureUrl ||
+                    pkg.guestGuideUrl ? (
                       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs sm:text-sm text-muted-foreground">
                         {packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name) ? (
                           <span>{packageDurationLabel(pkg.duration)}</span>
@@ -438,6 +439,17 @@ function PackageRow({
                             className="text-muted-foreground underline-offset-4 hover:underline"
                           >
                             View brochure
+                          </a>
+                        ) : null}
+                        {pkg.guestGuideUrl ? (
+                          <a
+                            href={pkg.guestGuideUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-muted-foreground underline-offset-4 hover:underline"
+                          >
+                            View guest guide
                           </a>
                         ) : null}
                       </div>

@@ -43,6 +43,8 @@ type DbPackage = {
   featured: boolean
   sort_order: number
   brochure_url?: string | null
+  guest_guide_url?: string | null
+  guest_guide?: unknown
   description?: string | null
   gallery_images?: unknown
   track_map?: string | null
@@ -86,6 +88,9 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
   const brochureRaw = p.brochure_url
   const brochureUrl =
     typeof brochureRaw === "string" && brochureRaw.trim().length > 0 ? brochureRaw.trim() : null
+  const guestGuideRaw = p.guest_guide_url
+  const guestGuideUrl =
+    typeof guestGuideRaw === "string" && guestGuideRaw.trim().length > 0 ? guestGuideRaw.trim() : null
   const description = typeof p.description === "string" ? p.description : ""
   const galleryImages = parseGalleryImages(p.gallery_images)
   const trackMapRaw = typeof p.track_map === "string" ? p.track_map.trim() : ""
@@ -118,6 +123,7 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     trackMap,
     featured: p.featured,
     brochureUrl,
+    guestGuideUrl,
     raceId: p.race_id,
     requiresBookingApproval,
   }
@@ -154,6 +160,7 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     trackMap,
     featured: p.featured,
     brochureUrl,
+    guestGuideUrl,
     raceId: p.race_id,
     requiresBookingApproval,
   }

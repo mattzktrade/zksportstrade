@@ -8,6 +8,7 @@ import {
   type PortalCatalog,
 } from "@/lib/catalog/portal-catalog"
 import { INVENTORY_COLUMNS, PACKAGE_COLUMNS, PORTAL_HOME_PACKAGE_COLUMNS, RACE_COLUMNS } from "@/lib/catalog/columns"
+import { guestGuideFieldsFor, loadGuestGuideFields } from "@/lib/catalog/guest-guide-fields"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import {
@@ -109,6 +110,22 @@ function asRows<T>(data: unknown): T[] {
   return Array.isArray(data) ? (data as T[]) : []
 }
 
+async function attachGuestGuideUrls(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  packages: Package[],
+): Promise<Package[]> {
+  if (packages.length === 0) return packages
+  const byId = await loadGuestGuideFields(
+    supabase,
+    packages.map((pkg) => pkg.id),
+    { includeContent: false },
+  )
+  return packages.map((pkg) => ({
+    ...pkg,
+    guestGuideUrl: guestGuideFieldsFor(byId, pkg.id).guest_guide_url,
+  }))
+}
+
 type PackageColumnSet = typeof PACKAGE_COLUMNS | typeof PORTAL_HOME_PACKAGE_COLUMNS
 
 async function fetchCatalogBuilt(
@@ -148,13 +165,14 @@ async function fetchCatalogBuilt(
 
   const visiblePackageRows = asRows<DbPackage>(allPackages).filter(isPortalVisiblePackage)
   const built = buildCatalog(asRows<DbRace>(allRaces), visiblePackageRows, asRows<DbInventory>(inventory))
+  const packages = await attachGuestGuideUrls(supabase, built.packages)
   const packageMeta = visiblePackageRows.map((p) => ({
     id: p.id,
     inventory_group_id: p.inventory_group_id,
     duration: p.duration,
     shell_parent_package_id: p.shell_parent_package_id,
   }))
-  return { races: built.races, packages: built.packages, packageMeta }
+  return { races: built.races, packages, packageMeta }
 }
 
 async function fetchHomeCatalog(
@@ -312,6 +330,7 @@ export async function getRaceCatalog(
     shell_parent_package_id: p.shell_parent_package_id,
   }))
   let packages = visiblePackageRows.map((p) => mapPackageRow(p, invByPackage.get(p.id)))
+  packages = await attachGuestGuideUrls(supabase, packages)
   packages = await attachStorefrontAvailability(supabase, packages, packageMeta)
   packages = await attachLargestSameSuiteRemaining(supabase, packages, packageMeta)
   const race = mapRaceRow(raceRow as DbRace, packages)
@@ -354,6 +373,7 @@ export async function getPackageById(
 
   const { data: inv } = await supabase.from("package_inventory").select(INVENTORY_COLUMNS).eq("package_id", id).maybeSingle()
   let pkg = mapPackageRow(dbPkg, inv as DbInventory | undefined)
+  ;[pkg] = await attachGuestGuideUrls(supabase, [pkg])
   const packageMeta = [
     {
       id: dbPkg.id,

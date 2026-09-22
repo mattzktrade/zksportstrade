@@ -204,7 +204,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           {
             title: "Sales list",
-            body: "What we can sell. Open a product to create a deal, place a hold, or make a brochure.",
+            body: "What we can sell. Open a product to create a deal, place a hold, or make a brochure or guest guide.",
             href: "/admin/inventory/sales-list",
           },
           {
@@ -363,7 +363,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     nav: "Selling",
     title: "Selling",
     summary: "Accounts, leads, deals, booking forms, and the pipeline.",
-    keywords: ["deal", "deals", "account", "contact", "lead", "leads", "enquiry", "enquiries", "booking form", "sign", "pipeline", "price", "ready to send", "brochure", "pdf", "marketing", "meta", "facebook", "whatsapp", "follow-up", "demand", "conversion", "sales tracker", "templates"],
+    keywords: ["deal", "deals", "account", "contact", "lead", "leads", "enquiry", "enquiries", "booking form", "sign", "pipeline", "price", "ready to send", "brochure", "guest guide", "pdf", "marketing", "meta", "facebook", "whatsapp", "follow-up", "demand", "conversion", "sales tracker", "templates"],
     blocks: [
       {
         type: "p",
@@ -419,6 +419,17 @@ export const HELP_TOPICS: HelpTopic[] = [
           "If not, click Create brochure. It needs at least 3 unique photos, a short description, and 4 inclusions. Add a track map on the product if you want a third page with the circuit layout. Standard Paddock Club or Champions Club copy can be filled from official programme details when the product name matches.",
           "Send that file to the client. Portal clients cannot create brochures — only the ZK team can.",
           "If you change the photos or copy later, use Recreate brochure so the PDF stays current.",
+        ],
+      },
+      {
+        type: "steps",
+        title: "Send a guest guide",
+        items: [
+          "Open the product page. Next to the sales brochure, fill the Guest guide pages, then click Create guest guide.",
+          "The cover matches the sales brochure. The other pages only use the copy you enter. Empty pages are skipped. It still needs at least 3 unique photos.",
+          "Singapore Velocity Terrace can load the official stored copy. Leave [NAME] and [NUMBER] until you have the on-ground contact. The Discover web link and QR sit on the last page.",
+          "Portal clients cannot create guest guides — only the ZK team can. They can download the finished file when it is attached.",
+          "If you change the guide copy later, save it and use Recreate guest guide.",
         ],
       },
       {
@@ -680,7 +691,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     nav: "Common questions",
     title: "Common questions",
     summary: "Short answers to the things people usually ask.",
-    keywords: ["faq", "help", "why", "how", "password", "login", "error", "stock wrong", "brochure"],
+    keywords: ["faq", "help", "why", "how", "password", "login", "error", "stock wrong", "brochure", "guest guide"],
     blocks: [
       {
         type: "qa",
@@ -700,6 +711,10 @@ export const HELP_TOPICS: HelpTopic[] = [
           {
             q: "How do I make a brochure for a product?",
             a: "Sales list → click the product → Create brochure. It needs at least 3 unique photos, a short description, and 4 inclusions on the product. Add a track map if you want a third page with the circuit. Only the ZK team can do this, not portal clients. If a brochure is already attached, download it, or recreate it after you change the listing.",
+          },
+          {
+            q: "How do I make a guest guide for a product?",
+            a: "Open the product page and use Guest guide, next to the sales brochure. Fill the pages, then Create guest guide. It needs at least 3 unique photos and copy on at least three pages, including Welcome. Singapore Velocity Terrace can load the official stored copy. Only the ZK team can generate it; portal clients just download the file.",
           },
           {
             q: "Available stock looks too low / too high.",

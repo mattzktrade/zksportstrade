@@ -19,4 +19,6 @@ Rules:
 - Refuse to generate without at least 3 unique photos; prompt staff to add them
 - Refuse to generate without a short description and at least 4 inclusions, unless the product is a standard F1 Paddock Club or Champions Club programme whose official copy we already store
 - Keep generation CMS-staff only; portal clients may download an attached file, not create one
-- Work lives in `lib/brochures/`, `components/admin/package-brochure-actions.tsx`, and `app/(admin)/admin/catalog/brochure-actions.ts`
+- Guest guide is a separate PDF next to the sales brochure on the product page. Cover page stays the sales cover; later pages use staff-edited guest guide copy. Empty pages are skipped. Do not invent itineraries, prices, or on-ground contact details
+- Guest guide pages are Welcome, Before race weekend, Digital ticket, Arriving, Experience, Getting there, Parking, On-ground support, Things to know, then the closing page. Discover QR/link lives on the closing page. On-ground contact lives on On-ground support. Red section headings use the bold condensed face
+- Work lives in `lib/brochures/`, `lib/brochures/guest-guide/`, `components/admin/package-brochure-actions.tsx`, `components/admin/package-guest-guide-panel.tsx`, and `app/(admin)/admin/catalog/brochure-actions.ts`

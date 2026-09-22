@@ -30,6 +30,10 @@ describe("admin help guide", () => {
     assert.ok(brochure.topics.some((topic) => topic.id === "sales"))
     assert.ok(brochure.questions.some((item) => item.q.toLowerCase().includes("brochure")))
 
+    const guestGuide = searchHelp("guest guide")
+    assert.ok(guestGuide.topics.some((topic) => topic.id === "sales"))
+    assert.ok(guestGuide.questions.some((item) => item.q.toLowerCase().includes("guest guide")))
+
     const ready = searchHelp("ready to send")
     assert.ok(ready.topics.some((topic) => topic.id === "sales"))
 

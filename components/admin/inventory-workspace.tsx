@@ -53,6 +53,7 @@ import {
 } from "@/components/admin/deal-line-basket"
 import { CatalogImage } from "@/components/catalog-image"
 import { PackageBrochureActions } from "@/components/admin/package-brochure-actions"
+import { PackageGuestGuideActions } from "@/components/admin/package-guest-guide-actions"
 import { PackageGallery } from "@/components/package-gallery"
 import { sanitizeHttpsUrl, sanitizeHttpsUrlList } from "@/lib/auth/safe-url"
 import { adminPackagePath } from "@/lib/admin/package-link"
@@ -387,6 +388,7 @@ export function InventoryWorkspace({
     return [...new Set(sanitizeHttpsUrlList(raw))]
   }, [selected])
   const selectedBrochure = sanitizeHttpsUrl(selected?.brochure_url)
+  const selectedGuestGuide = sanitizeHttpsUrl(selected?.guest_guide_url)
   const selectedContents = useMemo(
     () =>
       Array.isArray(selected?.includes)
@@ -961,9 +963,22 @@ export function InventoryWorkspace({
                       compact
                       onUrlChange={() => router.refresh()}
                     />
+                    <PackageGuestGuideActions
+                      packageId={selected.id}
+                      guestGuideUrl={selectedGuestGuide}
+                      productName={selected.name}
+                      eventName={selected.race_name}
+                      compact
+                      onUrlChange={() => router.refresh()}
+                    />
                     {!selectedBrochure ? (
                       <p className="text-[8px] leading-4 text-[#93979f]">
                         Creates a branded sales PDF from this product&apos;s photos, description and inclusions.
+                      </p>
+                    ) : null}
+                    {!selectedGuestGuide ? (
+                      <p className="text-[8px] leading-4 text-[#93979f]">
+                        Guest guide copy is edited on the product page. Singapore Velocity Terrace can use the official template.
                       </p>
                     ) : null}
                   </div>

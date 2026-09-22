@@ -17,6 +17,7 @@ import { PackageCostLayers } from "@/components/admin/package-cost-layers"
 import { PackagePortalVisibilityCheckbox } from "@/components/admin/package-portal-visibility"
 import { PackageIntegrationPanel } from "@/components/admin/package-integration-panel"
 import { PackageBrochureActions } from "@/components/admin/package-brochure-actions"
+import { PackageGuestGuidePanel } from "@/components/admin/package-guest-guide-panel"
 import { CatalogImageField } from "@/components/admin/catalog-image-field"
 import { LinkedDayInventoryToolbar } from "@/components/admin/linked-day-packages-panel"
 import { FulfilmentBlocksPanel } from "@/components/admin/fulfilment-blocks-panel"
@@ -117,6 +118,9 @@ export function PackageAdminPanel({
   const [featured, setFeatured] = useState(initial.featured)
   const [isHidden, setIsHidden] = useState(initial.is_hidden)
   const [brochureUrl, setBrochureUrl] = useState(typeof initial.brochure_url === "string" ? initial.brochure_url : "")
+  const [guestGuideUrl, setGuestGuideUrl] = useState(
+    typeof initial.guest_guide_url === "string" ? initial.guest_guide_url : "",
+  )
   const [trackMap, setTrackMap] = useState(typeof initial.track_map === "string" ? initial.track_map : "")
   useEffect(() => {
     setRaceId(initial.race_id)
@@ -140,6 +144,7 @@ export function PackageAdminPanel({
     setFeatured(initial.featured)
     setIsHidden(initial.is_hidden)
     setBrochureUrl(typeof initial.brochure_url === "string" ? initial.brochure_url : "")
+    setGuestGuideUrl(typeof initial.guest_guide_url === "string" ? initial.guest_guide_url : "")
     setTrackMap(typeof initial.track_map === "string" ? initial.track_map : "")
   }, [initial])
 
@@ -526,6 +531,17 @@ export function PackageAdminPanel({
                 className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
               />
             </label>
+          </div>
+          <div className="sm:col-span-2 rounded-xl border border-border bg-muted/30 p-4">
+            <PackageGuestGuidePanel
+              packageId={initial.id}
+              productName={name.trim() || initial.name}
+              eventName={initial.race_name}
+              location={location.trim() || initial.location}
+              guestGuideUrl={guestGuideUrl.trim() || null}
+              storedGuide={initial.guest_guide}
+              onUrlChange={(url) => setGuestGuideUrl(url)}
+            />
           </div>
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
             <input type="checkbox" checked={isEnquiry} onChange={(e) => setIsEnquiry(e.target.checked)} />

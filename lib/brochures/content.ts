@@ -7,6 +7,8 @@ const PACKAGE_SELECT =
   "id, race_id, name, circuit, location, country, date_range, description, image, gallery_images, track_map, includes, product_code, brochure_url, duration"
 
 export const BROCHURE_PACKAGE_SELECT = PACKAGE_SELECT
+export const GUEST_GUIDE_PACKAGE_SELECT =
+  "id, race_id, name, circuit, location, country, date_range, description, image, gallery_images, track_map, includes, product_code, brochure_url, guest_guide_url, guest_guide, duration"
 
 export type BrochurePackageRow = {
   id: string
@@ -23,6 +25,8 @@ export type BrochurePackageRow = {
   includes: unknown
   product_code: string | null
   brochure_url: string | null
+  guest_guide_url?: string | null
+  guest_guide?: unknown
   duration: string | null
 }
 

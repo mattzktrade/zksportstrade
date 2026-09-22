@@ -78,7 +78,8 @@ export function includedPhotoSlots(totalPhotos: number): 3 | 5 {
   return totalPhotos >= 6 ? 5 : 3
 }
 
-function drawCover(page: PDFPage, content: BrochureContent, fonts: BrochureFonts, photos: PDFImage[]) {
+/** Cover shared by the sales brochure and the guest guide. */
+export function drawBrochureCover(page: PDFPage, content: BrochureContent, fonts: BrochureFonts, photos: PDFImage[]) {
   const points = coverPhotoPoints()
   drawDiagonalPhoto(page, photos[0], points)
   fillPolygon(page, coverTextPanelPoints(), BLACK)
@@ -349,7 +350,7 @@ export async function generatePackageBrochurePdf(
   for (const [index, kind] of pages.entries()) {
     const page = pdf.addPage(PAGE)
     drawBackground(page, background)
-    if (kind === "cover") drawCover(page, content, fonts, photos)
+    if (kind === "cover") drawBrochureCover(page, content, fonts, photos)
     else if (kind === "included") {
       const totalPhotos = brochurePhotoUrls(content.heroUrl, content.galleryUrls, content.trackMapUrl).length
       drawIncluded(page, content, fonts, photos.slice(1), includedPhotoSlots(totalPhotos))

@@ -35,26 +35,57 @@ async function ensureBrochureBucket(
   return null
 }
 
-const LEGACY_BROCHURE_FILE = "brochure.pdf"
+export type PackagePdfKind = "brochure" | "guest-guide"
+
+const LEGACY_FILE: Record<PackagePdfKind, string> = {
+  brochure: "brochure.pdf",
+  "guest-guide": "guest-guide.pdf",
+}
 const PDF_CACHE_CONTROL = "0"
 
-function brochureKeepNames(filename: string): Set<string> {
-  const pretty = filename.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "") || LEGACY_BROCHURE_FILE
-  return new Set([pretty, LEGACY_BROCHURE_FILE])
+function sanitizePdfFilename(filename: string, fallback: string): string {
+  return filename.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "") || fallback
 }
 
-async function removePreviousBrochures(
+function keepNames(filename: string, kind: PackagePdfKind): Set<string> {
+  const pretty = sanitizePdfFilename(filename, LEGACY_FILE[kind])
+  return new Set([pretty, LEGACY_FILE[kind]])
+}
+
+export function isPackagePdfKind(name: string, kind: PackagePdfKind): boolean {
+  const n = name.toLowerCase()
+  if (!n.endsWith(".pdf")) return false
+  if (kind === "guest-guide") return n === "guest-guide.pdf" || n.endsWith("-guest-guide.pdf")
+  return n === "brochure.pdf" || (n.endsWith("-brochure.pdf") && !n.includes("guest-guide"))
+}
+
+/** Only stale files of the same document kind are removed so sales PDFs and guest guides can share a folder. */
+export function stalePackagePdfPaths(
+  folder: string,
+  names: string[],
+  kind: PackagePdfKind,
+  filename: string,
+): string[] {
+  const keep = keepNames(filename, kind)
+  return names
+    .filter((name) => isPackagePdfKind(name, kind) && !keep.has(name))
+    .map((name) => `${folder}/${name}`)
+}
+
+async function removePreviousDocuments(
   admin: NonNullable<ReturnType<typeof createAdminClient>>,
   packageId: string,
   filename: string,
+  kind: PackagePdfKind,
 ) {
   const folder = packageId.trim()
-  const keep = brochureKeepNames(filename)
   const { data } = await admin.storage.from(PACKAGE_BROCHURE_BUCKET).list(folder)
-  const stale = (data ?? [])
-    .map((file) => file.name)
-    .filter((name) => name.toLowerCase().endsWith(".pdf") && !keep.has(name))
-    .map((name) => `${folder}/${name}`)
+  const stale = stalePackagePdfPaths(
+    folder,
+    (data ?? []).map((file) => file.name),
+    kind,
+    filename,
+  )
   if (stale.length === 0) return
   await admin.storage.from(PACKAGE_BROCHURE_BUCKET).remove(stale)
 }
@@ -79,10 +110,11 @@ function storageUploadMessage(message: string): string {
   return message
 }
 
-export async function uploadPackageBrochurePdf(
+async function uploadPackagePdf(
   packageId: string,
   bytes: Uint8Array,
   filename: string,
+  kind: PackagePdfKind,
 ): Promise<{ url: string } | { error: string }> {
   const admin = createAdminClient()
   if (!admin) return { error: "SUPABASE_SERVICE_ROLE_KEY is required to store brochures." }
@@ -90,15 +122,17 @@ export async function uploadPackageBrochurePdf(
   const bucketError = await ensureBrochureBucket(admin)
   if (bucketError) return { error: bucketError }
 
-  await removePreviousBrochures(admin, packageId, filename)
+  await removePreviousDocuments(admin, packageId, filename, kind)
   if (bytes.byteLength > MAX_BROCHURE_BYTES) {
     return {
       error:
-        "This brochure file is too large to store. Use smaller JPEG gallery photos and try Recreate again.",
+        kind === "guest-guide"
+          ? "This guest guide file is too large to store. Use smaller JPEG gallery photos and try Recreate again."
+          : "This brochure file is too large to store. Use smaller JPEG gallery photos and try Recreate again.",
     }
   }
   const prettyPath = packageBrochureStoragePath(packageId, filename)
-  const legacyPath = packageBrochureStoragePath(packageId, LEGACY_BROCHURE_FILE)
+  const legacyPath = packageBrochureStoragePath(packageId, LEGACY_FILE[kind])
   const prettyError = await upsertPdf(admin, prettyPath, bytes)
   if (prettyError) return { error: storageUploadMessage(prettyError) }
   if (legacyPath !== prettyPath) {
@@ -107,7 +141,30 @@ export async function uploadPackageBrochurePdf(
 
   const { data } = admin.storage.from(PACKAGE_BROCHURE_BUCKET).getPublicUrl(prettyPath)
   const url = data.publicUrl?.trim()
-  if (!url) return { error: "Brochure uploaded but no public URL was returned." }
+  if (!url) {
+    return {
+      error:
+        kind === "guest-guide"
+          ? "Guest guide uploaded but no public URL was returned."
+          : "Brochure uploaded but no public URL was returned.",
+    }
+  }
   const separator = url.includes("?") ? "&" : "?"
   return { url: `${url}${separator}v=${Date.now()}` }
+}
+
+export async function uploadPackageBrochurePdf(
+  packageId: string,
+  bytes: Uint8Array,
+  filename: string,
+): Promise<{ url: string } | { error: string }> {
+  return uploadPackagePdf(packageId, bytes, filename, "brochure")
+}
+
+export async function uploadPackageGuestGuidePdf(
+  packageId: string,
+  bytes: Uint8Array,
+  filename: string,
+): Promise<{ url: string } | { error: string }> {
+  return uploadPackagePdf(packageId, bytes, filename, "guest-guide")
 }

@@ -129,6 +129,10 @@ export function brochureFilename(productName: string, raceName?: string | null):
   return `${slug || "package"}-brochure.pdf`
 }
 
+export function guestGuideFilename(productName: string, raceName?: string | null): string {
+  return brochureFilename(productName, raceName).replace(/-brochure\.pdf$/i, "-guest-guide.pdf")
+}
+
 export function uniqueImageUrls(heroUrl: string | null, galleryUrls: string[]): string[] {
   const seen = new Set<string>()
   const out: string[] = []
