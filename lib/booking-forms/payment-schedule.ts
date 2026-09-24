@@ -135,7 +135,7 @@ export function normalizePaymentSchedule(
 ): BookingFormPaymentSchedule {
   const installments = (value?.installments ?? [])
     .slice(0, MAX_PAYMENT_INSTALLMENTS)
-    .map((row) => ({
+    .map((row): BookingFormPaymentInstallment => ({
       percent: roundPercent(Number(row.percent)),
       dueKind: row.dueKind === "on_date" ? "on_date" : "days_after_signing",
       dueDaysAfterSigning: Math.max(0, Math.min(MAX_PAYMENT_DUE_DAYS, Math.round(Number(row.dueDaysAfterSigning) || 0))),

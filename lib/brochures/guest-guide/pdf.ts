@@ -1056,7 +1056,7 @@ function drawVelocityTerraceClosing(
     { label: "Dates", value: factValue(pageContent, "Dates") || brochure.dateHeadline },
     { label: "Time", value: factValue(pageContent, "Hours") },
     { label: "Location", value: factValue(pageContent, "Location") },
-  ].filter((item) => item.value)
+  ].filter((item): item is { label: string; value: string } => Boolean(item.value))
   let detailY = top - 8
   for (const detail of details) {
     page.drawCircle({

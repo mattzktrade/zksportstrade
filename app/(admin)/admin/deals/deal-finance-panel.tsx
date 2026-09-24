@@ -117,7 +117,7 @@ export function DealFinancePanel({
             <div className="rounded-md border border-slate-200 p-2">
               <p className="text-[8px] font-semibold text-slate-500">Payment schedule</p>
               <ul className="mt-1 space-y-1">
-                {deal.invoices.map((invoice) => (
+                {(deal.invoices ?? []).map((invoice) => (
                   <li key={invoice.id} className="text-[8px] leading-4">
                     <span className="font-semibold">
                       {invoice.installment_label?.trim() || `Payment ${invoice.installment_index} of ${invoice.installment_count}`}
