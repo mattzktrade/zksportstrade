@@ -74,12 +74,10 @@ function sellableQty(
           members,
         })
       : commitmentSellable({ stock, breakdown: pkg.sales_breakdown })
-  const held = Math.max(
-    0,
-    Math.floor(
-      Number(pkg.canonical_availability?.reserved ?? pkg.inventory.qty_held) || 0,
-    ),
-  )
+  const held = pkg.canonical_availability
+    ? Math.max(0, Math.floor(Number(pkg.canonical_availability.reserved) || 0)) +
+      Math.max(0, Math.floor(Number(pkg.canonical_availability.manualHold) || 0))
+    : Math.max(0, Math.floor(Number(pkg.inventory.qty_held) || 0))
   return committedSellable - held
 }
 

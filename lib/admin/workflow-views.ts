@@ -14,6 +14,7 @@ import type { OperationsStockAllocation, OperationsStockLayer } from "@/lib/oper
 import { applyUnlinkedDealSalesToRemaining, stockLayerKey, summarizeMappedSuppliers } from "@/lib/operations/stock"
 import { createClient } from "@/lib/supabase/server"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
+import { pickCurrentInvoice } from "@/lib/invoices/status"
 
 export type WorkflowOrderRow = {
   id: string
@@ -754,10 +755,17 @@ export async function getWorkflowOrderRows(): Promise<WorkflowOrderRow[]> {
     if (deal.order_id) dealsByOrder.set(String(deal.order_id), deal)
   }
 
-  const invoiceByOrder = new Map<string, InvoiceEmbed>()
+  const invoicesByOrder = new Map<string, InvoiceEmbed[]>()
   for (const invoice of invoices) {
     const orderId = String(invoice.order_id)
-    if (!invoiceByOrder.has(orderId)) invoiceByOrder.set(orderId, invoice)
+    const list = invoicesByOrder.get(orderId) ?? []
+    list.push(invoice)
+    invoicesByOrder.set(orderId, list)
+  }
+  const invoiceByOrder = new Map<string, InvoiceEmbed>()
+  for (const [orderId, rows] of invoicesByOrder) {
+    const current = pickCurrentInvoice(rows)
+    if (current) invoiceByOrder.set(orderId, current)
   }
 
   const linesByOrder = new Map<string, LineEmbed[]>()

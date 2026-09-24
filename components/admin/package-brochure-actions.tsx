@@ -25,6 +25,7 @@ export function PackageBrochureActions({
   productName,
   eventName,
   compact = false,
+  downloadOnly = false,
   onUrlChange,
 }: {
   packageId: string
@@ -32,6 +33,8 @@ export function PackageBrochureActions({
   productName: string
   eventName?: string | null
   compact?: boolean
+  /** List preview can download an existing file. Recreate stays on the product page. */
+  downloadOnly?: boolean
   onUrlChange?: (url: string) => void
 }) {
   const [pending, start] = useTransition()
@@ -97,6 +100,7 @@ export function PackageBrochureActions({
           <Download className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
         </a>
       ) : null}
+      {downloadOnly && attached ? null : (
       <button
         type="button"
         disabled={pending}
@@ -119,6 +123,7 @@ export function PackageBrochureActions({
         )}
         {pending ? "Designing..." : attached ? "Recreate brochure" : "Create brochure"}
       </button>
+      )}
     </div>
   )
 }

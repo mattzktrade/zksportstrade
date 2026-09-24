@@ -58,6 +58,7 @@ export type AdminPackageRow = DbPackage & {
     available: number
     net?: number
     reserved: number
+    manualHold: number
     committed: number
     shortage: number
     historicalShortage: number
@@ -66,6 +67,14 @@ export type AdminPackageRow = DbPackage & {
   /** Unified admin display balance, including linked-day sibling demand. */
   effective_sellable?: number
   effective_net?: number
+  staff_holds?: StaffStockHold[]
+}
+
+export type StaffStockHold = {
+  id: string
+  quantity: number
+  note: string | null
+  created_at: string
 }
 
 function attachCanonicalAvailability(
@@ -80,6 +89,7 @@ function attachCanonicalAvailability(
       available: availability.legacy_sellable,
       net: availability.net_quantity ?? availability.legacy_sellable,
       reserved: availability.active_reservations,
+      manualHold: availability.manual_hold_quantity ?? 0,
       committed: availability.committed_quantity ?? row.sales_breakdown.total,
       shortage: availability.open_shortage_qty,
       historicalShortage: availability.historical_shortage_quantity ?? 0,
@@ -496,6 +506,7 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
           available: Number(canonical.available_quantity ?? 0),
           net: Number(canonical.net_quantity ?? canonical.available_quantity ?? 0),
           reserved: Number(canonical.reserved_quantity ?? 0),
+          manualHold: Number(canonical.manual_hold_quantity ?? 0),
           committed: Number(canonical.committed_quantity ?? 0),
           shortage:
             Number(canonical.historical_shortage_quantity ?? 0) +
@@ -509,6 +520,19 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
         ? sfInventoryByProduct.get(row.salesforce_product_id.trim()) ?? null
         : null,
   }
+  const { data: staffHolds } = await supabase
+    .from("inventory_holds")
+    .select("id, quantity, note, created_at")
+    .eq("package_id", id)
+    .is("agent_profile_id", null)
+    .is("released_at", null)
+    .order("created_at", { ascending: false })
+  packageRow.staff_holds = (staffHolds ?? []).map((hold) => ({
+    id: String(hold.id),
+    quantity: Number(hold.quantity),
+    note: hold.note == null ? null : String(hold.note),
+    created_at: String(hold.created_at),
+  }))
   applyEffectiveSellable([packageRow])
   return packageRow
 }
@@ -704,12 +728,12 @@ async function getSalesforceInventorySnapshotsForPackages(
 export type InventoryHoldRow = {
   id: string
   package_id: string
-  agent_profile_id: string
+  agent_profile_id: string | null
   quantity: number
   note: string | null
   created_at: string
   released_at: string | null
-  expires_at: string
+  expires_at: string | null
 }
 
 /** Packages that have an inventory row (required for holds). */
@@ -755,11 +779,13 @@ export async function getInventoryHoldsWithDetails(): Promise<InventoryHoldWithD
   if (error || !holds?.length) return []
 
   const packageIds = [...new Set(holds.map((h) => h.package_id))]
-  const agentIds = [...new Set(holds.map((h) => h.agent_profile_id))]
+  const agentIds = [...new Set(holds.map((h) => h.agent_profile_id).filter((id): id is string => Boolean(id)))]
 
   const [{ data: pkgs }, { data: profs }] = await Promise.all([
     supabase.from("packages").select("id,name,circuit,date_range,race_id,location").in("id", packageIds),
-    supabase.from("profiles").select("id,email,company_name").in("id", agentIds),
+    agentIds.length > 0
+      ? supabase.from("profiles").select("id,email,company_name").in("id", agentIds)
+      : Promise.resolve({ data: [] as { id: string; email: string; company_name: string }[] }),
   ])
 
   const raceIds = [...new Set((pkgs ?? []).map((p: { race_id: string }) => p.race_id))]
@@ -780,7 +806,7 @@ export async function getInventoryHoldsWithDetails(): Promise<InventoryHoldWithD
   )
 
   return holds.map((h) => {
-    const agent = profBy.get(h.agent_profile_id)
+    const agent = h.agent_profile_id ? profBy.get(h.agent_profile_id) : undefined
     const pkg = pkgById.get(h.package_id)
     const rn = pkg ? raceName.get(pkg.race_id) ?? pkg.race_id : ""
     return {

@@ -6,7 +6,7 @@ export type CatalogClientCache = {
   fetchedAt: number
 }
 
-const CACHE_KEY = "zk-admin-catalog-v6"
+const CACHE_KEY = "zk-admin-catalog-v7"
 const TTL_MS = 5 * 60 * 1000
 
 export function readCatalogClientCache(): CatalogClientCache | null {

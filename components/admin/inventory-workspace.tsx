@@ -961,6 +961,7 @@ export function InventoryWorkspace({
                       productName={selected.name}
                       eventName={selected.race_name}
                       compact
+                      downloadOnly
                       onUrlChange={() => router.refresh()}
                     />
                     <PackageGuestGuideActions
@@ -969,16 +970,11 @@ export function InventoryWorkspace({
                       productName={selected.name}
                       eventName={selected.race_name}
                       compact
-                      onUrlChange={() => router.refresh()}
+                      downloadOnly
                     />
                     {!selectedBrochure ? (
                       <p className="text-[8px] leading-4 text-[#93979f]">
                         Creates a branded sales PDF from this product&apos;s photos, description and inclusions.
-                      </p>
-                    ) : null}
-                    {!selectedGuestGuide ? (
-                      <p className="text-[8px] leading-4 text-[#93979f]">
-                        Guest guide copy is edited on the product page. Singapore Velocity Terrace can use the official template.
                       </p>
                     ) : null}
                   </div>

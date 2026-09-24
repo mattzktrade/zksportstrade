@@ -86,7 +86,7 @@ import {
   ENQUIRY_CRM_STAGE_LABELS,
 } from "@/lib/crm/deal-pipeline"
 
-type ActionResult = { ok: true; message?: string } | { ok: false; message: string }
+type ActionResult = { ok: true; message?: string; purchaseOrderId?: string } | { ok: false; message: string }
 
 export type PackageIntegrationSnapshot = {
   integration_sync_status: string
@@ -1846,6 +1846,39 @@ export async function updateInventoryRow(input: {
   return { ok: true }
 }
 
+export async function placeStaffStockHold(input: {
+  packageId: string
+  quantity: number
+  note?: string | null
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  const q = Math.floor(Number(input.quantity))
+  if (!Number.isFinite(q) || q <= 0) {
+    return { ok: false, message: "Quantity must be a positive whole number." }
+  }
+  const { supabase } = gate
+  const { error } = await supabase.rpc("admin_place_staff_stock_hold", {
+    p_package_id: input.packageId,
+    p_quantity: q,
+    p_note: input.note ?? null,
+  })
+  if (error) {
+    const message = error.message.toLowerCase()
+    if (message.includes("insufficient free capacity")) {
+      return { ok: false, message: "That quantity is higher than the stock still available to hold." }
+    }
+    return { ok: false, message: error.message }
+  }
+  await enqueueLinkedInventoryChannelSync(supabase, input.packageId)
+  revalidatePath("/admin/inventory")
+  revalidatePath("/admin/catalog")
+  revalidatePath(`/admin/catalog/${encodeURIComponent(input.packageId)}`)
+  revalidatePath("/packages")
+  revalidatePath("/")
+  return { ok: true }
+}
+
 export async function createInventoryHold(input: {
   packageId: string
   agentProfileId: string
@@ -2624,6 +2657,8 @@ export async function updateCostLayer(input: {
     input.purchaseOrderGuestDetailsDeadline !== undefined ||
     input.purchaseOrderTicketsReceivedAt !== undefined
 
+  let linkedPurchaseOrderId: string | null = null
+
   if (purchaseFieldsProvided) {
     const supplierAccountId = input.purchaseOrderSupplierAccountId?.trim() ?? ""
     if (!supplierAccountId) {
@@ -2653,7 +2688,7 @@ export async function updateCostLayer(input: {
         : { ok: true as const, date: undefined as string | null | undefined }
     if (!ticketsReceived.ok) return ticketsReceived
 
-    let poIdForDates = existingPoId
+    linkedPurchaseOrderId = existingPoId
 
     if (existingPoId) {
       const { error: poUpdErr } = await supabase.rpc("admin_update_purchase_order", {
@@ -2674,7 +2709,7 @@ export async function updateCostLayer(input: {
         issuedAt: input.purchaseOrderIssuedAt?.trim() || null,
       })
       if (!resolved.ok) return resolved
-      poIdForDates = resolved.id
+      linkedPurchaseOrderId = resolved.id
       const { error: linkErr } = await supabase.rpc("admin_set_cost_layer_purchase_order", {
         p_layer_id: layerId,
         p_purchase_order_id: resolved.id,
@@ -2683,8 +2718,8 @@ export async function updateCostLayer(input: {
       if (linkErr) return { ok: false, message: linkErr.message }
     }
 
-    if (poIdForDates && (deadline.date !== undefined || ticketsReceived.date !== undefined)) {
-      const dates = await setPurchaseOrderOpsDates(supabase, poIdForDates, {
+    if (linkedPurchaseOrderId && (deadline.date !== undefined || ticketsReceived.date !== undefined)) {
+      const dates = await setPurchaseOrderOpsDates(supabase, linkedPurchaseOrderId, {
         guestDetailsDeadline: deadline.date,
         ticketsReceivedAt: ticketsReceived.date,
       })
@@ -2743,7 +2778,7 @@ export async function updateCostLayer(input: {
   if (input.packageId?.trim()) {
     await enqueueLinkedInventoryChannelSync(supabase, input.packageId.trim())
   }
-  return { ok: true }
+  return { ok: true, purchaseOrderId: linkedPurchaseOrderId ?? undefined }
 }
 
 export async function updateCostLayerQuantity(input: {
@@ -3080,15 +3115,35 @@ export async function deletePackage(packageId: string): Promise<ActionResult> {
   const shellIdsForOrderCheck = (shellRowsForOrderCheck ?? []).map((row) => String((row as { id: string }).id))
   const packageIdsForOrderCheck = [id, ...shellIdsForOrderCheck]
 
-  const { count, error: orderErr } = await supabase
+  const { data: referencingOrders, error: orderErr } = await supabase
     .from("orders")
-    .select("id", { count: "exact", head: true })
+    .select("id, status, deal_id")
     .in("package_id", packageIdsForOrderCheck)
   if (orderErr) return { ok: false, message: orderErr.message }
-  if ((count ?? 0) > 0) {
+  const referencingDealIds = [
+    ...new Set(
+      (referencingOrders ?? [])
+        .map((order) => order.deal_id)
+        .filter((dealId): dealId is string => typeof dealId === "string" && dealId.length > 0),
+    ),
+  ]
+  const { data: referencingDeals } = referencingDealIds.length
+    ? await supabase.from("deals").select("id, stage").in("id", referencingDealIds)
+    : { data: [] as Array<{ id: string; stage: string }> }
+  const withdrawnDealIds = new Set(
+    (referencingDeals ?? [])
+      .filter((deal) => deal.stage === "cancelled" || deal.stage === "closed_lost")
+      .map((deal) => deal.id),
+  )
+  const liveOrderCount = (referencingOrders ?? []).filter((order) => {
+    if (order.status === "cancelled") return false
+    if (typeof order.deal_id === "string" && withdrawnDealIds.has(order.deal_id)) return false
+    return true
+  }).length
+  if (liveOrderCount > 0) {
     return {
       ok: false,
-      message: `Cannot delete: ${count} order${count === 1 ? "" : "s"} reference this package or its Single Ticket children. Cancel or keep the package for records.`,
+      message: `Cannot delete: ${liveOrderCount} order${liveOrderCount === 1 ? "" : "s"} reference this package or its Single Ticket children. Cancel or keep the package for records.`,
     }
   }
 
@@ -3133,8 +3188,38 @@ export async function deletePackage(packageId: string): Promise<ActionResult> {
   const { error: bookingErr } = await supabase.from("booking_approval_requests").delete().eq("package_id", id)
   if (bookingErr) return { ok: false, message: bookingErr.message }
 
+  const { error: prepareErr } = await supabase.rpc("admin_prepare_package_delete", {
+    p_package_id: id,
+  })
+  if (prepareErr) {
+    const prepareMessage = prepareErr.message.toLowerCase()
+    if (
+      prepareMessage.includes("package_has_active_allocations") ||
+      prepareMessage.includes("package_has_active_deal_lines") ||
+      prepareMessage.includes("package_has_active_orders") ||
+      prepareMessage.includes("package_has_active_shortages")
+    ) {
+      return {
+        ok: false,
+        message: "Cannot delete this product because it still has a live sale.",
+      }
+    }
+    if (!prepareMessage.includes("function") || !prepareMessage.includes("does not exist")) {
+      return { ok: false, message: prepareErr.message }
+    }
+  }
+
   const { error } = await supabase.from("packages").delete().eq("id", id)
-  if (error) return { ok: false, message: error.message }
+  if (error) {
+    if (error.message.toLowerCase().includes("inventory_allocations_package_id_fkey")) {
+      return {
+        ok: false,
+        message:
+          "Cannot delete this product because cancelled sales still have allocation records. Apply the latest package-delete migration, then try again.",
+      }
+    }
+    return { ok: false, message: error.message }
+  }
 
   const raceId = pkgMeta.race_id
   const notes: string[] = ["Package deleted from portal."]
@@ -5235,8 +5320,25 @@ export async function updateNativeDealWorkflow(input: {
     }
     return { ok: false, message: error.message }
   }
+  if (stage === "cancelled" || stage === "closed_lost") {
+    const { data: deal } = await gate.supabase
+      .from("deals")
+      .select("order_id")
+      .eq("id", dealId)
+      .maybeSingle()
+    const orderId = typeof deal?.order_id === "string" ? deal.order_id : ""
+    if (orderId) {
+      try {
+        await cancelAdminOrder(orderId)
+      } catch {
+        // The deal stage is already saved. A blocked order cancel must not undo that.
+      }
+    }
+  }
   revalidatePath("/admin/deals", "layout")
   revalidatePath("/admin/enquiries", "layout")
+  revalidatePath("/admin/catalog", "layout")
+  revalidatePath("/admin/orders")
   return { ok: true, message: "Deal workflow updated." }
 }
 

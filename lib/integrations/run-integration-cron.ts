@@ -2,6 +2,7 @@ import { drainIntegrationOutbox } from "@/lib/integrations/drain-outbox"
 import { releaseExpiredInventoryHoldsAndSync } from "@/lib/integrations/release-expired-holds"
 import { releaseExpiredDealReservations } from "@/lib/integrations/release-expired-deal-reservations"
 import { processNativeBookingForms } from "@/lib/integrations/process-native-booking-forms"
+import { processInstallmentInvoiceCreates } from "@/lib/integrations/process-installment-invoices"
 import { processNativeInvoiceReminders } from "@/lib/integrations/process-native-invoice-reminders"
 import { processMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-process"
 import type { SalesforceInventoryPullResult } from "@/lib/integrations/salesforce/pull-inventory-from-salesforce"
@@ -24,6 +25,7 @@ export type IntegrationCronResult = {
   holds: Awaited<ReturnType<typeof releaseExpiredInventoryHoldsAndSync>>
   dealReservations: Awaited<ReturnType<typeof releaseExpiredDealReservations>>
   bookingForms: Awaited<ReturnType<typeof processNativeBookingForms>>
+  installmentInvoices: Awaited<ReturnType<typeof processInstallmentInvoiceCreates>>
   invoiceReminders: Awaited<ReturnType<typeof processNativeInvoiceReminders>>
   salesforceInventory: SalesforceInventoryPullResult
   staleOpenOpportunities: null
@@ -41,6 +43,7 @@ export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {
   const holds = await releaseExpiredInventoryHoldsAndSync()
   const bookingForms = await processNativeBookingForms()
   const dealReservations = await releaseExpiredDealReservations()
+  const installmentInvoices = await processInstallmentInvoiceCreates()
   const result = await drainIntegrationOutbox({ maxRounds: 10, skipInventoryPull: true })
   const invoiceReminders = await processNativeInvoiceReminders()
   let marketingOutreach: Awaited<ReturnType<typeof processMarketingOutreach>> = {
@@ -64,6 +67,7 @@ export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {
   return {
     holds,
     bookingForms,
+    installmentInvoices,
     invoiceReminders,
     dealReservations,
     salesforceInventory: RETIRED_SALESFORCE_PULL,

@@ -62,11 +62,23 @@ const INVOICE_STATUS_RANK: Record<InvoiceWorkflowStatus, number> = {
   awaiting_invoice: 2,
 }
 
+function invoiceList<T>(invoices: T | T[] | null | undefined): T[] {
+  return Array.isArray(invoices) ? invoices : invoices ? [invoices] : []
+}
+
+function isCancelledInvoiceStatus(status: string | null | undefined): boolean {
+  return status === "cancelled"
+}
+
+function isOpenInvoiceStatus(status: string | null | undefined): boolean {
+  return !isCancelledInvoiceStatus(status) && isOutstandingInvoiceStatus(status)
+}
+
 /** Prefer delivered over paid when an order has more than one invoice row. */
 export function pickPreferredInvoice<T extends { status: string }>(
   invoices: T | T[] | null | undefined,
 ): T | null {
-  const list = Array.isArray(invoices) ? invoices : invoices ? [invoices] : []
+  const list = invoiceList(invoices)
   return (
     [...list].sort(
       (a, b) =>
@@ -74,4 +86,58 @@ export function pickPreferredInvoice<T extends { status: string }>(
         (INVOICE_STATUS_RANK[normalizeInvoiceStatus(a.status)] ?? 1),
     )[0] ?? null
   )
+}
+
+export function sortInvoicesByInstallment<
+  T extends {
+    installment_index?: number | null
+    due_date?: string | null
+    created_at?: string | null
+  },
+>(invoices: T | T[] | null | undefined): T[] {
+  return [...invoiceList(invoices)].sort((a, b) => {
+    const indexA = Number(a.installment_index ?? 0)
+    const indexB = Number(b.installment_index ?? 0)
+    if (indexA !== indexB) return indexA - indexB
+    const due = String(a.due_date ?? "").localeCompare(String(b.due_date ?? ""))
+    if (due !== 0) return due
+    return String(a.created_at ?? "").localeCompare(String(b.created_at ?? ""))
+  })
+}
+
+/** Next unpaid installment, otherwise the last row. */
+export function pickCurrentInvoice<
+  T extends {
+    status: string
+    installment_index?: number | null
+    due_date?: string | null
+    created_at?: string | null
+  },
+>(invoices: T | T[] | null | undefined): T | null {
+  const list = sortInvoicesByInstallment(invoices)
+  if (!list.length) return null
+  return list.find((row) => isOpenInvoiceStatus(row.status)) ?? list[list.length - 1] ?? null
+}
+
+export function aggregateInvoiceStatus(
+  invoices: Array<{ status: string }> | { status: string } | null | undefined,
+): InvoiceWorkflowStatus | null {
+  const statuses = invoiceList(invoices)
+    .filter((row) => !isCancelledInvoiceStatus(row.status))
+    .map((row) => normalizeInvoiceStatus(row.status))
+  if (!statuses.length) return null
+  if (statuses.every((status) => status === "delivered")) return "delivered"
+  if (statuses.every((status) => status === "paid" || status === "delivered")) return "paid"
+  if (statuses.some((status) => status === "awaiting_payment")) return "awaiting_payment"
+  return "awaiting_invoice"
+}
+
+export function allOrderInvoicesPaid(
+  invoices: Array<{ status: string }> | { status: string } | null | undefined,
+): boolean {
+  const list = invoiceList(invoices).filter((row) => !isCancelledInvoiceStatus(row.status))
+  return list.length > 0 && list.every((row) => {
+    const status = normalizeInvoiceStatus(row.status)
+    return status === "paid" || status === "delivered"
+  })
 }

@@ -55,6 +55,8 @@ export type GuestGuidePage = {
   linkLabel?: string
   linkUrl?: string
   qrImagePath?: string
+  mapImagePath?: string
+  mapUrl?: string
   organisation?: string
   contactName?: string
   contactPhone?: string

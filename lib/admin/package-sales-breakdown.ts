@@ -317,6 +317,8 @@ export function applyEffectiveSellable<T extends EffectiveSellablePackage>(rows:
         purchasedStock - Number(row.sales_breakdown.total ?? 0),
       )
     }
+    const held = Math.max(0, Math.floor(Number(row.inventory?.qty_held ?? 0)))
+    row.effective_sellable = Math.max(0, Math.floor(Number(row.effective_sellable) || 0) - held)
   }
   return rows
 }

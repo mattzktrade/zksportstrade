@@ -1,6 +1,8 @@
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { hasCmsPermission } from "@/lib/auth/permissions"
+import { loadOrderInvoices } from "@/lib/invoices/order-invoices"
+import { pickCurrentInvoice } from "@/lib/invoices/status"
 
 export type InvoicePdfAccess = {
   xeroInvoiceId: string
@@ -9,7 +11,10 @@ export type InvoicePdfAccess = {
 }
 
 /** Agent (order owner) or admin may download the Xero invoice PDF for an order. */
-export async function assertInvoicePdfAccess(orderId: string): Promise<InvoicePdfAccess> {
+export async function assertInvoicePdfAccess(
+  orderId: string,
+  invoiceId?: string | null,
+): Promise<InvoicePdfAccess> {
   const profile = await getPortalProfile()
   if (!profile) throw new InvoicePdfAccessError("Not signed in.", 401)
 
@@ -33,12 +38,10 @@ export async function assertInvoicePdfAccess(orderId: string): Promise<InvoicePd
     throw new InvoicePdfAccessError("You do not have access to this invoice.", 403)
   }
 
-  const { data: inv, error: invErr } = await admin
-    .from("invoices")
-    .select("xero_invoice_id, xero_invoice_number")
-    .eq("order_id", orderId)
-    .maybeSingle()
-  if (invErr) throw new InvoicePdfAccessError(invErr.message, 500)
+  const invoices = await loadOrderInvoices(admin, orderId)
+  const inv = invoiceId
+    ? invoices.find((row) => row.id === invoiceId)
+    : pickCurrentInvoice(invoices.filter((row) => row.xero_invoice_id)) ?? invoices.find((row) => row.xero_invoice_id)
   if (!inv?.xero_invoice_id) {
     throw new InvoicePdfAccessError("Invoice PDF is not available yet — Xero invoice has not been created.", 404)
   }

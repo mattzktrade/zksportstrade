@@ -8,6 +8,7 @@ import {
   enquiryTemperatureFromDeal,
 } from "@/lib/crm/deal-pipeline"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
+import { aggregateInvoiceStatus, pickCurrentInvoice, sortInvoicesByInstallment } from "@/lib/invoices/status"
 import { costLayerSupplierPoolKey } from "@/lib/inventory/supplier-pool"
 
 export type { DealListRow, DealStage } from "@/lib/crm/deal-types"
@@ -192,10 +193,10 @@ export async function getDealListRows(options?: { ids?: string[] }): Promise<Dea
           .select(`
             id, reference,
             invoices(
-              id, status, xero_invoice_id, xero_invoice_number, xero_sync_status,
+              id, status, amount, xero_invoice_id, xero_invoice_number, xero_sync_status,
               xero_sync_error, due_date, invoice_emailed_at, invoice_email_error,
               payment_reminder_count, last_payment_reminder_at,
-              payment_reminder_error, cancellation_eligible_at
+              payment_reminder_error, cancellation_eligible_at, created_at
             )
           `)
           .in("id", orderIds)
@@ -336,40 +337,32 @@ export async function getDealListRows(options?: { ids?: string[] }): Promise<Dea
     })
     const effectiveRaceId = row.race_id ?? (lineEvents.length === 1 ? lineEvents[0].id : null)
     const order = row.order_id ? orderMap.get(String(row.order_id)) : null
-    const invoice = one(
-      (order?.invoices ?? null) as
-        | {
-            id: string
-            status: string
-            xero_invoice_id: string | null
-            xero_invoice_number: string | null
-            xero_sync_status: string | null
-            xero_sync_error: string | null
-            due_date: string | null
-            invoice_emailed_at: string | null
-            invoice_email_error: string | null
-            payment_reminder_count: number
-            last_payment_reminder_at: string | null
-            payment_reminder_error: string | null
-            cancellation_eligible_at: string | null
-          }
-        | Array<{
-            id: string
-            status: string
-            xero_invoice_id: string | null
-            xero_invoice_number: string | null
-            xero_sync_status: string | null
-            xero_sync_error: string | null
-            due_date: string | null
-            invoice_emailed_at: string | null
-            invoice_email_error: string | null
-            payment_reminder_count: number
-            last_payment_reminder_at: string | null
-            payment_reminder_error: string | null
-            cancellation_eligible_at: string | null
-          }>
-        | null,
+    type DealInvoiceEmbed = {
+      id: string
+      status: string
+      amount?: number | null
+      xero_invoice_id: string | null
+      xero_invoice_number: string | null
+      xero_sync_status: string | null
+      xero_sync_error: string | null
+      due_date: string | null
+      invoice_emailed_at: string | null
+      invoice_email_error: string | null
+      payment_reminder_count: number
+      last_payment_reminder_at: string | null
+      payment_reminder_error: string | null
+      cancellation_eligible_at: string | null
+      installment_index?: number | null
+      installment_count?: number | null
+      installment_percent?: number | null
+      installment_label?: string | null
+      created_at?: string | null
+    }
+    const invoiceRows = sortInvoicesByInstallment(
+      (order?.invoices ?? null) as DealInvoiceEmbed | DealInvoiceEmbed[] | null,
     )
+    const invoice = pickCurrentInvoice(invoiceRows)
+    const invoiceStatus = aggregateInvoiceStatus(invoiceRows) ?? invoice?.status ?? null
 
     return {
       id: row.id,
@@ -451,7 +444,25 @@ export async function getDealListRows(options?: { ids?: string[] }): Promise<Dea
       order_id: row.order_id,
       order_reference: order?.reference ? String(order.reference) : null,
       invoice_id: invoice?.id ?? null,
-      invoice_status: invoice?.status ?? null,
+      invoice_status: invoiceStatus,
+      invoices: invoiceRows.map((invoice, index) => ({
+        id: invoice.id,
+        status: invoice.status,
+        amount: invoice.amount == null ? null : Number(invoice.amount),
+        due_date: invoice.due_date ?? null,
+        installment_index: Number(invoice.installment_index ?? index + 1),
+        installment_count: Number(invoice.installment_count ?? invoiceRows.length),
+        installment_percent: Number(
+          invoice.installment_percent ??
+            (Number(invoice.amount) > 0 && Number(row.total_amount) > 0
+              ? Math.round((Number(invoice.amount) / Number(row.total_amount)) * 10000) / 100
+              : 100),
+        ),
+        installment_label: invoice.installment_label ?? null,
+        xero_invoice_id: invoice.xero_invoice_id ?? null,
+        xero_invoice_number: invoice.xero_invoice_number ?? null,
+        xero_sync_status: invoice.xero_sync_status ?? null,
+      })),
       xero_invoice_id: invoice?.xero_invoice_id ?? null,
       xero_invoice_number: invoice?.xero_invoice_number ?? null,
       ledger_invoice_number:

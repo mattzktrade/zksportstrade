@@ -199,6 +199,20 @@ test("signed contracts hold sellable as sold; unsigned demand does not", () => {
   assert.equal(commitmentSellable({ stock, breakdown: sfPipeline }), 91)
 })
 
+test("active holds reduce sellable without changing net stock", () => {
+  const rows: EffectiveSellablePackage[] = [
+    {
+      id: "paddock",
+      inventory: { qty_available: 2, qty_held: 2 },
+      layer_units_purchased: 20,
+      sales_breakdown: sold("paddock", 18),
+    },
+  ]
+  applyEffectiveSellable(rows)
+  assert.equal(rows[0].effective_sellable, 0)
+  assert.equal(rows[0].effective_net, 2)
+})
+
 test("stale package_inventory is ignored when purchased stock and sibling sales are known", () => {
   const three = emptyPackageSalesBreakdown("three")
   three.salesforceOffline = 10

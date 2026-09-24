@@ -12,6 +12,10 @@ import {
 } from "@/lib/booking-forms/template"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { bookingLineTax } from "@/lib/booking-forms/line-tax"
+import {
+  defaultPaymentSchedule,
+  formatPaymentTermsText,
+} from "@/lib/booking-forms/payment-schedule"
 
 export { bookingLineTax }
 
@@ -209,7 +213,8 @@ export async function buildBookingFormSnapshot(
           ? "VAT included (5%)"
           : "VAT included (5% on Abu Dhabi products only)",
     total: subtotal,
-    paymentTerms: `${currency} ${subtotal.toFixed(2)} (100.00%) due upon signing, all tax included.`,
+    paymentSchedule: defaultPaymentSchedule(),
+    paymentTerms: formatPaymentTermsText(defaultPaymentSchedule(), subtotal, currency),
     paymentMethod: "Wire Transfer",
     bankDetails: BOOKING_BANK_DETAILS,
     acknowledgement: BOOKING_ACKNOWLEDGEMENT,

@@ -27,6 +27,7 @@ export function PackageGuestGuideActions({
   eventName,
   content,
   compact = false,
+  downloadOnly = false,
   onUrlChange,
 }: {
   packageId: string
@@ -35,6 +36,8 @@ export function PackageGuestGuideActions({
   eventName?: string | null
   content?: GuestGuideContent
   compact?: boolean
+  /** Sales list preview can download an existing file. Creation stays on the product page. */
+  downloadOnly?: boolean
   onUrlChange?: (url: string) => void
 }) {
   const [pending, start] = useTransition()
@@ -79,6 +82,8 @@ export function PackageGuestGuideActions({
   const compactBtn = "h-8 rounded-md px-2.5 text-[8px]"
   const fullBtn = "h-9 rounded-lg px-3 text-sm"
 
+  if (downloadOnly && !liveUrl) return null
+
   return (
     <div className="flex w-full flex-wrap items-center gap-2">
       {liveUrl ? (
@@ -100,6 +105,7 @@ export function PackageGuestGuideActions({
           <Download className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
         </a>
       ) : null}
+      {downloadOnly ? null : (
       <button
         type="button"
         disabled={pending}
@@ -122,6 +128,7 @@ export function PackageGuestGuideActions({
         )}
         {pending ? "Designing..." : attached ? "Recreate guest guide" : "Create guest guide"}
       </button>
+      )}
     </div>
   )
 }

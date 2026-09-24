@@ -15,7 +15,7 @@ import { packageDurationLabel } from "@/lib/catalog/package-duration"
 import { adminDealPath, adminOrderDealPath } from "@/lib/admin/deal-link"
 import { getDealsForPackages } from "@/lib/crm/deals"
 import { DEAL_STAGE_LABELS, dealSourceLabel, type DealStage } from "@/lib/crm/deal-types"
-import { invoiceDisplayLabel } from "@/lib/invoices/status"
+import { aggregateInvoiceStatus, invoiceDisplayLabel } from "@/lib/invoices/status"
 
 export type NativeEventDetailEvent = {
   id: string
@@ -235,8 +235,18 @@ export async function getNativeEventDetail(eventId: string): Promise<NativeEvent
           .select("order_id, status")
           .in("order_id", [...ordersCovered])
       : { data: [] as Array<{ order_id: string; status: string }> }
+    const invoicesByOrder = new Map<string, Array<{ status: string }>>()
+    for (const row of invoiceRows ?? []) {
+      const orderId = String(row.order_id)
+      const list = invoicesByOrder.get(orderId) ?? []
+      list.push({ status: String(row.status) })
+      invoicesByOrder.set(orderId, list)
+    }
     const invoiceByOrder = new Map(
-      (invoiceRows ?? []).map((row) => [String(row.order_id), String(row.status)]),
+      [...invoicesByOrder.entries()].map(([orderId, rows]) => [
+        orderId,
+        aggregateInvoiceStatus(rows) ?? String(rows[0]?.status ?? ""),
+      ]),
     )
     for (const sale of sales) {
       if (sale.kind !== "order") continue

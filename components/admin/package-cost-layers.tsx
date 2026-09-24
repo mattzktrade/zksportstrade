@@ -11,6 +11,7 @@ import {
   updateCostLayer,
   updateCostLayerQuantity,
   updateOrphanPackageStock,
+  uploadPurchaseOrderDocument,
 } from "@/app/(admin)/actions"
 import type { CostLayerRow } from "@/lib/admin/cost-layers"
 import type { FulfilmentBlockRow } from "@/lib/admin/fulfilment-blocks"
@@ -124,6 +125,7 @@ export function PackageCostLayers({
   const router = useRouter()
   const [pending, start] = useTransition()
   const addFileRef = useRef<HTMLInputElement | null>(null)
+  const editFileRef = useRef<HTMLInputElement | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [addQty, setAddQty] = useState("")
   const [addCost, setAddCost] = useState("")
@@ -465,6 +467,7 @@ export function PackageCostLayers({
     setEditQty(String(layer.quantity))
     setEditCascade(true)
     setEditFulfilmentBlockId(layer.fulfilment_block_id ?? "")
+    if (editFileRef.current) editFileRef.current.value = ""
   }
 
   function submitEdit(layer: CostLayerRow) {
@@ -518,6 +521,22 @@ export function PackageCostLayers({
       if (!res.ok) {
         toast.error(res.message)
         return
+      }
+      const file = editFileRef.current?.files?.[0]
+      if (file && file.size > 0) {
+        const purchaseOrderId = res.purchaseOrderId ?? layer.purchase_order_id
+        if (!purchaseOrderId) {
+          toast.error("Purchase saved, but there is no purchase order to attach the file to.")
+          return
+        }
+        const fd = new FormData()
+        fd.set("purchaseOrderId", purchaseOrderId)
+        fd.set("file", file)
+        const upload = await uploadPurchaseOrderDocument(fd)
+        if (!upload.ok) {
+          toast.error(upload.message)
+          return
+        }
       }
       const qtyChanged = newQty !== layer.quantity
       toast.success(
@@ -1101,6 +1120,15 @@ export function PackageCostLayers({
                             onChange={(e) => setEditPoIssuedAt(e.target.value)}
                             className="w-full px-2 py-1 rounded border border-border bg-background text-xs"
                           />
+                          <label className="block text-[10px] text-muted-foreground">
+                            Attach contract / invoice
+                            <input
+                              ref={editFileRef}
+                              type="file"
+                              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,image/webp"
+                              className="mt-1 block w-full text-[10px]"
+                            />
+                          </label>
                           {layer.purchase_order_id ? (
                             <Link
                               href={`/admin/purchase-orders?po=${encodeURIComponent(layer.purchase_order_id)}`}

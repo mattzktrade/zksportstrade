@@ -12,6 +12,14 @@ import type { BrochureContent, BrochureCreateErrorCode } from "@/lib/brochures/t
 export const GUEST_GUIDE_KICKER = "Guest guide"
 export const VELOCITY_TERRACE_DISCOVER_QR = "/images/brochures/velocity-terrace-discover-qr.png"
 export const VELOCITY_TERRACE_SINGAPORE_URL = "https://www.velocity-terrace.com/races/singapore"
+export const NATIONAL_GALLERY_SINGAPORE_MAP = "/images/brochures/national-gallery-singapore-map.png"
+export const NATIONAL_GALLERY_SINGAPORE_MAPS_URL =
+  "https://www.google.com/maps/place/National+Gallery+Singapore/@1.2902217,103.8515167,17z"
+export const VELOCITY_TERRACE_LOGO = "/images/brochures/velocity-terrace/logo-white.png"
+export const VELOCITY_TERRACE_SY_LOGO = "/images/brochures/velocity-terrace/sy-holdings.png"
+export const VELOCITY_TERRACE_ZK_LOGO = "/images/brochures/velocity-terrace/zk-sports.png"
+export const VELOCITY_TERRACE_THE_TEAM_LOGO = "/images/brochures/velocity-terrace/the-team.png"
+export const VELOCITY_TERRACE_PRESENTER = "SY Holdings"
 export const MIN_GUEST_GUIDE_PAGES = 3
 
 const DEFAULT_TITLES: Record<GuestGuidePageKey, string> = {
@@ -308,11 +316,13 @@ export function officialSingaporeVelocityTerraceGuestGuide(): GuestGuideContent 
         ],
         highlight: "Incredible Racing  ·  Premium Hospitality  ·  Live DJ  ·  Spectacular Views",
         paragraphs: [
-          "For more information about Velocity Terrace Singapore and the experience, please scan the QR code in this guide or visit:",
+          "Please scan the QR code or click the link below.",
         ],
         linkLabel: "Velocity Terrace Singapore",
         linkUrl: VELOCITY_TERRACE_SINGAPORE_URL,
         qrImagePath: VELOCITY_TERRACE_DISCOVER_QR,
+        mapImagePath: NATIONAL_GALLERY_SINGAPORE_MAP,
+        mapUrl: NATIONAL_GALLERY_SINGAPORE_MAPS_URL,
       },
     ],
   }
@@ -347,6 +357,7 @@ export function pageHasContent(page: GuestGuidePage): boolean {
   if ((page.sections ?? []).some((section) => cleanText(section.title) || cleanText(section.body))) return true
   if ((page.notes ?? []).some((item) => cleanText(item))) return true
   if (cleanText(page.linkLabel) || cleanText(page.linkUrl) || cleanText(page.qrImagePath)) return true
+  if (cleanText(page.mapImagePath) || cleanText(page.mapUrl)) return true
   if (cleanText(page.organisation) || cleanText(page.contactName) || cleanText(page.contactPhone)) return true
   return Boolean(cleanText(page.highlight))
 }
@@ -409,6 +420,8 @@ function parsePage(raw: unknown, fallbackKey: GuestGuidePageKey): GuestGuidePage
     linkLabel: cleanText(record.linkLabel) || undefined,
     linkUrl: cleanText(record.linkUrl) || undefined,
     qrImagePath: cleanText(record.qrImagePath) || undefined,
+    mapImagePath: cleanText(record.mapImagePath) || undefined,
+    mapUrl: cleanText(record.mapUrl) || undefined,
     organisation: cleanText(record.organisation) || undefined,
     contactName: cleanText(record.contactName) || undefined,
     contactPhone: cleanText(record.contactPhone) || undefined,

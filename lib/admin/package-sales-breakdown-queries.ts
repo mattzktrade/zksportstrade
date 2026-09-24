@@ -53,7 +53,7 @@ export async function getPackageSalesBreakdownByPackage(
       batches.map((batch) =>
         supabase
           .from("order_line_items")
-          .select("package_id, quantity, order_id, orders!inner(status, channel)")
+          .select("package_id, quantity, order_id, orders!inner(status, channel, deal_id)")
           .in("package_id", batch)
           .neq("orders.status", "cancelled"),
       ),
@@ -62,7 +62,7 @@ export async function getPackageSalesBreakdownByPackage(
       batches.map((batch) =>
         supabase
           .from("orders")
-          .select("id, package_id, channel, guests")
+          .select("id, package_id, channel, guests, deal_id")
           .in("package_id", batch)
           .neq("status", "cancelled"),
       ),
@@ -77,12 +77,37 @@ export async function getPackageSalesBreakdownByPackage(
     ),
   ])
 
+  const orderIds = new Set<string>()
+  const dealIds = new Set<string>()
+  for (const { data: lines } of orderLineResults) {
+    for (const row of lines ?? []) {
+      if (typeof row.order_id === "string" && row.order_id) orderIds.add(row.order_id)
+      const order = Array.isArray(row.orders) ? row.orders[0] : row.orders
+      if (typeof order?.deal_id === "string" && order.deal_id) dealIds.add(order.deal_id)
+    }
+  }
+  for (const { data: orders } of orderResults) {
+    for (const row of orders ?? []) {
+      if (typeof row.id === "string") orderIds.add(row.id)
+      if (typeof row.deal_id === "string" && row.deal_id) dealIds.add(row.deal_id)
+    }
+  }
+  const withdrawn = await withdrawnSalesForDeals(supabase, [...orderIds], [...dealIds])
+
   for (const { data: lines } of orderLineResults) {
     for (const row of lines ?? []) {
       const pkgId = typeof row.package_id === "string" ? row.package_id.trim() : ""
       if (!pkgId) continue
-      if (typeof row.order_id === "string" && row.order_id) ordersWithLines.add(row.order_id)
       const order = Array.isArray(row.orders) ? row.orders[0] : row.orders
+      if (
+        (typeof row.order_id === "string" && withdrawn.orderIds.has(row.order_id)) ||
+        (typeof order?.deal_id === "string" && withdrawn.dealIds.has(order.deal_id))
+      ) {
+        continue
+      }
+      if (typeof row.order_id === "string" && row.order_id) {
+        ordersWithLines.add(row.order_id)
+      }
       const channel = typeof order?.channel === "string" ? order.channel : "trade_portal"
       const breakdown = out.get(pkgId) ?? emptyPackageSalesBreakdown(pkgId)
       addGuests(breakdown, channel, Number(row.quantity))
@@ -93,7 +118,14 @@ export async function getPackageSalesBreakdownByPackage(
   for (const { data: orders, error: orderErr } of orderResults) {
     if (orderErr || !orders) continue
     for (const row of orders) {
-      if (typeof row.id === "string" && ordersWithLines.has(row.id)) continue
+      if (
+        typeof row.id === "string" &&
+        (ordersWithLines.has(row.id) ||
+          withdrawn.orderIds.has(row.id) ||
+          (typeof row.deal_id === "string" && withdrawn.dealIds.has(row.deal_id)))
+      ) {
+        continue
+      }
       const pkgId = typeof row.package_id === "string" ? row.package_id.trim() : ""
       if (!pkgId) continue
       const breakdown = out.get(pkgId) ?? emptyPackageSalesBreakdown(pkgId)
@@ -128,4 +160,30 @@ export async function getPackageSalesBreakdownByPackage(
   }
 
   return out
+}
+
+async function withdrawnSalesForDeals(
+  supabase: SupabaseClient,
+  orderIds: string[],
+  dealIds: string[],
+): Promise<{ orderIds: Set<string>; dealIds: Set<string> }> {
+  const hiddenOrders = new Set<string>()
+  const hiddenDeals = new Set<string>()
+  if (orderIds.length === 0 && dealIds.length === 0) {
+    return { orderIds: hiddenOrders, dealIds: hiddenDeals }
+  }
+  const [byOrder, byDeal] = await Promise.all([
+    orderIds.length > 0
+      ? supabase.from("deals").select("id, order_id, stage").in("order_id", orderIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; order_id: string | null; stage: string }> }),
+    dealIds.length > 0
+      ? supabase.from("deals").select("id, order_id, stage").in("id", dealIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; order_id: string | null; stage: string }> }),
+  ])
+  for (const row of [...(byOrder.data ?? []), ...(byDeal.data ?? [])]) {
+    if (row.stage !== "cancelled" && row.stage !== "closed_lost") continue
+    hiddenDeals.add(String(row.id))
+    if (row.order_id) hiddenOrders.add(String(row.order_id))
+  }
+  return { orderIds: hiddenOrders, dealIds: hiddenDeals }
 }

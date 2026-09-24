@@ -153,6 +153,20 @@ export function dealSourceTone(source: string | null | undefined): DealSourceTon
   }
 }
 
+export type DealInvoiceRow = {
+  id: string
+  status: string
+  amount: number | null
+  due_date: string | null
+  installment_index: number
+  installment_count: number
+  installment_percent: number
+  installment_label: string | null
+  xero_invoice_id: string | null
+  xero_invoice_number: string | null
+  xero_sync_status: string | null
+}
+
 export type DealListRow = {
   id: string
   account_id: string | null
@@ -194,6 +208,7 @@ export type DealListRow = {
   order_reference: string | null
   invoice_id: string | null
   invoice_status: string | null
+  invoices?: DealInvoiceRow[]
   xero_invoice_id: string | null
   xero_invoice_number: string | null
   ledger_invoice_number: string | null

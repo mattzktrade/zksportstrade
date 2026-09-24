@@ -1,7 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import type { Booking } from "@/lib/types/catalog"
-import { normalizeInvoiceStatus, pickPreferredInvoice } from "@/lib/invoices/status"
+import { aggregateInvoiceStatus, normalizeInvoiceStatus, pickPreferredInvoice } from "@/lib/invoices/status"
 import type { BookingApprovalRequestRow } from "@/lib/booking-approval/types"
 import type { OrderRow, PackageSnippet } from "@/lib/orders/types"
 import { computeOrderProfit, getConsumptionsForOrders, type OrderProfit } from "@/lib/admin/cost-layers"
@@ -89,7 +89,9 @@ function mapOrderToBooking(row: OrderWithPackage): Booking {
     circuit: pkg?.circuit ?? "",
     date: pkg?.event_date ?? row.created_at,
     guests: row.guests,
-    invoiceStatus: normalizeInvoiceStatus(invoice?.status ?? "awaiting_invoice"),
+    invoiceStatus:
+      aggregateInvoiceStatus(row.invoices) ??
+      normalizeInvoiceStatus(invoice?.status ?? "awaiting_invoice"),
     xeroInvoiceNumber: invoice?.xero_invoice_number ?? null,
     totalAmount: Number(row.total_amount),
     currency: row.currency,
@@ -242,7 +244,38 @@ export async function getOrdersForPackages(packageIds: readonly string[]): Promi
     ),
   ]
   if (orderIds.length === 0) return []
-  return hydrateAdminOrders(await fetchAdminOrderRows(orderIds))
+  const orders = await hydrateAdminOrders(await fetchAdminOrderRows(orderIds))
+  const hiddenOrderIds = await orderIdsWithdrawnWithTheirDeal(orders)
+  return orders.filter(
+    (order) => order.status !== "cancelled" && !hiddenOrderIds.has(order.id),
+  )
+}
+
+/** Package sales should not keep an order after its deal is cancelled or lost. */
+async function orderIdsWithdrawnWithTheirDeal(
+  orders: Array<{ id: string; deal_id: string | null }>,
+): Promise<Set<string>> {
+  const hidden = new Set<string>()
+  if (orders.length === 0) return hidden
+  const supabase = await createClient()
+  const orderIds = orders.map((order) => order.id)
+  const dealIds = orders.map((order) => order.deal_id).filter((id): id is string => Boolean(id))
+  const [byOrder, byDeal] = await Promise.all([
+    supabase.from("deals").select("id, order_id, stage").in("order_id", orderIds),
+    dealIds.length > 0
+      ? supabase.from("deals").select("id, order_id, stage").in("id", dealIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; order_id: string | null; stage: string }> }),
+  ])
+  const withdrawnDealIds = new Set<string>()
+  for (const row of [...(byOrder.data ?? []), ...(byDeal.data ?? [])]) {
+    if (row.stage !== "cancelled" && row.stage !== "closed_lost") continue
+    withdrawnDealIds.add(String(row.id))
+    if (row.order_id) hidden.add(String(row.order_id))
+  }
+  for (const order of orders) {
+    if (order.deal_id && withdrawnDealIds.has(order.deal_id)) hidden.add(order.id)
+  }
+  return hidden
 }
 
 const ADMIN_ORDER_SELECT = `
@@ -384,7 +417,7 @@ async function hydrateAdminOrders(rows: RawAdminOrder[]): Promise<AdminOrderList
       agent: one(row.profiles),
       account: accountId ? accountsById.get(accountId) ?? null : null,
       contact: contactId ? contactsById.get(contactId) ?? null : null,
-      invoice: one(row.invoices),
+      invoice: pickPreferredInvoice(row.invoices) ?? one(row.invoices),
       supplierAllocations: [...suppliers.entries()].map(([supplier, quantity]) => ({ supplier, quantity })),
       supplierConsumptions: consumptions.map((c) => ({
         costLayerId: c.cost_layer_id,

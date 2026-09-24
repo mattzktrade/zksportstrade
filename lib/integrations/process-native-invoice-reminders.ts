@@ -77,7 +77,7 @@ export async function processNativeInvoiceReminders(): Promise<NativeInvoiceRemi
     if (await hasPendingInvoiceCreateJobs(admin)) break
     if (xeroCallsUsedThisProcess() >= OVERDUE_RECONCILE_SKIP_AFTER_CALLS) break
     try {
-      const remoteStatus = await reconcileXeroInvoiceForOrder(order.id)
+      const remoteStatus = await reconcileXeroInvoiceForOrder(order.id, null, invoice.id)
       if (remoteStatus === "PAID" || remoteStatus === "VOIDED" || remoteStatus === "DELETED") {
         continue
       }

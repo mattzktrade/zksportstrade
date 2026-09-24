@@ -10,6 +10,15 @@ import {
   resolveXeroInvoiceCurrency,
 } from "@/lib/integrations/xero/invoice-line-defaults"
 import { createAdminClient } from "@/lib/supabase/admin"
+import {
+  allOrderInvoicesPaid,
+  earliestOpenInvoiceDueDate,
+  isInvoiceIssuable,
+  loadOrderInvoices,
+  scaleLineAmountsToTotal,
+  type OrderInvoiceRow,
+} from "@/lib/invoices/order-invoices"
+import { aggregateInvoiceStatus } from "@/lib/invoices/status"
 
 type XeroContact = { ContactID?: string; Name?: string; EmailAddress?: string }
 type XeroInvoice = {
@@ -159,11 +168,8 @@ async function syncInvoicePdfToSalesforce(orderId: string): Promise<void> {
   const opportunityId = order?.salesforce_opportunity_id?.trim()
   if (!order || !opportunityId) return
 
-  const { data: inv } = await admin
-    .from("invoices")
-    .select("xero_invoice_id, xero_invoice_number")
-    .eq("order_id", orderId)
-    .maybeSingle()
+  const invoices = await loadOrderInvoices(admin, orderId)
+  const inv = invoices.find((row) => row.xero_invoice_id) ?? null
   if (!inv?.xero_invoice_id) return
 
   try {
@@ -188,7 +194,7 @@ async function syncInvoicePdfToSalesforce(orderId: string): Promise<void> {
  */
 export async function createXeroInvoiceForOrder(
   orderId: string,
-  options?: { replaceKey?: string },
+  options?: { replaceKey?: string; invoiceId?: string },
 ): Promise<{
   xeroInvoiceId: string
   xeroInvoiceNumber: string | null
@@ -204,16 +210,11 @@ export async function createXeroInvoiceForOrder(
     throw new Error("Wix orders are prepaid at checkout — Xero invoice creation is skipped.")
   }
 
-  const { data: inv, error: invErr } = await admin
-    .from("invoices")
-    .select("*")
-    .eq("order_id", orderId)
-    .maybeSingle()
-  if (invErr) throw new Error(invErr.message)
-  if (!inv) throw new Error("Invoice row not found for order.")
+  let invoices = await loadOrderInvoices(admin, orderId)
+  if (!invoices.length) throw new Error("Invoice row not found for order.")
 
-  if (options?.replaceKey && inv.xero_invoice_id) {
-    if (inv.status === "paid" || inv.status === "delivered") {
+  if (options?.replaceKey) {
+    if (invoices.some((row) => row.status === "paid" || row.status === "delivered")) {
       throw new Error("Mark the invoice unpaid before replacing it.")
     }
     await voidXeroInvoiceForOrder(orderId)
@@ -225,27 +226,35 @@ export async function createXeroInvoiceForOrder(
         xero_sync_status: "pending",
         xero_sync_error: null,
       })
-      .eq("id", inv.id)
+      .eq("order_id", orderId)
+      .neq("status", "cancelled")
     if (clearErr) throw new Error(clearErr.message)
-    inv.xero_invoice_id = null
-    inv.xero_invoice_number = null
-  } else if (inv.xero_invoice_id) {
+    invoices = await loadOrderInvoices(admin, orderId)
+  }
+
+  const requested = options?.invoiceId
+    ? invoices.find((row) => row.id === options.invoiceId)
+    : invoices.find((row) => isInvoiceIssuable(row)) ?? invoices.find((row) => row.xero_invoice_id)
+  if (!requested) throw new Error("Invoice row not found for order.")
+  const inv = requested as OrderInvoiceRow & Record<string, unknown>
+
+  if (inv.xero_invoice_id && !options?.replaceKey) {
     if (order.deal_id) {
+      const paid = allOrderInvoicesPaid(invoices)
+      const aggregate = aggregateInvoiceStatus(invoices)
       await admin
         .from("deals")
         .update({
-          stage:
-            inv.status === "paid"
-              ? "paid_confirmed"
-              : inv.status === "awaiting_invoice"
-                ? "awaiting_invoice"
-                : "awaiting_payment",
-          next_action:
-            inv.status === "paid"
-              ? "Hand over to fulfilment"
-              : inv.status === "awaiting_invoice"
-                ? "Authorise draft invoice in Xero"
-                : "Await Xero payment",
+          stage: paid
+            ? "paid_confirmed"
+            : aggregate === "awaiting_invoice"
+              ? "awaiting_invoice"
+              : "awaiting_payment",
+          next_action: paid
+            ? "Hand over to fulfilment"
+            : aggregate === "awaiting_invoice"
+              ? "Authorise draft invoice in Xero"
+              : "Await Xero payment",
           updated_at: new Date().toISOString(),
         })
         .eq("id", order.deal_id)
@@ -347,7 +356,15 @@ export async function createXeroInvoiceForOrder(
 
   const today = new Date().toISOString().slice(0, 10)
   const dueDays = Number(process.env.XERO_INVOICE_DUE_DAYS ?? "7")
-  const dueDate = addDays(today, Number.isFinite(dueDays) ? dueDays : 7)
+  const dueDate =
+    typeof inv.due_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(inv.due_date)
+      ? inv.due_date
+      : addDays(today, Number.isFinite(dueDays) ? dueDays : 7)
+  const installmentCount = Number(inv.installment_count ?? 1)
+  const installmentIndex = Number(inv.installment_index ?? 1)
+  const invoiceAmount = Number(inv.amount ?? order.total_amount)
+  const invoiceReference = String(inv.reference || order.reference)
+  const splitInvoice = installmentCount > 1
 
   const { accountCode, taxType } = await getXeroInvoiceLineDefaults()
   const currencyCode = await resolveXeroInvoiceCurrency(String(order.currency ?? "USD"))
@@ -366,7 +383,18 @@ export async function createXeroInvoiceForOrder(
           sort_order: 0,
         },
       ]
-  const invoiceLines = sourceLines.map((line) => {
+  const billedLines = splitInvoice
+    ? scaleLineAmountsToTotal(
+        sourceLines.map((line) => ({
+          ...line,
+          quantity: Number(line.quantity),
+          unit_price: Number(line.unit_price),
+          line_total: Number(line.line_total ?? Number(line.quantity) * Number(line.unit_price)),
+        })),
+        invoiceAmount,
+      )
+    : sourceLines
+  const invoiceLines = billedLines.map((line) => {
     const pkg = packageMap.get(String(line.package_id))
     const race = pkg?.race_id ? raceMap.get(String(pkg.race_id)) : null
     const raceLabel = formatXeroRaceLabel({
@@ -375,9 +403,13 @@ export async function createXeroInvoiceForOrder(
       eventDate: race?.event_date ?? pkg?.event_date,
     })
     const packageName = pkg?.name ?? String(line.description || "Package")
-    const description =
+    const baseDescription =
       String(line.description || "").trim() ||
       `${packageName}${raceLabel ? ` (${raceLabel})` : ""}`
+    const installmentLabel = String(inv.installment_label ?? "").trim()
+    const description = splitInvoice
+      ? `${baseDescription} — Payment ${installmentIndex} of ${installmentCount}${installmentLabel ? ` (${installmentLabel})` : ` (${Number(inv.installment_percent ?? 0).toFixed(0)}%)`}`
+      : baseDescription
     const abuDhabi = isAbuDhabiEvent({
       raceId: pkg?.race_id,
       raceName: race?.name,
@@ -395,7 +427,7 @@ export async function createXeroInvoiceForOrder(
   })
   const includesAbuDhabiTax = invoiceLines.some((line) => line.abuDhabi)
   const lineAmountTypes = includesAbuDhabiTax ? "Inclusive" : "Exclusive"
-  const where = encodeURIComponent(`Reference=="${String(order.reference).replaceAll('"', '\\"')}"`)
+  const where = encodeURIComponent(`Reference=="${String(invoiceReference).replaceAll('"', '\\"')}"`)
   const existing = await xeroRequest<{ Invoices?: XeroInvoice[] }>(
     "GET",
     `/api.xro/2.0/Invoices?where=${where}`,
@@ -409,8 +441,10 @@ export async function createXeroInvoiceForOrder(
       "/api.xro/2.0/Invoices",
       {
         idempotencyKey: options?.replaceKey
-          ? `zk-invoice-${orderId}-r${options.replaceKey}`
-          : `zk-invoice-${orderId}`,
+          ? `zk-invoice-${orderId}-r${options.replaceKey}${splitInvoice ? `-${inv.id}` : ""}`
+          : splitInvoice
+            ? `zk-invoice-${orderId}-${inv.id}`
+            : `zk-invoice-${orderId}`,
         body: {
           Invoices: [
             {
@@ -418,7 +452,7 @@ export async function createXeroInvoiceForOrder(
               Contact: { ContactID: contactId },
               Date: today,
               DueDate: dueDate,
-              Reference: order.reference,
+              Reference: invoiceReference,
               ...(currencyCode ? { CurrencyCode: currencyCode } : {}),
               LineAmountTypes: lineAmountTypes,
               Status: autoAuthorise ? "AUTHORISED" : "DRAFT",
@@ -457,20 +491,22 @@ export async function createXeroInvoiceForOrder(
       issued_at: issuedAt,
       due_date: dueDate,
       cancellation_eligible_at: addDays(dueDate, 28),
-      xero_amount_due: xeroInv.AmountDue ?? Number(order.total_amount),
+      xero_amount_due: xeroInv.AmountDue ?? invoiceAmount,
       xero_amount_paid: xeroInv.AmountPaid ?? 0,
-      xero_total: xeroInv.Total ?? Number(order.total_amount),
+      xero_total: xeroInv.Total ?? invoiceAmount,
     })
     .eq("id", inv.id)
   if (upErr) throw new Error(upErr.message)
 
   if (order.deal_id) {
+    const latest = await loadOrderInvoices(admin, orderId)
+    const nextDue = earliestOpenInvoiceDueDate(latest) ?? dueDate
     await admin
       .from("deals")
       .update({
         stage: awaitingPayment ? "awaiting_payment" : "awaiting_invoice",
         next_action: awaitingPayment ? "Await Xero payment" : "Authorise draft invoice in Xero",
-        next_action_due_at: `${dueDate}T00:00:00.000Z`,
+        next_action_due_at: `${nextDue}T00:00:00.000Z`,
         updated_at: issuedAt,
       })
       .eq("id", order.deal_id)
@@ -488,7 +524,7 @@ export async function createXeroInvoiceForOrder(
       packageName,
       clientName: order.client_name,
       guests: invoiceLines.reduce((sum, line) => sum + line.quantity, 0),
-      totalAmount: Number(order.total_amount),
+      totalAmount: invoiceAmount,
       currency: order.currency,
       dueDate,
       extraCc,
@@ -534,13 +570,14 @@ export async function createXeroInvoiceForOrder(
 export async function resendXeroInvoiceForOrder(orderId: string): Promise<void> {
   const admin = createAdminClient()
   if (!admin) throw new Error("Supabase service role is not configured.")
-  const [{ data: order, error: orderError }, { data: invoice, error: invoiceError }] =
+  const [{ data: order, error: orderError }, invoices] =
     await Promise.all([
       admin.from("orders").select("*").eq("id", orderId).maybeSingle(),
-      admin.from("invoices").select("*").eq("order_id", orderId).maybeSingle(),
+      loadOrderInvoices(admin, orderId),
     ])
   if (orderError || !order) throw new Error(orderError?.message ?? "Order not found.")
-  if (invoiceError || !invoice) throw new Error(invoiceError?.message ?? "Invoice not found.")
+  const invoice = invoices.find((row) => row.xero_invoice_id && row.status !== "cancelled") ?? invoices[0]
+  if (!invoice) throw new Error("Invoice not found.")
   if (!invoice.xero_invoice_id) throw new Error("The Xero invoice has not been created yet.")
   if (invoice.status === "cancelled") throw new Error("A cancelled invoice cannot be resent.")
 
@@ -579,7 +616,7 @@ export async function resendXeroInvoiceForOrder(orderId: string): Promise<void> 
     packageName,
     clientName: order.client_name,
     guests,
-    totalAmount: Number(order.total_amount),
+    totalAmount: Number(invoice.amount ?? order.total_amount),
     currency: order.currency,
     dueDate: invoice.due_date ?? new Date().toISOString().slice(0, 10),
     extraCc,
@@ -597,15 +634,15 @@ export async function resendXeroInvoiceForOrder(orderId: string): Promise<void> 
 export async function reconcileXeroInvoiceForOrder(
   orderId: string,
   actorProfileId?: string | null,
+  invoiceId?: string | null,
 ): Promise<string> {
   const admin = createAdminClient()
   if (!admin) throw new Error("Supabase service role is not configured.")
-  const { data: invoice, error } = await admin
-    .from("invoices")
-    .select("id, xero_invoice_id")
-    .eq("order_id", orderId)
-    .maybeSingle()
-  if (error || !invoice) throw new Error(error?.message ?? "Invoice not found.")
+  const invoices = await loadOrderInvoices(admin, orderId)
+  const invoice = invoiceId
+    ? invoices.find((row) => row.id === invoiceId)
+    : invoices.find((row) => row.xero_invoice_id) ?? invoices[0]
+  if (!invoice) throw new Error("Invoice not found.")
   if (!invoice.xero_invoice_id) throw new Error("The Xero invoice has not been created yet.")
   const remote = await xeroRequest<{ Invoices?: XeroInvoice[] }>(
     "GET",
@@ -640,7 +677,7 @@ export async function reconcileXeroInvoiceForOrder(
         .select("deal_id")
         .eq("id", orderId)
         .maybeSingle()
-      if (order?.deal_id) {
+      if (order?.deal_id && !allOrderInvoicesPaid(await loadOrderInvoices(admin, orderId))) {
         await admin
           .from("deals")
           .update({
@@ -668,16 +705,12 @@ export async function reconcileXeroInvoiceForOrder(
 export async function prepareXeroInvoiceReplacement(orderId: string): Promise<string> {
   const admin = createAdminClient()
   if (!admin) throw new Error("Supabase service role is not configured.")
-  const { data: invoice, error } = await admin
-    .from("invoices")
-    .select("id, status, xero_invoice_id")
-    .eq("order_id", orderId)
-    .maybeSingle()
-  if (error || !invoice) throw new Error(error?.message ?? "Invoice not found.")
-  if (invoice.status === "paid" || invoice.status === "delivered") {
+  const invoices = await loadOrderInvoices(admin, orderId)
+  if (!invoices.length) throw new Error("Invoice not found.")
+  if (invoices.some((invoice) => invoice.status === "paid" || invoice.status === "delivered")) {
     throw new Error("Mark the invoice unpaid before replacing it.")
   }
-  if (invoice.status === "cancelled") {
+  if (invoices.every((invoice) => invoice.status === "cancelled")) {
     throw new Error("A cancelled invoice cannot be replaced.")
   }
   await voidXeroInvoiceForOrder(orderId)
@@ -690,7 +723,8 @@ export async function prepareXeroInvoiceReplacement(orderId: string): Promise<st
       xero_sync_error: null,
       status: "awaiting_invoice",
     })
-    .eq("id", invoice.id)
+    .eq("order_id", orderId)
+    .neq("status", "cancelled")
   if (clearErr) throw new Error(clearErr.message)
   return `${Date.now()}`
 }
@@ -698,40 +732,41 @@ export async function prepareXeroInvoiceReplacement(orderId: string): Promise<st
 export async function voidXeroInvoiceForOrder(orderId: string): Promise<void> {
   const admin = createAdminClient()
   if (!admin) throw new Error("Supabase service role is not configured.")
-  const { data: invoice, error } = await admin
-    .from("invoices")
-    .select("xero_invoice_id, status")
-    .eq("order_id", orderId)
-    .maybeSingle()
-  if (error || !invoice) throw new Error(error?.message ?? "Invoice not found.")
-  if (invoice.status === "paid" || invoice.status === "delivered") {
+  const invoices = await loadOrderInvoices(admin, orderId)
+  if (!invoices.length) throw new Error("Invoice not found.")
+  if (invoices.some((invoice) => invoice.status === "paid" || invoice.status === "delivered")) {
     throw new Error("A paid or delivered invoice cannot be voided.")
   }
-  if (!invoice.xero_invoice_id) return
-  const remote = await xeroRequest<{ Invoices?: XeroInvoice[] }>(
-    "GET",
-    `/api.xro/2.0/Invoices/${encodeURIComponent(invoice.xero_invoice_id)}`,
-  )
-  const status = (remote.Invoices?.[0]?.Status ?? "").toUpperCase()
-  if (status === "PAID") throw new Error("Xero reports this invoice as paid; it cannot be cancelled.")
-  if (status !== "VOIDED" && status !== "DELETED") {
-    await xeroRequest(
-      "POST",
+  let lastXeroId: string | null = null
+  for (const invoice of invoices) {
+    if (!invoice.xero_invoice_id) continue
+    lastXeroId = invoice.xero_invoice_id
+    const remote = await xeroRequest<{ Invoices?: XeroInvoice[] }>(
+      "GET",
       `/api.xro/2.0/Invoices/${encodeURIComponent(invoice.xero_invoice_id)}`,
-      {
-        idempotencyKey: `zk-void-${orderId}-${invoice.xero_invoice_id}`,
-        body: {
-          Invoices: [{ InvoiceID: invoice.xero_invoice_id, Status: "VOIDED" }],
-        },
-      },
     )
+    const status = (remote.Invoices?.[0]?.Status ?? "").toUpperCase()
+    if (status === "PAID") throw new Error("Xero reports this invoice as paid; it cannot be cancelled.")
+    if (status !== "VOIDED" && status !== "DELETED") {
+      await xeroRequest(
+        "POST",
+        `/api.xro/2.0/Invoices/${encodeURIComponent(invoice.xero_invoice_id)}`,
+        {
+          idempotencyKey: `zk-void-${orderId}-${invoice.xero_invoice_id}`,
+          body: {
+            Invoices: [{ InvoiceID: invoice.xero_invoice_id, Status: "VOIDED" }],
+          },
+        },
+      )
+    }
   }
+  if (!lastXeroId) return
   const { error: confirmationError } = await admin
     .from("xero_void_confirmations")
     .upsert(
       {
         order_id: orderId,
-        xero_invoice_id: invoice.xero_invoice_id,
+        xero_invoice_id: lastXeroId,
         confirmed_at: new Date().toISOString(),
       },
       { onConflict: "order_id" },
@@ -778,12 +813,14 @@ export async function markPortalInvoicePaidFromXero(xeroInvoiceId: string): Prom
   if (upErr) throw new Error(upErr.message)
 
   if (inv.order_id) {
+    const invoices = await loadOrderInvoices(admin, String(inv.order_id))
+    const fullyPaid = allOrderInvoicesPaid(invoices)
     await admin.from("orders").update({ status: "confirmed" }).eq("id", inv.order_id)
     const orderRelation = inv.orders as { deal_id?: string | null } | { deal_id?: string | null }[] | null
     const dealId = Array.isArray(orderRelation)
       ? orderRelation[0]?.deal_id
       : orderRelation?.deal_id
-    if (dealId) {
+    if (dealId && fullyPaid) {
       const paidAt = new Date().toISOString()
       await admin
         .from("deals")
@@ -800,8 +837,21 @@ export async function markPortalInvoicePaidFromXero(xeroInvoiceId: string): Prom
         summary: "Xero confirmed the invoice as paid",
         metadata: { order_id: inv.order_id, xero_invoice_id: xeroInvoiceId },
       })
+    } else if (dealId) {
+      const nextDue = earliestOpenInvoiceDueDate(invoices)
+      await admin
+        .from("deals")
+        .update({
+          stage: "awaiting_payment",
+          next_action: "Await remaining installment",
+          next_action_due_at: nextDue ? `${nextDue}T00:00:00.000Z` : new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", dealId)
     }
-    const enq = await enqueueOpportunityOutcomeServer(String(inv.order_id), "won")
-    if (!enq.ok) console.warn("[xero webhook] Salesforce Closed Won not queued:", enq.message)
+    if (fullyPaid) {
+      const enq = await enqueueOpportunityOutcomeServer(String(inv.order_id), "won")
+      if (!enq.ok) console.warn("[xero webhook] Salesforce Closed Won not queued:", enq.message)
+    }
   }
 }

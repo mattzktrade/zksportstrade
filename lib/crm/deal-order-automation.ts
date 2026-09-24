@@ -1,6 +1,7 @@
 import { syncBookingFormDealInventory } from "@/lib/booking-forms/inventory-sync"
 import { enqueueInvoiceCreateServer } from "@/lib/integrations/enqueue-server"
 import { scheduleOutboxDrain } from "@/lib/integrations/schedule-drain"
+import { applyBookingFormPaymentScheduleToOrder } from "@/lib/invoices/order-invoices"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 export type NativeDealOrderResult = {
@@ -26,6 +27,25 @@ export async function ensureNativeDealOrderAndInvoice(
   if (!orderId) throw new Error("Order conversion did not return an order id.")
 
   await syncBookingFormDealInventory(dealId, "native_deal_order_commit")
+  try {
+    await applyBookingFormPaymentScheduleToOrder(admin, orderId)
+  } catch (scheduleError) {
+    await admin
+      .from("deals")
+      .update({
+        stage: "awaiting_invoice",
+        next_action: "Retry failed payment-schedule invoices",
+        next_action_due_at: new Date().toISOString(),
+      })
+      .eq("id", dealId)
+    return {
+      orderId,
+      orderReference,
+      alreadyCreated: Boolean(payload.already_created),
+      invoiceQueued: false,
+      warning: scheduleError instanceof Error ? scheduleError.message : "Payment schedule invoices failed.",
+    }
+  }
   const queued = await enqueueInvoiceCreateServer(orderId)
   if (!queued.ok) {
     await admin

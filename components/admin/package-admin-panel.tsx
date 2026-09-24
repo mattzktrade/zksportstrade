@@ -6,6 +6,8 @@ import { toast } from "sonner"
 import {
   deletePackage,
   insertPackageInventory,
+  placeStaffStockHold,
+  releaseInventoryHold,
   updatePackageFields,
 } from "@/app/(admin)/actions"
 import type { LinkedInventoryPackage, LinkedInventoryShellPackage } from "@/lib/admin/linked-inventory"
@@ -122,6 +124,8 @@ export function PackageAdminPanel({
     typeof initial.guest_guide_url === "string" ? initial.guest_guide_url : "",
   )
   const [trackMap, setTrackMap] = useState(typeof initial.track_map === "string" ? initial.track_map : "")
+  const [holdQty, setHoldQty] = useState("1")
+  const [holdNote, setHoldNote] = useState("")
   useEffect(() => {
     setRaceId(initial.race_id)
     setName(initial.name)
@@ -201,6 +205,44 @@ export function PackageAdminPanel({
   }
 
 
+  function placeHold() {
+    const quantity = Math.floor(Number(holdQty))
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      toast.error("Enter a whole number of units to hold.")
+      return
+    }
+    start(async () => {
+      const res = await placeStaffStockHold({
+        packageId: initial.id,
+        quantity,
+        note: holdNote.trim() || null,
+      })
+      if (!res.ok) {
+        toast.error(res.message)
+        return
+      }
+      toast.success(
+        quantity === 1 ? "1 unit is on hold." : `${quantity} units are on hold.`,
+      )
+      setHoldNote("")
+      router.refresh()
+      onInventoryChanged?.()
+    })
+  }
+
+  function releaseHold(holdId: string) {
+    start(async () => {
+      const res = await releaseInventoryHold(holdId)
+      if (!res.ok) {
+        toast.error(res.message)
+        return
+      }
+      toast.success("Hold released.")
+      router.refresh()
+      onInventoryChanged?.()
+    })
+  }
+
   function addInventoryRow() {
     start(async () => {
       const res = await insertPackageInventory(initial.id)
@@ -239,7 +281,11 @@ export function PackageAdminPanel({
   const showIntegrations = section === "all" || section === "visibility" || section === "integrations"
   const salePrice = section === "inventory" || section === "all" ? initial.trade_price : parsePrice()
   const qtyAvailable = initial.inventory?.qty_available ?? 0
-  const qtyHeldNum = initial.canonical_availability?.reserved ?? initial.inventory?.qty_held ?? 0
+  const reservedQty = Math.max(0, Math.floor(Number(initial.canonical_availability?.reserved) || 0))
+  const manualHoldQty = Math.max(0, Math.floor(Number(initial.canonical_availability?.manualHold) || 0))
+  const qtyHeldNum = initial.canonical_availability
+    ? reservedQty + manualHoldQty
+    : Math.max(0, Math.floor(Number(initial.inventory?.qty_held) || 0))
   const inventorySellable = Math.max(0, qtyAvailable - qtyHeldNum)
   const salesBreakdown = initial.sales_breakdown ?? {
     package_id: initial.id,
@@ -650,6 +696,59 @@ export function PackageAdminPanel({
                 </p>
                 <p className="text-lg font-semibold tabular-nums">{soldDisplay}</p>
               </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 max-w-3xl">
+              {(initial.staff_holds ?? []).map((hold) => (
+                <div
+                  key={hold.id}
+                  className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/40 pl-3 pr-1.5 py-1 text-sm"
+                >
+                  <span className="tabular-nums font-medium">{hold.quantity}</span>
+                  <span className="text-muted-foreground">
+                    {hold.note?.trim() || "held until released"}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => releaseHold(hold.id)}
+                    className="rounded-full px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-50"
+                  >
+                    Release
+                  </button>
+                </div>
+              ))}
+              <form
+                className="inline-flex items-center gap-1.5"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  placeHold()
+                }}
+              >
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={holdQty}
+                  onChange={(event) => setHoldQty(event.target.value)}
+                  aria-label="Units to hold"
+                  title="Stays off sale until you release it"
+                  className="h-8 w-14 rounded-full border border-border bg-background px-2.5 text-sm tabular-nums"
+                />
+                <input
+                  value={holdNote}
+                  onChange={(event) => setHoldNote(event.target.value)}
+                  placeholder="Note"
+                  aria-label="Hold note"
+                  className="h-8 w-36 rounded-full border border-border bg-background px-3 text-sm"
+                />
+                <button
+                  type="submit"
+                  disabled={pending || sellable < 1}
+                  className="h-8 px-3 rounded-full border border-border bg-background text-sm font-medium hover:bg-muted disabled:opacity-50"
+                >
+                  Hold
+                </button>
+              </form>
             </div>
             {linkedDayOverview ? <LinkedDayInventoryToolbar overview={linkedDayOverview} /> : null}
             <PackageCostLayers

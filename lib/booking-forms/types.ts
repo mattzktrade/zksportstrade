@@ -60,6 +60,17 @@ export type BookingFormSnapshot = {
   taxDescription?: string
   total: number
   paymentTerms: string
+  /** Structured schedule used to print payment terms and create matching invoices. */
+  paymentSchedule?: {
+    installments: Array<{
+      percent: number
+      dueKind: "days_after_signing" | "on_date"
+      dueDaysAfterSigning: number
+      dueOn: string
+      label: string
+    }>
+    notes: string
+  }
   paymentMethod: string
   bankDetails: Array<{
     currency: string

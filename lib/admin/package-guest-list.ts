@@ -7,6 +7,7 @@ import {
   assignSuppliersAcrossDays,
   expandBookingGuestSeats,
   guestListDayChips,
+  guestListDealReference,
   guestListDayRank,
   parseGuestTicketStatus,
   type GuestListGuestRecord,
@@ -166,6 +167,10 @@ export async function getPackageGuestList(input: {
   ])
 
   const seats: PackageGuestListSeat[] = []
+  const dealById = new Map(input.deals.map((deal) => [deal.id, deal]))
+  const dealByOrderId = new Map(
+    input.deals.filter((deal) => deal.orderId).map((deal) => [deal.orderId as string, deal]),
+  )
 
   for (const deal of soldDeals) {
     const ops = (deal.orderId ? orderOps.get(deal.orderId) : null) ?? dealOps.get(deal.id) ?? emptyOps()
@@ -173,7 +178,7 @@ export async function getPackageGuestList(input: {
       ? orderGuests.get(deal.orderId) ?? []
       : dealGuests.get(deal.id) ?? []
     const clientName = blank(deal.accountName) || blank(deal.contactName) || "—"
-    const orderNumber = blank(deal.orderReference) || deal.reference
+    const orderNumber = guestListDealReference(deal)
     const href = adminDealPath(deal.id)
     const mode = resolveGuestAttendanceMode(ops.attendanceMode, guests)
     let guestOffset = 0
@@ -267,7 +272,7 @@ export async function getPackageGuestList(input: {
             clientName: order.client_name,
           }) || "—",
           clientAccountId: order.account?.id ?? order.crm_account_id ?? null,
-          orderNumber: order.reference,
+          orderNumber: guestListDealReference(dealById.get(order.deal_id ?? "") ?? dealByOrderId.get(order.id), order.reference),
           dealHref: href,
           supplierName: seat.supplierName,
           supplierDeadline: seat.supplierDeadline,

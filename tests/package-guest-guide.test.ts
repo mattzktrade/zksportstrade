@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { existsSync, readFileSync } from "node:fs"
 import { describe, it } from "node:test"
-import { PDFArray, PDFDocument, PDFName } from "pdf-lib"
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from "pdf-lib"
 import type { BrochureContent } from "../lib/brochures/types"
 import {
   assessGuestGuideReadiness,
@@ -12,8 +12,14 @@ import {
   officialSingaporeVelocityTerraceGuestGuide,
   parseGuestGuide,
   resolveGuestGuideContent,
+  NATIONAL_GALLERY_SINGAPORE_MAP,
+  NATIONAL_GALLERY_SINGAPORE_MAPS_URL,
   VELOCITY_TERRACE_DISCOVER_QR,
+  VELOCITY_TERRACE_LOGO,
   VELOCITY_TERRACE_SINGAPORE_URL,
+  VELOCITY_TERRACE_SY_LOGO,
+  VELOCITY_TERRACE_THE_TEAM_LOGO,
+  VELOCITY_TERRACE_ZK_LOGO,
 } from "../lib/brochures/guest-guide/content"
 import { generatePackageGuestGuidePdf, guestGuidePhotoPlan } from "../lib/brochures/guest-guide/pdf"
 import { stalePackagePdfPaths } from "../lib/brochures/storage"
@@ -137,8 +143,15 @@ describe("package guest guides", () => {
     assert.equal(closing?.facts?.[0]?.value, "Velocity Terrace")
     assert.equal(closing?.qrImagePath, VELOCITY_TERRACE_DISCOVER_QR)
     assert.equal(closing?.linkUrl, VELOCITY_TERRACE_SINGAPORE_URL)
+    assert.equal(closing?.mapImagePath, NATIONAL_GALLERY_SINGAPORE_MAP)
+    assert.equal(closing?.mapUrl, NATIONAL_GALLERY_SINGAPORE_MAPS_URL)
     assert.equal(official.pages.length, 10)
     assert.ok(existsSync("public/images/brochures/velocity-terrace-discover-qr.png"))
+    assert.ok(existsSync("public/images/brochures/national-gallery-singapore-map.png"))
+    assert.ok(existsSync(VELOCITY_TERRACE_LOGO.replace(/^\//, "public/")))
+    assert.ok(existsSync(VELOCITY_TERRACE_SY_LOGO.replace(/^\//, "public/")))
+    assert.ok(existsSync(VELOCITY_TERRACE_ZK_LOGO.replace(/^\//, "public/")))
+    assert.ok(existsSync(VELOCITY_TERRACE_THE_TEAM_LOGO.replace(/^\//, "public/")))
   })
 
   it("parses stored JSON and skips empty pages", () => {
@@ -238,7 +251,47 @@ describe("package guest guides", () => {
     assert.doesNotMatch(asString, /Create guest guide/)
     const last = pdf.getPage(pdf.getPageCount() - 1)
     const annots = last.node.lookupMaybe(PDFName.of("Annots"), PDFArray)
-    assert.ok(annots && annots.size() >= 1)
+    assert.ok(annots && annots.size() >= 2)
+    const hrefs: string[] = []
+    for (let i = 0; i < (annots?.size() ?? 0); i += 1) {
+      const annot = annots!.lookup(i, PDFDict)
+      const action = annot.lookup(PDFName.of("A"), PDFDict)
+      hrefs.push(action.lookup(PDFName.of("URI"), PDFString).decodeText())
+    }
+    assert.ok(hrefs.some((href) => href.includes("velocity-terrace.com")))
+    assert.ok(hrefs.some((href) => href.includes("google.com/maps")))
+  })
+
+  it("keeps the location map and partner marks off the shared guest-guide template", async () => {
+    const other = {
+      ...sample,
+      productName: "Paddock Club",
+      raceName: "Monaco Grand Prix 2026",
+      location: "Monaco",
+    }
+    const bytes = await generatePackageGuestGuidePdf(other, {
+      pages: [
+        { key: "welcome", title: "Welcome", paragraphs: ["Hello guests."] },
+        {
+          key: "closing",
+          title: "We look forward to welcoming you",
+          paragraphs: ["Please scan the QR code or click the link below."],
+          linkUrl: "https://example.com/guide",
+          mapImagePath: NATIONAL_GALLERY_SINGAPORE_MAP,
+          mapUrl: NATIONAL_GALLERY_SINGAPORE_MAPS_URL,
+        },
+      ],
+    })
+    const pdf = await PDFDocument.load(bytes)
+    const last = pdf.getPage(pdf.getPageCount() - 1)
+    const annots = last.node.lookupMaybe(PDFName.of("Annots"), PDFArray)
+    const hrefs: string[] = []
+    for (let i = 0; i < (annots?.size() ?? 0); i += 1) {
+      const annot = annots!.lookup(i, PDFDict)
+      const action = annot.lookup(PDFName.of("A"), PDFDict)
+      hrefs.push(action.lookup(PDFName.of("URI"), PDFString).decodeText())
+    }
+    assert.ok(hrefs.every((href) => !href.includes("google.com/maps")))
   })
 
   it("keeps generation in the admin catalog action and public download in the portal", () => {
@@ -248,6 +301,9 @@ describe("package guest guides", () => {
     const portal = readFileSync("app/(portal)/packages/race/[id]/race-packages-client.tsx", "utf8")
     assert.match(portal, /View guest guide/)
     assert.doesNotMatch(portal, /Create guest guide/)
+    const salesList = readFileSync("components/admin/inventory-workspace.tsx", "utf8")
+    assert.match(salesList, /downloadOnly/)
+    assert.doesNotMatch(salesList, /Create guest guide/)
     const salesPdf = readFileSync("lib/brochures/pdf.ts", "utf8")
     assert.match(salesPdf, /export function drawBrochureCover/)
     assert.doesNotMatch(salesPdf, /guest-guide/)

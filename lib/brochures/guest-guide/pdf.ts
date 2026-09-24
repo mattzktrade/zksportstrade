@@ -1,11 +1,18 @@
 import { PDFArray, PDFDocument, PDFName, PDFString, type PDFImage, type PDFPage } from "pdf-lib"
-import { brochurePhotoUrls } from "@/lib/brochures/content"
+import { brochurePhotoUrls, brochureVenueLine } from "@/lib/brochures/content"
 import { embedBrochureFonts, type BrochureFonts } from "@/lib/brochures/fonts"
 import {
+  GUEST_GUIDE_KICKER,
   guestGuideHeadline,
   matchesOfficialGuestGuide,
+  NATIONAL_GALLERY_SINGAPORE_MAP,
+  NATIONAL_GALLERY_SINGAPORE_MAPS_URL,
   officialSingaporeVelocityTerraceGuestGuide,
   pageHasContent,
+  VELOCITY_TERRACE_LOGO,
+  VELOCITY_TERRACE_SY_LOGO,
+  VELOCITY_TERRACE_THE_TEAM_LOGO,
+  VELOCITY_TERRACE_ZK_LOGO,
 } from "@/lib/brochures/guest-guide/content"
 import type { GuestGuideContent, GuestGuidePage } from "@/lib/brochures/guest-guide/types"
 import {
@@ -17,9 +24,12 @@ import {
 } from "@/lib/brochures/images"
 import { drawBrochureCover } from "@/lib/brochures/pdf"
 import {
+  BLACK,
   CHARCOAL,
+  COVER_TYPE,
   FOOTER_H,
   FRAME,
+  HEADING,
   MARGIN,
   MUTED,
   PAGE,
@@ -28,11 +38,17 @@ import {
   RAIL,
   RED,
   WHITE,
+  coverPhotoPoints,
+  coverTextPanelPoints,
   drawBackground,
   drawChrome,
+  drawDiagonalPhoto,
+  drawLogo,
   drawSectionHeading,
   drawTracked,
+  fillPolygon,
   safeDrawText,
+  strokeDiagonal,
   trackedWidth,
 } from "@/lib/brochures/template"
 import { brochurePrintText, brochureReadable, wrapText } from "@/lib/brochures/text"
@@ -40,6 +56,7 @@ import { BrochureInsufficientImagesError, type BrochureContent } from "@/lib/bro
 
 const SECTION_TOP = PAGE_H - 40
 const PHOTO_BOTTOM = FOOTER_H + 18
+const VELOCITY_FOOTER_H = 50
 const BODY_SIZE = 12
 const BODY_LEAD = 18
 
@@ -107,6 +124,13 @@ type Cursor = {
   width: number
 }
 
+type VelocityMarks = {
+  logo: PDFImage | null
+  sy: PDFImage | null
+  zk: PDFImage | null
+  team: PDFImage | null
+}
+
 function drawHeading(page: PDFPage, fonts: BrochureFonts, pageContent: GuestGuidePage, width: number, x = leftTextX()): number {
   const heading = guestGuideHeadline(pageContent)
   return drawSectionHeading(page, fonts, {
@@ -166,6 +190,193 @@ function uniqueGuidePhotos(photos: PDFImage[]): { welcome: PDFImage[]; experienc
   }
 }
 
+function emptyVelocityMarks(): VelocityMarks {
+  return { logo: null, sy: null, zk: null, team: null }
+}
+
+async function embedVelocityMarks(pdf: PDFDocument): Promise<VelocityMarks> {
+  const [logo, sy, zk, team] = await Promise.all([
+    embedQrImage(pdf, VELOCITY_TERRACE_LOGO),
+    embedQrImage(pdf, VELOCITY_TERRACE_SY_LOGO),
+    embedQrImage(pdf, VELOCITY_TERRACE_ZK_LOGO),
+    embedQrImage(pdf, VELOCITY_TERRACE_THE_TEAM_LOGO),
+  ])
+  return { logo, sy, zk, team }
+}
+
+function drawPartnerLogos(
+  page: PDFPage,
+  marks: VelocityMarks,
+  box: { x: number; y: number; width: number; height: number },
+) {
+  const items = [
+    { logo: marks.sy, boost: 1.86 },
+    { logo: marks.zk, boost: 1 },
+    { logo: marks.team, boost: 0.8 },
+  ].filter((item): item is { logo: PDFImage; boost: number } => Boolean(item.logo))
+  if (items.length === 0) return
+
+  const gap = 20
+  const sized = items.map((item) => {
+    const height = box.height * item.boost
+    const width = item.logo.width * (height / item.logo.height)
+    return { logo: item.logo, width, height }
+  })
+  const rawWidth = sized.reduce((sum, item) => sum + item.width, 0) + gap * (sized.length - 1)
+  const fit = rawWidth > box.width ? box.width / rawWidth : 1
+  const used = rawWidth * fit
+
+  let x = box.x + (box.width - used) / 2
+  for (const item of sized) {
+    const width = item.width * fit
+    const height = item.height * fit
+    page.drawImage(item.logo, {
+      x,
+      y: box.y + (box.height - height) / 2,
+      width,
+      height,
+    })
+    x += width + gap * fit
+  }
+}
+
+function drawVelocityChrome(
+  page: PDFPage,
+  fonts: BrochureFonts,
+  marks: VelocityMarks,
+  opts: { pageIndex: number; pageCount: number },
+) {
+  page.drawRectangle({ x: 0, y: 0, width: RAIL, height: PAGE_H, color: RED })
+  page.drawRectangle({ x: 0, y: 0, width: PAGE_W, height: VELOCITY_FOOTER_H, color: BLACK })
+  page.drawRectangle({ x: 0, y: VELOCITY_FOOTER_H, width: PAGE_W, height: 2.5, color: RED })
+
+  const pageLabel = `${String(opts.pageIndex).padStart(2, "0")}  /  ${String(opts.pageCount).padStart(2, "0")}`
+  const pageWidth = fonts.condensed.widthOfTextAtSize(pageLabel, 10)
+  const numberX = PAGE_W - FRAME - pageWidth
+  drawPartnerLogos(page, marks, {
+    x: 0,
+    y: 17,
+    width: PAGE_W,
+    height: 16,
+  })
+  safeDrawText(page, pageLabel, {
+    x: numberX,
+    y: 18,
+    size: 10,
+    font: fonts.condensed,
+    color: RED,
+  })
+}
+
+function drawVelocityTerraceCover(
+  page: PDFPage,
+  content: BrochureContent,
+  fonts: BrochureFonts,
+  photos: PDFImage[],
+  marks: VelocityMarks,
+) {
+  const points = coverPhotoPoints()
+  drawDiagonalPhoto(page, photos[0], points)
+  fillPolygon(page, coverTextPanelPoints(), BLACK)
+  strokeDiagonal(page, points)
+
+  const x = leftTextX()
+  const textWidth = PAGE_W * 0.38
+  let y = PAGE_H - 70
+
+  safeDrawText(page, GUEST_GUIDE_KICKER.toUpperCase(), {
+    x,
+    y,
+    size: COVER_TYPE.kickerSize,
+    font: fonts.condensedMedium,
+    color: RED,
+  })
+
+  const logoH = 86
+  y -= 40 + logoH
+  const logoScale = marks.logo ? Math.min(logoH / marks.logo.height, textWidth / marks.logo.width) : 1
+  const columnW = marks.logo ? marks.logo.width * logoScale : textWidth
+  if (marks.logo) {
+    drawLogo(page, marks.logo, { x, y, maxWidth: textWidth, maxHeight: logoH })
+  }
+  const centerX = x + columnW / 2
+
+  y -= 30
+  const presentedSize = 10
+  const presentedTracking = 2.2
+  const presented = "Presented by"
+  drawTracked(page, presented, {
+    x: centerX - trackedWidth(presented, fonts.condensedMedium, presentedSize, presentedTracking) / 2,
+    y,
+    size: presentedSize,
+    font: fonts.condensedMedium,
+    color: MUTED,
+    tracking: presentedTracking,
+  })
+
+  const syH = 50
+  y -= 16 + syH
+  if (marks.sy) {
+    const syScale = Math.min(syH / marks.sy.height, columnW / marks.sy.width)
+    const syW = marks.sy.width * syScale
+    const syDrawn = marks.sy.height * syScale
+    page.drawImage(marks.sy, {
+      x: centerX - syW / 2,
+      y: y + (syH - syDrawn) / 2,
+      width: syW,
+      height: syDrawn,
+    })
+  }
+
+  y -= 22
+  page.drawRectangle({
+    x: centerX - HEADING.ruleW / 2,
+    y,
+    width: HEADING.ruleW,
+    height: HEADING.ruleH,
+    color: RED,
+  })
+  y -= 46
+
+  const eventLine = wrapText(brochurePrintText(content.raceName), fonts.sansMedium, COVER_TYPE.eventSize, columnW)
+  for (const line of eventLine.slice(0, 2)) {
+    const width = fonts.sansMedium.widthOfTextAtSize(line, COVER_TYPE.eventSize)
+    safeDrawText(page, line, {
+      x: centerX - width / 2,
+      y,
+      size: COVER_TYPE.eventSize,
+      font: fonts.sansMedium,
+      color: WHITE,
+    })
+    y -= 22
+  }
+
+  const venue = brochureVenueLine(content.circuit, content.location, content.raceName)
+  if (venue) {
+    const venueLines = wrapText(venue, fonts.sans, COVER_TYPE.metaSize, columnW)
+    const line = venueLines[0] ?? ""
+    const width = fonts.sans.widthOfTextAtSize(line, COVER_TYPE.metaSize)
+    safeDrawText(page, line, {
+      x: centerX - width / 2,
+      y,
+      size: COVER_TYPE.metaSize,
+      font: fonts.sans,
+      color: MUTED,
+    })
+    y -= 18
+  }
+  if (content.dateHeadline) {
+    const width = fonts.sans.widthOfTextAtSize(content.dateHeadline, COVER_TYPE.metaSize)
+    safeDrawText(page, content.dateHeadline, {
+      x: centerX - width / 2,
+      y,
+      size: COVER_TYPE.metaSize,
+      font: fonts.sans,
+      color: MUTED,
+    })
+  }
+}
+
 export async function generatePackageGuestGuidePdf(
   brochure: BrochureContent,
   guide: GuestGuideContent = officialSingaporeVelocityTerraceGuestGuide(),
@@ -180,13 +391,17 @@ export async function generatePackageGuestGuidePdf(
   pdf.setKeywords(["ZK Sports", "Guest guide", brochure.productName, brochure.raceName].filter(Boolean))
 
   const fonts = await embedBrochureFonts(pdf)
+  const official = matchesOfficialGuestGuide(brochure)
   const pagesWithCopy = guide.pages.filter(pageHasContent)
   const qrPaths = [...new Set(pagesWithCopy.map((page) => page.qrImagePath?.trim()).filter(Boolean))] as string[]
+  const mapPath = official ? closingMap(pagesWithCopy.find((page) => page.key === "closing"), brochure).imagePath : null
 
-  const [background, photos, qrImages] = await Promise.all([
+  const [background, photos, qrImages, mapImage, marks] = await Promise.all([
     embedPublicImage(pdf, "images", "brochures", "template-bg.png"),
     embedGuidePhotos(pdf, brochure),
     Promise.all(qrPaths.map(async (path) => [path, await embedQrImage(pdf, path)] as const)),
+    mapPath ? embedQrImage(pdf, mapPath) : Promise.resolve(null),
+    official ? embedVelocityMarks(pdf) : Promise.resolve(emptyVelocityMarks()),
   ])
   const qrByPath = new Map(qrImages)
 
@@ -204,7 +419,11 @@ export async function generatePackageGuestGuidePdf(
   }
 
   const cover = addPage()
-  drawBrochureCover(cover, brochure, fonts, photos)
+  if (official) {
+    drawVelocityTerraceCover(cover, brochure, fonts, photos, marks)
+  } else {
+    drawBrochureCover(cover, brochure, fonts, photos)
+  }
   const guidePhotos = uniqueGuidePhotos(photos)
 
   for (const pageContent of pagesWithCopy) {
@@ -230,7 +449,11 @@ export async function generatePackageGuestGuidePdf(
       continue
     }
     if (pageContent.key === "closing") {
-      drawClosingPage(pageContent, fonts, addPage(), qr, brochure)
+      if (official) {
+        drawVelocityTerraceClosing(pageContent, fonts, addPage(), qr, mapImage, marks, brochure)
+      } else {
+        drawTemplateClosing(pageContent, fonts, addPage(), qr, brochure)
+      }
       continue
     }
     drawContentPage(pageContent, fonts, addPage)
@@ -238,7 +461,11 @@ export async function generatePackageGuestGuidePdf(
 
   const pageCount = built.length
   for (const [index, page] of built.entries()) {
-    drawChrome(page, fonts, { pageIndex: index + 1, pageCount })
+    if (official) {
+      drawVelocityChrome(page, fonts, marks, { pageIndex: index + 1, pageCount })
+    } else {
+      drawChrome(page, fonts, { pageIndex: index + 1, pageCount })
+    }
   }
 
   return pdf.save({ useObjectStreams: false })
@@ -759,7 +986,23 @@ function closingMetaLines(values: string[]): string[] {
   return values.length ? [values.join("  ·  ")] : []
 }
 
-function drawClosingPage(
+function closingMap(
+  pageContent: GuestGuidePage | undefined,
+  brochure: BrochureContent,
+): { imagePath: string | null; url: string } {
+  if (!matchesOfficialGuestGuide(brochure)) return { imagePath: null, url: "" }
+  return {
+    imagePath: pageContent?.mapImagePath?.trim() || NATIONAL_GALLERY_SINGAPORE_MAP,
+    url: pageContent?.mapUrl?.trim() || NATIONAL_GALLERY_SINGAPORE_MAPS_URL,
+  }
+}
+
+function factValue(pageContent: GuestGuidePage, label: string) {
+  const match = (pageContent.facts ?? []).find((fact) => fact.label.trim().toLowerCase() === label.toLowerCase())
+  return brochurePrintText(match?.value ?? "")
+}
+
+function drawTemplateClosing(
   pageContent: GuestGuidePage,
   fonts: BrochureFonts,
   page: PDFPage,
@@ -780,15 +1023,157 @@ function drawClosingPage(
   const hasQr = Boolean(qr || pageContent.qrImagePath)
   const rowH = 196
   const rowY = Math.max(PHOTO_BOTTOM + 28, y - rowH)
-  const panel = { x, y: rowY, width, height: rowH }
+  drawDiscoverPanel(page, fonts, pageContent, { x, y: rowY, width, height: rowH }, qr, hasQr, href)
+}
+
+function drawVelocityTerraceClosing(
+  pageContent: GuestGuidePage,
+  fonts: BrochureFonts,
+  page: PDFPage,
+  qr: PDFImage | null,
+  map: PDFImage | null,
+  _marks: VelocityMarks,
+  brochure: BrochureContent,
+) {
+  const x = leftTextX()
+  const width = PAGE_W - x - FRAME
+  const headingY = drawHeading(page, fonts, pageContent, width, x)
+  const href = pageContent.linkUrl?.trim() ?? ""
+  const mapMeta = closingMap(pageContent, brochure)
+  const bottom = VELOCITY_FOOTER_H + 18
+  const top = headingY
+  const colGap = 16
+  const leftW = 228
+  const rightW = 210
+  const mapW = width - leftW - rightW - colGap * 2
+  const leftX = x
+  const mapX = x + leftW + colGap
+  const rightX = mapX + mapW + colGap
+  const rowH = top - bottom
+  const rowY = bottom
+
+  const details = [
+    { label: "Dates", value: factValue(pageContent, "Dates") || brochure.dateHeadline },
+    { label: "Time", value: factValue(pageContent, "Hours") },
+    { label: "Location", value: factValue(pageContent, "Location") },
+  ].filter((item) => item.value)
+  let detailY = top - 8
+  for (const detail of details) {
+    page.drawCircle({
+      x: leftX + 6,
+      y: detailY + 4,
+      size: 5.5,
+      borderColor: RED,
+      borderWidth: 1.2,
+    })
+    drawRedHeading(page, fonts, detail.label, leftX + 20, detailY + 6, 11)
+    const lines = wrapText(detail.value, fonts.sansMedium, 12, leftW - 24)
+    let lineY = detailY - 16
+    for (const line of lines.slice(0, 2)) {
+      safeDrawText(page, line, { x: leftX + 20, y: lineY, size: 12, font: fonts.sansMedium, color: WHITE })
+      lineY -= 16
+    }
+    detailY = lineY - 18
+  }
+
+  const mapPanel = { x: mapX, y: rowY, width: mapW, height: rowH }
+  if (mapPanel.height > 80) {
+    drawPanel(page, mapPanel)
+    drawRedHeading(page, fonts, "Location", mapPanel.x + 14, mapPanel.y + mapPanel.height - 20, 10)
+    const view = "VIEW ON MAP"
+    const viewW = fonts.condensed.widthOfTextAtSize(view, 9)
+    safeDrawText(page, view, {
+      x: mapPanel.x + mapPanel.width - 14 - viewW,
+      y: mapPanel.y + mapPanel.height - 20,
+      size: 9,
+      font: fonts.condensed,
+      color: MUTED,
+    })
+    const mapBox = {
+      x: mapPanel.x + 8,
+      y: mapPanel.y + 8,
+      width: mapPanel.width - 16,
+      height: mapPanel.height - 36,
+    }
+    page.drawRectangle({ ...mapBox, color: WHITE })
+    if (map) drawImageCover(page, map, mapBox)
+    if (mapMeta.url) {
+      addUriLink(page, mapBox, mapMeta.url)
+      addUriLink(page, {
+        x: mapPanel.x + mapPanel.width - 14 - viewW,
+        y: mapPanel.y + mapPanel.height - 24,
+        width: viewW,
+        height: 14,
+      }, mapMeta.url)
+    }
+  }
+
+  const panel = { x: rightX, y: rowY, width: rightW, height: rowH }
   drawPanel(page, panel)
+  const pad = 16
+  const qrSize = 88
+  const qrBox = {
+    x: panel.x + (panel.width - qrSize) / 2,
+    y: panel.y + panel.height - pad - qrSize - 8,
+    width: qrSize,
+    height: qrSize,
+  }
+  page.drawRectangle({ ...qrBox, color: WHITE })
+  if (qr) drawImageContain(page, qr, qrBox, 5)
+  if (href) addUriLink(page, qrBox, href)
 
-  const pad = 28
-  const qrColW = hasQr ? 248 : 0
+  const copy =
+    (pageContent.paragraphs ?? []).find((paragraph) => paragraph.trim()) ??
+    "Please scan the QR code or click the link below."
+  const copyWidth = panel.width - pad * 2
+  const copyLines = wrapText(brochureReadable(copy), fonts.sans, 11, copyWidth).slice(0, 4)
+  let copyY = qrBox.y - 20
+  for (const line of copyLines) {
+    const lineW = fonts.sans.widthOfTextAtSize(line, 11)
+    safeDrawText(page, line, {
+      x: panel.x + (panel.width - lineW) / 2,
+      y: copyY,
+      size: 11,
+      font: fonts.sans,
+      color: WHITE,
+    })
+    copyY -= 15
+  }
+
+  const label = brochurePrintText(pageContent.linkLabel || "Velocity Terrace Singapore").toUpperCase()
+  const btnH = 34
+  const btnW = panel.width - pad * 2
+  const button = { x: panel.x + pad, y: panel.y + pad, width: btnW, height: btnH }
+  page.drawRectangle({ ...button, color: RED })
+  const labelW = fonts.condensed.widthOfTextAtSize(label, 10)
+  safeDrawText(page, label, {
+    x: button.x + Math.max(8, (btnW - labelW) / 2),
+    y: button.y + 12,
+    size: 10,
+    font: fonts.condensed,
+    color: WHITE,
+  })
+  if (href) addUriLink(page, button, href)
+}
+
+function drawDiscoverPanel(
+  page: PDFPage,
+  fonts: BrochureFonts,
+  pageContent: GuestGuidePage,
+  panel: { x: number; y: number; width: number; height: number },
+  qr: PDFImage | null,
+  hasQr: boolean,
+  href: string,
+) {
+  drawPanel(page, panel)
+  const compact = panel.width < 420
+  const pad = compact ? 18 : 28
+  const qrSize = compact ? 78 : 112
+  const qrColW = hasQr ? (compact ? 108 : 248) : 0
   const dividerX = hasQr ? panel.x + panel.width - qrColW : panel.x + panel.width
-  const textW = dividerX - panel.x - pad - (hasQr ? 22 : pad)
+  const textW = dividerX - panel.x - pad - (hasQr ? 16 : pad)
 
-  if (hasQr) {
+  if (hasQr && !compact) {
     page.drawRectangle({
       x: dividerX,
       y: panel.y + 28,
@@ -803,7 +1188,7 @@ function drawClosingPage(
   const discoverCopy = (pageContent.paragraphs ?? []).find((paragraph) => paragraph.trim()) ?? ""
   let copyY = panel.y + panel.height - 56
   if (discoverCopy) {
-    for (const line of wrapText(brochureReadable(discoverCopy), fonts.sans, 12, textW).slice(0, 4)) {
+    for (const line of wrapText(brochureReadable(discoverCopy), fonts.sans, 12, textW).slice(0, compact ? 3 : 4)) {
       safeDrawText(page, line, {
         x: panel.x + pad,
         y: copyY,
@@ -816,11 +1201,10 @@ function drawClosingPage(
   }
 
   const label = brochurePrintText(pageContent.linkLabel || "Open the race page").toUpperCase()
-  const chevron = "  >"
   const btnH = 36
   const btnW = Math.min(
     textW,
-    Math.max(240, fonts.condensed.widthOfTextAtSize(label, 12) + fonts.condensed.widthOfTextAtSize(">", 12) + 48),
+    Math.max(compact ? 180 : 240, fonts.condensed.widthOfTextAtSize(label, 12) + fonts.condensed.widthOfTextAtSize(">", 12) + 48),
   )
   const button = { x: panel.x + pad, y: panel.y + 26, width: btnW, height: btnH }
   page.drawRectangle({ ...button, color: RED })
@@ -831,7 +1215,7 @@ function drawClosingPage(
     font: fonts.condensed,
     color: WHITE,
   })
-  safeDrawText(page, chevron.trim(), {
+  safeDrawText(page, ">", {
     x: button.x + btnW - 22,
     y: button.y + 12,
     size: 12,
@@ -841,25 +1225,26 @@ function drawClosingPage(
   if (href) addUriLink(page, button, href)
 
   if (hasQr) {
-    const qrSize = 112
     const qrBox = {
       x: dividerX + (qrColW - qrSize) / 2,
-      y: panel.y + (panel.height - qrSize) / 2 + 8,
+      y: panel.y + (panel.height - qrSize) / 2 + (compact ? 4 : 8),
       width: qrSize,
       height: qrSize,
     }
     page.drawRectangle({ ...qrBox, color: WHITE })
-    if (qr) drawImageContain(page, qr, qrBox, 6)
+    if (qr) drawImageContain(page, qr, qrBox, compact ? 3 : 6)
     if (href) addUriLink(page, qrBox, href)
-    const caption = "SCAN TO LEARN MORE"
-    const captionWidth = trackedWidth(caption, fonts.condensed, 8, 1.2)
-    drawTracked(page, caption, {
-      x: dividerX + (qrColW - captionWidth) / 2,
-      y: qrBox.y - 18,
-      size: 8,
-      font: fonts.condensed,
-      color: MUTED,
-      tracking: 1.2,
-    })
+    if (!compact) {
+      const caption = "SCAN TO LEARN MORE"
+      const captionWidth = trackedWidth(caption, fonts.condensed, 8, 1.2)
+      drawTracked(page, caption, {
+        x: dividerX + (qrColW - captionWidth) / 2,
+        y: qrBox.y - 18,
+        size: 8,
+        font: fonts.condensed,
+        color: MUTED,
+        tracking: 1.2,
+      })
+    }
   }
 }

@@ -19,6 +19,8 @@ import {
   type BookingFormEdits,
   type BookingFormSendMode,
 } from "@/lib/booking-forms/edits"
+import { defaultPaymentSchedule } from "@/lib/booking-forms/payment-schedule"
+import { BookingFormPaymentScheduleFields } from "./booking-form-payment-schedule-fields"
 
 const inputClass = "mt-2 h-11 w-full rounded-md border px-3 font-normal"
 const textareaClass = "mt-2 w-full rounded-md border p-3 font-normal"
@@ -250,7 +252,11 @@ export function BookingFormEditor({
         onClose()
         return
       }
-      setEdits({ ...result.edits, ccEmails: result.edits.ccEmails ?? [] })
+      setEdits({
+        ...result.edits,
+        ccEmails: result.edits.ccEmails ?? [],
+        paymentSchedule: result.edits.paymentSchedule ?? defaultPaymentSchedule(),
+      })
       setAccountEmails(result.accountEmails ?? [])
       setLoading(false)
     })
@@ -480,15 +486,15 @@ export function BookingFormEditor({
               </Section>
 
               <Section title="Payment">
-                <label className="block text-sm font-semibold">
-                  Payment terms
-                  <textarea
-                    value={edits.paymentTerms}
-                    onChange={(event) => update("paymentTerms", event.target.value)}
-                    rows={3}
-                    className={textareaClass}
-                  />
-                </label>
+                <BookingFormPaymentScheduleFields
+                  currency="USD"
+                  total={edits.lines.reduce(
+                    (sum, line) => sum + Math.round((Number(line.quantity) * Number(line.unitPrice) + Number.EPSILON) * 100) / 100,
+                    0,
+                  )}
+                  schedule={edits.paymentSchedule ?? defaultPaymentSchedule()}
+                  onChange={(paymentSchedule) => update("paymentSchedule", paymentSchedule)}
+                />
                 <label className="block text-sm font-semibold">
                   Payment method
                   <input

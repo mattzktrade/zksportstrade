@@ -151,12 +151,15 @@ async function invoiceIdForOrder(
   if (!orderId) return null
   const { data } = await admin
     .from("invoices")
-    .select("id")
+    .select("id, status, due_date, created_at")
     .eq("order_id", orderId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  return data?.id ? String(data.id) : null
+    .neq("status", "cancelled")
+    .order("due_date", { ascending: true, nullsFirst: true })
+    .order("created_at", { ascending: true })
+    .limit(20)
+  const current =
+    (data ?? []).find((row) => row.status !== "paid" && row.status !== "delivered") ?? data?.[0]
+  return current?.id ? String(current.id) : null
 }
 
 async function hasDeliveryProof(

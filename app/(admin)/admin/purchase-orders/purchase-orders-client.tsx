@@ -157,19 +157,13 @@ export function PurchaseOrdersClient({
   const [editPaidAt, setEditPaidAt] = useState("")
   const [editNote, setEditNote] = useState("")
   const scrolledToPo = useRef(false)
+  const focusedPoId = resolveInitialExpandedId(orders, initialPo)
 
   useEffect(() => {
+    scrolledToPo.current = false
     const next = resolveInitialExpandedId(orders, initialPo)
     if (next) setExpandedId(next)
   }, [initialPo, orders])
-
-  useEffect(() => {
-    if (!expandedId || !initialPo || scrolledToPo.current) return
-    const el = document.getElementById(`po-${expandedId}`)
-    if (!el) return
-    scrolledToPo.current = true
-    el.scrollIntoView({ block: "center" })
-  }, [expandedId, initialPo])
 
   useEffect(() => {
     setOptimisticReceived((current) => {
@@ -284,6 +278,30 @@ export function PurchaseOrdersClient({
       return dir * aDate.localeCompare(bDate)
     })
   }, [filters, optimisticPaidAt, optimisticReceived, orders, sortDescending, sortKey])
+
+  const visibleOrders = useMemo(() => {
+    if (!focusedPoId) return filteredOrders
+    if (filteredOrders.some((order) => order.id === focusedPoId)) return filteredOrders
+    const focused = orders.find((order) => order.id === focusedPoId)
+    return focused ? [focused, ...filteredOrders] : filteredOrders
+  }, [filteredOrders, focusedPoId, orders])
+
+  useEffect(() => {
+    if (!focusedPoId || scrolledToPo.current) return
+    const timer = window.setTimeout(() => {
+      const desktop = document.getElementById(`po-${focusedPoId}`)
+      const mobile = document.getElementById(`po-mobile-${focusedPoId}`)
+      const el = [desktop, mobile].find((node) => {
+        if (!node) return false
+        const box = node.getBoundingClientRect()
+        return box.width > 0 || box.height > 0
+      })
+      if (!el) return
+      scrolledToPo.current = true
+      el.scrollIntoView({ block: "center" })
+    }, 50)
+    return () => window.clearTimeout(timer)
+  }, [focusedPoId, visibleOrders])
 
   function toggleSort(next: SortKey) {
     setListState((current) => {
@@ -871,7 +889,7 @@ export function PurchaseOrdersClient({
             </tr>
           </thead>
           <tbody>
-            {filteredOrders.length === 0 ? (
+            {visibleOrders.length === 0 ? (
               <tr>
                 <td colSpan={PO_TABLE_COLSPAN} className="px-3 py-6 text-center text-sm text-muted-foreground">
                   {orders.length === 0
@@ -880,7 +898,7 @@ export function PurchaseOrdersClient({
                 </td>
               </tr>
             ) : (
-              filteredOrders.map((po) => {
+              visibleOrders.map((po) => {
                 const paymentPo = withPayment(po)
                 return (
                 <PurchaseOrderRow
@@ -931,20 +949,24 @@ export function PurchaseOrdersClient({
         </table>
       </AdminDesktopTable>
       <AdminMobileList>
-        {filteredOrders.length === 0 ? (
+        {visibleOrders.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm text-muted-foreground">
             {orders.length === 0
               ? "No purchase orders yet. Create one with the products you are buying."
               : "No matching purchase orders."}
           </p>
         ) : (
-          filteredOrders.map((po) => {
+          visibleOrders.map((po) => {
             const previewLines = matchingStockLines(po.usage.lines, filters)
             const groupedPreview = groupedStockLines(previewLines)
             const paymentPo = withPayment(po)
             const paymentKind = purchaseOrderPaymentKind(paymentPo)
             return (
-            <div key={`mobile-${po.id}`} className="space-y-2 px-4 py-3">
+            <div
+              key={`mobile-${po.id}`}
+              id={`po-mobile-${po.id}`}
+              className="space-y-2 px-4 py-3"
+            >
               <button type="button" onClick={() => setExpandedId((cur) => (cur === po.id ? null : po.id))} className="flex w-full items-start justify-between gap-3 text-left">
                 <div className="min-w-0">
                   <p className="font-semibold text-primary">{po.po_number}</p>

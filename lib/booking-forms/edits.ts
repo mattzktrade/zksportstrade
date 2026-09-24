@@ -1,5 +1,11 @@
 import { normalizeClientCcEmails } from "@/lib/booking-forms/cc-emails"
 import { applyInclusiveVat, defaultNoVat } from "@/lib/booking-forms/line-tax"
+import {
+  formatPaymentTermsText,
+  scheduleFromSnapshot,
+  validatePaymentSchedule,
+  type BookingFormPaymentSchedule,
+} from "@/lib/booking-forms/payment-schedule"
 import { BOOKING_TERMS } from "@/lib/booking-forms/template"
 import type { BookingFormSnapshot } from "@/lib/booking-forms/types"
 
@@ -37,6 +43,7 @@ export type BookingFormEdits = {
   sellerTrn: string
   lines: BookingFormLineEdit[]
   paymentTerms: string
+  paymentSchedule: BookingFormPaymentSchedule
   paymentMethod: string
   bankDetails: BookingFormBankEdit[]
   acknowledgement: string
@@ -104,6 +111,7 @@ export function snapshotToEdits(snapshot: BookingFormSnapshot): BookingFormEdits
       unitPrice: line.unitPrice,
     })),
     paymentTerms: snapshot.paymentTerms,
+    paymentSchedule: scheduleFromSnapshot(snapshot),
     paymentMethod: snapshot.paymentMethod,
     bankDetails: snapshot.bankDetails.map((bank) => ({ ...bank })),
     acknowledgement: snapshot.acknowledgement,
@@ -203,7 +211,12 @@ export function applyBookingFormEdits(
     taxAmountIncluded,
     taxDescription: includeVat ? "VAT included (5%)" : undefined,
     total: subtotal,
-    paymentTerms: clean(edits.paymentTerms, 4000, "Payment terms"),
+    paymentSchedule: validatePaymentSchedule(edits.paymentSchedule ?? scheduleFromSnapshot(base)),
+    paymentTerms: formatPaymentTermsText(
+      edits.paymentSchedule ?? scheduleFromSnapshot(base),
+      subtotal,
+      base.currency,
+    ),
     paymentMethod: clean(edits.paymentMethod, 120, "Payment method"),
     bankDetails: edits.bankDetails.map((bank) => ({
       currency: clean(bank.currency, 8, "Bank currency").toUpperCase(),

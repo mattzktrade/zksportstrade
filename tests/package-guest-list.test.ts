@@ -8,11 +8,21 @@ import {
   formatGuestListDayChipLabel,
   guestDetailsNeeded,
   guestListDayChips,
+  guestListDealReference,
   guestListStats,
   parseGuestTicketStatus,
   seatAttendsDay,
   supplierDetailsState,
 } from "../lib/admin/package-guest-list-model"
+
+test("guest list reference is the deal DL number, not the ZK order number", () => {
+  assert.equal(
+    guestListDealReference({ reference: "DL0275" }, "ZK-2026-519DAD14"),
+    "DL0275",
+  )
+  assert.equal(guestListDealReference(null, "ZK-2026-519DAD14"), "ZK-2026-519DAD14")
+  assert.equal(guestListDealReference({ reference: "  " }, null), "—")
+})
 
 test("placeholders fill unsold guest name slots without inventing people", () => {
   const seats = expandGuestSeats(4, [

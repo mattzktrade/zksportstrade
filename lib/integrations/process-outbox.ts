@@ -132,11 +132,11 @@ async function requeueRateLimitedInvoiceJobs(
     const payload = row.payload as Record<string, unknown> | null
     const orderId = typeof payload?.order_id === "string" ? payload.order_id : null
     if (orderId) {
-      const { data: invoice } = await admin
-        .from("invoices")
-        .select("xero_invoice_id")
-        .eq("order_id", orderId)
-        .maybeSingle()
+      const invoiceId = typeof payload?.invoice_id === "string" ? payload.invoice_id : null
+      const invoiceQuery = admin.from("invoices").select("xero_invoice_id")
+      const { data: invoice } = invoiceId
+        ? await invoiceQuery.eq("id", invoiceId).maybeSingle()
+        : await invoiceQuery.eq("order_id", orderId).limit(1).maybeSingle()
       if (invoice?.xero_invoice_id) {
         await admin
           .from("integration_outbox")
@@ -149,13 +149,14 @@ async function requeueRateLimitedInvoiceJobs(
           .eq("status", "failed")
         continue
       }
-      await admin
+      const pendingUpdate = admin
         .from("invoices")
         .update({
           xero_sync_status: "pending",
           xero_sync_error: null,
         })
-        .eq("order_id", orderId)
+      if (invoiceId) await pendingUpdate.eq("id", invoiceId)
+      else await pendingUpdate.eq("order_id", orderId)
     }
     await admin
       .from("integration_outbox")
@@ -464,13 +465,15 @@ export async function processIntegrationOutbox(
           .eq("id", orderId)
       }
       if (orderId && row.event_type === "invoice.create") {
-        await admin
+        const invoiceId = typeof row.payload.invoice_id === "string" ? row.payload.invoice_id : null
+        const failedUpdate = admin
           .from("invoices")
           .update({
             xero_sync_status: rateLimited ? "pending" : "failed",
             xero_sync_error: rateLimited ? XERO_RATE_LIMIT_USER_MESSAGE : msg.slice(0, 500),
           })
-          .eq("order_id", orderId)
+        if (invoiceId) await failedUpdate.eq("id", invoiceId)
+        else await failedUpdate.eq("order_id", orderId)
       }
     }
   }
@@ -605,7 +608,14 @@ async function handleOutboxEvent(row: OutboxRow): Promise<void> {
         typeof row.payload.replace_key === "string" && row.payload.replace_key
           ? row.payload.replace_key
           : undefined
-      await createXeroInvoiceForOrder(orderId, replaceKey ? { replaceKey } : undefined)
+      const invoiceId =
+        typeof row.payload.invoice_id === "string" && row.payload.invoice_id
+          ? row.payload.invoice_id
+          : undefined
+      await createXeroInvoiceForOrder(orderId, {
+        ...(replaceKey ? { replaceKey } : {}),
+        ...(invoiceId ? { invoiceId } : {}),
+      })
       return
     }
     default:

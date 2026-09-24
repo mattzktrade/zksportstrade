@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import type { OrderChannel } from "@/lib/integrations/types"
 import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
 import { attachDealForCommittedOrder } from "@/lib/crm/attach-portal-deal"
+import { isInvoiceIssuable, loadOrderInvoices } from "@/lib/invoices/order-invoices"
 
 type OutboxRowInput = {
   event_type: string
@@ -220,17 +221,44 @@ export async function enqueueInvoiceCreateServer(
     return { ok: false, message: "SUPABASE_SERVICE_ROLE_KEY is not configured; Xero sync was not queued." }
   }
 
-  await admin
-    .from("invoices")
-    .update({ xero_sync_status: "pending", xero_sync_error: null })
-    .eq("order_id", id)
+  const invoices = await loadOrderInvoices(admin, id)
+  const issuable = invoices.filter((invoice) => isInvoiceIssuable(invoice))
+  const targets = issuable.length ? issuable : invoices.slice(0, 1)
+  const targetIds = targets.map((invoice) => invoice.id).filter(Boolean)
+  if (targetIds.length) {
+    await admin
+      .from("invoices")
+      .update({ xero_sync_status: "pending", xero_sync_error: null })
+      .in("id", targetIds)
+  } else {
+    await admin
+      .from("invoices")
+      .update({ xero_sync_status: "pending", xero_sync_error: null })
+      .eq("order_id", id)
+      .is("xero_invoice_id", null)
+  }
 
-  const enq = await enqueueOutboxOnce({
-    event_type: "invoice.create",
-    idempotency_key: `invoice.create:${id}`,
-    payload: { order_id: id, triggered_at: new Date().toISOString() },
-  })
-  if (!enq.ok) return enq
+  if (!targets.length) {
+    return enqueueOutboxOnce({
+      event_type: "invoice.create",
+      idempotency_key: `invoice.create:${id}`,
+      payload: { order_id: id, triggered_at: new Date().toISOString() },
+    })
+  }
+
+  for (const invoice of targets) {
+    const split = Number(invoice.installment_count ?? 1) > 1
+    const enq = await enqueueOutboxOnce({
+      event_type: "invoice.create",
+      idempotency_key: split ? `invoice.create:${id}:${invoice.id}` : `invoice.create:${id}`,
+      payload: {
+        order_id: id,
+        ...(split ? { invoice_id: invoice.id } : {}),
+        triggered_at: new Date().toISOString(),
+      },
+    })
+    if (!enq.ok) return enq
+  }
   return { ok: true }
 }
 

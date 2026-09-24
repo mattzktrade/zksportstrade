@@ -113,6 +113,24 @@ export function DealFinancePanel({
             <dt className="text-slate-400">Due date</dt>
             <dd>{date(deal.invoice_due_date)}</dd>
           </dl>
+          {(deal.invoices ?? []).length > 1 ? (
+            <div className="rounded-md border border-slate-200 p-2">
+              <p className="text-[8px] font-semibold text-slate-500">Payment schedule</p>
+              <ul className="mt-1 space-y-1">
+                {deal.invoices.map((invoice) => (
+                  <li key={invoice.id} className="text-[8px] leading-4">
+                    <span className="font-semibold">
+                      {invoice.installment_label?.trim() || `Payment ${invoice.installment_index} of ${invoice.installment_count}`}
+                    </span>
+                    {` · ${Number(invoice.installment_percent).toFixed(0)}%`}
+                    {invoice.amount != null ? ` · ${deal.currency} ${Number(invoice.amount).toFixed(2)}` : ""}
+                    {` · due ${date(invoice.due_date)} · ${invoice.status.replaceAll("_", " ")}`}
+                    {invoice.xero_invoice_number ? ` · ${invoice.xero_invoice_number}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           {deal.xero_sync_error || deal.invoice_email_error || deal.payment_reminder_error ? (
             <div className="flex items-start gap-2 rounded-md bg-red-50 p-2 text-[8px] text-red-700">
@@ -145,7 +163,9 @@ export function DealFinancePanel({
               {deal.xero_invoice_id ? (
                 <>
                   <a
-                    href={`/api/invoices/${encodeURIComponent(deal.order_id)}/pdf`}
+                    href={`/api/invoices/${encodeURIComponent(deal.order_id)}/pdf${
+                      deal.invoice_id ? `?invoiceId=${encodeURIComponent(deal.invoice_id)}` : ""
+                    }`}
                     target="_blank"
                     rel="noreferrer"
                     className="flex h-9 items-center justify-center gap-1 rounded-md border text-[9px] font-semibold"

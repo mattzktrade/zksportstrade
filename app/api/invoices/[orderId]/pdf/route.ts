@@ -6,16 +6,20 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ orderId: string }> },
 ): Promise<NextResponse> {
   const { orderId } = await context.params
   if (!UUID_RE.test(orderId)) {
     return NextResponse.json({ error: "Invalid order id." }, { status: 400 })
   }
+  const invoiceId = new URL(request.url).searchParams.get("invoiceId")
+  if (invoiceId && !UUID_RE.test(invoiceId)) {
+    return NextResponse.json({ error: "Invalid invoice id." }, { status: 400 })
+  }
 
   try {
-    const access = await assertInvoicePdfAccess(orderId)
+    const access = await assertInvoicePdfAccess(orderId, invoiceId)
     const pdf = await xeroFetchInvoicePdf(access.xeroInvoiceId)
     const label = access.xeroInvoiceNumber?.trim() || access.orderReference
     const filename = `invoice-${label.replace(/[^\w.-]+/g, "-")}.pdf`

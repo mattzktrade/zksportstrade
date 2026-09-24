@@ -214,6 +214,14 @@ export function assignSuppliersAcrossDays(
   })
 }
 
+/** Guest list shows the deal DL number. The ZK order number is only a last resort. */
+export function guestListDealReference(
+  deal: { reference?: string | null } | null | undefined,
+  fallback?: string | null,
+): string {
+  return deal?.reference?.trim() || fallback?.trim() || "—"
+}
+
 export function guestListDayRank(day: string | null | undefined): number {
   if (!day) return 9
   const index = DAY_ORDER.indexOf(day as CostDaySlot)
