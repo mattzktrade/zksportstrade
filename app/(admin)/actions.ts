@@ -3211,11 +3211,19 @@ export async function deletePackage(packageId: string): Promise<ActionResult> {
 
   const { error } = await supabase.from("packages").delete().eq("id", id)
   if (error) {
-    if (error.message.toLowerCase().includes("inventory_allocations_package_id_fkey")) {
+    const deleteMessage = error.message.toLowerCase()
+    if (deleteMessage.includes("inventory_allocations_package_id_fkey")) {
       return {
         ok: false,
         message:
           "Cannot delete this product because cancelled sales still have allocation records. Apply the latest package-delete migration, then try again.",
+      }
+    }
+    if (deleteMessage.includes("orders_package_id_fkey")) {
+      return {
+        ok: false,
+        message:
+          "Cannot delete this product because an old order still points at it. Apply the latest package-delete migration, then try again.",
       }
     }
     return { ok: false, message: error.message }
