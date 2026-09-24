@@ -632,19 +632,19 @@ function PackageRow({
                     )}
                     {!canBook && (
                       <div className="pt-2 sm:pt-3 border-t border-border space-y-3">
-                        <p className="text-xs sm:text-sm text-muted-foreground text-center">
-                          {isAvailabilityString
-                            ? `Please contact us for availability and pricing`
-                            : pkg.price === null
-                              ? "Pricing available upon request"
-                              : "Not available for booking"}
-                        </p>
+                        {isAvailabilityString || pkg.price === null ? (
+                          <p className="text-xs sm:text-sm text-muted-foreground text-center">
+                            {isAvailabilityString
+                              ? "Please contact us for availability and pricing"
+                              : "Pricing available upon request"}
+                          </p>
+                        ) : null}
                         <a
                           href={packageEnquireMailto(pkg)}
                           className="w-full inline-flex items-center justify-center px-4 sm:px-5 py-2 sm:py-2.5 bg-primary text-primary-foreground rounded-xl text-xs sm:text-sm font-semibold hover:bg-primary/90 transition-colors"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          Enquire
+                          {pkg.price !== null && !isAvailabilityString ? "Enquire now" : "Enquire"}
                         </a>
                       </div>
                     )}
