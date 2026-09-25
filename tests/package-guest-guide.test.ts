@@ -294,13 +294,16 @@ describe("package guest guides", () => {
     assert.ok(hrefs.every((href) => !href.includes("google.com/maps")))
   })
 
-  it("keeps generation in the admin catalog action and public download in the portal", () => {
+  it("keeps generation in the admin catalog action and hides the download from the portal", () => {
     const action = readFileSync("app/(admin)/admin/catalog/brochure-actions.ts", "utf8")
     assert.match(action, /createPackageGuestGuide/)
     assert.match(action, /requireAdminAction\("cms.access"\)/)
     const portal = readFileSync("app/(portal)/packages/race/[id]/race-packages-client.tsx", "utf8")
-    assert.match(portal, /View guest guide/)
+    assert.doesNotMatch(portal, /View guest guide/)
+    assert.doesNotMatch(portal, /guestGuideUrl/)
     assert.doesNotMatch(portal, /Create guest guide/)
+    const catalog = readFileSync("lib/catalog/queries.ts", "utf8")
+    assert.doesNotMatch(catalog, /guestGuideUrl|guest_guide_url|attachGuestGuideUrls/)
     const salesList = readFileSync("components/admin/inventory-workspace.tsx", "utf8")
     assert.match(salesList, /downloadOnly/)
     assert.doesNotMatch(salesList, /Create guest guide/)

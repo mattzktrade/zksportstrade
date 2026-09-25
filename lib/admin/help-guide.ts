@@ -428,7 +428,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           "Open the product page. Next to the sales brochure, fill the Guest guide pages, then click Create guest guide.",
           "The cover matches the sales brochure. The other pages only use the copy you enter. Empty pages are skipped. It still needs at least 3 unique photos.",
           "Singapore Velocity Terrace can load the official stored copy. Leave [NAME] and [NUMBER] until you have the on-ground contact. The Discover web link and QR sit on the last page.",
-          "Portal clients cannot create guest guides — only the ZK team can. They can download the finished file when it is attached.",
+          "Guest guides stay off the agent portal. Only the ZK team can create them, and agents cannot download them.",
           "If you change the guide copy later, save it and use Recreate guest guide.",
         ],
       },
@@ -714,7 +714,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             q: "How do I make a guest guide for a product?",
-            a: "Open the product page and use Guest guide, next to the sales brochure. Fill the pages, then Create guest guide. It needs at least 3 unique photos and copy on at least three pages, including Welcome. Singapore Velocity Terrace can load the official stored copy. Only the ZK team can generate it; portal clients just download the file.",
+            a: "Open the product page and use Guest guide, next to the sales brochure. Fill the pages, then Create guest guide. It needs at least 3 unique photos and copy on at least three pages, including Welcome. Singapore Velocity Terrace can load the official stored copy. Only the ZK team can generate it. Guest guides are not shown on the agent portal.",
           },
           {
             q: "Available stock looks too low / too high.",

@@ -6,6 +6,7 @@ import {
   packageDetailsHref,
   packageIsBookable,
 } from "@/lib/catalog/featured-packages"
+import { portalStockLabel } from "@/lib/catalog/portal-package-list"
 import { packageDurationLabel } from "@/lib/catalog/package-duration"
 import { ArrowRight, Calendar, MapPin } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -19,15 +20,12 @@ function formatPrice(pkg: Package): string | null {
   }).format(pkg.price)
 }
 
-function availabilityLabel(pkg: Package): { text: string; tone: "available" | "enquire" | "sold" } {
+function availabilityLabel(pkg: Package): { text: string; tone: "available" | "enquire" } {
   if (typeof pkg.availability === "string") {
-    return { text: pkg.availability, tone: "enquire" }
+    return { text: portalStockLabel(pkg.availability), tone: "enquire" }
   }
-  if (pkg.price === null) {
+  if (pkg.price === null || pkg.availability <= 0) {
     return { text: "Enquire", tone: "enquire" }
-  }
-  if (pkg.availability <= 0) {
-    return { text: "Sold out", tone: "sold" }
   }
   return { text: `${pkg.availability} available`, tone: "available" }
 }
@@ -88,7 +86,6 @@ function FeaturedPackageCard({ pkg }: { pkg: Package }) {
               "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide",
               stock.tone === "available" && "bg-emerald-500/10 text-emerald-700",
               stock.tone === "enquire" && "bg-amber-500/10 text-amber-800",
-              stock.tone === "sold" && "bg-muted text-muted-foreground",
             )}
           >
             {stock.text}

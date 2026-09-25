@@ -65,6 +65,19 @@ export function portalPackageIsInStock(pkg: Pick<Package, "availability">): bool
   return pkg.availability > 0
 }
 
+/**
+ * Guest-facing stock. A real zero (or less) stays unbookable, but reads as
+ * Enquire so agents can still ask rather than seeing a sold-out count.
+ */
+export function portalStockLabel(availability: number | string): string {
+  if (typeof availability === "string") {
+    const text = availability.trim()
+    return text || "Enquire"
+  }
+  if (!Number.isFinite(availability) || availability <= 0) return "Enquire"
+  return String(Math.floor(availability))
+}
+
 function familyRank(family: string): number {
   const n = family.toLowerCase()
   if (/paddock club/.test(n)) return 10

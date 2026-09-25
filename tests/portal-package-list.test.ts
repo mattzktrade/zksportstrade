@@ -4,6 +4,8 @@ import {
   filterPortalPackages,
   groupPortalPackages,
   portalPackageFamily,
+  portalPackageIsInStock,
+  portalStockLabel,
 } from "../lib/catalog/portal-package-list"
 import type { Package } from "../lib/types/catalog"
 
@@ -68,6 +70,16 @@ describe("portal package list", () => {
       grouped[2]?.packages.map((item) => item.name),
       ["3 Days Velocity Terrace", "Saturday Velocity Terrace", "Sunday Velocity Terrace"],
     )
+  })
+
+  it("labels zero stock as Enquire without treating it as in stock", () => {
+    assert.equal(portalStockLabel(0), "Enquire")
+    assert.equal(portalStockLabel(-1), "Enquire")
+    assert.equal(portalStockLabel(6), "6")
+    assert.equal(portalStockLabel("Enquire"), "Enquire")
+    assert.equal(portalPackageIsInStock(pkg("sold out", { availability: 0 })), false)
+    assert.equal(portalPackageIsInStock(pkg("open", { availability: 2 })), true)
+    assert.equal(portalPackageIsInStock(pkg("ask", { availability: "Enquire" })), true)
   })
 
   it("filters by search, stock, duration and family", () => {

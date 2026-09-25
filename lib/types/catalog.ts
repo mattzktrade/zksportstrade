@@ -31,7 +31,7 @@ export interface Package {
   requiresBookingApproval?: boolean
   /** HTTPS URL to brochure PDF or page for agents to share (from Supabase when set) */
   brochureUrl?: string | null
-  /** HTTPS URL to the guest guide PDF. Agents may download it; only CMS staff can create it. */
+  /** HTTPS URL to the guest guide PDF. CMS staff only; not shown on the agent portal. */
   guestGuideUrl?: string | null
   /** Set when loaded from Supabase (used for navigation) */
   raceId?: string

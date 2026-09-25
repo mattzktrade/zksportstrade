@@ -17,6 +17,7 @@ import {
   groupPortalPackages,
   portalPackageDurationFilters,
   portalPackageFamilyFilters,
+  portalStockLabel,
 } from "@/lib/catalog/portal-package-list"
 import { ArrowLeft, MapPin, Calendar, Check, ArrowRight, ChevronDown, Minus, Plus, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -343,7 +344,7 @@ function PackageRow({
         </div>
         <div className="text-center">
           <span className="text-base font-semibold text-foreground">
-            {isAvailabilityString ? pkg.availability : pkg.availability}
+            {portalStockLabel(pkg.availability)}
           </span>
         </div>
         <div className="flex items-center justify-end">
@@ -384,7 +385,7 @@ function PackageRow({
           <div className="text-right">
             <p className="text-[10px] sm:text-xs text-muted-foreground mb-0.5">Stock</p>
             <p className="text-sm sm:text-base font-semibold text-foreground">
-              {isAvailabilityString ? pkg.availability : pkg.availability}
+              {portalStockLabel(pkg.availability)}
             </p>
           </div>
         </div>
@@ -424,8 +425,7 @@ function PackageRow({
                     </p>
                     <h3 className="mt-2 text-xl sm:text-2xl font-bold leading-tight text-foreground">{pkg.name}</h3>
                     {(packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name)) ||
-                    pkg.brochureUrl ||
-                    pkg.guestGuideUrl ? (
+                    pkg.brochureUrl ? (
                       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs sm:text-sm text-muted-foreground">
                         {packageDurationLabel(pkg.duration) && !nameIncludesDurationLabel(pkg.name) ? (
                           <span>{packageDurationLabel(pkg.duration)}</span>
@@ -439,17 +439,6 @@ function PackageRow({
                             className="text-muted-foreground underline-offset-4 hover:underline"
                           >
                             View brochure
-                          </a>
-                        ) : null}
-                        {pkg.guestGuideUrl ? (
-                          <a
-                            href={pkg.guestGuideUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="text-muted-foreground underline-offset-4 hover:underline"
-                          >
-                            View guest guide
                           </a>
                         ) : null}
                       </div>
