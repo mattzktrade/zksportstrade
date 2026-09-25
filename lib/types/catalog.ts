@@ -20,6 +20,8 @@ export interface Package {
   includes: string[]
   /** Marketing body shown on package detail; falls back to default copy when empty */
   description?: string | null
+  /** Answered product and race questions for agents. Blank answers are omitted. */
+  faqs?: { id: string; question: string; answer: string }[]
   /** Extra gallery image URLs (primary `image` is always first slide) */
   galleryImages?: string[]
   /** Circuit / track map shown on the product page and as brochure page 3 when set */

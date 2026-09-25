@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
+import { signalNavigation } from "@/components/navigation-progress"
 import { Search } from "lucide-react"
 import { searchAdminRecords } from "@/app/(admin)/admin/search-actions"
 import {
@@ -69,6 +70,7 @@ export function AdminJumpSearch({ destinations }: { destinations: AdminJumpItem[
     setQuery("")
     setRecords([])
     inputRef.current?.blur()
+    signalNavigation(href)
     router.push(href)
   }
 
@@ -147,7 +149,6 @@ export function AdminJumpSearch({ destinations }: { destinations: AdminJumpItem[
                 aria-selected={index === activeIndex}
                 onMouseEnter={() => {
                   setHighlight(index)
-                  router.prefetch(item.href)
                 }}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => go(item.href)}

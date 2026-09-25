@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState, useTransition } from "react"
+import { useEffect, useState, useTransition, type ReactNode } from "react"
+import { ChevronDown } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
@@ -16,11 +17,13 @@ import type { LinkedDayPackageOverview } from "@/lib/admin/linked-day-package-ov
 import { adminRaceLabel } from "@/lib/admin/race-label"
 import { cn } from "@/lib/utils"
 import { PackageCostLayers } from "@/components/admin/package-cost-layers"
-import { PackagePortalVisibilityCheckbox } from "@/components/admin/package-portal-visibility"
 import { PackageIntegrationPanel } from "@/components/admin/package-integration-panel"
 import { PackageBrochureActions } from "@/components/admin/package-brochure-actions"
 import { PackageGuestGuidePanel } from "@/components/admin/package-guest-guide-panel"
 import { CatalogImageField } from "@/components/admin/catalog-image-field"
+import { PackageCopyFields } from "@/components/admin/package-copy-fields"
+import { PackageFaqFields } from "@/components/admin/package-faq-fields"
+import { mergePackageFaqs, parsePackageFaqs, suggestedPackageFaqs, type PackageFaqSource } from "@/lib/catalog/package-faqs"
 import { LinkedDayInventoryToolbar } from "@/components/admin/linked-day-packages-panel"
 import { FulfilmentBlocksPanel } from "@/components/admin/fulfilment-blocks-panel"
 import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
@@ -55,9 +58,112 @@ function includesToText(inc: unknown): string {
   return inc.filter((x): x is string => typeof x === "string").join("\n")
 }
 
+function DetailSection({
+  title,
+  summary,
+  defaultOpen = false,
+  children,
+}: {
+  title: string
+  summary?: string
+  defaultOpen?: boolean
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <section className="sm:col-span-2 overflow-hidden rounded-xl border border-border">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/40"
+      >
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-foreground">{title}</span>
+          {summary ? (
+            <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{summary}</span>
+          ) : null}
+        </span>
+        <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+      </button>
+      {open ? <div className="grid gap-4 border-t border-border px-4 py-4 sm:grid-cols-2">{children}</div> : null}
+    </section>
+  )
+}
+
+function imageSummary(image: string, gallery: string, trackMap: string): string {
+  const count = (image.trim() ? 1 : 0) + linesToList(gallery).length + (trackMap.trim() ? 1 : 0)
+  if (count === 0) return "No images yet"
+  return `${count} image${count === 1 ? "" : "s"}${trackMap.trim() ? ", including a track map" : ""}`
+}
+
+function faqSummary(faqs: { answer: string }[]): string {
+  const answered = faqs.filter((faq) => faq.answer.trim()).length
+  const blank = faqs.length - answered
+  if (faqs.length === 0) return "No questions yet"
+  if (blank === 0) return `${answered} answered`
+  return `${answered} answered · ${blank} still to complete`
+}
+
 function currencyHint(currency: string): string {
   const c = (currency || "USD").trim() || "USD"
   return `Amounts in ${c}`
+}
+
+function packageFaqsFromRow(row: AdminPackageRow) {
+  return mergePackageFaqs(
+    parsePackageFaqs(row.faqs),
+    suggestedPackageFaqs({
+      name: row.name,
+      raceName: row.race_name,
+      circuit: row.circuit,
+      location: row.location,
+      country: row.country,
+      eventDate: String(row.event_date ?? ""),
+      dateRange: row.date_range,
+      duration: row.duration,
+      description: typeof row.description === "string" ? row.description : "",
+      includes: Array.isArray(row.includes) ? row.includes.filter((item): item is string => typeof item === "string") : [],
+      currency: row.currency || "USD",
+      tradePrice: row.trade_price,
+      isEnquiry: row.is_enquiry,
+      brochureUrl: row.brochure_url,
+    }),
+  )
+}
+
+function faqSource(input: {
+  name: string
+  raceName: string
+  circuit: string
+  location: string
+  country: string
+  eventDate: string
+  dateRange: string
+  duration: string
+  description: string
+  includesText: string
+  currency: string
+  tradePrice: string
+  isEnquiry: boolean
+  brochureUrl: string
+}): PackageFaqSource {
+  const price = input.tradePrice.trim() === "" ? null : Number(input.tradePrice)
+  return {
+    name: input.name,
+    raceName: input.raceName,
+    circuit: input.circuit,
+    location: input.location,
+    country: input.country,
+    eventDate: input.eventDate,
+    dateRange: input.dateRange,
+    duration: input.duration,
+    description: input.description,
+    includes: linesToList(input.includesText),
+    currency: input.currency || "USD",
+    tradePrice: price != null && Number.isFinite(price) ? price : null,
+    isEnquiry: input.isEnquiry,
+    brochureUrl: input.brochureUrl,
+  }
 }
 
 export type PackageAdminPanelSection = "all" | "details" | "inventory" | "visibility" | "integrations"
@@ -124,6 +230,7 @@ export function PackageAdminPanel({
     typeof initial.guest_guide_url === "string" ? initial.guest_guide_url : "",
   )
   const [trackMap, setTrackMap] = useState(typeof initial.track_map === "string" ? initial.track_map : "")
+  const [faqs, setFaqs] = useState(() => packageFaqsFromRow(initial))
   const [holdQty, setHoldQty] = useState("1")
   const [holdNote, setHoldNote] = useState("")
   useEffect(() => {
@@ -150,6 +257,7 @@ export function PackageAdminPanel({
     setBrochureUrl(typeof initial.brochure_url === "string" ? initial.brochure_url : "")
     setGuestGuideUrl(typeof initial.guest_guide_url === "string" ? initial.guest_guide_url : "")
     setTrackMap(typeof initial.track_map === "string" ? initial.track_map : "")
+    setFaqs(packageFaqsFromRow(initial))
   }, [initial])
 
   function parsePrice(): number | null {
@@ -194,6 +302,7 @@ export function PackageAdminPanel({
         sort_order: initial.sort_order,
         brochure_url: brochureUrl.trim() || null,
         track_map: trackMap.trim() || null,
+        faqs,
       })
       if (!res.ok) {
         toast.error(res.message)
@@ -363,8 +472,6 @@ export function PackageAdminPanel({
     <div className="space-y-6 min-w-0 w-full">
       {showDetails ? (
       <div className="space-y-4 min-w-0">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Package details</p>
-        <PackagePortalVisibilityCheckbox packageId={initial.id} isHidden={initial.is_hidden} className="mb-1" />
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block text-xs text-muted-foreground sm:col-span-2">
             {isFormula1Event ? "Race" : "Event"}
@@ -400,58 +507,6 @@ export function PackageAdminPanel({
               className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
             />
           </label>
-          <label className="block text-xs text-muted-foreground sm:col-span-2">
-            {isFormula1Event ? "Circuit" : "Venue"}
-            <input
-              value={circuit}
-              onChange={(e) => setCircuit(e.target.value)}
-              className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            />
-            <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground/90">
-              Shared with the event. Edit it on Inventory → Events to update every product for this race.
-            </span>
-          </label>
-          <label className="block text-xs text-muted-foreground">
-            Location
-            <input
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            />
-          </label>
-          <label className="block text-xs text-muted-foreground">
-            Country
-            <input
-              value={country}
-              onChange={(e) => setCountry(e.target.value)}
-              className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            />
-          </label>
-          <label className="block text-xs text-muted-foreground sm:col-span-2 sm:max-w-xs">
-            Country code
-            <input
-              value={countryCode}
-              onChange={(e) => setCountryCode(e.target.value)}
-              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            />
-          </label>
-          <label className="block text-xs text-muted-foreground">
-            Event date
-            <input
-              type="date"
-              value={eventDate}
-              onChange={(e) => setEventDate(e.target.value)}
-              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            />
-          </label>
-          <label className="block text-xs text-muted-foreground sm:col-span-2">
-            Date range label
-            <input
-              value={dateRange}
-              onChange={(e) => setDateRange(e.target.value)}
-              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            />
-          </label>
           <label className="block text-xs text-muted-foreground">
             Package type / duration
             <select
@@ -465,91 +520,194 @@ export function PackageAdminPanel({
                 </option>
               ))}
             </select>
-            <span className="block text-[11px] text-muted-foreground/80 mt-1">
-              Current: {packageDurationLabel(initial.duration) ?? "Not specified"}
-            </span>
-          </label>
-          <label className="block text-xs text-muted-foreground">
-            Linked inventory key
-            <input
-              value={inventoryGroupId}
-              onChange={(e) => setInventoryGroupId(e.target.value)}
-              disabled={inventoryIsStandalone}
-              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
-              placeholder={inventoryIsStandalone ? "Standalone inventory" : "Auto-generated when blank"}
-            />
-            <span className="block text-[11px] text-muted-foreground/80 mt-1 leading-relaxed">
-              Packages with the same key share inventory.
-            </span>
-            <span className="mt-2 flex items-start gap-2 rounded-md border border-border p-2.5 text-[11px] leading-relaxed">
-              <input
-                type="checkbox"
-                checked={inventoryIsStandalone}
-                onChange={(e) => setInventoryIsStandalone(e.target.checked)}
-                className="mt-0.5"
-              />
-              <span>
-                <strong className="text-foreground">Use separate inventory for this package.</strong>{" "}
-                Select this when the day package was purchased independently and should not consume the
-                3-day stock.
-              </span>
-            </span>
-          </label>
-          <label className="block text-xs text-muted-foreground sm:col-span-2">
-            Primary image URL
-            <input
-              value={image}
-              onChange={(e) => setImage(e.target.value)}
-              className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
-              placeholder="https://… or /images/…"
-            />
-            <span className="block text-[11px] text-muted-foreground/80 mt-1 leading-relaxed">
-              Wix and other CDN thumbnail links are upgraded to full size on save and in the portal.
-            </span>
-          </label>
-          <label className="block text-xs text-muted-foreground sm:col-span-2">
-            Extra gallery image URLs (one per line)
-            <textarea
-              value={galleryText}
-              onChange={(e) => setGalleryText(e.target.value)}
-              className="mt-1 w-full min-h-[72px] px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
-            />
-          </label>
-          <div className="sm:col-span-2 space-y-1">
-            <CatalogImageField label="Track map" value={trackMap} onChange={setTrackMap} />
-            <p className="text-[11px] text-muted-foreground/80 leading-relaxed">
-              Optional circuit layout. Shown on the product page, and added as brochure page 3 when you create a
-              brochure.
-            </p>
-          </div>
-          <label className="block text-xs text-muted-foreground sm:col-span-2">
-            Description (portal)
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="mt-1 w-full min-h-[100px] px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            />
-          </label>
-          <label className="block text-xs text-muted-foreground sm:col-span-2">
-            Package includes (one bullet per line)
-            <textarea
-              value={includesText}
-              onChange={(e) => setIncludesText(e.target.value)}
-              className="mt-1 w-full min-h-[100px] px-3 py-2 rounded-lg border border-border bg-background text-sm"
-            />
           </label>
           <label className="block text-xs text-muted-foreground">
             Trade price (blank if enquiry)
             <input
               value={tradePrice}
               onChange={(e) => setTradePrice(e.target.value)}
-              className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
             />
             <span className="block text-[11px] text-muted-foreground/80 mt-1">
               {currencyHint((initial.currency || "USD").trim() || "USD")}
             </span>
           </label>
-          <div className="sm:col-span-2 rounded-xl border border-border bg-muted/30 p-4 space-y-3">
+          <div className="flex flex-col gap-2 sm:col-span-2 sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={requiresBookingApproval}
+                onChange={(e) => setRequiresBookingApproval(e.target.checked)}
+              />
+              Requires booking approval
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={featured} onChange={(e) => setFeatured(e.target.checked)} />
+              Featured
+            </label>
+          </div>
+          <DetailSection
+            title="Event"
+            summary={[circuit.trim(), dateRange.trim() || eventDate.trim()].filter(Boolean).join(" · ") || "Venue and dates"}
+          >
+            <label className="block text-xs text-muted-foreground sm:col-span-2">
+              {isFormula1Event ? "Circuit" : "Venue"}
+              <input
+                value={circuit}
+                onChange={(e) => setCircuit(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              />
+              <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground/90">
+                Shared with the event. Edit it on Inventory → Events to update every product for this race.
+              </span>
+            </label>
+            <label className="block text-xs text-muted-foreground">
+              Location
+              <input
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              />
+            </label>
+            <label className="block text-xs text-muted-foreground">
+              Country
+              <input
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              />
+            </label>
+            <label className="block text-xs text-muted-foreground sm:max-w-xs">
+              Country code
+              <input
+                value={countryCode}
+                onChange={(e) => setCountryCode(e.target.value)}
+                className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              />
+            </label>
+            <label className="block text-xs text-muted-foreground">
+              Event date
+              <input
+                type="date"
+                value={eventDate}
+                onChange={(e) => setEventDate(e.target.value)}
+                className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              />
+            </label>
+            <label className="block text-xs text-muted-foreground sm:col-span-2">
+              Date range label
+              <input
+                value={dateRange}
+                onChange={(e) => setDateRange(e.target.value)}
+                className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              />
+            </label>
+          </DetailSection>
+          <DetailSection
+            title="Images"
+            summary={imageSummary(image, galleryText, trackMap)}
+          >
+            <label className="block text-xs text-muted-foreground sm:col-span-2">
+              Primary image URL
+              <input
+                value={image}
+                onChange={(e) => setImage(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
+                placeholder="https://… or /images/…"
+              />
+              <span className="block text-[11px] text-muted-foreground/80 mt-1 leading-relaxed">
+                Wix and other CDN thumbnail links are upgraded to full size on save and in the portal.
+              </span>
+            </label>
+            <label className="block text-xs text-muted-foreground sm:col-span-2">
+              Extra gallery image URLs (one per line)
+              <textarea
+                value={galleryText}
+                onChange={(e) => setGalleryText(e.target.value)}
+                className="mt-1 w-full min-h-[72px] px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
+              />
+            </label>
+            <div className="sm:col-span-2 space-y-1">
+              <CatalogImageField label="Track map" value={trackMap} onChange={setTrackMap} />
+              <p className="text-[11px] text-muted-foreground/80 leading-relaxed">
+                Optional circuit layout. Shown on the product page, and added as brochure page 3 when you create a
+                brochure.
+              </p>
+            </div>
+          </DetailSection>
+          <DetailSection
+            title="Description and inclusions"
+            summary={description.trim() ? description.trim().replace(/\s+/g, " ").slice(0, 90) : "No description yet"}
+          >
+            <PackageCopyFields
+              description={description}
+              includesText={includesText}
+              onDescriptionChange={setDescription}
+              onIncludesChange={setIncludesText}
+            />
+          </DetailSection>
+          <DetailSection
+            title="FAQs"
+            summary={faqSummary(faqs)}
+          >
+            <PackageFaqFields
+              faqs={faqs}
+              onChange={setFaqs}
+              source={faqSource({
+                name,
+                raceName: initial.race_name,
+                circuit,
+                location,
+                country,
+                eventDate,
+                dateRange,
+                duration,
+                description,
+                includesText,
+                currency: initial.currency,
+                tradePrice,
+                isEnquiry,
+                brochureUrl,
+              })}
+            />
+          </DetailSection>
+          <DetailSection
+            title="Stock sharing"
+            summary={inventoryIsStandalone ? "Separate inventory" : inventoryGroupId.trim() || "Shares stock with linked packages"}
+          >
+            <label className="block text-xs text-muted-foreground sm:col-span-2">
+              Linked inventory key
+              <input
+                value={inventoryGroupId}
+                onChange={(e) => setInventoryGroupId(e.target.value)}
+                disabled={inventoryIsStandalone}
+                className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
+                placeholder={inventoryIsStandalone ? "Standalone inventory" : "Auto-generated when blank"}
+              />
+              <span className="block text-[11px] text-muted-foreground/80 mt-1 leading-relaxed">
+                Packages with the same key share inventory.
+              </span>
+              <span className="mt-2 flex items-start gap-2 rounded-md border border-border p-2.5 text-[11px] leading-relaxed">
+                <input
+                  type="checkbox"
+                  checked={inventoryIsStandalone}
+                  onChange={(e) => setInventoryIsStandalone(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <strong className="text-foreground">Use separate inventory for this package.</strong>{" "}
+                  Select this when the day package was purchased independently and should not consume the
+                  3-day stock.
+                </span>
+              </span>
+            </label>
+          </DetailSection>
+          <DetailSection
+            title="Brochures"
+            summary={[brochureUrl.trim() ? "Sales brochure attached" : "No sales brochure", guestGuideUrl.trim() ? "Guest guide attached" : "No guest guide"].join(" · ")}
+          >
+          <div className="sm:col-span-2 space-y-3">
+          <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <p className="text-sm font-medium text-foreground">Sales brochure</p>
@@ -578,7 +736,7 @@ export function PackageAdminPanel({
               />
             </label>
           </div>
-          <div className="sm:col-span-2 rounded-xl border border-border bg-muted/30 p-4">
+          <div className="rounded-xl border border-border bg-muted/30 p-4">
             <PackageGuestGuidePanel
               packageId={initial.id}
               productName={name.trim() || initial.name}
@@ -589,22 +747,8 @@ export function PackageAdminPanel({
               onUrlChange={(url) => setGuestGuideUrl(url)}
             />
           </div>
-          <label className="flex items-center gap-2 text-sm sm:col-span-2">
-            <input type="checkbox" checked={isEnquiry} onChange={(e) => setIsEnquiry(e.target.checked)} />
-            Enquiry package
-          </label>
-          <label className="flex items-center gap-2 text-sm sm:col-span-2">
-            <input
-              type="checkbox"
-              checked={requiresBookingApproval}
-              onChange={(e) => setRequiresBookingApproval(e.target.checked)}
-            />
-            Requires booking approval (Paddock Club)
-          </label>
-          <label className="flex items-center gap-2 text-sm sm:col-span-2">
-            <input type="checkbox" checked={featured} onChange={(e) => setFeatured(e.target.checked)} />
-            Featured
-          </label>
+          </div>
+          </DetailSection>
         </div>
         <div className="flex flex-wrap items-center gap-3 pt-1">
           <button

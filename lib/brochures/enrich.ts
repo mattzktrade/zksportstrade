@@ -82,7 +82,7 @@ export function enrichBrochureContent(content: BrochureContent): BrochureContent
   if (!needsDescription && !needsIncludes) {
     return {
       ...content,
-      description: punchyDescription(description) || description,
+      description: description || null,
       includes,
     }
   }
@@ -96,11 +96,11 @@ export function enrichBrochureContent(content: BrochureContent): BrochureContent
     }
   }
 
-  const nextDescription = needsDescription ? programme.description : description
+  const nextDescription = needsDescription ? programme.description : description || null
   const nextIncludes = needsIncludes ? withAccessDays(programme.includes, content) : includes
   return {
     ...content,
-    description: punchyDescription(nextDescription) || nextDescription,
+    description: nextDescription,
     includes: nextIncludes,
     copyEnriched: true,
   }

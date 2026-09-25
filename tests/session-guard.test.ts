@@ -220,12 +220,12 @@ describe("navigation prefetch wiring", () => {
     assert.doesNotMatch(prefetchBlock, /auth\.getUser/)
   })
 
-  it("shell nav warms routes on hover instead of viewport prefetch", () => {
+  it("shell nav does not prefetch, so a stalled hover request cannot swallow the click", () => {
     const nav = readFileSync("components/nav-link.tsx", "utf8")
     const portal = readFileSync("components/portal-layout.tsx", "utf8")
     const admin = readFileSync("components/admin-layout.tsx", "utf8")
-    assert.match(nav, /router\.prefetch/)
     assert.match(nav, /prefetch = false/)
+    assert.doesNotMatch(nav, /router\.prefetch/)
     assert.match(portal, /NavLink/)
     assert.match(admin, /NavLink/)
     assert.doesNotMatch(portal, /prefetch=\{false\}/)

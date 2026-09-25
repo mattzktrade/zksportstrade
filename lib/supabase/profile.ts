@@ -1,5 +1,11 @@
 import { cache } from "react"
 import { createClient } from "@/lib/supabase/server"
+import {
+  PROFILE_LOAD_TIMEOUT_MESSAGE,
+  PROFILE_LOOKUP_TIMEOUT_MS,
+  SESSION_LOOKUP_TIMEOUT_MS,
+  withTimeout,
+} from "@/lib/supabase/session-guard"
 import type { PortalProfile } from "@/lib/types/profile"
 
 const PROFILE_COLUMNS =
@@ -7,12 +13,27 @@ const PROFILE_COLUMNS =
 
 export const getPortalProfile = cache(async (): Promise<PortalProfile | null> => {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // Middleware already verified the session. This second getUser() has no platform
+  // cap, so a stalled Auth call used to sit for ~30s with the click looking dead.
+  const userResult = await withTimeout(supabase.auth.getUser(), SESSION_LOOKUP_TIMEOUT_MS)
+  let user = userResult.ok ? userResult.value.data.user : null
+  if (!user) {
+    const sessionResult = await withTimeout(supabase.auth.getSession(), 1_500)
+    user = sessionResult.ok ? (sessionResult.value.data.session?.user ?? null) : null
+  }
+  if (!user && !userResult.ok) {
+    throw new Error(PROFILE_LOAD_TIMEOUT_MESSAGE)
+  }
   if (!user) return null
 
-  const { data, error } = await supabase.from("profiles").select(PROFILE_COLUMNS).eq("id", user.id).single()
+  const profileResult = await withTimeout(
+    supabase.from("profiles").select(PROFILE_COLUMNS).eq("id", user.id).single(),
+    PROFILE_LOOKUP_TIMEOUT_MS,
+  )
+  if (!profileResult.ok) {
+    throw new Error(PROFILE_LOAD_TIMEOUT_MESSAGE)
+  }
+  const { data, error } = profileResult.value
   if (error || !data) return null
   return data as PortalProfile
 })

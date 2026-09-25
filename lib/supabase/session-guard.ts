@@ -5,6 +5,10 @@ export const SESSION_LOOKUP_TIMEOUT_MS = 6_000
 export const PROFILE_LOOKUP_TIMEOUT_MS = 4_000
 export const SIGNOUT_TIMEOUT_MS = 3_000
 
+/** Shown by the root error page. Must not redirect to /login — that loops when the session cookie is still valid. */
+export const PROFILE_LOAD_TIMEOUT_MESSAGE =
+  "This page is taking too long to load. Refresh and try again."
+
 export type GateProfile = {
   role: string | null
   approval_status: string | null

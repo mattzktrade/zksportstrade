@@ -16,7 +16,15 @@ import {
 } from "../lib/brochures/content"
 import { enrichBrochureContent, officialProgrammeTemplate } from "../lib/brochures/enrich"
 import { brochureImageFetchUrl, compressBrochureImageBytes } from "../lib/brochures/images"
-import { brochurePagePlan, generatePackageBrochurePdf, includedPhotoSlots } from "../lib/brochures/pdf"
+import { embedBrochureFonts } from "../lib/brochures/fonts"
+import {
+  brochurePagePlan,
+  generatePackageBrochurePdf,
+  includedPhotoSlots,
+  planExperienceParagraphs,
+  planIncludedItems,
+  splitInnerPhotos,
+} from "../lib/brochures/pdf"
 import { assessBrochureReadiness } from "../lib/brochures/readiness"
 import { brochureFilename, brochurePrintText, brochureSafeText, uniqueImageUrls } from "../lib/brochures/text"
 import { packageBrochureStoragePath } from "../lib/brochures/storage"
@@ -63,12 +71,17 @@ describe("package brochures", () => {
   })
 
   it("uses the same cover / what's included layout for every product", () => {
-    assert.deepEqual(brochurePagePlan(false), ["cover", "included"])
-    assert.deepEqual(brochurePagePlan(true), ["cover", "included", "details"])
+    assert.deepEqual(brochurePagePlan(false), ["cover", "experience", "included"])
+    assert.deepEqual(brochurePagePlan(true), ["cover", "experience", "included", "details"])
     assert.equal(includedPhotoSlots(3), 3)
     assert.equal(includedPhotoSlots(5), 3)
     assert.equal(includedPhotoSlots(6), 5)
     assert.equal(includedPhotoSlots(10), 5)
+    assert.deepEqual(splitInnerPhotos(["cover", "a", "b", "c", "d"]), {
+      experience: ["a", "b"],
+      included: ["c", "d"],
+    })
+    assert.deepEqual(splitInnerPhotos(["cover", "a"]), { experience: ["a"], included: [] })
     const pdfSource = readFileSync("lib/brochures/pdf.ts", "utf8")
     assert.match(pdfSource, /splitProductHeadline\(content\.productName\)/)
     assert.doesNotMatch(pdfSource, /placeHeadline/)
@@ -232,7 +245,7 @@ describe("package brochures", () => {
     const bytes = await generatePackageBrochurePdf(sample)
     assert.equal(Buffer.from(bytes).subarray(0, 4).toString(), "%PDF")
     const pdf = await PDFDocument.load(bytes)
-    assert.equal(pdf.getPageCount(), 2)
+    assert.equal(pdf.getPageCount(), 3)
     const size = pdf.getPage(0).getSize()
     assert.ok(size.width > size.height)
     assert.match(pdf.getTitle() ?? "", /Legend Paddock Club/)
@@ -250,16 +263,43 @@ describe("package brochures", () => {
       ...sample,
       trackMapUrl: "/images/circuits/vegas.jpg",
     })
-    assert.equal((await PDFDocument.load(withMap)).getPageCount(), 3)
+    assert.equal((await PDFDocument.load(withMap)).getPageCount(), 4)
 
     const missingMap = await generatePackageBrochurePdf({
       ...sample,
       trackMapUrl: "/images/circuits/does-not-exist.jpg",
     })
-    assert.equal((await PDFDocument.load(missingMap)).getPageCount(), 2)
+    assert.equal((await PDFDocument.load(missingMap)).getPageCount(), 3)
   })
 
-  it("still uses two pages when the 5-photo What's Included layout is selected", async () => {
+  it("keeps the description and the inclusion list on two pages", async () => {
+    const content = {
+      ...sample,
+      description:
+        "Velocity Terrace hospitality at Yas Marina with sweeping views of Turns 8-11, gourmet dining, premium open bar, live entertainment, racing simulators and Yasalam concert access.",
+      includes: [
+        "Sweeping views of Turns 8, 9, 10 and 11",
+        "Curated food menus prepared by highly trained chefs",
+        "Premium open bar with free-flowing champagne and beverages",
+        "International mixologists",
+        "Live DJs, dancers, saxophonists and magicians",
+        "State-of-the-art racing simulators",
+        "Flatscreen TVs, comfortable sofas and exclusive VIP terrace access",
+        "General admission to Yasalam after-race concerts on your booked day(s)",
+        "Guests aged 16 and over",
+      ],
+    }
+    const bytes = await generatePackageBrochurePdf(content)
+    const layoutPdf = await PDFDocument.create()
+    const fonts = await embedBrochureFonts(layoutPdf)
+    const experience = planExperienceParagraphs(content, fonts).flat().join(" ")
+    const included = planIncludedItems(content, fonts).map((item) => item.title)
+    assert.match(experience, /Yasalam concert access/)
+    assert.ok(included.length >= 7)
+    assert.equal((await PDFDocument.load(bytes)).getPageCount(), 3)
+  })
+
+  it("still uses the experience and included pages when there are many photos", async () => {
     const bytes = await generatePackageBrochurePdf({
       ...sample,
       galleryUrls: [
@@ -270,7 +310,7 @@ describe("package brochures", () => {
         "/images/circuits/monza.jpg",
       ],
     })
-    assert.equal((await PDFDocument.load(bytes)).getPageCount(), 2)
+    assert.equal((await PDFDocument.load(bytes)).getPageCount(), 3)
   })
 
   it("still draws the template if optional copy is missing, but blocks when photos are required", async () => {
@@ -282,7 +322,7 @@ describe("package brochures", () => {
       galleryUrls: [],
     })
     const pdf = await PDFDocument.load(bytes)
-    assert.equal(pdf.getPageCount(), 2)
+    assert.equal(pdf.getPageCount(), 3)
 
     await assert.rejects(
       () =>

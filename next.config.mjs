@@ -124,13 +124,15 @@ const nextConfig = {
       {
         source: "/admin",
         headers: [
-          { key: "Cache-Control", value: "private, no-store, max-age=0, must-revalidate" },
+          // private + must-revalidate stays out of the CDN but keeps the back/forward cache.
+          // no-store made every admin return a full reload.
+          { key: "Cache-Control", value: "private, max-age=0, must-revalidate" },
         ],
       },
       {
         source: "/admin/:path*",
         headers: [
-          { key: "Cache-Control", value: "private, no-store, max-age=0, must-revalidate" },
+          { key: "Cache-Control", value: "private, max-age=0, must-revalidate" },
         ],
       },
     ]

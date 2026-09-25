@@ -11,6 +11,7 @@ import { ensureShellSingleTicketsForParent } from "@/lib/catalog/ensure-shell-si
 import { generatePackageIdFromRaceAndName } from "@/lib/catalog/generate-package-id"
 import { isPaddockClubPackageName } from "@/lib/catalog/paddock-club"
 import { inferPackageDurationFromName, isValidPackageDuration } from "@/lib/catalog/package-duration"
+import { parsePackageFaqs } from "@/lib/catalog/package-faqs"
 import { isEventCategory, type EventCategory } from "@/lib/catalog/event-categories"
 import {
   eventSharedFieldsChanged,
@@ -717,6 +718,8 @@ export async function updatePackageFields(input: {
   sort_order: number
   brochure_url: string | null
   track_map?: string | null
+  faqs?: { id: string; question: string; answer: string }[]
+  skipFaqs?: boolean
 }): Promise<ActionResult> {
   const gate = await requireAdminAction()
   if (!gate.ok) return gate
@@ -784,6 +787,7 @@ export async function updatePackageFields(input: {
       sort_order: Math.floor(Number(input.sort_order)) || 0,
       brochure_url: brochure,
       track_map: trackMap,
+      ...(input.skipFaqs ? {} : { faqs: parsePackageFaqs(input.faqs ?? []) }),
     })
     .eq("id", id)
 
@@ -1319,8 +1323,12 @@ export async function createPackage(input: {
   initial_supplier_account_id?: string | null
   initial_supplier_reference?: string | null
   initial_issued_at?: string | null
+  initial_payment_due_date?: string | null
   initial_po_note?: string | null
-}): Promise<{ ok: true; message?: string; purchaseOrderId?: string } | { ok: false; message: string }> {
+  faqs?: { id: string; question: string; answer: string }[]
+  /** Set when the hosted database has not had the faqs column added yet. */
+  skipFaqs?: boolean
+}): Promise<{ ok: true; message?: string; purchaseOrderId?: string; packageId: string } | { ok: false; message: string }> {
   const gate = await requireAdminAction("inventory.manage")
   if (!gate.ok) return gate
   const { supabase } = gate
@@ -1443,6 +1451,15 @@ export async function createPackage(input: {
     issuedAt = issued
   }
 
+  let paymentDueDate: string | null = null
+  if (input.initial_payment_due_date && input.initial_payment_due_date.trim()) {
+    const due = input.initial_payment_due_date.trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) {
+      return { ok: false, message: "Payment due date must be YYYY-MM-DD." }
+    }
+    paymentDueDate = due
+  }
+
   let retailMultiplier: number | null = input.retail_price_multiplier ?? null
   if (retailMultiplier != null && (!Number.isFinite(retailMultiplier) || retailMultiplier <= 0)) {
     return { ok: false, message: "Wix price multiplier must be a positive number (e.g. 1.1)." }
@@ -1514,6 +1531,7 @@ export async function createPackage(input: {
     sort_order: Math.floor(Number(input.sort_order)) || 0,
     trade_price: input.trade_price,
     brochure_url: brochure,
+    ...(input.skipFaqs ? {} : { faqs: parsePackageFaqs(input.faqs ?? []) }),
     product_code: productCode,
     salesforce_product_id: salesforceProductId,
     sell_on_trade_portal: true,
@@ -1647,6 +1665,17 @@ export async function createPackage(input: {
       return referenced
     }
     createdPurchaseOrderId = resolved.id
+    if (paymentDueDate) {
+      const { error: dueErr } = await supabase
+        .from("purchase_orders")
+        .update({ payment_due_date: paymentDueDate })
+        .eq("id", resolved.id)
+      if (dueErr) {
+        await supabase.from("package_inventory").delete().eq("package_id", id)
+        await supabase.from("packages").delete().eq("id", id)
+        return { ok: false, message: dueErr.message }
+      }
+    }
     const { error: layerErr } = await addCostLayerWithSourcePackage(supabase, {
       packageId: id,
       sourcePackageId: id,
@@ -1775,6 +1804,7 @@ export async function createPackage(input: {
 
   return {
     ok: true,
+    packageId: id,
     message: wixNote ? `Package created. ${wixNote}` : "Package created.",
     purchaseOrderId: createdPurchaseOrderId,
   }

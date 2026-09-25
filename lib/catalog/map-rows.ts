@@ -1,3 +1,4 @@
+import { answeredPackageFaqs, parsePackageFaqs } from "@/lib/catalog/package-faqs"
 import { packageRequiresBookingApproval } from "@/lib/catalog/paddock-club"
 import { toDisplayImageUrl } from "@/lib/images/display-image-url"
 import type { Package, Race } from "@/lib/types/catalog"
@@ -46,6 +47,7 @@ type DbPackage = {
   guest_guide_url?: string | null
   guest_guide?: unknown
   description?: string | null
+  faqs?: unknown
   gallery_images?: unknown
   track_map?: string | null
   product_code?: string | null
@@ -119,6 +121,7 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     duration: durationRaw,
     includes,
     description: description.trim() ? description : null,
+    faqs: answeredPackageFaqs(parsePackageFaqs(p.faqs)),
     galleryImages: galleryImages.length > 0 ? galleryImages : undefined,
     trackMap,
     featured: p.featured,
@@ -156,6 +159,7 @@ export function mapPackageRow(p: DbPackage, inv: DbInventory | undefined): Packa
     duration: durationRaw,
     includes,
     description: description.trim() ? description : null,
+    faqs: answeredPackageFaqs(parsePackageFaqs(p.faqs)),
     galleryImages: galleryImages.length > 0 ? galleryImages : undefined,
     trackMap,
     featured: p.featured,

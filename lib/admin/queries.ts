@@ -4,6 +4,7 @@ import { isOutstandingInvoiceStatus } from "@/lib/invoices/status"
 import type { PortalProfile } from "@/lib/types/profile"
 import { CATALOG_LIST_PACKAGE_COLUMNS, INVENTORY_COLUMNS, PACKAGE_COLUMNS } from "@/lib/catalog/columns"
 import { guestGuideFieldsFor, loadGuestGuideFields } from "@/lib/catalog/guest-guide-fields"
+import { loadPackageFaqs } from "@/lib/catalog/package-faqs"
 import type { DbInventory, DbPackage } from "@/lib/catalog/map-rows"
 import {
   getCostLayerQuantityTotalsByPackage,
@@ -463,6 +464,7 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
     sfInventoryByProduct,
     fulfilmentSold,
     guestGuideById,
+    faqsById,
     { data: canonical },
   ] = await Promise.all([
     supabase.from("races").select("id,name,season").eq("id", row.race_id).maybeSingle(),
@@ -471,6 +473,7 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
     getSalesforceInventorySnapshotsForPackages([row]),
     loadFulfilmentSoldByCostLayer(supabase, [id]),
     loadGuestGuideFields(supabase, [id], { includeContent: true }),
+    loadPackageFaqs(supabase, [id]),
     supabase
       .from("inventory_availability")
       .select("*")
@@ -493,6 +496,7 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
     ...row,
     guest_guide_url: guestGuide.guest_guide_url,
     guest_guide: guestGuide.guest_guide,
+    faqs: faqsById.get(id) ?? row.faqs ?? [],
     inventory: (inv as DbInventory | null) ?? null,
     race_name: raceName,
     cost_layers: layers,

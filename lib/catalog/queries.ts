@@ -18,6 +18,7 @@ import {
   type DbPackage,
   type DbRace,
 } from "@/lib/catalog/map-rows"
+import { loadPackageFaqs } from "@/lib/catalog/package-faqs"
 import { attachLargestSameSuiteRemaining } from "@/lib/catalog/same-suite-remaining"
 import { attachStorefrontAvailability } from "@/lib/catalog/storefront-availability"
 import { getPortalProfile } from "@/lib/supabase/profile"
@@ -303,6 +304,8 @@ export async function getRaceCatalog(
       !pkg.shell_parent_package_id,
   )
   const packageIds = visiblePackageRows.map((p) => p.id)
+  const faqsById = await loadPackageFaqs(supabase, packageIds)
+  for (const row of visiblePackageRows) row.faqs = faqsById.get(row.id) ?? row.faqs
   const inventoryRows = await fetchInventoryForPackages(supabase, packageIds)
   const invByPackage = new Map(inventoryRows.map((i) => [i.package_id, i]))
 
@@ -312,17 +315,14 @@ export async function getRaceCatalog(
     duration: p.duration,
     shell_parent_package_id: p.shell_parent_package_id,
   }))
-  let packages = visiblePackageRows.map((p) => mapPackageRow(p, invByPackage.get(p.id)))
-  packages = await attachStorefrontAvailability(supabase, packages, packageMeta)
-  packages = await attachLargestSameSuiteRemaining(supabase, packages, packageMeta)
+  const packages = await attachPortalSellable(
+    supabase,
+    visiblePackageRows.map((p) => mapPackageRow(p, invByPackage.get(p.id))),
+    packageMeta,
+    agentProfileId,
+    packageIds,
+  )
   const race = mapRaceRow(raceRow as DbRace, packages)
-
-  if (agentProfileId && packages.length > 0) {
-    const holdAgg = await fetchAgentHoldAggregates(supabase, agentProfileId, packageIds)
-    if (holdAgg.size > 0) {
-      packages = mergeAgentHoldAvailability(packages, holdAgg)
-    }
-  }
 
   return { race, packages }
 }
@@ -338,6 +338,8 @@ export async function getPackageById(
   if (error || !p) return null
 
   const dbPkg = p as DbPackage
+  const faqsById = await loadPackageFaqs(supabase, [id])
+  dbPkg.faqs = faqsById.get(id) ?? dbPkg.faqs
   if (
     !options?.includeUnlisted &&
     (dbPkg.is_hidden || dbPkg.sell_on_trade_portal === false || Boolean(dbPkg.shell_parent_package_id))

@@ -11,9 +11,10 @@ Rules:
 - Universal black / white / ZK red (`#F90202`) template in `public/images/brochures/template-bg.png`
 - Do not put the ZK logo lockup, the red ZK mark, or "Official F1 Paddock Club Distributor" on the pages
 - Cover headline is the package name, with the event underneath and the circuit/location as small supporting text
-- Page 2 is titled What's Included and shows the experience copy plus at-a-glance inclusions
-- What's Included uses the 3-photo column when the product has 5 or fewer unique photos, and the 5-photo column (hero plus a 2×2) when it has 6 or more
-- Page 3 is only created when the product has a track map image; title it The Details, show the full map uncropped, and keep location copy factual
+- Page 2 is titled The Experience and shows the description as whole sentences. Stop at the last sentence that fits. Do not end a sentence with an ellipsis
+- Page 3 is titled What's Included and shows the inclusion list as bullets. A long bullet may be shortened to two lines, but only on a finished phrase, with no ellipsis
+- Each of those pages uses a few photos in the right-hand column, each with a thin ZK red border and even gaps. The two pages do not repeat the same photos. If there are not enough photos, use a one-photo or two-photo stack, or drop the photo column. Do not add further copy pages. The track-map page still follows when a map exists
+- The track-map page is only created when the product has a track map image; title it The Details, show the full map uncropped, and list Location as a heading with the place name, in the same style as Event, Circuit, and Dates
 - Black footer bar with a red line along the top and the page number on the right; no zk-sports.com address
 - Photography-led, short readable copy — do not invent itineraries, partner logos, or prices
 - Refuse to generate without at least 3 unique photos; prompt staff to add them

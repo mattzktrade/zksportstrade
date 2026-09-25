@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react"
 import { NavLink } from "@/components/nav-link"
 import { useRouter } from "next/navigation"
+import { signalNavigation } from "@/components/navigation-progress"
 import { CatalogImage } from "@/components/catalog-image"
 import type { Race } from "@/lib/types/catalog"
 import type { PortalCatalog, PortalCatalogSeasonYear } from "@/lib/catalog/portal-catalog"
@@ -19,13 +20,13 @@ function RaceTableRow({ race }: { race: RaceRow }) {
   return (
     <tr
       className="hover:bg-muted/30 transition-colors cursor-pointer"
-      onMouseEnter={() => router.prefetch(href)}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest("a,button")) return
         if (isModifiedClick(event)) {
           openInNewTab(href)
           return
         }
+        signalNavigation(href)
         router.push(href)
       }}
     >

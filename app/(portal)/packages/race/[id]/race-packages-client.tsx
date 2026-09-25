@@ -292,7 +292,10 @@ function PackageRow({
   const includeItems = pkg.includes.map((item) => item.trim()).filter(Boolean)
   const description = pkg.description?.trim() ? pkg.description.trim() : DEFAULT_PACKAGE_DESCRIPTION
   const shouldCollapseDetails =
-    description.length > 180 || includeItems.length > 4 || includeItems.some((item) => item.length > 72)
+    description.length > 180 ||
+    includeItems.length > 4 ||
+    includeItems.some((item) => item.length > 72) ||
+    (pkg.faqs?.length ?? 0) > 0
 
   const packageImages = useMemo(() => {
     const primaryImage = pkg.image?.trim() || "/placeholder.svg"
@@ -483,6 +486,26 @@ function PackageRow({
                           + {includeItems.length - 4} more included
                         </p>
                       ) : null}
+                    </div>
+                  ) : null}
+                  {pkg.faqs && pkg.faqs.length > 0 ? (
+                    <div
+                      className={cn(
+                        "border-t border-border pt-4 sm:pt-5",
+                        !showFullDetails && shouldCollapseDetails && "xl:hidden",
+                      )}
+                    >
+                      <h4 className="text-sm sm:text-base font-semibold text-foreground mb-3">FAQs</h4>
+                      <div className="space-y-2">
+                        {pkg.faqs.map((faq) => (
+                          <details key={faq.id} className="rounded-lg border border-border px-3 py-2">
+                            <summary className="cursor-pointer text-sm font-medium text-foreground">{faq.question}</summary>
+                            <p className="mt-2 whitespace-pre-wrap text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                              {faq.answer}
+                            </p>
+                          </details>
+                        ))}
+                      </div>
                     </div>
                   ) : null}
                   {shouldCollapseDetails ? (

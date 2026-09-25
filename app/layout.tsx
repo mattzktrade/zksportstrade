@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next"
 import { Inter, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import { LaptopQol } from "@/components/laptop-qol"
+import { NavigationProgress } from "@/components/navigation-progress"
 import "./globals.css"
 import { LOGO_ICON } from "@/lib/branding"
 
@@ -53,6 +54,7 @@ export default function RootLayout({
       </head>
       <body className={`${inter.variable} ${geistMono.variable} font-sans antialiased`}>
         <LaptopQol />
+        <NavigationProgress />
         {children}
         <Analytics />
       </body>
