@@ -10,7 +10,7 @@ Admin can generate a landscape product brochure PDF from Sales list and the prod
 Rules:
 - Universal black / white / ZK red (`#F90202`) template in `public/images/brochures/template-bg.png`
 - Do not put the ZK logo lockup, the red ZK mark, or "Official F1 Paddock Club Distributor" on the pages
-- Cover headline is the package name, with the event underneath and the circuit/location as small supporting text
+- Cover headline is the package name, with the event underneath and the circuit/location as small supporting text. Every title line uses the same size and stacks in the black panel: a leading "3 Day" stays together, then one word per line, with the last word in red. A trailing number stays on the line above. A trailing "BY ZK" stays on one red line
 - Page 2 is titled The Experience and shows the description as whole sentences. Stop at the last sentence that fits. Do not end a sentence with an ellipsis
 - Page 3 is titled What's Included and shows the inclusion list as bullets. A long bullet may be shortened to two lines, but only on a finished phrase, with no ellipsis
 - Each of those pages uses a few photos in the right-hand column, each with a thin ZK red border and even gaps. The two pages do not repeat the same photos. If there are not enough photos, use a one-photo or two-photo stack, or drop the photo column. Do not add further copy pages. The track-map page still follows when a map exists
@@ -24,3 +24,4 @@ Rules:
 - Official Singapore Velocity Terrace guest guide only: cover uses the Velocity Terrace logo, then "Presented by" and the SY logo centred under it, then the event details centred on that same column; the supplied partner marks (SY, ZK, The Team) sit in the footer on every page; the closing page uses the National Gallery location map. Do not add those logos or that map to the shared guest-guide template or the sales brochure
 - Guest guide pages are Welcome, Before race weekend, Digital ticket, Arriving, Experience, Getting there, Parking, On-ground support, Things to know, then the closing page. Discover QR/link lives on the closing page. On-ground contact lives on On-ground support. Red section headings use the bold condensed face
 - Work lives in `lib/brochures/`, `lib/brochures/guest-guide/`, `components/admin/package-brochure-actions.tsx`, `components/admin/package-guest-guide-panel.tsx`, and `app/(admin)/admin/catalog/brochure-actions.ts`
+- Temporary only: the Marsa Box brochure adds an intro page and an index page before the normal cover, plus a simple ZK closing page at the end. Those pages may use the ZK logo and the seller badges. Do not add those pages, that logo, or those badges to any other package. Remove `lib/brochures/marsa-box-front.ts` and the Marsa photos when asked

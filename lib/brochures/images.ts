@@ -18,7 +18,7 @@ const WIX_MEDIA_BASE =
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 const FETCH_TIMEOUT_MS = 12_000
-const JPEG_QUALITY = 80
+const JPEG_QUALITY = 92
 
 function jpegMagic(bytes: Uint8Array): boolean {
   return bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
@@ -122,8 +122,9 @@ async function fetchRemoteImage(url: string): Promise<Uint8Array | null> {
   try {
     const response = await fetch(parsed.toString(), {
       headers: {
-        Accept: "image/jpeg,image/png,image/*;q=0.8",
-        "User-Agent": "ZKSportsBrochure/1.0",
+        Accept: "image/jpeg,image/png,image/webp,image/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (compatible; ZKSportsBrochure/1.0)",
+        Referer: `${parsed.origin}/`,
       },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       redirect: "follow",
@@ -145,7 +146,9 @@ export async function loadImageBytes(
   options?: { fit?: "cover" | "contain" },
 ): Promise<Uint8Array | null> {
   const fetchUrl = brochureImageFetchUrl(url, width, options)
-  const raw = fetchUrl.startsWith("/") ? await readLocalPublicFile(fetchUrl) : await fetchRemoteImage(fetchUrl)
+  const raw = fetchUrl.startsWith("/")
+    ? await readLocalPublicFile(fetchUrl)
+    : (await fetchRemoteImage(fetchUrl)) ?? (await fetchRemoteImage(url.trim()))
   if (!raw) return null
   const compressed = await compressBrochureImageBytes(raw, width)
   return compressed.length > 0 ? compressed : null

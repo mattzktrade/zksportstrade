@@ -12,9 +12,12 @@ import {
   brochureVenueLine,
   formatBrochureIncludes,
   resolveTrackMapUrl,
+  coverAccentSharesLine,
+  coverTitleStack,
   splitProductHeadline,
 } from "../lib/brochures/content"
 import { enrichBrochureContent, officialProgrammeTemplate } from "../lib/brochures/enrich"
+import { isMarsaBoxBrochure } from "../lib/brochures/marsa-box-front"
 import { brochureImageFetchUrl, compressBrochureImageBytes } from "../lib/brochures/images"
 import { embedBrochureFonts } from "../lib/brochures/fonts"
 import {
@@ -83,7 +86,7 @@ describe("package brochures", () => {
     })
     assert.deepEqual(splitInnerPhotos(["cover", "a"]), { experience: ["a"], included: [] })
     const pdfSource = readFileSync("lib/brochures/pdf.ts", "utf8")
-    assert.match(pdfSource, /splitProductHeadline\(content\.productName\)/)
+    assert.match(pdfSource, /coverTitleStack\(content\.productName\)/)
     assert.doesNotMatch(pdfSource, /placeHeadline/)
     assert.doesNotMatch(pdfSource, /drawStory/)
   })
@@ -129,6 +132,15 @@ describe("package brochures", () => {
     assert.equal(brochureVenueLine("Yas Marina Circuit", "Abu Dhabi", "Abu Dhabi Grand Prix 2026"), "Yas Marina Circuit")
     assert.equal(brochureVenueLine(null, "Abu Dhabi", "Abu Dhabi Grand Prix 2026"), null)
     assert.deepEqual(splitProductHeadline("Marsa Box"), { lead: "MARSA", accent: "BOX" })
+    assert.deepEqual(splitProductHeadline("3 Days Marsa Box by ZK"), { lead: "3 DAYS MARSA BOX", accent: "BY ZK" })
+    assert.equal(coverAccentSharesLine("2"), true)
+    assert.equal(coverAccentSharesLine("BY ZK"), false)
+    assert.deepEqual(coverTitleStack("3 Day Marina Views Brunch"), {
+      lines: ["3 DAY", "MARINA", "VIEWS", "BRUNCH"],
+      accentLine: 3,
+    })
+    assert.equal(isMarsaBoxBrochure("3 Days Marsa Box by ZK"), true)
+    assert.equal(isMarsaBoxBrochure("Marina Views Brunch"), false)
     assert.equal(formatBrochureIncludes(["Dining", "Open bar", "Host", "Pit walk"]).length, 4)
     assert.equal(formatBrochureIncludes(["Premium Views: Watch the start"]).at(0)?.title, "Premium Views")
     assert.equal(

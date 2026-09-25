@@ -5,6 +5,8 @@ import {
   brochurePhotoUrls,
   brochureVenueLine,
   formatBrochureIncludes,
+  coverAccentSharesLine,
+  coverTitleStack,
   splitProductHeadline,
   type BrochureIncludeItem,
 } from "@/lib/brochures/content"
@@ -38,6 +40,13 @@ import {
   strokeDiagonal,
 } from "@/lib/brochures/template"
 import { brochurePrintText, brochureReadable, fitTitle, wrapText } from "@/lib/brochures/text"
+import {
+  drawMarsaBoxClosing,
+  drawMarsaBoxIndex,
+  drawMarsaBoxIntro,
+  embedMarsaBoxFrontPhotos,
+  isMarsaBoxBrochure,
+} from "@/lib/brochures/marsa-box-front"
 
 const SECTION_TOP = PAGE_H - 40
 const PHOTO_BOTTOM = FOOTER_H + 16
@@ -58,7 +67,7 @@ async function embedPhotos(pdf: PDFDocument, content: BrochureContent): Promise<
   const urls = brochurePhotoUrls(content.heroUrl, content.galleryUrls, content.trackMapUrl)
   const photos: PDFImage[] = []
   for (const [index, url] of urls.slice(0, 1 + INNER_PHOTOS * 2).entries()) {
-    const bytes = await loadImageBytes(url, index === 0 ? 1600 : 1200)
+    const bytes = await loadImageBytes(url, 2400)
     if (!bytes) continue
     const image = await embedRasterImage(pdf, bytes)
     if (image) photos.push(image)
@@ -107,20 +116,34 @@ export function drawBrochureCover(page: PDFPage, content: BrochureContent, fonts
     color: RED,
   })
 
-  const parts = splitProductHeadline(content.productName)
-  y -= HEADING.kickerToTitle + COVER_TYPE.titleSize
-  if (parts.lead) {
-    const lead = fitTitle(parts.lead, fonts.condensed, textWidth, COVER_TYPE.titleSize, COVER_TYPE.titleMin, 3)
-    for (const line of lead.lines) {
-      safeDrawText(page, line, { x, y, size: lead.size, font: fonts.condensed, color: WHITE })
-      y -= lead.size * HEADING.titleLeading
+  const stack = coverTitleStack(content.productName)
+  let titleSize = COVER_TYPE.titleSize
+  while (
+    titleSize > COVER_TYPE.titleMin &&
+    stack.lines.some((line) => fonts.condensed.widthOfTextAtSize(line, titleSize) > textWidth)
+  ) {
+    titleSize -= 1
+  }
+  y -= HEADING.kickerToTitle + titleSize
+  stack.lines.forEach((line, index) => {
+    const sharedAccent = stack.accentLine < 0 && index === stack.lines.length - 1 && coverAccentSharesLine(line.split(/\s+/).at(-1) ?? "")
+    if (sharedAccent) {
+      const accent = line.split(/\s+/).at(-1) ?? ""
+      const white = line.slice(0, line.length - accent.length).trimEnd()
+      safeDrawText(page, white, { x, y, size: titleSize, font: fonts.condensed, color: WHITE })
+      const accentX = x + fonts.condensed.widthOfTextAtSize(`${white} `, titleSize)
+      safeDrawText(page, accent, { x: accentX, y, size: titleSize, font: fonts.condensed, color: RED })
+    } else {
+      safeDrawText(page, line, {
+        x,
+        y,
+        size: titleSize,
+        font: fonts.condensed,
+        color: index === stack.accentLine ? RED : WHITE,
+      })
     }
-  }
-  const accent = fitTitle(parts.accent, fonts.condensed, textWidth, COVER_TYPE.titleSize, COVER_TYPE.titleMin, 2)
-  for (const line of accent.lines) {
-    safeDrawText(page, line, { x, y, size: accent.size, font: fonts.condensed, color: RED })
-    y -= accent.size * HEADING.titleLeading
-  }
+    y -= titleSize * HEADING.titleLeading
+  })
 
   y -= HEADING.titleToRule
   page.drawRectangle({ x, y: y + 10, width: HEADING.ruleW, height: HEADING.ruleH, color: RED })
@@ -481,14 +504,23 @@ export async function generatePackageBrochurePdf(
     throw new BrochureInsufficientImagesError(photos.length, minPhotos)
   }
 
-  const pages = brochurePagePlan(Boolean(trackMap))
+  const marsaFront = isMarsaBoxBrochure(content.productName)
+  const frontPhotos = marsaFront ? await embedMarsaBoxFrontPhotos(pdf) : null
+  const pages = [
+    ...(marsaFront ? (["intro", "index"] as const) : []),
+    ...brochurePagePlan(Boolean(trackMap)),
+    ...(marsaFront ? (["closing"] as const) : []),
+  ]
   const pageCount = pages.length
   const chrome = (page: PDFPage, index: number) => drawChrome(page, fonts, { pageIndex: index, pageCount })
 
   for (const [index, kind] of pages.entries()) {
     const page = pdf.addPage(PAGE)
     drawBackground(page, background)
-    if (kind === "cover") drawBrochureCover(page, content, fonts, photos)
+    if (kind === "intro") drawMarsaBoxIntro(page, fonts, frontPhotos?.intro ?? null, frontPhotos?.logo ?? null)
+    else if (kind === "index") drawMarsaBoxIndex(page, fonts, frontPhotos?.badges ?? null)
+    else if (kind === "closing") drawMarsaBoxClosing(page, fonts, frontPhotos?.logo ?? null)
+    else if (kind === "cover") drawBrochureCover(page, content, fonts, photos)
     else if (kind === "experience") drawExperience(page, content, fonts, splitInnerPhotos(photos).experience)
     else if (kind === "included") drawIncluded(page, content, fonts, splitInnerPhotos(photos).included)
     else if (trackMap) drawCircuit(page, content, fonts, trackMap)

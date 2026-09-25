@@ -136,7 +136,35 @@ export function splitProductHeadline(name: string): { lead: string; accent: stri
     .filter(Boolean)
   if (words.length === 0) return { lead: "HOSPITALITY", accent: "EXPERIENCE" }
   if (words.length === 1) return { lead: "", accent: words[0] }
+  if (words.length >= 2 && words.at(-2) === "BY" && words.at(-1) === "ZK") {
+    return { lead: words.slice(0, -2).join(" "), accent: "BY ZK" }
+  }
   return { lead: words.slice(0, -1).join(" "), accent: words[words.length - 1] ?? "" }
+}
+
+/** A trailing number stays with the title on two lines, instead of sitting alone underneath. */
+export function coverAccentSharesLine(accent: string): boolean {
+  return /^\d{1,2}$/.test(accent.trim())
+}
+
+/** Cover title lines at one size. A leading "3 DAY" stays together. The accent is the last line. */
+export function coverTitleStack(name: string): { lines: string[]; accentLine: number } {
+  const parts = splitProductHeadline(name)
+  const leadWords = parts.lead.split(/\s+/).filter(Boolean)
+  const lines: string[] = []
+  const duration = leadWords.length >= 2 && /^\d+$/.test(leadWords[0]) && /^DAYS?$/.test(leadWords[1])
+  if (duration) {
+    lines.push(`${leadWords[0]} ${leadWords[1]}`)
+    lines.push(...leadWords.slice(2))
+  } else {
+    lines.push(...leadWords)
+  }
+  if (coverAccentSharesLine(parts.accent) && lines.length > 0) {
+    lines[lines.length - 1] = `${lines[lines.length - 1]} ${parts.accent}`
+    return { lines: lines.filter(Boolean), accentLine: -1 }
+  }
+  if (parts.accent) lines.push(parts.accent)
+  return { lines: lines.filter(Boolean), accentLine: lines.length - 1 }
 }
 
 export type BrochureIncludeItem = {
