@@ -22,7 +22,7 @@ describe("marketing deal source", () => {
     assert.equal(DEAL_SOURCES.includes("marketing"), true)
     assert.equal(DEAL_SOURCES.includes("whatsapp"), true)
     assert.equal(DEAL_SOURCES.includes("email"), true)
-    assert.equal(DEAL_SOURCES.includes("offline"), false)
+    assert.equal((DEAL_SOURCES as readonly string[]).includes("offline"), false)
     assert.equal(DEAL_SOURCE_LABELS.whatsapp, "WhatsApp")
     assert.equal(DEAL_SOURCE_LABELS.email, "Email")
     assert.equal(DEAL_SOURCE_LABELS.marketing, "Marketing")

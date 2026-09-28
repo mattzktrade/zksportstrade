@@ -186,15 +186,17 @@ async function readSnapshotRows(reader: DealReader, dealIds: string[], columns: 
 }
 
 export async function loadSourcingEnquirySnapshots(
-  reader: DealReader,
+  // `object` on purpose. A structural DealReader makes tsc recurse through SupabaseClient.from.
+  reader: object,
   dealIds: string[],
 ): Promise<Map<string, SourcingEnquirySnapshot>> {
   const ids = [...new Set(dealIds.map((id) => id.trim()).filter(Boolean))]
   const snapshots = new Map<string, SourcingEnquirySnapshot>()
   if (ids.length === 0) return snapshots
+  const dealReader = reader as DealReader
 
   try {
-    const rows = (await readSnapshotRows(reader, ids, RICH_SELECT)) ?? (await readSnapshotRows(reader, ids, PLAIN_SELECT))
+    const rows = (await readSnapshotRows(dealReader, ids, RICH_SELECT)) ?? (await readSnapshotRows(dealReader, ids, PLAIN_SELECT))
     for (const row of rows ?? []) {
       const snapshot = sourcingEnquirySnapshotFromRow(row)
       if (snapshot) snapshots.set(snapshot.id, snapshot)
