@@ -1,4 +1,4 @@
-import { getResendApiKey, getResendFromAddress, stripSurroundingQuotes } from "@/lib/email/config"
+import { DEFAULT_MARKETING_OUTREACH_FROM, getResendApiKey, stripSurroundingQuotes } from "@/lib/email/config"
 
 function trimEnv(name: string): string | undefined {
   const value = process.env[name]?.trim()
@@ -45,5 +45,5 @@ export function getWhatsAppAppSecret(): string | undefined {
 export function isMarketingOutreachEmailConfigured(): boolean {
   if (!getResendApiKey()) return false
   const dedicated = stripSurroundingQuotes(process.env.MARKETING_OUTREACH_FROM?.trim() ?? "")
-  return Boolean(dedicated || getResendFromAddress())
+  return Boolean(dedicated || DEFAULT_MARKETING_OUTREACH_FROM)
 }

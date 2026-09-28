@@ -1,14 +1,19 @@
 import { Resend } from "resend"
-import { NEVER_CC_ADDRESSES, getResendApiKey, getResendFromAddress, stripSurroundingQuotes } from "@/lib/email/config"
+import {
+  DEFAULT_MARKETING_OUTREACH_FROM,
+  NEVER_CC_ADDRESSES,
+  getResendApiKey,
+  stripSurroundingQuotes,
+} from "@/lib/email/config"
 import { outreachPlainTextToHtml } from "@/lib/integrations/marketing-leads/outreach-render"
 
 export type MarketingOutreachEmailResult =
   | { ok: true; id: string | null }
   | { ok: false; skipped?: string; error?: string }
 
-function marketingFromAddress(): string | null {
+function marketingFromAddress(): string {
   const dedicated = stripSurroundingQuotes(process.env.MARKETING_OUTREACH_FROM?.trim() ?? "")
-  return dedicated || getResendFromAddress()
+  return dedicated || DEFAULT_MARKETING_OUTREACH_FROM
 }
 
 export async function sendMarketingOutreachEmail(input: {

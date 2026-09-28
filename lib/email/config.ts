@@ -10,6 +10,7 @@ export function stripSurroundingQuotes(value: string): string {
   return v
 }
 
+export const DEFAULT_MARKETING_OUTREACH_FROM = "ZK Sports <sales@zk-sports.com>"
 export const DEFAULT_FINANCE_CC = "finance@zk-sports.com"
 export const DEFAULT_BOOKINGS_CC = "bookings@zk-sports.com"
 export const DEFAULT_CHELLEY_CC = "chelley@zk-sports.com"
