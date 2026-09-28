@@ -26,6 +26,7 @@ import { loadSourcingEnquirySnapshots } from "@/lib/crm/sourcing-notifications"
 import { executeBookingApproval } from "@/lib/booking-approval/execute-approval"
 import { mapPlaceOrderError } from "@/lib/orders/place-order-errors"
 import { getPortalProfile } from "@/lib/supabase/profile"
+import { withTimeout } from "@/lib/supabase/session-guard"
 import { hasCmsPermission, isCmsStaff, type CmsPermission } from "@/lib/auth/permissions"
 import { applyDealLedgerImportBatch } from "@/lib/crm/imports/deal-ledger-apply"
 import { isInvoiceWorkflowStatus, normalizeInvoiceStatus, type InvoiceWorkflowStatus } from "@/lib/invoices/status"
@@ -295,7 +296,7 @@ async function enqueueLinkedInventoryChannelSync(
   }
 }
 
-/** After cost-layer add/remove/resize, recompute linked pool from layers and push Stock to SF. */
+/** After cost-layer add/remove/resize, push a standalone package to Wix. Linked groups are already updated in the database. */
 async function reconcileInventoryAfterCostLayerChange(
   supabase: Awaited<ReturnType<typeof createClient>>,
   packageId: string,
@@ -311,15 +312,8 @@ async function reconcileInventoryAfterCostLayerChange(
   const groupId = (pkgMeta as { inventory_group_id?: string | null } | null)?.inventory_group_id?.trim()
 
   if (groupId) {
-    // Heal pushes SF Stock/Available for the whole group and Wix inventory — do not also
-    // enqueue product.upsert for every sibling/shell (that burned Salesforce TotalRequests).
-    const { healLinkedGroupInBackground } = await import("@/lib/inventory/linked-group-inventory")
-    await healLinkedGroupInBackground(groupId).catch((e) => {
-      console.warn(
-        "[admin] heal after cost-layer change failed:",
-        e instanceof Error ? e.message : e,
-      )
-    })
+    // Linked stock is updated in the database when the layer changes.
+    // Salesforce is retired, so do not rewrite the group or call out to it here.
     return
   }
 
@@ -2673,6 +2667,17 @@ export async function updateCostLayer(input: {
     received = d.toISOString()
   }
   const { supabase } = gate
+  let previousUnitCost: number | null = null
+  if (cost != null) {
+    const { data: before } = await supabase
+      .from("package_cost_layers")
+      .select("unit_cost")
+      .eq("id", layerId)
+      .maybeSingle()
+    const rawCost = (before as { unit_cost?: number | string | null } | null)?.unit_cost
+    const parsed = rawCost == null ? null : Number(rawCost)
+    if (parsed != null && Number.isFinite(parsed)) previousUnitCost = parsed
+  }
   const { error } = await supabase.rpc("admin_update_cost_layer", {
     p_layer_id: layerId,
     p_unit_cost: cost,
@@ -2682,6 +2687,26 @@ export async function updateCostLayer(input: {
     p_cascade_to_consumptions: input.cascadeToConsumptions ?? true,
   })
   if (error) return { ok: false, message: error.message }
+
+  if (cost != null && previousUnitCost != null && Math.abs(previousUnitCost - cost) >= 0.000001) {
+    const { error: clearErr } = await supabase.rpc("admin_set_cost_layer_buy_price_confirmed", {
+      p_layer_id: layerId,
+      p_confirmed: false,
+    })
+    if (clearErr) {
+      const clearMessage = clearErr.message.toLowerCase()
+      const migrationMissing =
+        clearMessage.includes("unit_cost_confirmed") ||
+        clearMessage.includes("could not find") ||
+        clearMessage.includes("does not exist")
+      if (!migrationMissing) {
+        return {
+          ok: false,
+          message: "Buy price was saved, but its confirmation could not be cleared. Try again.",
+        }
+      }
+    }
+  }
 
   const purchaseFieldsProvided =
     input.purchaseOrderSupplierAccountId !== undefined ||
@@ -3786,6 +3811,74 @@ export async function setPurchaseOrderPaid(input: {
   return { ok: true }
 }
 
+function buyPriceConfirmationMessage(message: string): string {
+  const detail = message.toLowerCase()
+  if (detail.includes("purchase_order_not_found")) return "Purchase order not found."
+  if (detail.includes("cost_layer_not_found")) return "Stock line not found."
+  if (detail.includes("buy_price_already_recorded")) {
+    return "This line already has a buy price above zero, so it is already included in profit and loss."
+  }
+  if (detail.includes("no_zero_buy_price")) {
+    return "This purchase order has no zero buy price to confirm."
+  }
+  if (detail.includes("purchase_order_required")) {
+    return "Link this stock to a purchase order before confirming the buy price."
+  }
+  if (detail.includes("forbidden")) return "You do not have permission to confirm this buy price."
+  if (
+    detail.includes("unit_cost_confirmed") ||
+    detail.includes("could not find") ||
+    detail.includes("does not exist")
+  ) {
+    return "Apply the latest database migration to confirm buy prices."
+  }
+  return message
+}
+
+function revalidateBuyPriceConfirmation() {
+  revalidateAdminProfitPaths()
+  revalidatePath("/admin/purchase-orders")
+  revalidatePath("/admin")
+}
+
+/** Tick every zero buy price on a purchase order as the real cost, or clear that tick. */
+export async function setPurchaseOrderBuyPriceConfirmed(input: {
+  id: string
+  confirmed: boolean
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  const id = input.id.trim()
+  if (!UUID_RE.test(id)) return { ok: false, message: "Invalid purchase order id." }
+
+  const { error } = await gate.supabase.rpc("admin_set_purchase_order_buy_price_confirmed", {
+    p_purchase_order_id: id,
+    p_confirmed: input.confirmed,
+  })
+  if (error) return { ok: false, message: buyPriceConfirmationMessage(error.message) }
+  revalidateBuyPriceConfirmation()
+  return { ok: true }
+}
+
+/** Tick one stock line's zero buy price as the real cost, or clear that tick. */
+export async function setCostLayerBuyPriceConfirmed(input: {
+  layerId: string
+  confirmed: boolean
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  const layerId = input.layerId.trim()
+  if (!UUID_RE.test(layerId)) return { ok: false, message: "Invalid stock line id." }
+
+  const { error } = await gate.supabase.rpc("admin_set_cost_layer_buy_price_confirmed", {
+    p_layer_id: layerId,
+    p_confirmed: input.confirmed,
+  })
+  if (error) return { ok: false, message: buyPriceConfirmationMessage(error.message) }
+  revalidateBuyPriceConfirmation()
+  return { ok: true }
+}
+
 export async function setPurchaseOrderContractInvoiceReceived(input: {
   id: string
   received: boolean
@@ -4173,10 +4266,16 @@ export async function fetchAdminPackageForCatalogExpand(
     breakdowns.set(lp.id, lp.sales_breakdown)
   }
 
-  await enrichPackageSalesBreakdownWithOpenPipeline(breakdowns, [
-    { id: pkg.id, salesforce_product_id: pkg.salesforce_product_id ?? null },
-    ...linkedPackages.map((p) => ({ id: p.id, salesforce_product_id: p.salesforce_product_id })),
-  ])
+  const enriched = await withTimeout(
+    enrichPackageSalesBreakdownWithOpenPipeline(breakdowns, [
+      { id: pkg.id, salesforce_product_id: pkg.salesforce_product_id ?? null },
+      ...linkedPackages.map((p) => ({ id: p.id, salesforce_product_id: p.salesforce_product_id })),
+    ]),
+    4_000,
+  )
+  if (!enriched.ok) {
+    console.warn("[admin] Salesforce sales breakdown enrich timed out; showing portal figures.")
+  }
 
   return { pkg, linkedPackages, wixListings }
 }

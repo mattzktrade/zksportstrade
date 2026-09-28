@@ -64,6 +64,8 @@ test("admin dashboard is titled Dashboard, not Directors Dashboard", () => {
   assert.match(ui, /Pending users/)
   assert.match(ui, /Booking forms awaiting approval/)
   assert.match(ui, /Approvals & action needed/)
+  assert.match(ui, /Purchase orders awaiting buy price/)
+  assert.match(ui, /PURCHASE_ORDERS_AWAITING_BUY_PRICE_HREF/)
   assert.doesNotMatch(ui, /Pending user approvals/)
   assert.match(ui, /Recent confirmed deals/)
   assert.doesNotMatch(ui, /Key numbers at a glance/)
@@ -144,6 +146,7 @@ test("admin dashboard model uses live confirmed sales and open pipeline", () => 
     bookingFormsAwaiting: 7,
     bookingFormsHref: "/admin/deals?pipeline=awaiting_approval",
     negativeStock: 2,
+    purchaseOrdersAwaitingBuyPrice: 6,
     sourcingRequired: 4,
     activeHolds: 10,
     workflowRows: [
@@ -184,6 +187,7 @@ test("admin dashboard model uses live confirmed sales and open pipeline", () => 
   assert.equal(view.paddockRequests, 12)
   assert.equal(view.bookingFormsAwaiting, 7)
   assert.equal(view.sourcingRequired, 4)
+  assert.equal(view.purchaseOrdersAwaitingBuyPrice, 6)
   assert.equal(view.revenue, 245000)
   assert.equal(view.profit, 49000)
   assert.equal(view.confirmedDeals, 1)

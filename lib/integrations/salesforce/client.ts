@@ -1,6 +1,9 @@
 import { getSalesforceAccessToken } from "@/lib/integrations/salesforce/auth"
 import { getSalesforceConfig } from "@/lib/integrations/salesforce/config"
 
+/** One Salesforce HTTP call. Long enough for a real query, short enough that a hung call cannot pin a page. */
+export const SALESFORCE_REQUEST_TIMEOUT_MS = 12_000
+
 export class SalesforceApiError extends Error {
   constructor(
     message: string,
@@ -15,7 +18,7 @@ export class SalesforceApiError extends Error {
 export async function salesforceRequest<T = unknown>(
   method: string,
   path: string,
-  options?: { body?: Record<string, unknown>; instanceUrl?: string },
+  options?: { body?: Record<string, unknown>; instanceUrl?: string; timeoutMs?: number },
 ): Promise<T> {
   const { accessToken, instanceUrl: tokenInstance } = await getSalesforceAccessToken()
   const config = getSalesforceConfig(options?.instanceUrl ?? tokenInstance)
@@ -26,6 +29,7 @@ export async function salesforceRequest<T = unknown>(
     ? path
     : `${base}/services/data/${config.apiVersion}${path.startsWith("/") ? path : `/${path}`}`
 
+  const timeoutMs = options?.timeoutMs ?? SALESFORCE_REQUEST_TIMEOUT_MS
   const res = await fetch(url, {
     method,
     headers: {
@@ -34,6 +38,7 @@ export async function salesforceRequest<T = unknown>(
       Accept: "application/json",
     },
     body: options?.body ? JSON.stringify(options.body) : undefined,
+    signal: AbortSignal.timeout(timeoutMs),
   })
 
   const text = await res.text()
@@ -58,8 +63,13 @@ export async function salesforceRequest<T = unknown>(
 
 export async function salesforceQuery<T extends Record<string, unknown>>(
   soql: string,
+  options?: { timeoutMs?: number },
 ): Promise<T[]> {
   const encoded = encodeURIComponent(soql.replace(/\s+/g, " ").trim())
-  const result = await salesforceRequest<{ records: T[]; done: boolean }>("GET", `/query?q=${encoded}`)
+  const result = await salesforceRequest<{ records: T[]; done: boolean }>(
+    "GET",
+    `/query?q=${encoded}`,
+    { timeoutMs: options?.timeoutMs },
+  )
   return result.records ?? []
 }

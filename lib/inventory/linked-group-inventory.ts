@@ -1092,8 +1092,9 @@ export async function repairAllDriftedLinkedGroupsFromSalesforce(
 }
 
 /**
- * Background heal for a single linked group (package detail page). No-op when SF is
- * disconnected or the group is already in sync.
+ * Linked-group stock rewrite. Salesforce is retired, so this only reconciles from
+ * portal sales. Do not call it while rendering or saving a product — that rewrite
+ * was what made the admin page stall. Explicit repair actions may still call it.
  */
 export async function healLinkedGroupInBackground(groupId: string): Promise<boolean> {
   const gid = groupId.trim()

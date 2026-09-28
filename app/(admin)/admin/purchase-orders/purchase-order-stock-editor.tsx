@@ -4,7 +4,13 @@ import { useEffect, useMemo, useState, useTransition, type ReactNode } from "rea
 import Link from "next/link"
 import { Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
-import { addCostLayer, deleteCostLayer, updateCostLayer, updateCostLayerQuantity } from "@/app/(admin)/actions"
+import {
+  addCostLayer,
+  deleteCostLayer,
+  setCostLayerBuyPriceConfirmed,
+  updateCostLayer,
+  updateCostLayerQuantity,
+} from "@/app/(admin)/actions"
 import { SearchableSelect } from "@/components/admin/searchable-select"
 import { adminPackagePath } from "@/lib/admin/package-link"
 import type { PurchaseOrderProductOption, PurchaseOrderStockLine } from "@/lib/admin/purchase-orders"
@@ -227,6 +233,21 @@ export function PurchaseOrderStockEditor({
     { qty: 0, amount: 0 },
   )
 
+  function confirmLine(line: PurchaseOrderStockLine, confirmed: boolean) {
+    start(async () => {
+      const res = await setCostLayerBuyPriceConfirmed({
+        layerId: line.layerId,
+        confirmed,
+      })
+      if (!res.ok) {
+        toast.error(res.message)
+        return
+      }
+      toast.success(confirmed ? "Buy price confirmed." : "Buy price confirmation cleared.")
+      onChanged()
+    })
+  }
+
   function saveLine(line: PurchaseOrderStockLine) {
     const draft = draftFor(line)
     const qty = Math.floor(Number(draft.qty))
@@ -336,7 +357,7 @@ export function PurchaseOrderStockEditor({
   return (
     <ProductLinesChrome
       title="Products"
-      hint="Edit quantity and buy price directly. Save a line after you change it."
+      hint="Edit quantity and buy price, then save the line. Tick confirmed buy price when zero is the real cost so profit and loss includes it."
       totals={{ qty: totals.qty, amount: Math.round(totals.amount * 100) / 100 }}
     >
       {lines.map((line) => {
@@ -374,6 +395,20 @@ export function PurchaseOrderStockEditor({
                 inputMode="decimal"
                 className={inputClass}
               />
+              {line.unitCost === 0 && Number(draft.cost) === 0 ? (
+                <label className="mt-1.5 flex items-center gap-1.5 text-[10px] font-medium text-[#3d4148]">
+                  <input
+                    type="checkbox"
+                    checked={line.unitCostConfirmed}
+                    disabled={pending}
+                    aria-label={`Confirmed buy price for ${line.packageName}`}
+                    title="Tick when zero is the real buy price. Profit and loss will include it."
+                    onChange={(event) => confirmLine(line, event.target.checked)}
+                    className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-primary disabled:cursor-wait"
+                  />
+                  Confirmed buy price
+                </label>
+              ) : null}
             </td>
             <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
               {total != null ? formatMoney(line.currency, total) : "—"}

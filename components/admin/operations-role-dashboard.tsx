@@ -1,9 +1,10 @@
 import type { ReactNode } from "react"
 import Link from "next/link"
-import { AlertTriangle, Banknote, ChevronRight, CircleDollarSign, Truck } from "lucide-react"
+import { AlertTriangle, Banknote, ChevronRight, CircleDollarSign, Receipt, Truck } from "lucide-react"
 import { OperationsDashboardCalendar } from "@/components/admin/operations-dashboard-calendar"
 import { getOperationsDashboardModel } from "@/lib/admin/operations-dashboard-model"
 import type { OperationsDashboardModel } from "@/lib/admin/operations-dashboard-metrics"
+import { PURCHASE_ORDERS_AWAITING_BUY_PRICE_HREF } from "@/lib/admin/purchase-order-buy-price"
 import { formatMoneyCompact } from "@/lib/format/money"
 import { cn } from "@/lib/utils"
 
@@ -73,6 +74,13 @@ function OperationsDashboardView({ data }: { data: OperationsDashboardModel }) {
       href: "/admin/inventory/negative-stock",
     },
     {
+      icon: Receipt,
+      value: data.purchaseOrdersAwaitingBuyPrice,
+      label: "Purchase orders awaiting buy price",
+      hint: "Tick a zero when it is the real cost",
+      href: PURCHASE_ORDERS_AWAITING_BUY_PRICE_HREF,
+    },
+    {
       icon: Banknote,
       value: data.overdueSupplierPayments,
       label: "Overdue supplier payments",
@@ -91,7 +99,7 @@ function OperationsDashboardView({ data }: { data: OperationsDashboardModel }) {
         <p className="text-[11px] text-[#9aa0a6] sm:pt-1.5">{data.generatedAtLabel}</p>
       </header>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {glance.map((card) => {
           const Icon = card.icon
           return (

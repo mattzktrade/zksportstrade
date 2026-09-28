@@ -10,7 +10,6 @@ import { inferPackageDurationFromName, isValidPackageDuration } from "@/lib/cata
 import { isPaddockClubPackageName } from "@/lib/catalog/paddock-club"
 import { enqueuePackageInventoryChannelSync } from "@/lib/integrations/enqueue"
 import { recordPurchaseLedgerForLatestLayer } from "@/lib/inventory/ledger"
-import { healLinkedGroupInBackground } from "@/lib/inventory/linked-group-inventory"
 import {
   normalizeMatchText,
   parsePurchaseBulkCsv,
@@ -516,7 +515,6 @@ export async function applyPurchaseBulkUpload(formData: FormData): Promise<Apply
   const createdPackageIds = new Map<string, string>()
   const attachedContracts = new Set<string>()
   const touchedPackages = new Set<string>()
-  const touchedGroups = new Set<string>()
   let created = 0
   let packagesCreated = 0
   let contractsAttached = 0
@@ -596,8 +594,6 @@ export async function applyPurchaseBulkUpload(formData: FormData): Promise<Apply
 
       existingKeys.add(dedupe)
       touchedPackages.add(packageId)
-      const pkg = catalog.packages.find((item) => item.id === packageId)
-      if (pkg?.inventoryGroupId) touchedGroups.add(pkg.inventoryGroupId)
 
       try {
         await recordPurchaseLedgerForLatestLayer(gate.supabase, packageId, row.quantity, {
@@ -624,15 +620,6 @@ export async function applyPurchaseBulkUpload(formData: FormData): Promise<Apply
     if (bfErr) {
       console.warn("[purchase-bulk-upload] cost backfill skipped:", bfErr.message)
     }
-  }
-
-  for (const groupId of touchedGroups) {
-    await healLinkedGroupInBackground(groupId).catch((error) => {
-      console.warn(
-        "[purchase-bulk-upload] linked-group heal skipped:",
-        error instanceof Error ? error.message : error,
-      )
-    })
   }
 
   for (const packageId of touchedPackages) {

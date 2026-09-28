@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect } from "react"
 import { PROFILE_LOAD_TIMEOUT_MESSAGE } from "@/lib/supabase/session-guard"
 
 export default function RootError({
@@ -10,6 +11,10 @@ export default function RootError({
   reset: () => void
 }) {
   const timedOut = error.message === PROFILE_LOAD_TIMEOUT_MESSAGE
+
+  useEffect(() => {
+    console.error("[page] failed to finish loading:", error)
+  }, [error])
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-[#f7f8fa] px-6 text-center">

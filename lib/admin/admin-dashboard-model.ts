@@ -1,6 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache"
 import { bookingFormsAwaitingApprovalHref } from "@/lib/admin/deal-link"
 import { getNegativeStockRows } from "@/lib/admin/negative-stock-query"
+import { countPurchaseOrdersAwaitingBuyPrice } from "@/lib/admin/purchase-orders"
 import { getFinanceWorkflowRows } from "@/lib/admin/workflow-views"
 import { countPendingBookingApprovalRequests } from "@/lib/booking-approval/queries"
 import { listNativeBookingFormsAwaitingApprovalDealIds } from "@/lib/booking-forms/queries"
@@ -73,6 +74,7 @@ export async function getAdminDashboardModel(): Promise<AdminDashboardModel> {
     paddockRequests,
     bookingFormDealIds,
     negativeStockRows,
+    purchaseOrdersAwaitingBuyPrice,
     workflowRows,
     pipelineResult,
     sourcingRequired,
@@ -82,6 +84,7 @@ export async function getAdminDashboardModel(): Promise<AdminDashboardModel> {
     countPendingBookingApprovalRequests(),
     listNativeBookingFormsAwaitingApprovalDealIds(),
     getNegativeStockRows(),
+    countPurchaseOrdersAwaitingBuyPrice(),
     getFinanceWorkflowRows(),
     fetchAllRows<DealPipelineRow>((from, to) =>
       supabase
@@ -106,6 +109,7 @@ export async function getAdminDashboardModel(): Promise<AdminDashboardModel> {
     bookingFormsAwaiting: bookingFormDealIds.length,
     bookingFormsHref: bookingFormsAwaitingApprovalHref(bookingFormDealIds),
     negativeStock: negativeStockRows.length,
+    purchaseOrdersAwaitingBuyPrice,
     sourcingRequired,
     activeHolds: activeHolds ?? 0,
     workflowRows: workflowRows.map(toSaleRow),

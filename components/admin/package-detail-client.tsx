@@ -14,7 +14,6 @@ import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
 import type { FulfilmentBlockWithUsage } from "@/lib/admin/fulfilment-blocks"
 import type { PurchaseOrderRow } from "@/lib/admin/purchase-orders"
 import { adminPackagePath, type AdminPackageTab } from "@/lib/admin/package-link"
-import { fetchAdminPackageForCatalogExpand } from "@/app/(admin)/actions"
 import { PackageAdminPanel } from "@/components/admin/package-admin-panel"
 import { PackageGuestList } from "@/components/admin/package-guest-list"
 import { PackageOrdersTable } from "@/components/admin/package-orders-table"
@@ -132,13 +131,7 @@ export function PackageDetailClient({
     setActiveTab(initialTab)
   }, [initialTab])
 
-  async function refreshInventory() {
-    const full = await fetchAdminPackageForCatalogExpand(livePkg.id)
-    if (full) {
-      setLivePkg(full.pkg)
-      setLiveLinkedPackages(full.linkedPackages)
-      setLiveWixListings(full.wixListings)
-    }
+  function refreshInventory() {
     router.refresh()
   }
 

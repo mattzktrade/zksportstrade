@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, ArrowUpDown, CircleAlert, CircleDollarSign, Clock3, PackageCheck, Upload } from "lucide-react"
+import { AlertTriangle, ArrowUpDown, CircleAlert, CircleDollarSign, Clock3, PackageCheck, Receipt, Upload } from "lucide-react"
 import { toast } from "sonner"
 import {
   createPurchaseOrder,
   deletePurchaseOrder,
   deletePurchaseOrderDocument,
   getPurchaseOrderDocumentDownloadUrl,
+  setPurchaseOrderBuyPriceConfirmed,
   setPurchaseOrderContractInvoiceReceived,
   setPurchaseOrderPaid,
   updatePurchaseOrder,
@@ -18,6 +19,11 @@ import {
 import { PurchaseBulkUploadModal } from "@/app/(admin)/admin/purchase-orders/bulk-upload-modal"
 import { adminPackagePath } from "@/lib/admin/package-link"
 import { purchaseOrderHasContractInvoice } from "@/lib/admin/purchase-order-contract-invoice"
+import {
+  purchaseOrderBuyPriceState,
+  type PurchaseOrderBuyPriceFilter,
+  type PurchaseOrderBuyPriceState,
+} from "@/lib/admin/purchase-order-buy-price"
 import {
   calendarTodayIso,
   purchaseOrderIsPaid,
@@ -36,11 +42,12 @@ import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filter
 import { pageSearchProps } from "@/lib/browser/laptop-qol"
 
 const STOCK_PREVIEW_LIMIT = 3
-const PO_TABLE_COLSPAN = 12
+const PO_TABLE_COLSPAN = 13
 
 type SortKey = "poNumber" | "issuedAt" | "paymentDue"
 type AttachedFilter = "" | "yes" | "no"
 type PaymentFilter = "" | PurchaseOrderPaymentFilter
+type BuyPriceFilter = "" | PurchaseOrderBuyPriceFilter
 
 type PoFilters = {
   search: string
@@ -49,6 +56,7 @@ type PoFilters = {
   product: string
   attached: AttachedFilter
   payment: PaymentFilter
+  buyPrice: BuyPriceFilter
 }
 
 const EMPTY_FILTERS: PoFilters = {
@@ -58,6 +66,7 @@ const EMPTY_FILTERS: PoFilters = {
   product: "",
   attached: "",
   payment: "",
+  buyPrice: "",
 }
 
 const DEFAULT_PO_LIST = {
@@ -106,12 +115,14 @@ export function PurchaseOrdersClient({
   products,
   initialPo = null,
   initialPayment = null,
+  initialBuyPrice = null,
 }: {
   orders: PurchaseOrderWithMeta[]
   companies: CrmCompanyOption[]
   products: PurchaseOrderProductOption[]
   initialPo?: string | null
   initialPayment?: PurchaseOrderPaymentFilter | null
+  initialBuyPrice?: PurchaseOrderBuyPriceFilter | null
 }) {
   const router = useRouter()
   const [pending, start] = useTransition()
@@ -124,13 +135,21 @@ export function PurchaseOrdersClient({
   const [listState, setListState] = usePersistedAdminFilters(
     "zk-admin-po-filters-v1",
     DEFAULT_PO_LIST,
-    initialPayment
-      ? { override: { payment: initialPayment, sortKey: "paymentDue" as SortKey, sortDescending: false } }
+    initialPayment || initialBuyPrice
+      ? {
+          override: {
+            ...(initialPayment
+              ? { payment: initialPayment, sortKey: "paymentDue" as SortKey, sortDescending: false }
+              : {}),
+            ...(initialBuyPrice ? { buyPrice: initialBuyPrice } : {}),
+          },
+        }
       : undefined,
   )
   const { sortKey, sortDescending, ...filters } = listState
   const [optimisticReceived, setOptimisticReceived] = useState<Record<string, boolean>>({})
   const [optimisticPaidAt, setOptimisticPaidAt] = useState<Record<string, string | null>>({})
+  const [optimisticBuyPrice, setOptimisticBuyPrice] = useState<Record<string, boolean>>({})
 
   // Create form state
   const [newPoNumber, setNewPoNumber] = useState("")
@@ -207,6 +226,18 @@ export function PurchaseOrdersClient({
     return { ...po, paid_at: optimisticPaidAt[po.id] ?? null }
   }
 
+  function buyPriceLines(po: PurchaseOrderWithMeta) {
+    if (!Object.prototype.hasOwnProperty.call(optimisticBuyPrice, po.id)) return po.usage.lines
+    const confirmed = optimisticBuyPrice[po.id] === true
+    return po.usage.lines.map((line) =>
+      line.unitCost === 0 ? { ...line, unitCostConfirmed: confirmed } : line,
+    )
+  }
+
+  function buyPriceState(po: PurchaseOrderWithMeta): PurchaseOrderBuyPriceState {
+    return purchaseOrderBuyPriceState(buyPriceLines(po))
+  }
+
   const supplierOptions = useMemo(() => uniqueSorted(orders.map((o) => o.supplier)), [orders])
   const eventOptions = useMemo(
     () => uniqueSorted(orders.flatMap((o) => o.usage.lines.map((line) => line.eventName))),
@@ -222,10 +253,12 @@ export function PurchaseOrdersClient({
     Boolean(filters.event) ||
     Boolean(filters.product) ||
     Boolean(filters.attached) ||
-    Boolean(filters.payment)
+    Boolean(filters.payment) ||
+    Boolean(filters.buyPrice)
   const awaitingDocs = orders.filter((order) => !contractInvoiceReceived(order)).length
   const overduePayments = orders.filter((order) => purchaseOrderPaymentKind(withPayment(order)) === "overdue").length
   const unpaidPayments = orders.filter((order) => !purchaseOrderIsPaid(withPayment(order))).length
+  const awaitingBuyPrice = orders.filter((order) => buyPriceState(order) === "awaiting").length
   const totalUnits = orders.reduce((sum, order) => sum + order.usage.quantity_purchased, 0)
   const remainingUnits = orders.reduce((sum, order) => sum + order.usage.quantity_remaining, 0)
 
@@ -240,6 +273,7 @@ export function PurchaseOrdersClient({
       if (filters.payment === "paid" && paymentKind !== "paid") return false
       if (filters.payment === "unpaid" && paymentKind === "paid") return false
       if (filters.payment === "overdue" && paymentKind !== "overdue") return false
+      if (filters.buyPrice === "awaiting" && buyPriceState(o) !== "awaiting") return false
       const previewLines = matchingStockLines(o.usage.lines, filters)
       if ((filters.event || filters.product) && previewLines.length === 0) return false
       if (!q) return true
@@ -277,7 +311,7 @@ export function PurchaseOrdersClient({
       if (!bDate) return -1
       return dir * aDate.localeCompare(bDate)
     })
-  }, [filters, optimisticPaidAt, optimisticReceived, orders, sortDescending, sortKey])
+  }, [filters, optimisticBuyPrice, optimisticPaidAt, optimisticReceived, orders, sortDescending, sortKey])
 
   const visibleOrders = useMemo(() => {
     if (!focusedPoId) return filteredOrders
@@ -519,9 +553,27 @@ export function PurchaseOrdersClient({
     })
   }
 
+  function toggleBuyPriceConfirmed(po: PurchaseOrderWithMeta, confirmed: boolean) {
+    setOptimisticBuyPrice((current) => ({ ...current, [po.id]: confirmed }))
+    start(async () => {
+      const res = await setPurchaseOrderBuyPriceConfirmed({ id: po.id, confirmed })
+      if (!res.ok) {
+        setOptimisticBuyPrice((current) => {
+          const next = { ...current }
+          delete next[po.id]
+          return next
+        })
+        toast.error(res.message)
+        return
+      }
+      toast.success(confirmed ? "Buy price confirmed." : "Buy price confirmation cleared.")
+      router.refresh()
+    })
+  }
+
   return (
     <div className="space-y-3">
-      <AdminStats className="sm:grid-cols-2 xl:grid-cols-5">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-3">
         <AdminStatCard icon={PackageCheck} value={orders.length} label="Open purchase orders" tone="blue" />
         <AdminStatCard
           icon={Clock3}
@@ -556,6 +608,24 @@ export function PurchaseOrdersClient({
                 ? { ...current, payment: "" }
                 : { ...current, payment: "overdue", sortKey: "paymentDue", sortDescending: false },
             )
+          }
+        />
+        <AdminStatCard
+          icon={Receipt}
+          value={awaitingBuyPrice}
+          label="Purchase orders awaiting buy price"
+          tone="amber"
+          hint={
+            filters.buyPrice === "awaiting"
+              ? "Showing purchase orders that still need a confirmed buy price"
+              : "Zero counts once you tick confirmed buy price"
+          }
+          active={filters.buyPrice === "awaiting"}
+          onClick={() =>
+            setListState((current) => ({
+              ...current,
+              buyPrice: current.buyPrice === "awaiting" ? "" : "awaiting",
+            }))
           }
         />
         <AdminStatCard icon={CircleDollarSign} value={totalUnits} label="Purchased units tracked" tone="green" />
@@ -631,6 +701,16 @@ export function PurchaseOrdersClient({
           <option value="paid">Paid</option>
         </select>
         <select
+          value={filters.buyPrice}
+          onChange={(e) =>
+            setListState((current) => ({ ...current, buyPrice: e.target.value as BuyPriceFilter }))
+          }
+          className="h-8 max-w-[190px] rounded-md border border-[#e4e6ea] bg-white px-2 text-[9px] text-[#62666e]"
+        >
+          <option value="">All buy prices</option>
+          <option value="awaiting">Awaiting buy price</option>
+        </select>
+        <select
           value={sortKey}
           onChange={(e) => {
             const next = e.target.value as SortKey
@@ -676,6 +756,12 @@ export function PurchaseOrdersClient({
           </button>
         </div>
       </div>
+
+      {filters.buyPrice === "awaiting" ? (
+        <p className="border-b border-[#eceef1] bg-amber-50 px-3 py-2 text-[11px] text-amber-950">
+          These purchase orders still need a buy price. Tick confirmed buy price when the amount, including zero, is the real cost. Confirmed prices are included in profit and loss.
+        </p>
+      ) : null}
 
       {showCreate ? (
         <div className="space-y-4 border-b border-[#eceef1] bg-[#fafbfc] p-4">
@@ -859,6 +945,12 @@ export function PurchaseOrdersClient({
                   {sortKey === "paymentDue" ? <span>{sortDescending ? "↓" : "↑"}</span> : null}
                 </button>
               </th>
+              <th
+                className="px-3 py-2 font-medium whitespace-nowrap"
+                title="Tick when the buy price, including zero, is confirmed"
+              >
+                Buy price
+              </th>
               <th className="px-3 py-2 font-medium">
                 <button
                   type="button"
@@ -939,6 +1031,8 @@ export function PurchaseOrdersClient({
                   onRemoveDocument={removeDocument}
                   onToggleContractInvoice={(received) => toggleContractInvoiceReceived(po, received)}
                   onTogglePaid={(paid) => togglePaid(po, paid)}
+                  buyPriceState={buyPriceState(po)}
+                  onToggleBuyPrice={(confirmed) => toggleBuyPriceConfirmed(po, confirmed)}
                   contractInvoiceReceived={contractInvoiceReceived(po)}
                   onRefresh={() => router.refresh()}
                 />
@@ -1005,6 +1099,22 @@ export function PurchaseOrdersClient({
                   onChange={(received) => toggleContractInvoiceReceived(po, received)}
                 />
                 <span className="text-[10px] font-medium text-slate-700">Contract</span>
+                {buyPriceState(po) === "recorded" ? (
+                  <span className="text-[10px] font-medium text-slate-500">Buy price recorded</span>
+                ) : (
+                  <label className="inline-flex items-center gap-1.5 text-[10px] font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={buyPriceState(po) === "confirmed"}
+                      disabled={pending}
+                      aria-label={`Confirmed buy price for ${po.po_number}`}
+                      title="Tick when the buy price, including zero, is the real cost."
+                      onChange={(event) => toggleBuyPriceConfirmed(po, event.target.checked)}
+                      className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-primary disabled:cursor-wait"
+                    />
+                    Confirmed buy price
+                  </label>
+                )}
                 <button type="button" onClick={() => startEdit(po)} disabled={pending} className="text-[11px] font-medium text-primary disabled:opacity-50">Edit</button>
                 <button type="button" onClick={() => confirmDelete(po)} disabled={pending} className="text-[11px] font-medium text-destructive disabled:opacity-50">Delete</button>
               </div>
@@ -1114,6 +1224,42 @@ function PurchaseOrderPaidCheckbox({
       onChange={(event) => onChange(event.target.checked)}
       className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-primary disabled:cursor-wait"
     />
+  )
+}
+
+function PurchaseOrderBuyPriceCell({
+  poNumber,
+  state,
+  pending,
+  onChange,
+}: {
+  poNumber: string
+  state: PurchaseOrderBuyPriceState
+  pending: boolean
+  onChange: (confirmed: boolean) => void
+}) {
+  if (state === "recorded") {
+    return <span className="text-muted-foreground">Recorded</span>
+  }
+  return (
+    <label className="flex items-start gap-2">
+      <input
+        type="checkbox"
+        checked={state === "confirmed"}
+        disabled={pending}
+        aria-label={`Confirmed buy price for ${poNumber}`}
+        title="Tick when this buy price, including zero, is the real cost. Profit and loss will include it."
+        onClick={(event) => event.stopPropagation()}
+        onChange={(event) => onChange(event.target.checked)}
+        className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-pointer accent-primary disabled:cursor-wait"
+      />
+      <span className="min-w-0">
+        <span className="block font-medium text-[#3d4148]">
+          {state === "confirmed" ? "Confirmed" : "Awaiting"}
+        </span>
+        <span className="mt-0.5 block text-[8px] text-muted-foreground">Includes zero</span>
+      </span>
+    </label>
   )
 }
 
@@ -1304,6 +1450,8 @@ function PurchaseOrderRow({
   onRemoveDocument,
   onToggleContractInvoice,
   onTogglePaid,
+  buyPriceState,
+  onToggleBuyPrice,
   contractInvoiceReceived,
   onRefresh,
 }: {
@@ -1324,6 +1472,8 @@ function PurchaseOrderRow({
   onRemoveDocument: (documentId: string) => void
   onToggleContractInvoice: (received: boolean) => void
   onTogglePaid: (paid: boolean) => void
+  buyPriceState: PurchaseOrderBuyPriceState
+  onToggleBuyPrice: (confirmed: boolean) => void
   contractInvoiceReceived: boolean
   onRefresh: () => void
 }) {
@@ -1388,6 +1538,14 @@ function PurchaseOrderRow({
         </td>
         <td className="px-3 py-2">
           <PurchaseOrderPaymentCell po={po} pending={pending} onTogglePaid={onTogglePaid} />
+        </td>
+        <td className="px-3 py-2">
+          <PurchaseOrderBuyPriceCell
+            poNumber={po.po_number}
+            state={buyPriceState}
+            pending={pending}
+            onChange={onToggleBuyPrice}
+          />
         </td>
         <td className="px-3 py-2 text-muted-foreground">{formatDate(po.issued_at)}</td>
         <td className="px-3 py-2 text-muted-foreground">{formatDate(po.guest_details_deadline)}</td>

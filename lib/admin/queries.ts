@@ -461,7 +461,6 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
     { data: race },
     layersByPkg,
     salesByPkg,
-    sfInventoryByProduct,
     fulfilmentSold,
     guestGuideById,
     faqsById,
@@ -470,7 +469,6 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
     supabase.from("races").select("id,name,season").eq("id", row.race_id).maybeSingle(),
     getCostLayersByPackage([id]),
     getPackageSalesBreakdownByPackage([id]),
-    getSalesforceInventorySnapshotsForPackages([row]),
     loadFulfilmentSoldByCostLayer(supabase, [id]),
     loadGuestGuideFields(supabase, [id], { includeContent: true }),
     loadPackageFaqs(supabase, [id]),
@@ -519,10 +517,7 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
           brokeredShortage: Number(canonical.brokered_shortage_quantity ?? 0),
         }
       : undefined,
-    salesforce_inventory:
-      row.salesforce_product_id?.trim()
-        ? sfInventoryByProduct.get(row.salesforce_product_id.trim()) ?? null
-        : null,
+    salesforce_inventory: null,
   }
   const { data: staffHolds } = await supabase
     .from("inventory_holds")

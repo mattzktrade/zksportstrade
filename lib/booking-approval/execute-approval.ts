@@ -157,7 +157,7 @@ export async function executeBookingApproval(
           (ledgerPkg as { salesforce_product_id?: string | null } | null)?.salesforce_product_id?.trim() ||
           (pkg as { salesforce_product_id?: string | null } | null)?.salesforce_product_id?.trim() ||
           ""
-        if (product2Id) {
+        if (product2Id && isSalesforceConfigured()) {
           const { syncStockSourcesForProduct } = await import(
             "@/lib/integrations/salesforce/stock-sources"
           )
@@ -166,16 +166,6 @@ export async function executeBookingApproval(
             packageId: ledgerPackageId,
             product2Id,
           })
-        }
-        const groupId =
-          typeof (pkg as { inventory_group_id?: string | null } | null)?.inventory_group_id === "string"
-            ? (pkg as { inventory_group_id: string }).inventory_group_id.trim()
-            : ""
-        if (groupId) {
-          const { healLinkedGroupInBackground } = await import(
-            "@/lib/inventory/linked-group-inventory"
-          )
-          await healLinkedGroupInBackground(groupId).catch(() => false)
         }
       } catch (e) {
         console.warn(

@@ -1,6 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
+import { fetchAllRows } from "@/lib/supabase/fetch-all-rows"
 import { createClient } from "@/lib/supabase/server"
 import { linkPurchaseOrderSupplier } from "@/lib/inventory/suppliers"
 import { resolveLinkedStockLedger } from "@/lib/inventory/linked-stock-ledger"
@@ -55,6 +56,8 @@ export type PurchaseOrderStockLine = {
   quantityPurchased: number
   quantityRemaining: number
   unitCost: number
+  /** True when a zero unit cost has been ticked as the real buy price. */
+  unitCostConfirmed: boolean
   currency: string
 }
 
@@ -298,68 +301,76 @@ function normaliseIssuedAt(value: unknown): string | null {
   return s ? s.slice(0, 10) : null
 }
 
-export async function getPurchaseOrders(): Promise<PurchaseOrderRow[]> {
+export async function getPurchaseOrders(ids?: readonly string[]): Promise<PurchaseOrderRow[]> {
   noStore()
+  const wanted = ids ? [...new Set(ids.map((id) => id.trim()).filter(Boolean))] : null
+  if (wanted && wanted.length === 0) return []
+
   const supabase = await createClient()
-  const { data, error } = await supabase
-    .from("purchase_orders")
-    .select(PO_COLUMNS)
-    .order("issued_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
+  const load = async (columns: string) => {
+    const selected = supabase.from("purchase_orders").select(columns)
+    const filtered = wanted ? selected.in("id", wanted) : selected
+    const result = await filtered
+      .order("issued_at", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
+    return {
+      error: result.error,
+      data: (result.data ?? null) as Parameters<typeof mapPurchaseOrderRow>[0][] | null,
+    }
+  }
+
+  const { data, error } = await load(PO_COLUMNS)
   if (!error && data) return data.map((row) => mapPurchaseOrderRow(row))
 
-  const withoutPayment = await supabase
-    .from("purchase_orders")
-    .select(PO_COLUMNS_NO_PAYMENT)
-    .order("issued_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
+  const withoutPayment = await load(PO_COLUMNS_NO_PAYMENT)
   if (!withoutPayment.error && withoutPayment.data) {
     return withoutPayment.data.map((row) => mapPurchaseOrderRow(row))
   }
 
-  const withoutOpsDates = await supabase
-    .from("purchase_orders")
-    .select(PO_COLUMNS_NO_OPS_DATES)
-    .order("issued_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
+  const withoutOpsDates = await load(PO_COLUMNS_NO_OPS_DATES)
   if (!withoutOpsDates.error && withoutOpsDates.data) {
     return withoutOpsDates.data.map((row) => mapPurchaseOrderRow(row))
   }
 
-  const withoutReceived = await supabase
-    .from("purchase_orders")
-    .select(PO_COLUMNS_NO_RECEIVED)
-    .order("issued_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
+  const withoutReceived = await load(PO_COLUMNS_NO_RECEIVED)
   if (!withoutReceived.error && withoutReceived.data) {
     return withoutReceived.data.map((row) => mapPurchaseOrderRow(row))
   }
 
-  const withoutRef = await supabase
-    .from("purchase_orders")
-    .select(PO_COLUMNS_NO_REF)
-    .order("issued_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
+  const withoutRef = await load(PO_COLUMNS_NO_REF)
   if (!withoutRef.error && withoutRef.data) {
     return withoutRef.data.map((row) => mapPurchaseOrderRow({ ...row, supplier_reference: null }))
   }
 
-  const withoutAccount = await supabase
-    .from("purchase_orders")
-    .select(PO_COLUMNS_NO_ACCOUNT)
-    .order("issued_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
+  const withoutAccount = await load(PO_COLUMNS_NO_ACCOUNT)
   if (!withoutAccount.error && withoutAccount.data) {
     return withoutAccount.data.map((row) => mapPurchaseOrderRow(row))
   }
 
-  const fallback = await supabase
-    .from("purchase_orders")
-    .select(PO_COLUMNS_BARE)
-    .order("issued_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
+  const fallback = await load(PO_COLUMNS_BARE)
   if (fallback.error || !fallback.data) return []
   return fallback.data.map((row) => mapPurchaseOrderRow({ ...row, suppliers: null, supplier_reference: null }))
+}
+
+/** Purchase orders linked to cost layers on these packages. Skips the full PO table. */
+export async function getPurchaseOrdersForPackages(packageIds: readonly string[]): Promise<PurchaseOrderRow[]> {
+  const ids = [...new Set(packageIds.map((id) => id.trim()).filter(Boolean))]
+  if (ids.length === 0) return []
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from("package_cost_layers")
+    .select("purchase_order_id")
+    .in("package_id", ids)
+    .not("purchase_order_id", "is", null)
+  if (error || !data) return []
+  const purchaseOrderIds = [
+    ...new Set(
+      data
+        .map((row) => (typeof row.purchase_order_id === "string" ? row.purchase_order_id.trim() : ""))
+        .filter(Boolean),
+    ),
+  ]
+  return getPurchaseOrders(purchaseOrderIds)
 }
 
 export async function getPurchaseOrderById(id: string): Promise<PurchaseOrderRow | null> {
@@ -437,14 +448,40 @@ export async function getPurchaseOrderUsage(
   const out = new Map<string, PurchaseOrderUsage>()
   if (purchaseOrderIds.length === 0) return out
   const supabase = await createClient()
-  const { data, error } = await supabase
+  type UsageLayerRow = {
+    id: string
+    package_id: string
+    purchase_order_id: string
+    quantity: number | string
+    quantity_remaining: number | string
+    unit_cost: number | string | null
+    unit_cost_confirmed?: boolean | null
+    currency: string | null
+    created_at: string
+  }
+  const withConfirmation =
+    "id, package_id, purchase_order_id, quantity, quantity_remaining, unit_cost, unit_cost_confirmed, currency, created_at"
+  const withoutConfirmation =
+    "id, package_id, purchase_order_id, quantity, quantity_remaining, unit_cost, currency, created_at"
+  const first = await supabase
     .from("package_cost_layers")
-    .select("id, package_id, purchase_order_id, quantity, quantity_remaining, unit_cost, currency, created_at")
+    .select(withConfirmation)
     .in("purchase_order_id", purchaseOrderIds)
     .order("created_at", { ascending: true })
+  let data = (first.data ?? null) as UsageLayerRow[] | null
+  let error = first.error
+  if (error && error.message.toLowerCase().includes("unit_cost_confirmed")) {
+    const retry = await supabase
+      .from("package_cost_layers")
+      .select(withoutConfirmation)
+      .in("purchase_order_id", purchaseOrderIds)
+      .order("created_at", { ascending: true })
+    data = (retry.data ?? null) as UsageLayerRow[] | null
+    error = retry.error
+  }
   if (error || !data) return out
 
-  const layersByPo = new Map<string, typeof data>()
+  const layersByPo = new Map<string, UsageLayerRow[]>()
   for (const raw of data) {
     const row = raw as {
       id: string
@@ -508,6 +545,7 @@ export async function getPurchaseOrderUsage(
           quantity: number | string
           quantity_remaining: number | string
           unit_cost: number | string | null
+          unit_cost_confirmed?: boolean | null
           currency: string | null
         }
         const pkg = packageById.get(row.package_id)
@@ -521,6 +559,7 @@ export async function getPurchaseOrderUsage(
           quantityPurchased: Math.max(0, Math.floor(Number(row.quantity) || 0)),
           quantityRemaining: Math.max(0, Math.floor(Number(row.quantity_remaining) || 0)),
           unitCost: Number(row.unit_cost) || 0,
+          unitCostConfirmed: row.unit_cost_confirmed === true,
           currency: String(row.currency ?? "USD") || "USD",
         }
       })
@@ -651,4 +690,34 @@ export async function ensurePurchaseOrdersForPackageLayers(packageId: string): P
     created += 1
   }
   return created
+}
+
+/** Purchase orders with at least one zero buy price that staff have not confirmed. */
+export async function countPurchaseOrdersAwaitingBuyPrice(): Promise<number> {
+  const supabase = await createClient()
+  const confirmed = await fetchAllRows<{ purchase_order_id: string }>((from, to) =>
+    supabase
+      .from("package_cost_layers")
+      .select("purchase_order_id")
+      .eq("unit_cost", 0)
+      .eq("unit_cost_confirmed", false)
+      .not("purchase_order_id", "is", null)
+      .order("id")
+      .range(from, to),
+  )
+  if (!confirmed.error) {
+    return new Set((confirmed.data ?? []).map((row) => row.purchase_order_id).filter(Boolean)).size
+  }
+  if (!confirmed.error.message.toLowerCase().includes("unit_cost_confirmed")) return 0
+  const fallback = await fetchAllRows<{ purchase_order_id: string }>((from, to) =>
+    supabase
+      .from("package_cost_layers")
+      .select("purchase_order_id")
+      .eq("unit_cost", 0)
+      .not("purchase_order_id", "is", null)
+      .order("id")
+      .range(from, to),
+  )
+  if (fallback.error) return 0
+  return new Set((fallback.data ?? []).map((row) => row.purchase_order_id).filter(Boolean)).size
 }

@@ -2,6 +2,7 @@ import nextDynamic from "next/dynamic"
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { getCrmCompanyOptions } from "@/lib/crm/deals"
 import { getPurchaseOrderProductOptions, getPurchaseOrdersWithMeta } from "@/lib/admin/purchase-orders"
+import { isPurchaseOrderBuyPriceFilter } from "@/lib/admin/purchase-order-buy-price"
 import { isPurchaseOrderPaymentFilter } from "@/lib/admin/purchase-order-payment"
 import { PageLoadingSpinner } from "@/components/page-loading-spinner"
 import { AdminPageHeader } from "@/components/admin/admin-page-kit"
@@ -14,12 +15,12 @@ const PurchaseOrdersClient = nextDynamic(
 )
 
 type Props = {
-  searchParams: Promise<{ po?: string; payment?: string }>
+  searchParams: Promise<{ po?: string; payment?: string; buyPrice?: string }>
 }
 
 export default async function AdminPurchaseOrdersPage({ searchParams }: Props) {
   await requireAdmin()
-  const { po, payment } = await searchParams
+  const { po, payment, buyPrice } = await searchParams
   const [orders, companies, products] = await Promise.all([
     getPurchaseOrdersWithMeta(),
     getCrmCompanyOptions(),
@@ -38,6 +39,7 @@ export default async function AdminPurchaseOrdersPage({ searchParams }: Props) {
         products={products}
         initialPo={po ?? null}
         initialPayment={isPurchaseOrderPaymentFilter(payment) ? payment : null}
+        initialBuyPrice={isPurchaseOrderBuyPriceFilter(buyPrice) ? buyPrice : null}
       />
     </div>
   )

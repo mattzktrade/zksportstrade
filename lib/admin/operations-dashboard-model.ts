@@ -55,6 +55,7 @@ function toPurchaseOrderInput(
         eventName: line.eventName,
         quantityPurchased: line.quantityPurchased,
         unitCost: line.unitCost,
+        unitCostConfirmed: line.unitCostConfirmed,
         currency: line.currency,
       })),
     },

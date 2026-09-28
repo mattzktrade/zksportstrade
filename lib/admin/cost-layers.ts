@@ -32,6 +32,11 @@ export type CostConsumptionRow = {
   package_id: string
   quantity: number
   unit_cost: number | null
+  /**
+   * True when a zero snapshot is a confirmed buy price.
+   * Absent or false keeps a zero out of profit and loss.
+   */
+  unit_cost_confirmed?: boolean
   currency: string
   supplier_source_snapshot: string | null
   fulfilment_block_snapshot: string | null
@@ -58,7 +63,7 @@ export type OrderCostSummary = {
   weighted_unit_cost: number | null
   /** Total COGS for the order (sum of qty * unit_cost), null when any unit lacks cost basis. */
   cogs: number | null
-  /** True when any consumption row has unit_cost = NULL (un-priced shortfall). */
+  /** True when every unit has a buy price. A confirmed zero counts; an unconfirmed zero does not. */
   cost_known: boolean
   /** True when consumption currencies don't all match the order currency. */
   currency_consistent: boolean
@@ -223,17 +228,59 @@ export async function getConsumptionsForOrders(
     .select(CONSUMPTION_COLUMNS)
     .in("order_id", orderIds)
   if (error || !data) return out
-  for (const raw of data) {
+  const rows = data.map((raw) => {
     const row = raw as CostConsumptionRow
-    const list = out.get(row.order_id) ?? []
-    list.push({
+    return {
       ...row,
       quantity: Math.floor(n(row.quantity)),
       unit_cost: nNullable(row.unit_cost),
+    }
+  })
+  const confirmedZeroLayers = await loadConfirmedZeroCostLayerIds(
+    supabase,
+    rows.map((row) => row.cost_layer_id),
+  )
+  for (const row of rows) {
+    const list = out.get(row.order_id) ?? []
+    list.push({
+      ...row,
+      unit_cost_confirmed:
+        row.unit_cost === 0 &&
+        row.cost_layer_id != null &&
+        confirmedZeroLayers.has(row.cost_layer_id),
     })
     out.set(row.order_id, list)
   }
   return out
+}
+
+async function loadConfirmedZeroCostLayerIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  layerIds: readonly (string | null)[],
+): Promise<Set<string>> {
+  const ids = [...new Set(layerIds.filter((id): id is string => Boolean(id)))]
+  const confirmed = new Set<string>()
+  if (ids.length === 0) return confirmed
+  for (let i = 0; i < ids.length; i += IN_FILTER_BATCH) {
+    const batch = ids.slice(i, i + IN_FILTER_BATCH)
+    const { data, error } = await supabase
+      .from("package_cost_layers")
+      .select("id")
+      .in("id", batch)
+      .eq("unit_cost", 0)
+      .eq("unit_cost_confirmed", true)
+    if (error || !data) return new Set()
+    for (const raw of data) {
+      const id = String((raw as { id: string }).id)
+      if (id) confirmed.add(id)
+    }
+  }
+  return confirmed
+}
+
+function consumptionLacksBuyPrice(row: CostConsumptionRow): boolean {
+  if (row.unit_cost == null) return true
+  return row.unit_cost === 0 && row.unit_cost_confirmed !== true
 }
 
 export function summarizeOrderCost(
@@ -257,7 +304,7 @@ export function summarizeOrderCost(
   let consistent = true
   for (const c of consumptions) {
     units += c.quantity
-    if (c.unit_cost == null || c.unit_cost === 0) {
+    if (c.unit_cost == null || consumptionLacksBuyPrice(c)) {
       anyMissing = true
       continue
     }
@@ -328,13 +375,13 @@ export type DashboardProfitTotals = {
   cogs: number
   gross_profit: number
   margin: number | null
-  /** Revenue from orders with a complete, non-zero buy price on every unit. */
+  /** Revenue from orders with a complete buy price on every unit. A confirmed zero counts. */
   priced_revenue: number
-  /** Revenue from orders excluded from COGS / profit (missing or zero buy price). */
+  /** Revenue from orders excluded from COGS / profit (missing buy price or unconfirmed zero). */
   unpriced_revenue: number
   /** Orders with a complete cost basis included in COGS. */
   orders_priced: number
-  /** Orders missing buy price, zero-cost snapshots, or incomplete consumption. */
+  /** Orders missing buy price, unconfirmed zero-cost snapshots, or incomplete consumption. */
   orders_missing_cost: number
   orders_total: number
 }

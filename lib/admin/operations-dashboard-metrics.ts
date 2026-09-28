@@ -1,6 +1,7 @@
 import { adminOrderDealPath } from "@/lib/admin/deal-link"
 import { adminPackagePath } from "@/lib/admin/package-link"
 import { dashboardTodayLabel } from "@/lib/admin/admin-dashboard-metrics"
+import { countPurchaseOrdersAwaitingBuyPrice } from "@/lib/admin/purchase-order-buy-price"
 import { purchaseOrderAdminHref } from "@/lib/admin/purchase-order-link"
 import {
   calendarTodayIso,
@@ -87,6 +88,7 @@ export type OperationsDashboardModel = {
   supplierDeadlinesDue: number
   overdueInvoiceCount: number
   negativeStock: number
+  purchaseOrdersAwaitingBuyPrice: number
   overdueSupplierPayments: number
   calendarItems: OperationsDashboardCalendarItem[]
   stockToBuy: OperationsDashboardStockItem[]
@@ -119,6 +121,7 @@ export type OperationsDashboardPurchaseOrderInput = {
       eventName: string
       quantityPurchased: number
       unitCost: number
+      unitCostConfirmed?: boolean
       currency: string
     }>
   }
@@ -493,6 +496,9 @@ export function buildOperationsDashboardView(input: {
     supplierDeadlinesDue: countSupplierDeadlinesDueThisMonth(input.purchaseOrders, todayIso),
     overdueInvoiceCount: countOverdueClientInvoices(input.bookings),
     negativeStock: input.negativeStock.length,
+    purchaseOrdersAwaitingBuyPrice: countPurchaseOrdersAwaitingBuyPrice(
+      input.purchaseOrders.map((po) => ({ lines: po.usage.lines })),
+    ),
     overdueSupplierPayments: countOverdueSupplierPayments(input.purchaseOrders, todayIso),
     calendarItems,
     stockToBuy: buildStockToBuy(input.negativeStock),

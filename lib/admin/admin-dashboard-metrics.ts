@@ -63,6 +63,7 @@ export type AdminDashboardModel = {
   bookingFormsAwaiting: number
   bookingFormsHref: string
   negativeStock: number
+  purchaseOrdersAwaitingBuyPrice: number
   overdueInvoices: number
   outstandingInvoices: number
   outstandingValue: number
@@ -263,6 +264,7 @@ export function buildAdminDashboardView(input: {
   bookingFormsHref: string
   bookingFormsAwaiting: number
   negativeStock: number
+  purchaseOrdersAwaitingBuyPrice: number
   sourcingRequired: number
   activeHolds: number
   workflowRows: ProfitRow[]
@@ -317,6 +319,7 @@ export function buildAdminDashboardView(input: {
     bookingFormsAwaiting: input.bookingFormsAwaiting,
     bookingFormsHref: input.bookingFormsHref,
     negativeStock: input.negativeStock,
+    purchaseOrdersAwaitingBuyPrice: input.purchaseOrdersAwaitingBuyPrice,
     sourcingRequired: input.sourcingRequired,
     overdueInvoices: overdue.length,
     outstandingInvoices: outstanding.length,

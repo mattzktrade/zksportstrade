@@ -9,6 +9,7 @@ import {
   FileText,
   Mail,
   PackageCheck,
+  Receipt,
   Search,
   UserRound,
 } from "lucide-react"
@@ -20,6 +21,7 @@ import {
   type AdminDashboardModel,
   type MonthBucket,
 } from "@/lib/admin/admin-dashboard-metrics"
+import { PURCHASE_ORDERS_AWAITING_BUY_PRICE_HREF } from "@/lib/admin/purchase-order-buy-price"
 import { formatMoneyCompact } from "@/lib/format/money"
 import { SOURCING_REQUIRED_HREF } from "@/lib/crm/sourcing-notifications"
 import { cn } from "@/lib/utils"
@@ -173,6 +175,12 @@ function AdminDashboardView({ data }: { data: AdminDashboardModel }) {
       label: "Negative stock items to purchase",
       value: data.negativeStock,
       href: "/admin/inventory/negative-stock",
+    },
+    {
+      icon: Receipt,
+      label: "Purchase orders awaiting buy price",
+      value: data.purchaseOrdersAwaitingBuyPrice,
+      href: PURCHASE_ORDERS_AWAITING_BUY_PRICE_HREF,
     },
     {
       icon: CircleDollarSign,
