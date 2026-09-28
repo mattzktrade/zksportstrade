@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { describe, it } from "node:test"
 import { createHmac } from "crypto"
-import { DEAL_SOURCE_LABELS, DEAL_SOURCES, dealSourceLabel } from "../lib/crm/deal-types"
+import { DEAL_SOURCE_LABELS, DEAL_SOURCES, canonicalDealSource, dealSourceLabel } from "../lib/crm/deal-types"
 import { inboundEnquirySource, resolvedEnquiryTemperature } from "../lib/crm/deal-pipeline"
 import { MARKETING_LEAD_EXAMPLE_PAYLOAD } from "../lib/integrations/marketing-leads/contract"
 import {
@@ -20,8 +20,17 @@ const sql = readFileSync(
 describe("marketing deal source", () => {
   it("adds marketing as a first-class enquiry source", () => {
     assert.equal(DEAL_SOURCES.includes("marketing"), true)
+    assert.equal(DEAL_SOURCES.includes("whatsapp"), true)
+    assert.equal(DEAL_SOURCES.includes("email"), true)
+    assert.equal(DEAL_SOURCES.includes("offline"), false)
+    assert.equal(DEAL_SOURCE_LABELS.whatsapp, "WhatsApp")
+    assert.equal(DEAL_SOURCE_LABELS.email, "Email")
     assert.equal(DEAL_SOURCE_LABELS.marketing, "Marketing")
     assert.equal(dealSourceLabel("marketing"), "Marketing")
+    assert.equal(dealSourceLabel("offline"), "WhatsApp")
+    assert.equal(dealSourceLabel("email"), "Email")
+    assert.equal(canonicalDealSource("offline"), "whatsapp")
+    assert.equal(canonicalDealSource(""), "whatsapp")
     assert.equal(inboundEnquirySource("marketing"), true)
     assert.equal(
       resolvedEnquiryTemperature({ source: "marketing", enquiryStage: "new", temperature: "cold" }),

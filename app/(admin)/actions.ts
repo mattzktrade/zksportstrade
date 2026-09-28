@@ -21,6 +21,8 @@ import {
   resolvePackageCircuitInput,
 } from "@/lib/catalog/race-circuit"
 import { sendBookingApprovalRejectedEmail } from "@/lib/email/send-booking-approval-rejected"
+import { deliverSourcingStageNotification, sourcingEmailWarning } from "@/lib/email/send-sourcing-notification"
+import { loadSourcingEnquirySnapshots } from "@/lib/crm/sourcing-notifications"
 import { executeBookingApproval } from "@/lib/booking-approval/execute-approval"
 import { mapPlaceOrderError } from "@/lib/orders/place-order-errors"
 import { getPortalProfile } from "@/lib/supabase/profile"
@@ -86,6 +88,7 @@ import {
   suggestedSelectableStageAction,
   ENQUIRY_CRM_STAGE_LABELS,
 } from "@/lib/crm/deal-pipeline"
+import { canonicalDealSource } from "@/lib/crm/deal-types"
 
 type ActionResult = { ok: true; message?: string; purchaseOrderId?: string } | { ok: false; message: string }
 
@@ -4727,7 +4730,7 @@ export async function createNativeDeal(input: {
     p_package_id: input.packageId?.trim() || null,
     p_quantity: quantity,
     p_unit_sale_price: unitSalePrice,
-    p_source: input.source?.trim() || "offline",
+    p_source: canonicalDealSource(input.source),
     p_stage: pipeline.reserve ? "proposal" : "draft",
     p_notes: input.notes?.trim() || null,
     p_reserve: pipeline.reserve,
@@ -4736,7 +4739,7 @@ export async function createNativeDeal(input: {
     ? await gate.supabase.rpc("admin_create_deal_with_lines", {
         p_account_id: accountId,
         p_contact_id: contactId,
-        p_source: input.source?.trim() || "offline",
+        p_source: canonicalDealSource(input.source),
         p_notes: input.notes?.trim() || null,
         p_lines: normalizedLines,
         p_reserve: pipeline.reserve,
@@ -4779,7 +4782,7 @@ export async function createNativeDeal(input: {
   }
 
   const dealId = String(data)
-  const source = input.source?.trim() || "offline"
+  const source = canonicalDealSource(input.source)
   const enquiryTemperature = inboundEnquirySource(source)
     ? "warm"
     : input.enquiryTemperature === "cold"
@@ -5182,6 +5185,7 @@ export async function updateEnquiryPipeline(input: {
     nextActionDueAt = due.toISOString()
   }
 
+  const sourcingSnapshots = await loadSourcingEnquirySnapshots(gate.supabase, [dealId])
   const { error } = await gate.supabase.rpc("admin_update_enquiry_pipeline", {
     p_deal_id: dealId,
     p_enquiry_stage: input.enquiryStage,
@@ -5207,9 +5211,14 @@ export async function updateEnquiryPipeline(input: {
       input.enquiryStage === "not_interested" ? "not_interested" : "staff",
     ).catch(() => undefined)
   }
+  const sourcingEmail = await deliverSourcingStageNotification(sourcingSnapshots.get(dealId), input.enquiryStage)
   revalidatePath("/admin/deals", "layout")
   revalidatePath("/admin/enquiries", "layout")
-  return { ok: true, message: "Enquiry updated." }
+  revalidatePath("/admin")
+  return {
+    ok: true,
+    message: `Enquiry updated.${sourcingEmailWarning(sourcingEmail === "failed" ? 1 : 0)}`,
+  }
 }
 
 export async function updateEnquiryPipelineBulk(input: {
@@ -5228,7 +5237,9 @@ export async function updateEnquiryPipelineBulk(input: {
   }
 
   const nextAction = suggestedEnquiryAction(input.enquiryStage)
+  const sourcingSnapshots = await loadSourcingEnquirySnapshots(gate.supabase, dealIds)
   let updated = 0
+  let emailFailed = 0
   let firstError = ""
   for (const dealId of dealIds) {
     const { data: deal, error: loadError } = await gate.supabase
@@ -5261,6 +5272,11 @@ export async function updateEnquiryPipelineBulk(input: {
       continue
     }
     updated += 1
+    const sourcingEmail = await deliverSourcingStageNotification(
+      sourcingSnapshots.get(dealId),
+      input.enquiryStage,
+    )
+    if (sourcingEmail === "failed") emailFailed += 1
   }
 
   if (input.enquiryStage !== "new") {
@@ -5277,21 +5293,23 @@ export async function updateEnquiryPipelineBulk(input: {
 
   revalidatePath("/admin/deals", "layout")
   revalidatePath("/admin/enquiries", "layout")
+  revalidatePath("/admin")
+  const emailNote = sourcingEmailWarning(emailFailed)
   if (updated === 0) {
     return { ok: false, message: firstError || "None of the selected enquiries could be updated." }
   }
   if (updated < dealIds.length) {
     return {
       ok: true,
-      message: `Updated ${updated} of ${dealIds.length} enquiries. ${firstError}`.trim(),
+      message: `Updated ${updated} of ${dealIds.length} enquiries. ${firstError}${emailNote}`.trim(),
     }
   }
   return {
     ok: true,
     message:
-      dealIds.length === 1
+      (dealIds.length === 1
         ? "Enquiry stage updated."
-        : `${updated} enquiries moved to ${ENQUIRY_CRM_STAGE_LABELS[input.enquiryStage]}.`,
+        : `${updated} enquiries moved to ${ENQUIRY_CRM_STAGE_LABELS[input.enquiryStage]}.`) + emailNote,
   }
 }
 

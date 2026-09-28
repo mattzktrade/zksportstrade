@@ -137,16 +137,20 @@ test("staff can start or jump an enquiry to later deal stages including won/paid
 
 test("cold outreach warms when they respond, inbound stays warm", () => {
   assert.equal(
+    resolvedEnquiryTemperature({ source: "whatsapp", enquiryStage: "new", temperature: "cold" }),
+    "cold",
+  )
+  assert.equal(
+    resolvedEnquiryTemperature({ source: "email", enquiryStage: "contacted", temperature: "cold" }),
+    "cold",
+  )
+  assert.equal(
+    resolvedEnquiryTemperature({ source: "whatsapp", enquiryStage: "responded", temperature: "cold" }),
+    "warm",
+  )
+  assert.equal(
     resolvedEnquiryTemperature({ source: "offline", enquiryStage: "new", temperature: "cold" }),
     "cold",
-  )
-  assert.equal(
-    resolvedEnquiryTemperature({ source: "offline", enquiryStage: "contacted", temperature: "cold" }),
-    "cold",
-  )
-  assert.equal(
-    resolvedEnquiryTemperature({ source: "offline", enquiryStage: "responded", temperature: "cold" }),
-    "warm",
   )
   assert.equal(
     resolvedEnquiryTemperature({ source: "website", enquiryStage: "new", temperature: "cold" }),

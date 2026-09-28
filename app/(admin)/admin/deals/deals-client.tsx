@@ -41,6 +41,7 @@ import {
   DEAL_SOURCES,
   DEAL_STAGES,
   DEAL_STAGE_LABELS,
+  canonicalDealSource,
   canonicalDealStage,
   dealConfirmedOffPlatform,
   dealSourceLabel,
@@ -326,7 +327,7 @@ export function DealsClient({
   const [showEdit, setShowEdit] = useState(false)
   const [editAccountId, setEditAccountId] = useState("")
   const [editContactId, setEditContactId] = useState("")
-  const [editSource, setEditSource] = useState("other")
+  const [editSource, setEditSource] = useState("whatsapp")
   const [editNotes, setEditNotes] = useState("")
   const [editLines, setEditLines] = useState<EditLineState[]>([])
 
@@ -346,7 +347,7 @@ export function DealsClient({
       ) {
         return false
       }
-      if (sourceFilter && deal.source !== sourceFilter) return false
+      if (sourceFilter && canonicalDealSource(deal.source) !== sourceFilter) return false
       if (eventFilter.length > 0) {
         const selected = new Set(eventFilter)
         if (!(deal.events ?? []).some((event) => selected.has(event.id))) return false
@@ -512,7 +513,7 @@ export function DealsClient({
     if (!selected) return
     setEditAccountId(selected.account_id ?? "")
     setEditContactId(selected.primary_contact_id ?? "")
-    setEditSource(selected.source)
+    setEditSource(canonicalDealSource(selected.source))
     setEditNotes(selected.notes ?? "")
     setEditLines(
       selected.lines.length

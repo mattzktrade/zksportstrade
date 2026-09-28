@@ -11,6 +11,8 @@ test("native deal orders are offline sales, not portal checkouts", () => {
   assert.equal(classifySalesChannel("admin"), "offline")
   assert.equal(classifySalesChannel("other"), "offline")
   assert.equal(classifySalesChannel("offline"), "offline")
+  assert.equal(classifySalesChannel("whatsapp"), "offline")
+  assert.equal(classifySalesChannel("email"), "offline")
   assert.equal(classifySalesChannel("trade_portal"), "portal")
   assert.equal(classifySalesChannel("wix"), "wix")
   assert.equal(classifySalesChannel("partner_api"), "portal")
@@ -23,7 +25,15 @@ test("product page labels signed native deals as offline even after an order is 
   )
   assert.equal(
     orderSaleChannelLabel({ channel: "native_deal", dealSource: "offline" }),
-    "Offline deal",
+    "WhatsApp",
+  )
+  assert.equal(
+    orderSaleChannelLabel({ channel: "native_deal", dealSource: "whatsapp" }),
+    "WhatsApp",
+  )
+  assert.equal(
+    orderSaleChannelLabel({ channel: "native_deal", dealSource: "email" }),
+    "Email",
   )
   assert.equal(
     orderSaleChannelLabel({ channel: "trade_portal", dealSource: "other" }),
@@ -31,7 +41,7 @@ test("product page labels signed native deals as offline even after an order is 
   )
   assert.equal(
     orderSaleChannelLabel({ channel: null, dealSource: "offline" }),
-    "Offline deal",
+    "WhatsApp",
   )
   assert.equal(
     orderSaleChannelLabel({ channel: "trade_portal", dealSource: "portal" }),

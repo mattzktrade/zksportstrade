@@ -245,7 +245,8 @@ function channelFromDealSource(source: string | null | undefined, salesforceId?:
   if (salesforceId) return "salesforce_import"
   if (source === "portal") return "trade_portal"
   if (source === "website") return "wix"
-  return source || "offline"
+  if (!source || source === "offline") return "whatsapp"
+  return source
 }
 
 function fulfilmentFromDealStage(stage: string): string {

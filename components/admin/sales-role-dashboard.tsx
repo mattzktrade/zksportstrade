@@ -292,6 +292,38 @@ function SalesDashboardView({ data }: { data: SalesDashboardModel }) {
         })}
       </section>
 
+      <Card>
+        <div className="flex items-start justify-between gap-3 px-4 py-3">
+          <div className="min-w-0">
+            <h2 className="text-[13px] font-semibold text-[#1b1c1f]">Action needed</h2>
+            <p className="mt-0.5 text-[11px] text-[#8b9198]">
+              {data.sourcingCompleteCount === 0
+                ? "No quotes are waiting to send."
+                : data.sourcingCompleteCount === 1
+                  ? "Sourcing is complete for 1 enquiry. Send the quote to the client."
+                  : `Sourcing is complete for ${data.sourcingCompleteCount} enquiries. Send the quote to the client.`}
+            </p>
+          </div>
+          <SectionLink href={data.sourcingCompleteHref}>View enquiries</SectionLink>
+        </div>
+        {data.sourcingComplete.length > 0 ? (
+          <div className="divide-y divide-[#f2f4f6] border-t border-[#f2f4f6]">
+            {data.sourcingComplete.map((row) => (
+              <Link key={row.id} href={row.href} className="flex items-start gap-2.5 px-4 py-2.5 hover:bg-slate-50">
+                <Send className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[12px] font-medium text-[#2c3036]">
+                    {row.reference}
+                    <span className="font-normal text-[#5c6168]"> · {row.client}</span>
+                  </span>
+                  <span className="mt-0.5 block text-[11px] leading-snug text-[#8b9198]">{row.interest}</span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        ) : null}
+      </Card>
+
       <section className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(260px,0.9fr)]">
         <Card className="min-w-0 p-4">
           <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">

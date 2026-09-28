@@ -9,6 +9,7 @@ import {
   FileText,
   Mail,
   PackageCheck,
+  Search,
   UserRound,
 } from "lucide-react"
 import { getAdminDashboardModel } from "@/lib/admin/admin-dashboard-model"
@@ -20,6 +21,7 @@ import {
   type MonthBucket,
 } from "@/lib/admin/admin-dashboard-metrics"
 import { formatMoneyCompact } from "@/lib/format/money"
+import { SOURCING_REQUIRED_HREF } from "@/lib/crm/sourcing-notifications"
 import { cn } from "@/lib/utils"
 
 function money(value: number, currency: string): string {
@@ -142,6 +144,12 @@ function SalesTrendChart({ months, currency }: { months: MonthBucket[]; currency
 
 function AdminDashboardView({ data }: { data: AdminDashboardModel }) {
   const approvalRows = [
+    {
+      icon: Search,
+      label: "Sourcing required",
+      value: data.sourcingRequired,
+      href: SOURCING_REQUIRED_HREF,
+    },
     {
       icon: UserRound,
       label: "Pending users",

@@ -12,11 +12,31 @@ import {
   type DashboardPipelineDeal,
   type DashboardSaleRow,
 } from "@/lib/admin/admin-dashboard-metrics"
+import { isOpenSourcingStage } from "@/lib/crm/sourcing-notifications"
 
 type DealPipelineRow = {
   stage: string
   total_amount: number | string | null
   currency: string | null
+}
+
+async function countSourcingRequired(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<number> {
+  try {
+    const result = await fetchAllRows<{ stage: string; enquiry_stage: string | null }>((from, to) =>
+      supabase
+        .from("deals")
+        .select("stage, enquiry_stage")
+        .in("stage", ["draft", "sourcing", "proposal"])
+        .order("id")
+        .range(from, to),
+    )
+    if (result.error) return 0
+    return (result.data ?? []).filter((deal) => isOpenSourcingStage(deal, "sourcing_required")).length
+  } catch {
+    return 0
+  }
 }
 
 function toSaleRow(
@@ -55,6 +75,7 @@ export async function getAdminDashboardModel(): Promise<AdminDashboardModel> {
     negativeStockRows,
     workflowRows,
     pipelineResult,
+    sourcingRequired,
   ] = await Promise.all([
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("approval_status", "pending"),
     supabase.from("inventory_holds").select("*", { count: "exact", head: true }).is("released_at", null),
@@ -70,6 +91,7 @@ export async function getAdminDashboardModel(): Promise<AdminDashboardModel> {
         .order("id")
         .range(from, to),
     ),
+    countSourcingRequired(supabase),
   ])
 
   const pipelineDeals: DashboardPipelineDeal[] = (pipelineResult.data ?? []).map((deal) => ({
@@ -84,6 +106,7 @@ export async function getAdminDashboardModel(): Promise<AdminDashboardModel> {
     bookingFormsAwaiting: bookingFormDealIds.length,
     bookingFormsHref: bookingFormsAwaitingApprovalHref(bookingFormDealIds),
     negativeStock: negativeStockRows.length,
+    sourcingRequired,
     activeHolds: activeHolds ?? 0,
     workflowRows: workflowRows.map(toSaleRow),
     pipelineDeals,

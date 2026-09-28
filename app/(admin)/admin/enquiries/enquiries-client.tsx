@@ -9,8 +9,10 @@ import {
   Flame,
   Globe,
   Inbox,
+  Mail,
   Maximize2,
   Megaphone,
+  MessageCircle,
   Phone,
   Plus,
   Search,
@@ -45,6 +47,7 @@ import { isModifiedClick, openInNewTab, pageSearchProps } from "@/lib/browser/la
 import {
   DEAL_SOURCE_LABELS,
   DEAL_SOURCES,
+  canonicalDealSource,
   dealSourceLabel,
   friendlyDealActivitySummary,
   type CrmAccountOption,
@@ -99,6 +102,11 @@ function sourceIcon(source: string) {
       return Store
     case "referral":
       return Share2
+    case "email":
+      return Mail
+    case "whatsapp":
+    case "offline":
+      return MessageCircle
     default:
       return Phone
   }
@@ -121,8 +129,11 @@ function sourceKind(source: string): { label: string; className: string } {
       return { label: "Inbound", className: "bg-emerald-50 text-emerald-700" }
     case "referral":
       return { label: "Referral", className: "bg-violet-50 text-violet-700" }
+    case "email":
+      return { label: "Email", className: "bg-indigo-50 text-indigo-700" }
+    case "whatsapp":
     case "offline":
-      return { label: "Offline", className: "bg-amber-50 text-amber-700" }
+      return { label: "WhatsApp", className: "bg-green-50 text-green-700" }
     default:
       return { label: "Other", className: "bg-slate-100 text-slate-600" }
   }
@@ -306,7 +317,7 @@ export function EnquiriesClient({
   const scoped = useMemo(() => {
     const q = query.trim().toLowerCase()
     return deals.filter((deal) => {
-      if (sourceFilter && deal.source !== sourceFilter) return false
+      if (sourceFilter && canonicalDealSource(deal.source) !== sourceFilter) return false
       if (temperatureFilter && enquiryTemperatureFromDeal(deal) !== temperatureFilter) return false
       if (ownerFilter === "unassigned" && deal.owner_profile_id) return false
       if (ownerFilter && ownerFilter !== "unassigned" && deal.owner_profile_id !== ownerFilter) return false

@@ -29,6 +29,8 @@ function deal(overrides: Partial<SalesDashboardDeal> = {}): SalesDashboardDeal {
     total_amount: overrides.total_amount ?? 25000,
     currency: overrides.currency ?? "USD",
     created_at: overrides.created_at ?? "2026-09-10T12:00:00.000Z",
+    updated_at: overrides.updated_at ?? overrides.created_at ?? "2026-09-10T12:00:00.000Z",
+    account_name: overrides.account_name === undefined ? "Apex Group" : overrides.account_name,
     race_name: overrides.race_name ?? "Singapore Grand Prix 2026",
     line_summary: overrides.line_summary ?? "Paddock Club",
     recent_activities: overrides.recent_activities ?? [],
@@ -243,6 +245,56 @@ test("empty monthly performance hides the fake £2M chart scale", () => {
   assert.doesNotMatch(ui, /No prior month to compare/)
 })
 
+test("sourcing complete quotes are an action for every sales user, including enquiries they do not own", () => {
+  const view = buildSalesDashboardView({
+    ownerId: OWNER,
+    now: new Date("2026-09-18T12:00:00.000Z"),
+    deals: [
+      deal({
+        id: "mine-ready-to-quote",
+        reference: "DL1100",
+        stage: "sourcing",
+        enquiry_stage: "sourcing_complete",
+        account_name: "Apex Group",
+        updated_at: "2026-09-17T12:00:00.000Z",
+      }),
+      deal({
+        id: "other-ready-to-quote",
+        reference: "DL1101",
+        owner_profile_id: OTHER,
+        stage: "sourcing",
+        enquiry_stage: "sourcing_complete",
+        account_name: "Northwind",
+        updated_at: "2026-09-18T09:00:00.000Z",
+      }),
+      deal({
+        id: "already-a-deal",
+        reference: "DL1102",
+        stage: "awaiting_payment",
+        enquiry_stage: "sourcing_complete",
+        updated_at: "2026-09-18T10:00:00.000Z",
+      }),
+      deal({
+        id: "still-sourcing",
+        reference: "DL1103",
+        stage: "sourcing",
+        enquiry_stage: "sourcing_required",
+      }),
+    ],
+    sales: [],
+  })
+
+  assert.equal(view.sourcingCompleteCount, 2)
+  assert.equal(view.sourcingCompleteHref, "/admin/enquiries?stage=sourcing_complete")
+  assert.deepEqual(
+    view.sourcingComplete.map((row) => row.reference),
+    ["DL1101", "DL1100"],
+  )
+  assert.equal(view.sourcingComplete[0]?.client, "Northwind")
+  assert.match(view.sourcingComplete[0]?.interest ?? "", /Singapore/)
+  assert.equal(view.pipelineRows.find((row) => row.id === "sourcing_complete")?.count, 1)
+})
+
 test("sales dashboard stays in USD even when the only records are GBP", () => {
   const view = buildSalesDashboardView({
     ownerId: OWNER,
@@ -268,6 +320,9 @@ test("sales dashboard page is wired for sales staff and uses live ZK stages", ()
   assert.doesNotMatch(metrics, /"GBP"/)
   assert.match(metrics, /\/admin\/enquiries\?stage=new&owner=unassigned/)
   assert.match(ui, /\{data\.title\}/)
+  assert.match(ui, /Action needed/)
+  assert.match(ui, /Send the quote to the client/)
+  assert.match(ui, /No quotes are waiting to send/)
   assert.match(ui, /New unassigned enquiries/)
   assert.match(ui, /Won vs closed lost/)
   assert.match(ui, /Your monthly performance/)

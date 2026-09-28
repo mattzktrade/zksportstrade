@@ -12,7 +12,7 @@ import { SearchableSelect } from "@/components/admin/searchable-select"
 import { AdminPageHeader, AdminPanel, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { AdminModalScrim } from "@/components/admin/admin-list-preview"
 import type { DealBasketSupplier } from "@/components/admin/deal-line-basket"
-import { DEAL_NEXT_ACTION_OPTIONS, DEAL_SOURCE_LABELS, DEAL_SOURCES, DEAL_STAGES, DEAL_STAGE_LABELS, canonicalDealStage, dealConfirmedOffPlatform, dealSourceLabel, dealSourceTone, friendlyDealActivitySummary, type CrmAccountOption, type DealPackageOption, type DealStage } from "@/lib/crm/deal-types"
+import { DEAL_NEXT_ACTION_OPTIONS, DEAL_SOURCE_LABELS, DEAL_SOURCES, DEAL_STAGES, DEAL_STAGE_LABELS, canonicalDealSource, canonicalDealStage, dealConfirmedOffPlatform, dealSourceLabel, dealSourceTone, friendlyDealActivitySummary, type CrmAccountOption, type DealPackageOption, type DealStage } from "@/lib/crm/deal-types"
 import { adminPipelineHome, enquiryStageLabel, enquiryStageTone, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
 import { nextActionForDealStage } from "@/lib/crm/deal-workflow"
 import type { DealAddressDraft, DealDetailPageData, DealFulfilmentClient } from "@/lib/crm/deal-detail"
@@ -278,7 +278,7 @@ export function DealDetailClient({
     [accountOptions, knownAccounts],
   )
   const editAccount = clientAccounts.find((account) => account.id === editAccountId) ?? null
-  const [editSource, setEditSource] = useState(deal.source)
+  const [editSource, setEditSource] = useState(canonicalDealSource(deal.source))
   const [editNotes, setEditNotes] = useState(deal.notes ?? "")
   const [editLines, setEditLines] = useState<EditLineState[]>([])
 
@@ -356,7 +356,7 @@ export function DealDetailClient({
   function openCommercialEditor() {
     setEditAccountId(deal.account_id ?? "")
     setEditContactId(deal.primary_contact_id ?? "")
-    setEditSource(deal.source)
+    setEditSource(canonicalDealSource(deal.source))
     setEditNotes(deal.notes ?? "")
     setEditLines(
       deal.lines.length

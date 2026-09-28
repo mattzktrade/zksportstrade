@@ -45,6 +45,8 @@ function toDealRow(deal: Awaited<ReturnType<typeof getDealListRows>>[number]): S
     total_amount: deal.total_amount,
     currency: deal.currency,
     created_at: deal.created_at,
+    updated_at: deal.updated_at,
+    account_name: deal.account_name,
     race_name: deal.race_name,
     line_summary: deal.line_summary,
     recent_activities: deal.recent_activities.map((activity) => ({

@@ -98,8 +98,9 @@ function nativeSource(raw: string): string {
   if (source.includes("market") || source.includes("meta") || source.includes("facebook")) return "marketing"
   if (source.includes("web")) return "website"
   if (source.includes("referr")) return "referral"
-  if (source.includes("offline") || source.includes("manual")) return "offline"
-  return "offline"
+  if (source.includes("email") || source.includes("e-mail")) return "email"
+  if (source.includes("whatsapp") || source.includes("offline") || source.includes("manual")) return "whatsapp"
+  return "whatsapp"
 }
 
 function nativeAccountType(raw: string): string {

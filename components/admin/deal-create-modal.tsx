@@ -69,7 +69,7 @@ export function DealCreateModal({
   const [createdAccounts, setCreatedAccounts] = useState<CrmAccountOption[]>([])
   const [createLines, setCreateLines] = useState<DealBasketLine[]>([])
   const [notes, setNotes] = useState("")
-  const [createSource, setCreateSource] = useState("offline")
+  const [createSource, setCreateSource] = useState("whatsapp")
   const [enquiryTemperature, setEnquiryTemperature] = useState<EnquiryTemperature>("warm")
   const [createStage, setCreateStage] = useState<EnquirySelectableStage>("new")
   const [reserve, setReserve] = useState(false)

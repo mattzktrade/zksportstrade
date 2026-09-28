@@ -10,6 +10,8 @@ export function classifySalesChannel(channel: string | null | undefined): Packag
   if (normalized === "wix" || normalized === "website") return "wix"
   if (
     normalized === "offline" ||
+    normalized === "whatsapp" ||
+    normalized === "email" ||
     normalized === "admin" ||
     normalized === "native_deal" ||
     normalized === "other" ||
@@ -29,15 +31,16 @@ export function orderSaleChannelLabel(input: {
   const channel = (input.channel ?? "").trim().toLowerCase()
   const source = (input.dealSource ?? "").trim().toLowerCase()
 
-  if (channel === "wix") return "Website"
+  if (source === "email") return "Email"
+  if (source === "whatsapp" || source === "offline") return "WhatsApp"
+  if (channel === "wix" || source === "website") return "Website"
   if (channel === "partner_api") return "Partner"
+  if (source === "portal") return "Portal"
   if (channel === "native_deal" || channel === "admin" || channel === "offline") {
     return "Offline deal"
   }
 
-  if (source === "website") return "Website"
-  if (source === "portal") return "Portal"
-  if (source === "offline" || source === "other" || source === "referral") {
+  if (source === "other" || source === "referral") {
     return "Offline deal"
   }
   if (source) return "Offline deal"
@@ -48,6 +51,26 @@ export function orderSaleChannelLabel(input: {
   if (bucket === "wix") return "Website"
   if (bucket === "offline") return "Offline deal"
   return "Portal"
+}
+
+/** Dashboard and sales-tracker label. Former offline sales are WhatsApp. */
+export function salesOriginLabel(input: {
+  channel?: string | null
+  dealSource?: string | null
+}): string {
+  const source = (input.dealSource ?? "").trim().toLowerCase()
+  if (source === "email") return "Email"
+  if (source === "whatsapp" || source === "offline") return "WhatsApp"
+  if (source === "referral") return "Referral"
+  if (source === "marketing") return "Marketing"
+  if (source === "website") return "Website"
+  if (source === "portal") return "Portal"
+  if (source === "other") return "Other"
+  const label = orderSaleChannelLabel(input)
+  if (label === "Website" || label === "Portal" || label === "WhatsApp" || label === "Email" || label === "Partner") {
+    return label === "Partner" ? "WhatsApp" : label
+  }
+  return "WhatsApp"
 }
 
 export function isPortalCheckoutChannel(channel: string | null | undefined): boolean {

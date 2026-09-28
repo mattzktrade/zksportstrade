@@ -46,8 +46,14 @@ type SortKey = "eventDate" | "reference" | "client" | "event"
 function sourceMatches(row: WorkflowOrderRow, filter: string): boolean {
   if (filter === "all") return true
   const values = [row.channel, row.dealSource].filter(Boolean) as string[]
+  if (filter === "whatsapp") {
+    return row.dealSource === "whatsapp" || row.dealSource === "offline" || (!row.dealSource && values.some((value) => value === "whatsapp" || value === "offline"))
+  }
+  if (filter === "email") {
+    return row.dealSource === "email" || (!row.dealSource && values.includes("email"))
+  }
   if (filter === "offline") {
-    return values.some((value) => ["offline", "native_deal", "admin", "other"].includes(value))
+    return values.some((value) => ["offline", "whatsapp", "email", "native_deal", "admin", "other"].includes(value))
   }
   if (filter === "trade_portal") {
     return values.some((value) => ["trade_portal", "portal"].includes(value))
@@ -149,7 +155,7 @@ export function WorkflowTrackerClient({
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [listState, setListState] = usePersistedAdminFilters(
-    `zk-admin-${mode}-tracker-filters-v1`,
+    `zk-admin-${mode}-tracker-filters-v2`,
     {
     search: "",
     status: "all" as FinanceStatusFilter | string,
@@ -473,7 +479,8 @@ export function WorkflowTrackerClient({
           </select>
           <select value={channel} onChange={(event) => setListState((current) => ({ ...current, channel: event.target.value }))} className="h-9 w-full shrink-0 rounded-md border bg-white px-3 text-[10px] sm:w-auto">
             <option value="all">All sources</option>
-            <option value="offline">Offline</option>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="email">Email</option>
             <option value="trade_portal">Portal</option>
             <option value="website">Website</option>
             <option value="referral">Referral</option>

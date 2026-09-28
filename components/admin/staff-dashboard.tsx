@@ -24,7 +24,7 @@ import { getNegativeStockRows } from "@/lib/admin/negative-stock-query"
 import { getSalesTrackerRows } from "@/lib/admin/workflow-views"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { DEAL_STAGE_LABELS, dealSourceLabel, type DealStage } from "@/lib/crm/deal-types"
-import { orderSaleChannelLabel } from "@/lib/orders/channel"
+import { salesOriginLabel } from "@/lib/orders/channel"
 import {
   AdminPageHeader,
   AdminPanel,
@@ -49,11 +49,7 @@ function shortDate(value: string): string {
 }
 
 function dashboardSalesSource(row: { channel: string; dealSource: string | null }): string {
-  if (row.dealSource === "referral") return "Referral"
-  const label = orderSaleChannelLabel({ channel: row.channel, dealSource: row.dealSource })
-  if (label === "Website") return "Website"
-  if (label === "Portal") return "Portal"
-  return "Offline"
+  return salesOriginLabel({ channel: row.channel, dealSource: row.dealSource })
 }
 
 function dashboardDealSource(source: string | null | undefined): string {
@@ -172,9 +168,11 @@ export async function StaffDashboard() {
   const monthProfit = monthSales.reduce((sum, row) => sum + (row.grossProfit ?? 0), 0)
   const salesMix = [
     { label: "Portal", colour: "bg-primary" },
-    { label: "Offline", colour: "bg-slate-800" },
+    { label: "WhatsApp", colour: "bg-emerald-600" },
+    { label: "Email", colour: "bg-sky-600" },
     { label: "Website", colour: "bg-blue-500" },
     { label: "Referral", colour: "bg-slate-300" },
+    { label: "Marketing", colour: "bg-violet-500" },
   ].map((item) => {
     const value = confirmedSales
       .filter((row) => dashboardSalesSource(row) === item.label)

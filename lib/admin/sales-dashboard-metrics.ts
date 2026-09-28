@@ -29,12 +29,17 @@ import {
   dealStageIsOpenPipeline,
   friendlyDealActivitySummary,
 } from "@/lib/crm/deal-types"
+import {
+  isOpenSourcingStage,
+  SOURCING_COMPLETE_HREF,
+} from "@/lib/crm/sourcing-notifications"
 
 export const SALES_DASHBOARD_TITLE = "Sales Dashboard"
 export const SALES_DASHBOARD_DESCRIPTION =
   "Your enquiries, pipeline and sales performance at a glance."
 
 export const UNASSIGNED_ENQUIRIES_HREF = "/admin/enquiries?stage=new&owner=unassigned"
+export const SOURCING_COMPLETE_PREVIEW = 6
 
 export type SalesPipelineRowId = EnquiryCrmStage | DealBoardPipelineId
 
@@ -73,6 +78,8 @@ export type SalesDashboardDeal = {
   total_amount: number
   currency: string
   created_at: string
+  updated_at: string
+  account_name: string | null
   race_name: string | null
   line_summary: string | null
   recent_activities: Array<{
@@ -130,6 +137,14 @@ export type SalesDashboardActivity = {
   kind: SalesActivityKind
 }
 
+export type SalesSourcingCompleteItem = {
+  id: string
+  href: string
+  reference: string
+  client: string
+  interest: string
+}
+
 export type SalesDashboardModel = {
   title: string
   description: string
@@ -153,6 +168,9 @@ export type SalesDashboardModel = {
   pipelineRows: SalesDashboardPipelineRow[]
   unassigned: SalesDashboardUnassigned[]
   recentActivity: SalesDashboardActivity[]
+  sourcingCompleteCount: number
+  sourcingCompleteHref: string
+  sourcingComplete: SalesSourcingCompleteItem[]
 }
 
 export function salesPipelineRowId(deal: Pick<SalesDashboardDeal, "stage" | "enquiry_stage">): SalesPipelineRowId {
@@ -257,6 +275,13 @@ export function buildSalesDashboardView(input: {
     })
     .filter((activity, index, rows) => rows.findIndex((row) => row.id === activity.id) === index)
     .slice(0, 8)
+  const sourcingComplete = input.deals
+    .filter((deal) => isOpenSourcingStage(deal, "sourcing_complete"))
+    .sort((a, b) => {
+      const byDate = new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+      if (byDate !== 0) return byDate
+      return b.reference.localeCompare(a.reference)
+    })
 
   return {
     title: SALES_DASHBOARD_TITLE,
@@ -302,5 +327,14 @@ export function buildSalesDashboardView(input: {
       receivedAt: deal.created_at,
     })),
     recentActivity,
+    sourcingCompleteCount: sourcingComplete.length,
+    sourcingCompleteHref: SOURCING_COMPLETE_HREF,
+    sourcingComplete: sourcingComplete.slice(0, SOURCING_COMPLETE_PREVIEW).map((deal) => ({
+      id: deal.id,
+      href: adminRecordWorkspacePath(deal.id, deal.stage),
+      reference: deal.reference.trim() || "—",
+      client: deal.account_name?.trim() || "Client not set",
+      interest: enquiryInterestLabel(deal),
+    })),
   }
 }

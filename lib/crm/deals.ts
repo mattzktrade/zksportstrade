@@ -2,7 +2,7 @@ import { unstable_noStore as noStore } from "next/cache"
 import { fetchAllRows } from "@/lib/supabase/fetch-all-rows"
 import { createClient } from "@/lib/supabase/server"
 import type { CrmAccountOption, DealListRow, PackageDealSaleRow } from "@/lib/crm/deal-types"
-import { canonicalDealStage, dealStageCountsAsSold } from "@/lib/crm/deal-types"
+import { canonicalDealSource, canonicalDealStage, dealStageCountsAsSold } from "@/lib/crm/deal-types"
 import {
   enquiryCrmStageFromDeal,
   enquiryTemperatureFromDeal,
@@ -794,7 +794,7 @@ export async function getDealsForPackages(packageIds: readonly string[]): Promis
       totalAmount: lineTotal,
       currency: deal.currency || "USD",
       stage: canonicalDealStage(deal.stage),
-      source: deal.source || "offline",
+      source: canonicalDealSource(deal.source),
       createdAt: deal.created_at,
       updatedAt: deal.updated_at,
       notes: deal.notes,

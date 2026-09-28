@@ -6,7 +6,7 @@ import type { WorkflowOrderRow } from "@/lib/admin/workflow-views"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { SalesTrackerNav } from "@/components/admin/sales-tracker-nav"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
-import { orderSaleChannelLabel } from "@/lib/orders/channel"
+import { salesOriginLabel } from "@/lib/orders/channel"
 
 type SourceAggregate = {
   source: string
@@ -27,11 +27,7 @@ function money(value: number): string {
 }
 
 function sourceFor(row: WorkflowOrderRow): string {
-  if (row.dealSource === "referral") return "Referral"
-  const label = orderSaleChannelLabel({ channel: row.channel, dealSource: row.dealSource })
-  if (label === "Website") return "Website"
-  if (label === "Portal") return "Portal"
-  return "Offline"
+  return salesOriginLabel({ channel: row.channel, dealSource: row.dealSource })
 }
 
 export function SalesSourceTrackerClient({ rows }: { rows: WorkflowOrderRow[] }) {

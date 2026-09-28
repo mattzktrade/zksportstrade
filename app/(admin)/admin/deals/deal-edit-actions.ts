@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { hasCmsPermission } from "@/lib/auth/permissions"
-import { dealStageHoldsPurchasedStock } from "@/lib/crm/deal-types"
+import { canonicalDealSource, dealStageHoldsPurchasedStock } from "@/lib/crm/deal-types"
 import { toPurchasedSupplierPoolKey } from "@/lib/inventory/supplier-pool"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { createClient } from "@/lib/supabase/server"
@@ -50,7 +50,7 @@ export async function updateDealCommercials(input: {
     p_deal_id: input.dealId,
     p_account_id: input.accountId,
     p_contact_id: input.contactId || null,
-    p_source: input.source,
+    p_source: canonicalDealSource(input.source),
     p_notes: input.notes?.trim() || null,
     p_lines: input.lines.map((line) => ({
       id: line.id || null,

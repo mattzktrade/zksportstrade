@@ -115,11 +115,12 @@ export function dealConfirmedOffPlatform(deal: {
   return !deal.order_id && dealStageIsConfirmed(deal.stage)
 }
 
-export const DEAL_SOURCES = ["offline", "website", "portal", "referral", "marketing", "other"] as const
+export const DEAL_SOURCES = ["whatsapp", "email", "website", "portal", "referral", "marketing", "other"] as const
 export type DealSource = (typeof DEAL_SOURCES)[number]
 
 export const DEAL_SOURCE_LABELS: Record<DealSource, string> = {
-  offline: "Offline",
+  whatsapp: "WhatsApp",
+  email: "Email",
   website: "Website",
   portal: "Portal",
   referral: "Referral",
@@ -127,10 +128,17 @@ export const DEAL_SOURCE_LABELS: Record<DealSource, string> = {
   other: "Other",
 }
 
+/** Stored source. Blank and the retired offline value are WhatsApp. */
+export function canonicalDealSource(source: string | null | undefined): string {
+  const value = source?.trim() ?? ""
+  if (!value || value === "offline") return "whatsapp"
+  return value
+}
+
 export function dealSourceLabel(source: string | null | undefined): string {
-  if (!source) return DEAL_SOURCE_LABELS.offline
-  if (source in DEAL_SOURCE_LABELS) return DEAL_SOURCE_LABELS[source as DealSource]
-  return source.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+  const value = canonicalDealSource(source)
+  if (value in DEAL_SOURCE_LABELS) return DEAL_SOURCE_LABELS[value as DealSource]
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 export type DealSourceTone = "green" | "amber" | "red" | "blue" | "purple" | "gray"
@@ -147,7 +155,11 @@ export function dealSourceTone(source: string | null | undefined): DealSourceTon
       return "blue"
     case "other":
       return "blue"
+    case "email":
+      return "blue"
+    case "whatsapp":
     case "offline":
+      return "green"
     default:
       return "gray"
   }
