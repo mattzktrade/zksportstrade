@@ -20,7 +20,7 @@ export async function enrollMarketingOutreach(dealId: string): Promise<{ ok: boo
     .select(
       `
       id, source, account_id, primary_contact_id, race_id, enquiry_stage,
-      crm_contacts ( id, full_name, email, phone ),
+      crm_contacts!primary_contact_id ( id, full_name, email, phone ),
       races ( name, season ),
       deal_line_items ( quantity, packages ( name, races ( name, season ) ) )
     `,
