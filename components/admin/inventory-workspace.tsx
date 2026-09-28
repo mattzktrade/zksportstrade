@@ -35,7 +35,7 @@ import {
   adminPackageSoldQuantity,
 } from "@/lib/inventory/effective-availability"
 import { CrmPartySelect } from "@/components/admin/crm-party-select"
-import type { CrmAccountOption } from "@/lib/crm/deal-types"
+import { DEAL_SOURCE_LABELS, DEAL_SOURCES, type CrmAccountOption } from "@/lib/crm/deal-types"
 import { mergeCrmAccountOptions } from "@/lib/crm/party-search"
 import { cn } from "@/lib/utils"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
@@ -251,6 +251,7 @@ export function InventoryWorkspace({
   const [dealContactPhone, setDealContactPhone] = useState("")
   const [dealLines, setDealLines] = useState<DealBasketLine[]>([])
   const [dealReserve, setDealReserve] = useState(true)
+  const [dealSource, setDealSource] = useState("whatsapp")
 
   const catalogRows = useMemo(
     () => initialRows.filter((row) => !row.shell_parent_package_id),
@@ -518,7 +519,7 @@ export function InventoryWorkspace({
           supplierQuoteAt: line.supplierQuoteAt || null,
         })),
         reserve: dealMode === "hold" ? true : dealReserve,
-        source: "offline",
+        source: dealSource,
       })
       if (!result.ok) {
         toast.error(result.message)
@@ -536,6 +537,7 @@ export function InventoryWorkspace({
       setDealContactEmail("")
       setDealContactPhone("")
       setDealLines([])
+      setDealSource("whatsapp")
       if (dealMode === "deal") router.push("/admin/enquiries")
       router.refresh()
     })
@@ -769,7 +771,7 @@ export function InventoryWorkspace({
                   <th className="px-3 py-2 font-medium">Package</th>
                   <th className="px-3 py-2 font-medium">Dates</th>
                   <th className="px-3 py-2 font-medium">Location</th>
-                  <th className="px-3 py-2 font-medium">Stock type</th>
+                  {mode === "manage" ? <th className="px-3 py-2 font-medium">Stock type</th> : null}
                   {mode === "manage" ? <th className="px-3 py-2 font-medium">Status</th> : null}
                   <th className="px-3 py-2 font-medium">{mode === "manage" ? "Live qty" : "Qty"}</th>
                   {mode === "manage" ? <th className="px-3 py-2 font-medium">Held</th> : null}
@@ -819,19 +821,18 @@ export function InventoryWorkspace({
                       </td>
                       <td className="whitespace-nowrap px-3 py-2.5 text-[#6a6e76]">{row.date_range || "—"}</td>
                       <td className="px-3 py-2.5 text-[#6a6e76]">{row.location || row.circuit}</td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex flex-wrap gap-1">
-                          <StatusPill tone={row.inventory_group_id && sharedGroupIds.has(row.inventory_group_id) ? "purple" : "green"}>
-                            {row.inventory_group_id && sharedGroupIds.has(row.inventory_group_id) ? "Shared" : "Standalone"}
-                          </StatusPill>
-                          {mode === "sales" && availability ? (
-                            <StatusPill tone="blue">{availability.canonical ? "Allocated" : "Compatibility"}</StatusPill>
-                          ) : null}
-                          {availability?.openShortageQty ? (
-                            <StatusPill tone="amber">{availability.openShortageQty} shortage</StatusPill>
-                          ) : null}
-                        </div>
-                      </td>
+                      {mode === "manage" ? (
+                        <td className="px-3 py-2.5">
+                          <div className="flex flex-wrap gap-1">
+                            <StatusPill tone={row.inventory_group_id && sharedGroupIds.has(row.inventory_group_id) ? "purple" : "green"}>
+                              {row.inventory_group_id && sharedGroupIds.has(row.inventory_group_id) ? "Shared" : "Standalone"}
+                            </StatusPill>
+                            {availability?.openShortageQty ? (
+                              <StatusPill tone="amber">{availability.openShortageQty} shortage</StatusPill>
+                            ) : null}
+                          </div>
+                        </td>
+                      ) : null}
                       {mode === "manage" ? (
                         <td className="px-3 py-2.5">
                           <div className="flex flex-wrap gap-1">
@@ -862,7 +863,7 @@ export function InventoryWorkspace({
                 })}
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={mode === "manage" ? 11 : 7} className="px-4 py-12 text-center text-[10px] text-slate-400">
+                    <td colSpan={mode === "manage" ? 11 : 6} className="px-4 py-12 text-center text-[10px] text-slate-400">
                       No inventory matches these filters.
                     </td>
                   </tr>
@@ -1108,7 +1109,7 @@ export function InventoryWorkspace({
                       </div>
                     ))}
                   </div>
-                  {shortageQty(selected, nativeAvailability[selected.id]) > 0 ? (
+                  {mode === "manage" && shortageQty(selected, nativeAvailability[selected.id]) > 0 ? (
                     <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-[8px] text-amber-800">
                       {shortageQty(selected, nativeAvailability[selected.id])}{" "}
                       sold place(s) are not covered by a recorded purchase. Add the missing purchase order or review
@@ -1138,7 +1139,7 @@ export function InventoryWorkspace({
                     {dealOpen ? (
                       <div className="space-y-2 rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3">
                         <h3 className="text-[9px] font-semibold text-[#42464d]">
-                          {dealMode === "hold" ? "Place a 7-day stock hold" : "Create offline deal"}
+                          {dealMode === "hold" ? "Place a 7-day stock hold" : "Create deal"}
                         </h3>
                         {!selectedDealAccount && !dealCreatingCompany ? (
                           <CrmPartySelect
@@ -1219,6 +1220,18 @@ export function InventoryWorkspace({
                             </div>
                           </>
                         )}
+                        <label className="text-[8px] font-medium text-[#555961]">
+                          Source
+                          <select
+                            value={dealSource}
+                            onChange={(event) => setDealSource(event.target.value)}
+                            className="mt-1 h-9 w-full rounded-md border bg-white px-2 text-[9px] font-normal"
+                          >
+                            {DEAL_SOURCES.map((source) => (
+                              <option key={source} value={source}>{DEAL_SOURCE_LABELS[source]}</option>
+                            ))}
+                          </select>
+                        </label>
                         <DealLineBasket
                           products={dealProducts}
                           suppliers={supplierOptions}
