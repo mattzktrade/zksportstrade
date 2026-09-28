@@ -95,14 +95,13 @@ export function DealCreateModal({
   const selectedAccount = clientAccounts.find((account) => account.id === accountId) ?? null
   const addingNewContact =
     newAccountMode || newContactMode || Boolean(selectedAccount && selectedAccount.contacts.length === 0)
-  const hasNewContactDetails = Boolean(newContactName.trim() && newContactEmail.trim())
-  const hasNewAccountAddress = Boolean(
-    newBillingLine1.trim() && newBillingCity.trim() && newBillingCountry.trim(),
+  const hasNewContactDetails = Boolean(
+    newContactName.trim() && (newContactEmail.trim() || newContactPhone.trim()),
   )
   const canSubmitDeal =
     createLines.length > 0 &&
     (newAccountMode
-      ? Boolean(newAccountName.trim() && hasNewContactDetails && hasNewAccountAddress)
+      ? Boolean(newAccountName.trim() && hasNewContactDetails)
       : Boolean(accountId && (addingNewContact ? hasNewContactDetails : contactId)))
 
   function rememberCreatedClient(account: CrmAccountOption) {
@@ -132,12 +131,8 @@ export function DealCreateModal({
         toast.error("Add a contact name so we know who to speak to.")
         return
       }
-      if (!newContactEmail.trim()) {
-        toast.error("Add the contact email — it is used on the booking form and invoice.")
-        return
-      }
-      if (!newBillingLine1.trim() || !newBillingCity.trim() || !newBillingCountry.trim()) {
-        toast.error("Add the billing address — it is used on the booking form and invoice. Postcode can be left blank.")
+      if (!newContactEmail.trim() && !newContactPhone.trim()) {
+        toast.error("Add an email or a phone number.")
         return
       }
     } else {
@@ -150,8 +145,8 @@ export function DealCreateModal({
           toast.error("Add a contact name so we know who to speak to.")
           return
         }
-        if (!newContactEmail.trim()) {
-          toast.error("Add the contact email — it is used on the booking form and invoice.")
+        if (!newContactEmail.trim() && !newContactPhone.trim()) {
+          toast.error("Add an email or a phone number.")
           return
         }
       } else if (!contactId) {
@@ -354,8 +349,8 @@ export function DealCreateModal({
                 <AccountKindPills compact value={newAccountTypes} onChange={setNewAccountTypes} />
               </div>
               <div>
-                <p className="text-sm font-medium">Billing address</p>
-                <p className="mt-0.5 text-xs text-slate-500">Used on the booking form and invoice.</p>
+                <p className="text-sm font-medium">Billing address <span className="font-normal text-slate-500">(optional)</span></p>
+                <p className="mt-0.5 text-xs text-slate-500">Leave this blank if you only have a name and an email or phone. Add it later for the booking form and invoice.</p>
                 <div className="mt-3 grid gap-2">
                   <input
                     value={newBillingLine1}
@@ -393,7 +388,7 @@ export function DealCreateModal({
               </div>
               <div className="rounded-lg border border-white bg-white p-3">
                 <p className="text-sm font-medium">Primary contact</p>
-                <p className="mt-0.5 text-xs text-slate-500">Name and email are required for the booking form and invoice.</p>
+                <p className="mt-0.5 text-xs text-slate-500">Name, plus an email or a phone number.</p>
                 <div className="mt-3 grid gap-2 md:grid-cols-3">
                   <input
                     value={newContactName}
@@ -411,7 +406,7 @@ export function DealCreateModal({
                   <input
                     value={newContactPhone}
                     onChange={(e) => setNewContactPhone(e.target.value)}
-                    placeholder="Phone (optional)"
+                    placeholder="Phone"
                     className="h-10 rounded-md border px-3 text-sm"
                   />
                 </div>
@@ -455,8 +450,8 @@ export function DealCreateModal({
                       </p>
                       <p className="mt-0.5 text-xs text-slate-500">
                         {selectedAccount.contacts.length === 0
-                          ? `${selectedAccount.name} has no contacts yet.`
-                          : `Adding someone new at ${selectedAccount.name}.`}
+                          ? `${selectedAccount.name} has no contacts yet. Add a name and either an email or a phone number.`
+                          : `Adding someone new at ${selectedAccount.name}. A name and either an email or a phone number is enough.`}
                       </p>
                     </div>
                     {selectedAccount.contacts.length > 0 ? (
@@ -491,7 +486,7 @@ export function DealCreateModal({
                     <input
                       value={newContactPhone}
                       onChange={(e) => setNewContactPhone(e.target.value)}
-                      placeholder="Phone (optional)"
+                      placeholder="Phone"
                       className="h-10 rounded-md border px-3 text-sm"
                     />
                   </div>
