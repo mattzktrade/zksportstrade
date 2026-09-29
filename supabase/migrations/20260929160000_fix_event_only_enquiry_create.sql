@@ -1,10 +1,6 @@
--- Staff can log an enquiry against an event before a package is chosen.
--- The previous create function read package fields even when no package was sent,
--- which failed for that path.
-
-drop function if exists public.admin_create_deal_with_existing_links(
-  uuid, uuid, text, int, numeric, text, text, text, boolean
-);
+-- The first event-only create function still mentioned the package record in
+-- expressions that run even when no package was chosen. Postgres then refused
+-- to save the enquiry. Copy the package fields into plain variables first.
 
 create or replace function public.admin_create_deal_with_existing_links(
   p_account_id uuid,
@@ -240,9 +236,4 @@ begin
 end;
 $$;
 
-revoke all on function public.admin_create_deal_with_existing_links(
-  uuid, uuid, text, int, numeric, text, text, text, boolean, text
-) from public;
-grant execute on function public.admin_create_deal_with_existing_links(
-  uuid, uuid, text, int, numeric, text, text, text, boolean, text
-) to authenticated;
+notify pgrst, 'reload schema';

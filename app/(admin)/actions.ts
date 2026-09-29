@@ -4893,10 +4893,7 @@ export async function createNativeDeal(input: {
     if (message.includes("event_not_found")) {
       return { ok: false, message: "Selected event was not found." }
     }
-    if (
-      eventOnlyRaceId &&
-      /could not find the function|schema cache|p_race_id|is not assigned yet/i.test(message)
-    ) {
+    if (eventOnlyRaceId && /could not find the function|schema cache/i.test(message)) {
       return {
         ok: false,
         message: "Saving an event without a package needs the latest database update. Apply it, then try again.",
