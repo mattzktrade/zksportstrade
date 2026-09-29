@@ -1,11 +1,6 @@
 import { redirect } from "next/navigation"
 import { requireAdmin } from "@/lib/admin/require-admin"
-import { getAdminCatalogListRows } from "@/lib/admin/queries"
-import {
-  adminPackageNetQuantity,
-  adminPackageSellable,
-} from "@/lib/inventory/effective-availability"
-import { getCrmAccountOptions, getDealListRows } from "@/lib/crm/deals"
+import { getCrmAccountOptions, getDealListRows, getDealPackagePicker, type DealListRow } from "@/lib/crm/deals"
 import { getSalesStaffOptions } from "@/lib/crm/leads"
 import {
   getBookingFormsForDeals,
@@ -13,7 +8,7 @@ import {
 } from "@/lib/booking-forms/queries"
 import { hasCmsPermission, canSendNativeBookingForm, canSignNativeBookingForm } from "@/lib/auth/permissions"
 import { getSuppliers } from "@/lib/inventory/suppliers"
-import { adminEnquiryListPath, isDealBoardStage, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
+import { DEAL_BOARD_STAGES, adminEnquiryListPath, isDealBoardStage, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
 import { isAwaitingZkApprovalDeal, uniqueDealIds } from "@/lib/admin/deal-link"
 import { DealsClient } from "./deals-client"
 
@@ -50,10 +45,12 @@ export default async function DealsPage({
     redirect("/admin/enquiries?stage=price_sent")
   }
 
-  const [initialDeals, packages, accountOptions, staffOptions, bookingForms, suppliers, awaitingZkDealIdsRaw] =
+  const selectedId = initialSelectedId?.trim() || null
+  const [initialDeals, selectedRows, packagePicker, accountOptions, staffOptions, bookingForms, suppliers, awaitingZkDealIdsRaw] =
     await Promise.all([
-      getDealListRows(),
-      getAdminCatalogListRows(),
+      getDealListRows({ stages: DEAL_BOARD_STAGES, summary: true }),
+      selectedId ? getDealListRows({ ids: [selectedId] }) : Promise.resolve([] as DealListRow[]),
+      getDealPackagePicker(),
       getCrmAccountOptions(),
       getSalesStaffOptions(),
       getBookingFormsForDeals(),
@@ -63,11 +60,11 @@ export default async function DealsPage({
 
   const awaitingZkDealIds = uniqueDealIds(awaitingZkDealIdsRaw)
   let deals = initialDeals
-  const selectedId = initialSelectedId?.trim() || null
-  const extraIds = [...new Set([selectedId, ...awaitingZkDealIds].filter((id): id is string => Boolean(id)))]
-    .filter((id) => !deals.some((deal) => deal.id === id))
+  const opened = selectedRows[0]
+  if (opened) deals = [opened, ...deals.filter((deal) => deal.id !== opened.id)]
+  const extraIds = awaitingZkDealIds.filter((id) => !deals.some((deal) => deal.id === id))
   if (extraIds.length > 0) {
-    const extra = await getDealListRows({ ids: extraIds })
+    const extra = await getDealListRows({ ids: extraIds, summary: true })
     if (extra.length > 0) deals = [...extra, ...deals]
   }
 
@@ -84,23 +81,7 @@ export default async function DealsPage({
     (deal) => isDealBoardStage(deal.stage) || isAwaitingZkApprovalDeal(deal.id, awaitingZkDealIds),
   )
 
-  const packageOptions = packages
-    .filter((row) => !row.shell_parent_package_id)
-    .map((row) => ({
-      id: row.id,
-      label: `${row.race_name} — ${row.name}`,
-      eventId: row.race_id,
-      eventName: row.race_name,
-      packageName: row.name,
-      price: row.trade_price,
-      currency: row.currency || "USD",
-      stockLeft: adminPackageSellable(row),
-      netStock: adminPackageNetQuantity(row),
-    }))
-    .sort((a, b) => a.label.localeCompare(b.label))
-  const createPackageOptions = packageOptions.filter((option) =>
-    packages.some((row) => row.id === option.id && !row.is_hidden),
-  )
+  const { packageOptions, createPackageOptions, eventOptions } = packagePicker
 
   return (
     <div className="mx-auto max-w-[1540px] p-3 sm:p-5 lg:p-7">
@@ -108,6 +89,7 @@ export default async function DealsPage({
         deals={boardDeals}
         packageOptions={packageOptions}
         createPackageOptions={createPackageOptions}
+        createEventOptions={eventOptions}
         accountOptions={accountOptions}
         staffOptions={staffOptions}
         currentProfileId={profile.id}

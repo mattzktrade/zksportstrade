@@ -458,7 +458,7 @@ export function DealDetailClient({
         </Link>
         <AdminPageHeader
           title={`${deal.reference} — ${deal.account_name || "Deal"}`}
-          description={`${deal.race_name || "No event"} · ${deal.line_summary || "No products"}`}
+          description={`${deal.race_name || "No event"} · ${deal.line_summary || (deal.race_name ? "No package yet" : "No products")}`}
           action={
             <div className="flex flex-wrap items-center gap-2">
               {canManageDeals ? (
@@ -869,6 +869,12 @@ export function DealDetailClient({
                 </button>
               ) : null}
             </div>
+            {lines.length === 0 ? (
+              <p className="px-4 py-6 text-[10px] text-slate-500">
+                No package yet. Click Edit to add one when they decide.
+              </p>
+            ) : (
+            <>
             <AdminDesktopTable>
               <table className="w-full text-left text-[10px]">
                 <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-slate-400">
@@ -980,6 +986,8 @@ export function DealDetailClient({
                 </div>
               ))}
             </AdminMobileList>
+            </>
+            )}
           </AdminPanel>
 
           <AdminPanel>

@@ -218,6 +218,10 @@ test("enquiry helpers describe interest, sourcing, and next action", () => {
     "Abu Dhabi GP — 6× Paddock Club",
   )
   assert.equal(
+    enquiryInterestLabel({ race_name: "2026 Abu Dhabi Grand Prix", line_summary: null }),
+    "2026 Abu Dhabi Grand Prix — no package yet",
+  )
+  assert.equal(
     enquiryNeedsSourcing({
       stage: "draft",
       enquiry_stage: "new",

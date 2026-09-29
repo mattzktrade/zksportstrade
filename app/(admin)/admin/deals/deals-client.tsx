@@ -48,6 +48,7 @@ import {
   dealSourceTone,
   friendlyDealActivitySummary,
   type CrmAccountOption,
+  type DealEventOption,
   type DealListRow,
   type DealPackageOption,
   type DealStage,
@@ -258,6 +259,7 @@ export function DealsClient({
   deals,
   packageOptions,
   createPackageOptions,
+  createEventOptions,
   accountOptions,
   staffOptions,
   currentProfileId,
@@ -276,6 +278,7 @@ export function DealsClient({
   deals: DealListRow[]
   packageOptions: DealPackageOption[]
   createPackageOptions: DealPackageOption[]
+  createEventOptions: DealEventOption[]
   accountOptions: CrmAccountOption[]
   staffOptions: StaffOption[]
   currentProfileId: string
@@ -1359,9 +1362,10 @@ export function DealsClient({
         <DealCreateModal
           accountOptions={accountOptions}
           products={createPackageOptions}
+          events={createEventOptions}
           suppliers={supplierOptions}
           title="Create new enquiry"
-          description="New records start in Enquiries unless you pick a later deal stage such as won / paid, which skips the booking form."
+          description="Log the client, then either an event or a specific package. A later deal stage such as won / paid needs a package and skips the booking form."
           submitLabel="Create enquiry"
           onClose={() => setShowCreate(false)}
           onCreated={() => setShowCreate(false)}

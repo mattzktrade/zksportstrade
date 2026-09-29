@@ -780,6 +780,7 @@ export async function updatePackageFields(input: {
       trade_price: input.trade_price,
       is_enquiry: input.is_enquiry,
       is_hidden: input.is_hidden,
+      ...(input.is_hidden ? { sell_on_trade_portal: false, sell_on_wix: false } : {}),
       featured: input.featured,
       sort_order: Math.floor(Number(input.sort_order)) || 0,
       brochure_url: brochure,
@@ -1531,7 +1532,7 @@ export async function createPackage(input: {
     ...(input.skipFaqs ? {} : { faqs: parsePackageFaqs(input.faqs ?? []) }),
     product_code: productCode,
     salesforce_product_id: salesforceProductId,
-    sell_on_trade_portal: true,
+    sell_on_trade_portal: input.is_hidden !== true,
     sell_on_wix: sellOnWix,
     sell_on_partners: false,
     retail_price_multiplier: retailMultiplier,
@@ -4731,6 +4732,8 @@ export async function createNativeDeal(input: {
   reserve?: boolean
   stage?: string | null
   enquiryTemperature?: "warm" | "cold" | null
+  /** Set when the enquiry is for an event and no package has been chosen yet. */
+  raceId?: string | null
   lines?: Array<{
     packageId: string
     quantity: number
@@ -4825,6 +4828,27 @@ export async function createNativeDeal(input: {
     }
   }
 
+  const eventOnlyRaceId =
+    !normalizedLines?.length && !input.packageId?.trim() ? input.raceId?.trim() || null : null
+  if (eventOnlyRaceId) {
+    if (pipeline.reserve || isEnquirySkipaheadStage(pipeline.selectableStage)) {
+      return {
+        ok: false,
+        message: "Choose a package before holding stock or moving this onto a deal stage.",
+      }
+    }
+    const { data: race, error: raceError } = await gate.supabase
+      .from("races")
+      .select("id, is_archived")
+      .eq("id", eventOnlyRaceId)
+      .maybeSingle()
+    if (raceError) return { ok: false, message: raceError.message }
+    if (!race) return { ok: false, message: "Selected event was not found." }
+    if (race.is_archived) {
+      return { ok: false, message: "That event is archived. Choose a current event." }
+    }
+  }
+
   const sharedArgs = {
     p_package_id: input.packageId?.trim() || null,
     p_quantity: quantity,
@@ -4849,6 +4873,7 @@ export async function createNativeDeal(input: {
         p_account_id: accountId,
         p_contact_id: contactId,
         ...sharedArgs,
+        p_race_id: eventOnlyRaceId,
       })
       : await gate.supabase.rpc("admin_create_deal_with_line", {
         p_account_name: accountName,
@@ -4864,6 +4889,18 @@ export async function createNativeDeal(input: {
     }
     if (message.includes("package_not_found")) {
       return { ok: false, message: "Selected package was not found." }
+    }
+    if (message.includes("event_not_found")) {
+      return { ok: false, message: "Selected event was not found." }
+    }
+    if (
+      eventOnlyRaceId &&
+      /could not find the function|schema cache|p_race_id|is not assigned yet/i.test(message)
+    ) {
+      return {
+        ok: false,
+        message: "Saving an event without a package needs the latest database update. Apply it, then try again.",
+      }
     }
     if (message.includes("account_not_found")) {
       return { ok: false, message: "Selected account is no longer available." }
@@ -4881,6 +4918,20 @@ export async function createNativeDeal(input: {
   }
 
   const dealId = String(data)
+  if (eventOnlyRaceId) {
+    const { error: raceSaveError } = await gate.supabase
+      .from("deals")
+      .update({ race_id: eventOnlyRaceId })
+      .eq("id", dealId)
+    if (raceSaveError) {
+      return {
+        ok: false,
+        message: "Enquiry was created, but the event could not be saved.",
+        dealId,
+        stage: pipeline.dealStage,
+      }
+    }
+  }
   const source = canonicalDealSource(input.source)
   const enquiryTemperature = inboundEnquirySource(source)
     ? "warm"

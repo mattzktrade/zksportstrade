@@ -1,7 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache"
-import { fetchAllRows } from "@/lib/supabase/fetch-all-rows"
+import { chunkList, fetchAllRows } from "@/lib/supabase/fetch-all-rows"
 import { createClient } from "@/lib/supabase/server"
-import type { CrmAccountOption, DealListRow, PackageDealSaleRow } from "@/lib/crm/deal-types"
+import type { CrmAccountOption, DealEventOption, DealListRow, DealPackageOption, PackageDealSaleRow } from "@/lib/crm/deal-types"
 import { canonicalDealSource, canonicalDealStage, dealStageCountsAsSold } from "@/lib/crm/deal-types"
 import {
   enquiryCrmStageFromDeal,
@@ -92,10 +92,166 @@ export async function getCrmCompanyOptions(): Promise<CrmCompanyOption[]> {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
-export async function getDealListRows(options?: { ids?: string[] }): Promise<DealListRow[]> {
+function sortPickerEvents(events: DealEventOption[]): DealEventOption[] {
+  const today = new Date().toISOString().slice(0, 10)
+  return [...events].sort((a, b) => {
+    const aDate = a.eventDate ?? ""
+    const bDate = b.eventDate ?? ""
+    const aUpcoming = aDate !== "" && aDate >= today
+    const bUpcoming = bDate !== "" && bDate >= today
+    if (aUpcoming !== bUpcoming) return aUpcoming ? -1 : 1
+    if (aDate && bDate && aDate !== bDate) {
+      return aUpcoming ? aDate.localeCompare(bDate) : bDate.localeCompare(aDate)
+    }
+    if (Boolean(aDate) !== Boolean(bDate)) return aDate ? -1 : 1
+    return a.label.localeCompare(b.label)
+  })
+}
+
+export async function getDealPackagePicker(): Promise<{
+  packageOptions: DealPackageOption[]
+  createPackageOptions: DealPackageOption[]
+  eventOptions: DealEventOption[]
+}> {
+  noStore()
+  const supabase = await createClient()
+  const [packagesResult, racesResult, inventoryResult] = await Promise.all([
+    fetchAllRows<{
+      id: string
+      name: string
+      race_id: string
+      trade_price: number | string | null
+      currency: string | null
+      shell_parent_package_id: string | null
+    }>((from, to) =>
+      supabase
+        .from("packages")
+        .select("id, name, race_id, trade_price, currency, shell_parent_package_id")
+        .order("id")
+        .range(from, to),
+    ),
+    fetchAllRows<{
+      id: string
+      name: string
+      season: number | null
+      event_date: string | null
+      is_archived: boolean | null
+    }>((from, to) =>
+      supabase
+        .from("races")
+        .select("id, name, season, event_date, is_archived")
+        .order("id")
+        .range(from, to),
+    ),
+    fetchAllRows<{
+      package_id: string
+      qty_available: number | string | null
+      qty_held: number | string | null
+    }>((from, to) =>
+      supabase
+        .from("package_inventory")
+        .select("package_id, qty_available, qty_held")
+        .order("package_id")
+        .range(from, to),
+    ),
+  ])
+  const packages = packagesResult.data
+  const races = racesResult.data
+  const inventory = inventoryResult.data
+
+  const raceName = new Map(
+    (races ?? []).map((race) => [race.id, eventSeasonLabel(race.name, race.season)]),
+  )
+  const stockByPackage = new Map(
+    (inventory ?? []).map((row) => [
+      row.package_id,
+      Math.max(0, Math.floor(Number(row.qty_available) || 0) - Math.floor(Number(row.qty_held) || 0)),
+    ]),
+  )
+
+  const packageOptions = (packages ?? [])
+    .filter((row) => !row.shell_parent_package_id)
+    .map((row) => {
+      const eventName = raceName.get(row.race_id) ?? row.race_id
+      return {
+        id: row.id,
+        label: `${eventName} — ${row.name}`,
+        eventId: row.race_id,
+        eventName,
+        packageName: row.name,
+        price: row.trade_price == null ? null : Number(row.trade_price),
+        currency: row.currency || "USD",
+        stockLeft: stockByPackage.get(row.id) ?? 0,
+      }
+    })
+    .sort((a, b) => a.label.localeCompare(b.label))
+
+  const eventOptions = sortPickerEvents(
+    (races ?? [])
+      .filter((race) => race.is_archived !== true)
+      .map((race) => ({
+        id: race.id,
+        label: eventSeasonLabel(race.name, race.season),
+        eventDate: race.event_date,
+      })),
+  )
+
+  return {
+    packageOptions,
+    // Hidden products stay off the portal and website, but staff still sell them
+    // on deals (parking passes, coach passes, and similar internal stock).
+    createPackageOptions: packageOptions,
+    eventOptions,
+  }
+}
+
+export async function countBoardDealsUpdatedThisMonth(stages: readonly string[]): Promise<number> {
+  noStore()
+  const openStages = stages.filter((stage) => stage !== "closed_lost" && stage !== "cancelled")
+  if (openStages.length === 0) return 0
+  const supabase = await createClient()
+  const monthStart = new Date()
+  monthStart.setUTCDate(1)
+  monthStart.setUTCHours(0, 0, 0, 0)
+  const nextMonth = new Date(monthStart)
+  nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1)
+  const { count, error } = await supabase
+    .from("deals")
+    .select("id", { count: "exact", head: true })
+    .in("stage", [...openStages])
+    .gte("updated_at", monthStart.toISOString())
+    .lt("updated_at", nextMonth.toISOString())
+  if (error) return 0
+  return count ?? 0
+}
+
+async function loadRowsInChunks<T>(
+  ids: string[],
+  run: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  if (ids.length === 0) return []
+  const chunks = chunkList(ids, 80)
+  const rows: T[] = []
+  for (let i = 0; i < chunks.length; i += 4) {
+    const results = await Promise.all(chunks.slice(i, i + 4).map((chunk) => run(chunk)))
+    for (const result of results) {
+      if (!result.error && result.data) rows.push(...result.data)
+    }
+  }
+  return rows
+}
+
+export async function getDealListRows(options?: {
+  ids?: string[]
+  stages?: readonly string[]
+  /** List cards only. Orders, invoices, and activities load for the open deal. */
+  summary?: boolean
+}): Promise<DealListRow[]> {
   noStore()
   const supabase = await createClient()
   const ids = [...new Set((options?.ids ?? []).map((id) => id.trim()).filter(Boolean))]
+  const stages = [...new Set((options?.stages ?? []).map((stage) => stage.trim()).filter(Boolean))]
+  const summary = options?.summary === true
   const lineSelect = `
       crm_accounts(name),
       crm_contacts!primary_contact_id(full_name, email, phone),
@@ -116,7 +272,9 @@ export async function getDealListRows(options?: { ids?: string[] }): Promise<Dea
 
   async function load(select: string) {
     let query = supabase.from("deals").select(select as never).order("reference", { ascending: false })
-    query = ids.length > 0 ? query.in("id", ids) : query.limit(5000)
+    if (ids.length > 0) query = query.in("id", ids)
+    else if (stages.length > 0) query = query.in("stage", stages)
+    else query = query.limit(5000)
     return query as unknown as Promise<{
       data: Array<{
         id: string
@@ -181,16 +339,18 @@ export async function getDealListRows(options?: { ids?: string[] }): Promise<Dea
   const orderIds = [...new Set(data.map((row) => row.order_id).filter(Boolean))] as string[]
   const dealIds = data.map((row) => row.id)
 
-  const [{ data: races }, { data: orders }, { data: activities }] = await Promise.all([
+  const [racesResult, orders, activities] = await Promise.all([
     raceIds.length
       ? supabase.from("races").select("id, name, season, event_date").in("id", raceIds)
       : Promise.resolve({
           data: [] as Array<{ id: string; name: string; season: number; event_date: string | null }>,
         }),
-    orderIds.length
-      ? supabase
-          .from("orders")
-          .select(`
+    summary
+      ? Promise.resolve([])
+      : loadRowsInChunks(orderIds, (chunk) =>
+          supabase
+            .from("orders")
+            .select(`
             id, reference,
             invoices(
               id, status, amount, xero_invoice_id, xero_invoice_number, xero_sync_status,
@@ -199,26 +359,20 @@ export async function getDealListRows(options?: { ids?: string[] }): Promise<Dea
               payment_reminder_error, cancellation_eligible_at, created_at
             )
           `)
-          .in("id", orderIds)
-      : Promise.resolve({ data: [] }),
-    dealIds.length
-      ? supabase
-          .from("deal_activities")
-          .select("id, deal_id, actor_profile_id, action, summary, created_at")
-          .in("deal_id", dealIds)
-          .order("created_at", { ascending: false })
-          .limit(2000)
-      : Promise.resolve({
-          data: [] as Array<{
-            id: string
-            deal_id: string
-            actor_profile_id: string | null
-            action: string
-            summary: string
-            created_at: string
-          }>,
-        }),
+            .in("id", chunk),
+        ),
+    summary
+      ? Promise.resolve([])
+      : loadRowsInChunks(dealIds, (chunk) =>
+          supabase
+            .from("deal_activities")
+            .select("id, deal_id, actor_profile_id, action, summary, created_at")
+            .in("deal_id", chunk)
+            .order("created_at", { ascending: false })
+            .limit(200),
+        ),
   ])
+  const races = racesResult.data
 
   const actorIds = [
     ...new Set(

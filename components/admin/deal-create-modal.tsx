@@ -9,6 +9,7 @@ import { createNativeDeal } from "@/app/(admin)/actions"
 import { AccountKindPills } from "@/components/admin/account-kind-pills"
 import { AdminModalScrim } from "@/components/admin/admin-list-preview"
 import { CrmPartySelect } from "@/components/admin/crm-party-select"
+import { SearchableSelect } from "@/components/admin/searchable-select"
 import {
   DealLineBasket,
   isPricedDealBasketLine,
@@ -18,13 +19,14 @@ import {
   type DealBasketSupplier,
 } from "@/components/admin/deal-line-basket"
 import { type AccountKind } from "@/lib/crm/account-kinds"
-import { DEAL_SOURCE_LABELS, DEAL_SOURCES, type CrmAccountOption } from "@/lib/crm/deal-types"
+import { DEAL_SOURCE_LABELS, DEAL_SOURCES, type CrmAccountOption, type DealEventOption } from "@/lib/crm/deal-types"
 import { EnquirySelectableStageSelect } from "@/components/admin/enquiry-selectable-stage-select"
 import {
   adminCreatedRecordPath,
   createdDealPipeline,
   enquirySelectableStageAllowsHold,
   inboundEnquirySource,
+  isEnquirySkipaheadStage,
   type EnquirySelectableStage,
   type EnquiryTemperature,
 } from "@/lib/crm/deal-pipeline"
@@ -34,15 +36,17 @@ import { cn } from "@/lib/utils"
 export function DealCreateModal({
   accountOptions,
   products,
+  events,
   suppliers,
   title = "Create new deal",
-  description = "Choose the client and product, then confirm pricing and stock.",
+  description = "Choose the client, then an event or a specific package.",
   submitLabel = "Create deal",
   onCreated,
   onClose,
 }: {
   accountOptions: CrmAccountOption[]
   products: DealBasketProduct[]
+  events: DealEventOption[]
   suppliers: DealBasketSupplier[]
   title?: string
   description?: string
@@ -67,6 +71,8 @@ export function DealCreateModal({
   const [newBillingPostcode, setNewBillingPostcode] = useState("")
   const [newBillingCountry, setNewBillingCountry] = useState("")
   const [createdAccounts, setCreatedAccounts] = useState<CrmAccountOption[]>([])
+  const [interest, setInterest] = useState<"event" | "package">("package")
+  const [eventId, setEventId] = useState("")
   const [createLines, setCreateLines] = useState<DealBasketLine[]>([])
   const [notes, setNotes] = useState("")
   const [createSource, setCreateSource] = useState("whatsapp")
@@ -98,8 +104,9 @@ export function DealCreateModal({
   const hasNewContactDetails = Boolean(
     newContactName.trim() && (newContactEmail.trim() || newContactPhone.trim()),
   )
+  const hasInterest = interest === "event" ? Boolean(eventId) : createLines.length > 0
   const canSubmitDeal =
-    createLines.length > 0 &&
+    hasInterest &&
     (newAccountMode
       ? Boolean(newAccountName.trim() && hasNewContactDetails)
       : Boolean(accountId && (addingNewContact ? hasNewContactDetails : contactId)))
@@ -154,13 +161,20 @@ export function DealCreateModal({
         return
       }
     }
-    if (createLines.length === 0) {
-      toast.error("Add at least one product.")
-      return
-    }
-    if (createLines.some((line) => !isPricedDealBasketLine(line))) {
-      toast.error("Check the quantity and sale price for every product.")
-      return
+    if (interest === "event") {
+      if (!eventId) {
+        toast.error("Select an event, such as 2026 Abu Dhabi.")
+        return
+      }
+    } else {
+      if (createLines.length === 0) {
+        toast.error("Add at least one product.")
+        return
+      }
+      if (createLines.some((line) => !isPricedDealBasketLine(line))) {
+        toast.error("Check the quantity and sale price for every product.")
+        return
+      }
     }
     startTransition(async () => {
       let resolvedAccountId = accountId
@@ -235,20 +249,24 @@ export function DealCreateModal({
         })
       }
 
+      const eventOnly = interest === "event"
       const result = await createNativeDeal({
         accountId: resolvedAccountId,
         contactId: resolvedContactId,
-        lines: createLines.map((line) => ({
-          packageId: line.packageId,
-          quantity: numericDealField(line.quantity),
-          unitPrice: numericDealField(line.unitPrice),
-          sourcingMode: line.sourcingMode,
-          supplierId: line.supplierId || null,
-          expectedUnitCost: line.expectedUnitCost,
-          supplierQuoteAt: line.supplierQuoteAt || null,
-        })),
+        raceId: eventOnly ? eventId : null,
+        lines: eventOnly
+          ? []
+          : createLines.map((line) => ({
+              packageId: line.packageId,
+              quantity: numericDealField(line.quantity),
+              unitPrice: numericDealField(line.unitPrice),
+              sourcingMode: line.sourcingMode,
+              supplierId: line.supplierId || null,
+              expectedUnitCost: line.expectedUnitCost,
+              supplierQuoteAt: line.supplierQuoteAt || null,
+            })),
         notes,
-        reserve: createdDealPipeline({ stage: createStage, reserve }).reserve,
+        reserve: eventOnly ? false : createdDealPipeline({ stage: createStage, reserve }).reserve,
         stage: createStage,
         source: createSource,
         enquiryTemperature: inboundEnquirySource(createSource) ? "warm" : enquiryTemperature,
@@ -526,50 +544,102 @@ export function DealCreateModal({
 
         <div className="mt-4 rounded-lg border border-slate-200 p-4">
           <div>
-            <h3 className="text-sm font-semibold">2. Products, events and pricing</h3>
+            <h3 className="text-sm font-semibold">2. What are they interested in?</h3>
             <p className="mt-0.5 text-xs text-slate-500">
-              Add products from any event. Each line can use your stock or a fresh broker quote, and its sale price can be changed.
+              Choose a package when you already know it. Choose the event when they only know the race, such as 2026 Abu Dhabi.
             </p>
           </div>
-          <div className="mt-3">
-            <DealLineBasket
-              products={products}
-              suppliers={suppliers}
-              lines={createLines}
-              onChange={setCreateLines}
-            />
-          </div>
-          <div className="mt-4 flex items-center justify-between gap-4 border-t pt-3">
-            <div>
-              <label className="flex items-center gap-2 text-sm font-medium">
-                <input
-                  type="checkbox"
-                  checked={reserve && holdAllowed}
-                  disabled={!holdAllowed}
-                  onChange={(event) => {
-                    const next = event.target.checked
-                    setReserve(next)
-                    if (next && createStage === "new") setCreateStage("price_sent")
-                  }}
-                />
-                Place a seven-day hold now
-              </label>
-              {!holdAllowed ? (
-                <p className="mt-1 text-xs text-slate-500">
-                  Signed and won deals take purchased stock instead of a short hold.
-                </p>
-              ) : null}
-            </div>
-            <div className="text-right">
-              <p className="text-[10px] uppercase text-slate-400">Total</p>
-              <p className="text-lg font-semibold">
-                {formatMoneyCompact(
-                  "USD",
-                  createLines.reduce((sum, line) => sum + numericDealField(line.quantity) * numericDealField(line.unitPrice), 0),
+          {events.length > 0 ? (
+            <div className="mt-3 flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-sm font-medium">
+              <button
+                type="button"
+                onClick={() => setInterest("package")}
+                className={cn(
+                  "flex-1 rounded px-3 py-2",
+                  interest === "package" ? "bg-primary text-white" : "text-slate-600 hover:bg-white",
                 )}
-              </p>
+              >
+                A specific package
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setInterest("event")
+                  setReserve(false)
+                  if (isEnquirySkipaheadStage(createStage)) setCreateStage("new")
+                }}
+                className={cn(
+                  "flex-1 rounded px-3 py-2",
+                  interest === "event" ? "bg-primary text-white" : "text-slate-600 hover:bg-white",
+                )}
+              >
+                Just the event
+              </button>
             </div>
-          </div>
+          ) : null}
+
+          {interest === "event" ? (
+            <label className="mt-4 block text-sm">
+              <span className="mb-1 block font-medium">Event</span>
+              <SearchableSelect
+                value={eventId}
+                onChange={setEventId}
+                options={events.map((event) => ({ value: event.id, label: event.label }))}
+                placeholder="Search events, e.g. 2026 Abu Dhabi"
+                emptyLabel="No events match"
+                optionClassName="py-2 text-sm"
+                className="h-11 w-full rounded-md border bg-white px-3 text-sm"
+              />
+              <span className="mt-1.5 block text-xs text-slate-500">
+                No package or price yet. Add a package on the enquiry once they decide.
+              </span>
+            </label>
+          ) : (
+            <>
+              <p className="mt-3 text-xs text-slate-500">
+                Add products from any event. Each line can use your stock or a fresh broker quote, and its sale price can be changed.
+              </p>
+              <div className="mt-3">
+                <DealLineBasket
+                  products={products}
+                  suppliers={suppliers}
+                  lines={createLines}
+                  onChange={setCreateLines}
+                />
+              </div>
+              <div className="mt-4 flex items-center justify-between gap-4 border-t pt-3">
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      checked={reserve && holdAllowed}
+                      disabled={!holdAllowed}
+                      onChange={(event) => {
+                        const next = event.target.checked
+                        setReserve(next)
+                        if (next && createStage === "new") setCreateStage("price_sent")
+                      }}
+                    />
+                    Place a seven-day hold now
+                  </label>
+                  {!holdAllowed ? (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Signed and won deals take purchased stock instead of a short hold.
+                    </p>
+                  ) : null}
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] uppercase text-slate-400">Total</p>
+                  <p className="text-lg font-semibold">
+                    {formatMoneyCompact(
+                      "USD",
+                      createLines.reduce((sum, line) => sum + numericDealField(line.quantity) * numericDealField(line.unitPrice), 0),
+                    )}
+                  </p>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="mt-4">
@@ -577,6 +647,7 @@ export function DealCreateModal({
             <span className="mb-1 block font-medium">Stage</span>
             <EnquirySelectableStageSelect
               value={createStage}
+              enquiryStagesOnly={interest === "event"}
               onChange={(stage) => {
                 setCreateStage(stage)
                 if (!enquirySelectableStageAllowsHold(stage)) setReserve(false)
@@ -584,7 +655,9 @@ export function DealCreateModal({
               className="h-11 w-full rounded-md border bg-white px-3"
             />
             <span className="mt-1.5 block text-xs text-slate-500">
-              Defaults to New. Won / paid and other deal stages skip the booking form.
+              {interest === "event"
+                ? "Defaults to New. Add a package later if you need a deal stage such as won / paid."
+                : "Defaults to New. Won / paid and other deal stages skip the booking form."}
             </span>
           </label>
         </div>
@@ -647,12 +720,16 @@ export function DealCreateModal({
           <label className="text-sm">
             <span className="mb-1 block font-medium">Notes</span>
             <span className="mb-2 block text-xs text-slate-500">
-              Other options, dates, or anything they were not sure about. You still need at least one product on the enquiry.
+              Other options, dates, or anything they were not sure about.
             </span>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Also asked about Paddock Club, or Sunday only if the three-day is gone."
+              placeholder={
+                interest === "event"
+                  ? "e.g. Hospitality for four, not sure which package yet."
+                  : "e.g. Also asked about Paddock Club, or Sunday only if the three-day is gone."
+              }
               className="min-h-20 w-full rounded-md border p-3"
             />
           </label>

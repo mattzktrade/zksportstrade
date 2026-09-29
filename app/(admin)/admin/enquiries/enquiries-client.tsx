@@ -51,6 +51,7 @@ import {
   dealSourceLabel,
   friendlyDealActivitySummary,
   type CrmAccountOption,
+  type DealEventOption,
   type DealListRow,
 } from "@/lib/crm/deal-types"
 import {
@@ -189,7 +190,21 @@ function EnquiryAvailability({
 }) {
   const byId = useMemo(() => new Map(products.map((product) => [product.id, product])), [products])
   if (deal.lines.length === 0) {
-    return <p className="text-[9px] text-slate-500">No product on this enquiry yet.</p>
+    return (
+      <p className="text-[9px] text-slate-500">
+        {deal.race_name ? (
+          <>
+            No package chosen yet.{" "}
+            <Link href={adminDealPath(deal.id)} className="font-medium text-primary hover:underline">
+              Add one when they decide
+            </Link>
+            .
+          </>
+        ) : (
+          "No product on this enquiry yet."
+        )}
+      </p>
+    )
   }
   return (
     <div className="space-y-2">
@@ -240,6 +255,7 @@ export function EnquiriesClient({
   deals,
   convertedThisMonth,
   packageOptions,
+  createEventOptions,
   stockProducts,
   accountOptions,
   staffOptions,
@@ -259,6 +275,7 @@ export function EnquiriesClient({
   deals: DealListRow[]
   convertedThisMonth: number
   packageOptions: DealBasketProduct[]
+  createEventOptions: DealEventOption[]
   stockProducts: DealBasketProduct[]
   accountOptions: CrmAccountOption[]
   staffOptions: StaffOption[]
@@ -898,7 +915,9 @@ export function EnquiriesClient({
                       </td>
                       <td className="max-w-[260px] px-3 py-3">
                         <p className="font-medium text-slate-700">{deal.race_name || "—"}</p>
-                        <p className="mt-0.5 text-[8px] text-slate-400">{deal.line_summary || "—"}</p>
+                        <p className="mt-0.5 text-[8px] text-slate-400">
+                          {deal.line_summary || (deal.race_name ? "No package yet" : "—")}
+                        </p>
                         {notes ? (
                           <p className="mt-1 text-[8px] leading-snug text-slate-600" title={deal.notes ?? undefined}>
                             {notes}
@@ -1067,9 +1086,11 @@ export function EnquiriesClient({
                 <div>
                   <h3 className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Interest</h3>
                   <p className="mt-1 text-[10px] font-medium text-slate-800">{enquiryInterestLabel(selected)}</p>
-                  <p className="mt-0.5 text-[9px] text-slate-500">
-                    {formatMoneyCompact(selected.currency, selected.total_amount)}
-                  </p>
+                  {selected.lines.length > 0 ? (
+                    <p className="mt-0.5 text-[9px] text-slate-500">
+                      {formatMoneyCompact(selected.currency, selected.total_amount)}
+                    </p>
+                  ) : null}
                 </div>
 
                 <div>
@@ -1204,9 +1225,10 @@ export function EnquiriesClient({
         <DealCreateModal
           accountOptions={accountOptions}
           products={packageOptions}
+          events={createEventOptions}
           suppliers={supplierOptions}
           title="Create new enquiry"
-          description="Log the client, at least one product, and notes. Stage defaults to New; won / paid skips the booking form."
+          description="Log the client, then either an event or a specific package. Stage defaults to New."
           submitLabel="Create enquiry"
           onClose={() => setShowCreate(false)}
           onCreated={() => setShowCreate(false)}

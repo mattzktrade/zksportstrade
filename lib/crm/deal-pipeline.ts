@@ -437,7 +437,8 @@ export function enquiryInterestLabel(deal: Pick<DealListRow, "race_name" | "line
   const event = deal.race_name?.trim() || ""
   const lines = deal.line_summary?.trim() || ""
   if (event && lines) return `${event} — ${lines}`
-  return event || lines || "—"
+  if (event) return `${event} — no package yet`
+  return lines || "—"
 }
 
 export function enquiryLastActivityAt(deal: Pick<DealListRow, "updated_at" | "recent_activities">): string {

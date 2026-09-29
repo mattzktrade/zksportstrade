@@ -12,13 +12,19 @@ export function EnquirySelectableStageSelect({
   disabled,
   id,
   className,
+  enquiryStagesOnly = false,
 }: {
   value: EnquirySelectableStage
   onChange: (stage: EnquirySelectableStage) => void
   disabled?: boolean
   id?: string
   className?: string
+  /** Event-only enquiries stay in the enquiry stages until a package is added. */
+  enquiryStagesOnly?: boolean
 }) {
+  const groups = enquiryStagesOnly
+    ? ENQUIRY_SELECTABLE_STAGE_GROUPS.filter((group) => group.label === "Enquiry")
+    : ENQUIRY_SELECTABLE_STAGE_GROUPS
   return (
     <select
       id={id}
@@ -27,7 +33,7 @@ export function EnquirySelectableStageSelect({
       onChange={(event) => onChange(event.target.value as EnquirySelectableStage)}
       className={className}
     >
-      {ENQUIRY_SELECTABLE_STAGE_GROUPS.map((group) => (
+      {groups.map((group) => (
         <optgroup key={group.label} label={group.label}>
           {group.stages.map((stage) => (
             <option key={stage} value={stage}>

@@ -1,17 +1,20 @@
 import { redirect } from "next/navigation"
 import { requireAdmin } from "@/lib/admin/require-admin"
-import { getAdminCatalogListRows } from "@/lib/admin/queries"
 import {
-  adminPackageNetQuantity,
-  adminPackageSellable,
-} from "@/lib/inventory/effective-availability"
-import { getCrmAccountOptions, getDealListRows } from "@/lib/crm/deals"
+  countBoardDealsUpdatedThisMonth,
+  getCrmAccountOptions,
+  getDealListRows,
+  getDealPackagePicker,
+  type DealListRow,
+} from "@/lib/crm/deals"
 import { getSalesStaffOptions } from "@/lib/crm/leads"
 import { getBookingFormsForDeals, listNativeBookingFormsAwaitingApprovalDealIds } from "@/lib/booking-forms/queries"
 import { hasCmsPermission, canSendNativeBookingForm, canSignNativeBookingForm } from "@/lib/auth/permissions"
 import { getSuppliers } from "@/lib/inventory/suppliers"
 import {
+  DEAL_BOARD_STAGES,
   ENQUIRY_CRM_STAGES,
+  ENQUIRY_PIPELINE_STAGES,
   adminDealListPath,
   isDealBoardStage,
   isEnquiryPipelineStage,
@@ -49,24 +52,24 @@ export default async function EnquiriesPage({
 }) {
   const profile = await requireAdmin()
   const { enquiry: initialSelectedId, stage: stageParam, owner: ownerParam } = await searchParams
-  const [allDeals, packages, accountOptions, staffOptions, suppliers, bookingForms, awaitingZkDealIdsRaw] =
+  const selectedId = initialSelectedId?.trim() || null
+  const [allDeals, selectedRows, packagePicker, accountOptions, staffOptions, suppliers, bookingForms, awaitingZkDealIdsRaw, convertedThisMonth] =
     await Promise.all([
-      getDealListRows(),
-      getAdminCatalogListRows(),
+      getDealListRows({ stages: ENQUIRY_PIPELINE_STAGES, summary: true }),
+      selectedId ? getDealListRows({ ids: [selectedId] }) : Promise.resolve([] as DealListRow[]),
+      getDealPackagePicker(),
       getCrmAccountOptions(),
       getSalesStaffOptions(),
       getSuppliers(),
       getBookingFormsForDeals(),
       listNativeBookingFormsAwaitingApprovalDealIds(),
+      countBoardDealsUpdatedThisMonth(DEAL_BOARD_STAGES),
     ])
 
   const awaitingZkDealIds = uniqueDealIds(awaitingZkDealIdsRaw)
-  const selectedId = initialSelectedId?.trim() || null
   let deals = allDeals
-  if (selectedId && !deals.some((deal) => deal.id === selectedId)) {
-    const extra = await getDealListRows({ ids: [selectedId] })
-    if (extra.length > 0) deals = [...extra, ...deals]
-  }
+  const opened = selectedRows[0]
+  if (opened) deals = [opened, ...deals.filter((deal) => deal.id !== opened.id)]
 
   const selected = selectedId ? deals.find((deal) => deal.id === selectedId) ?? null : null
   if (
@@ -80,32 +83,7 @@ export default async function EnquiriesPage({
     (deal) =>
       isEnquiryPipelineStage(deal.stage) && !isAwaitingZkApprovalDeal(deal.id, awaitingZkDealIds),
   )
-  const monthKey = new Date().toISOString().slice(0, 7)
-  const convertedThisMonth = deals.filter(
-    (deal) =>
-      isDealBoardStage(deal.stage) &&
-      deal.stage !== "closed_lost" &&
-      deal.stage !== "cancelled" &&
-      deal.updated_at.startsWith(monthKey),
-  ).length
-
-  const packageOptions = packages
-    .filter((row) => !row.shell_parent_package_id)
-    .map((row) => ({
-      id: row.id,
-      label: `${row.race_name} — ${row.name}`,
-      eventId: row.race_id,
-      eventName: row.race_name,
-      packageName: row.name,
-      price: row.trade_price,
-      currency: row.currency || "USD",
-      stockLeft: adminPackageSellable(row),
-      netStock: adminPackageNetQuantity(row),
-    }))
-    .sort((a, b) => a.label.localeCompare(b.label))
-  const createPackageOptions = packageOptions.filter((option) =>
-    packages.some((row) => row.id === option.id && !row.is_hidden),
-  )
+  const { packageOptions, createPackageOptions, eventOptions } = packagePicker
   const [outreachSummaries, outreachAdmin] = await Promise.all([
     listMarketingOutreachForDeals(enquiryDeals.map((deal) => deal.id)),
     loadMarketingOutreachAdmin(),
@@ -122,6 +100,7 @@ export default async function EnquiriesPage({
         outreachSequenceEnabled={outreachAdmin.settings?.enabled === true}
         convertedThisMonth={convertedThisMonth}
         packageOptions={createPackageOptions}
+        createEventOptions={eventOptions}
         stockProducts={packageOptions}
         accountOptions={accountOptions}
         staffOptions={staffOptions}

@@ -35,6 +35,7 @@ export function SearchableSelect({
   placeholder = "Search…",
   emptyLabel = "No matches",
   className,
+  optionClassName = "text-[10px]",
 }: {
   value: string
   onChange: (value: string) => void
@@ -42,6 +43,7 @@ export function SearchableSelect({
   placeholder?: string
   emptyLabel?: string
   className?: string
+  optionClassName?: string
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -163,7 +165,7 @@ export function SearchableSelect({
         className="fixed z-[120] overflow-y-auto overscroll-contain rounded-md border bg-white py-1 shadow-lg"
       >
         {matches.length === 0 ? (
-          <p className="px-3 py-2 text-[10px] text-slate-400">{emptyLabel}</p>
+          <p className={cn("px-3 py-2 text-slate-400", optionClassName)}>{emptyLabel}</p>
         ) : (
           matches.map((option, index) => (
             <button
@@ -174,7 +176,8 @@ export function SearchableSelect({
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => choose(option)}
               className={cn(
-                "block w-full px-3 py-1.5 text-left text-[10px] hover:bg-slate-50",
+                "block w-full px-3 py-1.5 text-left hover:bg-slate-50",
+                optionClassName,
                 (index === activeIndex || option.value === value) && "bg-red-50 text-primary",
               )}
             >
