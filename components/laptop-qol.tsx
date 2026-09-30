@@ -60,8 +60,8 @@ export function LaptopQol() {
       const el = event.target
       if (!(el instanceof HTMLTextAreaElement) || !canAutocorrect(el)) return
       el.lang = "en-GB"
-      el.spellCheck = true
-      el.autoCapitalize = "sentences"
+      el.setAttribute("spellcheck", "true")
+      el.setAttribute("autocapitalize", "sentences")
       el.setAttribute("autocorrect", "on")
     }
 
