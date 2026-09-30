@@ -46,7 +46,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en-GB" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: PLATFORM_SCRIPT }} />
         <link rel="preconnect" href="https://static.wixstatic.com" crossOrigin="anonymous" />

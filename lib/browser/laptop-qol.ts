@@ -60,6 +60,12 @@ export function setNativeInputValue(el: HTMLInputElement, value: string) {
   el.dispatchEvent(new Event("input", { bubbles: true }))
 }
 
+export function setNativeTextAreaValue(el: HTMLTextAreaElement, value: string) {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")
+  descriptor?.set?.call(el, value)
+  el.dispatchEvent(new Event("input", { bubbles: true }))
+}
+
 export function isVisibleInput(el: HTMLInputElement) {
   if (el.disabled) return false
   return el.getClientRects().length > 0

@@ -219,7 +219,7 @@ export function AdminLayout({
   }
 
   return (
-    <div className="admin-shell min-h-dvh bg-[#f7f8fa]">
+    <div lang="en-GB" className="admin-shell min-h-dvh bg-[#f7f8fa]">
       {sidebarOpen && (
         <div
           className="fixed inset-0 bg-zk-black/50 z-40 lg:hidden"
