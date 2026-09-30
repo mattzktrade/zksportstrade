@@ -9,6 +9,7 @@ import {
   sortNegativeStockRows,
   statusLabel,
   summarizeNegativeStock,
+  uncoveredSoldQuantity,
   urgencyForEvent,
   type NegativeStockRow,
 } from "../lib/admin/negative-stock"
@@ -44,6 +45,29 @@ function row(overrides: Partial<NegativeStockRow> = {}): NegativeStockRow {
     ...overrides,
   }
 }
+
+test("allocated linked sales stay off the shortage list", () => {
+  assert.equal(
+    uncoveredSoldQuantity({ soldQty: 4, allocatedQty: 4, plannedUncovered: 0 }),
+    0,
+  )
+  assert.equal(
+    uncoveredSoldQuantity({ soldQty: 4, allocatedQty: 0, plannedUncovered: 0 }),
+    0,
+  )
+  assert.equal(
+    uncoveredSoldQuantity({ soldQty: 1, allocatedQty: 1, plannedUncovered: 1 }),
+    1,
+  )
+  assert.equal(
+    uncoveredSoldQuantity({ soldQty: 14, allocatedQty: 11, cap: 3 }),
+    3,
+  )
+  assert.equal(
+    uncoveredSoldQuantity({ soldQty: 2, allocatedQty: 0, plannedUncovered: 2 }),
+    2,
+  )
+})
 
 test("urgency bands match 7-day critical and 45-day urgent", () => {
   assert.equal(urgencyForEvent("2026-08-18", now), "critical")
@@ -170,7 +194,15 @@ test("negative stock query includes signed deal lines even without a shortage ro
   const query = readFileSync("lib/admin/negative-stock-query.ts", "utf8")
   assert.match(query, /loadSoldDealLines/)
   assert.match(query, /\.in\("deal_id", chunk\)/)
+  assert.match(query, /chunkList\(lineIds, 80\)/)
+  assert.match(query, /allocationLookupFailed/)
+  assert.doesNotMatch(query, /\.in\("deal_line_item_id", lineIds\)/)
   assert.doesNotMatch(query, /\.in\("deals\.stage"/)
+  assert.match(query, /uncoveredQuantitiesFromLinkedDayPlan/)
+  assert.match(query, /inventory_group_id/)
+  assert.match(query, /uncoveredSoldQuantity/)
+  assert.match(query, /\.in\("package_id", chunk\)/)
+  assert.match(query, /linkedGroupIds/)
   assert.match(query, /status", "purchased"/)
 })
 

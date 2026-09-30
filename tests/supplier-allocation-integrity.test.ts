@@ -234,7 +234,8 @@ test("automatic allocation reshuffles earlier deals to keep one supplier", () =>
     dealPartyRepackMigration,
     /case when supplier\.supplier_key = any\(v_used\) then 0 else 1 end/,
   )
-  assert.match(orderTable, /dealAssignedSupplierSlices/)
+  assert.match(orderTable, /planSupplierAssignments/)
+  assert.match(orderTable, /assignmentForLines/)
   assert.match(orderTable, /Move to one supplier/)
   assert.doesNotMatch(orderTable, /This booking is split:/)
   assert.doesNotMatch(orderTable, /Assign to one/)
@@ -352,10 +353,9 @@ test("unconfirmed deals cannot block or save paid supplier assignments", () => {
   assert.match(orderTable, /dealProjectsSupplierConsumption/)
   assert.match(orderTable, /dealStageIsOpenPipeline/)
   assert.match(orderTable, /Not complete — do not fulfil/)
-  assert.match(orderTable, /Oversold — do not fulfil until more stock is bought/)
-  assert.match(orderTable, /Oversold — do not fulfil/)
-  assert.match(orderTable, /Unassigned — do not fulfil/)
-  assert.match(orderTable, /No stock left/)
+  assert.match(orderTable, /Add more stock to fulfil this order/)
+  assert.doesNotMatch(orderTable, /Oversold — do not fulfil until more stock is bought/)
+  assert.doesNotMatch(orderTable, /No stock left/)
   assert.match(orderTable, /do not take[\s\S]*purchased stock/)
   assert.match(orderTable, /saleFilter === "incomplete"/)
   assert.match(orderTable, /Search company, contact or reference/)

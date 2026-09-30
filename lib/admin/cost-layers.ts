@@ -223,12 +223,26 @@ export async function getConsumptionsForOrders(
   const out = new Map<string, CostConsumptionRow[]>()
   if (orderIds.length === 0) return out
   const supabase = await createClient()
-  const { data, error } = await supabase
-    .from("order_cost_consumptions")
-    .select(CONSUMPTION_COLUMNS)
-    .in("order_id", orderIds)
-  if (error || !data) return out
-  const rows = data.map((raw) => {
+  const uniqueIds = [...new Set(orderIds.map((id) => id.trim()).filter(Boolean))]
+  const loaded: Array<Record<string, unknown>> = []
+  const batches: string[][] = []
+  for (let i = 0; i < uniqueIds.length; i += IN_FILTER_BATCH) {
+    batches.push(uniqueIds.slice(i, i + IN_FILTER_BATCH))
+  }
+  for (let i = 0; i < batches.length; i += 4) {
+    const results = await Promise.all(
+      batches.slice(i, i + 4).map(async (batch) => {
+        const { data, error } = await supabase
+          .from("order_cost_consumptions")
+          .select(CONSUMPTION_COLUMNS)
+          .in("order_id", batch)
+        if (error || !data) return []
+        return data
+      }),
+    )
+    for (const rows of results) loaded.push(...rows)
+  }
+  const rows = loaded.map((raw) => {
     const row = raw as CostConsumptionRow
     return {
       ...row,

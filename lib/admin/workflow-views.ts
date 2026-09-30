@@ -590,9 +590,9 @@ function mergeOrderAndDealRows(orders: WorkflowOrderRow[], deals: WorkflowOrderR
   )
 }
 
-export async function getFinanceWorkflowRows(): Promise<WorkflowOrderRow[]> {
+export async function getFinanceWorkflowRows(options?: { sinceIso?: string }): Promise<WorkflowOrderRow[]> {
   const [orders, deals] = await Promise.all([
-    getWorkflowOrderRows(),
+    getWorkflowOrderRows(options),
     getUnlinkedDealWorkflowRows(FINANCE_DEAL_STAGES),
   ])
   return mergeOrderAndDealRows(orders, deals)
@@ -614,10 +614,10 @@ function packageLabel(pkg: PackageEmbed | null | undefined, fallback: string): s
   return [event, pkg.name].filter(Boolean).join(" · ") || fallback
 }
 
-export async function getWorkflowOrderRows(): Promise<WorkflowOrderRow[]> {
+export async function getWorkflowOrderRows(options?: { sinceIso?: string }): Promise<WorkflowOrderRow[]> {
   noStore()
   const supabase = await createClient()
-  const { data, error } = await supabase
+  let orderQuery = supabase
     .from("orders")
     .select(
       `
@@ -627,12 +627,45 @@ export async function getWorkflowOrderRows(): Promise<WorkflowOrderRow[]> {
     `,
     )
     .order("created_at", { ascending: false })
-    .limit(10000)
+  if (options?.sinceIso) orderQuery = orderQuery.gte("created_at", options.sinceIso)
+  else orderQuery = orderQuery.limit(10000)
+  const { data: recentOrders, error } = await orderQuery
   if (error) {
     console.error("[getWorkflowOrderRows] orders", error.message)
     return []
   }
-  if (!data?.length) return []
+  const data = [...(recentOrders ?? [])]
+  if (options?.sinceIso) {
+    const { data: openInvoices } = await supabase
+      .from("invoices")
+      .select("order_id")
+      .in("status", ["awaiting_invoice", "awaiting_payment", "pending", "overdue"])
+      .limit(2000)
+    const have = new Set(data.map((row) => String(row.id)))
+    const missing = [
+      ...new Set(
+        (openInvoices ?? [])
+          .map((row) => String(row.order_id ?? ""))
+          .filter((id) => id && !have.has(id)),
+      ),
+    ]
+    const olderOpen = await fetchInChunks(missing, async (chunk) => {
+      const { data: rows, error: olderError } = await supabase
+        .from("orders")
+        .select(
+          `
+          id, reference, channel, status, deal_id, agent_profile_id, crm_account_id,
+          crm_contact_id, client_name, client_email, package_id,
+          guests, total_amount, currency, created_at
+        `,
+        )
+        .in("id", chunk)
+      if (olderError) console.error("[getWorkflowOrderRows] open orders", olderError.message)
+      return rows ?? []
+    })
+    data.push(...olderOpen)
+  }
+  if (!data.length) return []
 
   const orderIds = data.map((row) => String(row.id))
   const dealIdsFromOrders = data.map((row) => row.deal_id).filter(Boolean).map(String)

@@ -31,6 +31,37 @@ function members(rows: Array<{ id: string; duration: string; qty: number }>): Li
   }))
 }
 
+test("trackside yacht only the sunday row goes negative", () => {
+  const group = members([
+    { id: "three", duration: "3_day", qty: 19 },
+    { id: "fri", duration: "friday_only", qty: 1 },
+    { id: "sat", duration: "saturday_only", qty: 0 },
+    { id: "sun", duration: "sunday_only", qty: 2 },
+    { id: "two", duration: "2_day", qty: 1 },
+  ])
+  const input = { stock: 20, members: group }
+  assert.equal(linkedPoolSellableForPackage({ ...input, targetId: "three", targetDuration: "3_day" }), 0)
+  assert.equal(linkedPoolSellableForPackage({ ...input, targetId: "two", targetDuration: "2_day" }), 0)
+  assert.equal(linkedPoolSellableForPackage({ ...input, targetId: "fri", targetDuration: "friday_only" }), 0)
+  assert.equal(linkedPoolSellableForPackage({ ...input, targetId: "sat", targetDuration: "saturday_only" }), 0)
+  assert.equal(linkedPoolSellableForPackage({ ...input, targetId: "sun", targetDuration: "sunday_only" }), -2)
+  assert.equal(linkedPoolAttributedSold({ ...input, targetId: "three", targetDuration: "3_day" }), 20)
+})
+
+test("club suite only the extra friday row goes negative", () => {
+  const group = members([
+    { id: "three", duration: "3_day", qty: 14 },
+    { id: "fri", duration: "friday_only", qty: 9 },
+    { id: "sat", duration: "saturday_only", qty: 8 },
+    { id: "sun", duration: "sunday_only", qty: 8 },
+  ])
+  const input = { stock: 22, members: group }
+  assert.equal(linkedPoolSellableForPackage({ ...input, targetId: "three", targetDuration: "3_day" }), 0)
+  assert.equal(linkedPoolSellableForPackage({ ...input, targetId: "fri", targetDuration: "friday_only" }), -1)
+  assert.equal(linkedPoolSellableForPackage({ ...input, targetId: "sat", targetDuration: "saturday_only" }), 0)
+  assert.equal(linkedPoolSellableForPackage({ ...input, targetId: "sun", targetDuration: "sunday_only" }), 0)
+})
+
 test("selling 5 Saturday & Sunday packages reduces 3-day, Saturday, Sunday, and 2-day by 5", () => {
   const group = members([
     { id: "three", duration: "3_day", qty: 0 },
@@ -330,8 +361,9 @@ test("package sales list shows the deal DL reference instead of the ZK order num
 
 test("package sales list shows split supplier quantities as a compact list", () => {
   const table = readFileSync("components/admin/package-orders-table.tsx", "utf8")
-  assert.match(table, /dealAssignedSupplierSlices/)
-  assert.match(table, /splitSlices.length > 1/)
+  assert.match(table, /planSupplierAssignments/)
+  assert.match(table, /assignmentForLines/)
+  assert.match(table, /assignment.slices.length > 1/)
   assert.match(table, /Move to one supplier/)
   assert.match(table, /\{slice.quantity\}×/)
   assert.doesNotMatch(table, /This booking is split:/)
@@ -339,9 +371,15 @@ test("package sales list shows split supplier quantities as a compact list", () 
   assert.doesNotMatch(table, /stockLines.length > 1 && selectedKeys.length !== 1/)
 })
 
-test("paid uncovered deals warn they are oversold and should not be fulfilled", () => {
+test("paid uncovered deals warn they need more stock and should not be fulfilled", () => {
   const table = readFileSync("components/admin/package-orders-table.tsx", "utf8")
-  assert.match(table, /Oversold — do not fulfil until more stock is bought/)
-  assert.match(table, /Unassigned — do not fulfil/)
-  assert.match(table, /No stock left/)
+  assert.match(table, /Add more stock to fulfil this order/)
+  assert.doesNotMatch(table, /Oversold — do not fulfil until more stock is bought/)
+  assert.doesNotMatch(table, /No stock left/)
+})
+
+test("package sales list projects COGS from the live supplier assignment", () => {
+  const table = readFileSync("components/admin/package-orders-table.tsx", "utf8")
+  assert.match(table, /planSupplierAssignmentCogs/)
+  assert.match(table, /financeFromPlannedCogs/)
 })

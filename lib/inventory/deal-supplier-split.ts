@@ -16,6 +16,32 @@ function storedSupplierKeys(line: DealSupplierSplitLine): string[] {
   return [...new Set(line.supplierAllocations.map((row) => row.key).filter(Boolean))]
 }
 
+/** The dropdown still shows the supplier already stored on the line. */
+export function dealLineDraftMatchesStoredSupplier(
+  line: DealSupplierSplitLine,
+  draftKey?: string,
+): boolean {
+  if (!draftKey) return false
+  const storedKeys = storedSupplierKeys(line)
+  return storedKeys.length === 1 && storedKeys[0] === draftKey
+}
+
+/**
+ * Guests that count as assigned to purchased stock.
+ * A new supplier choice covers the whole line. The saved supplier only covers seats that already have an allocation.
+ */
+export function dealLineAssignedPurchasedQuantity(
+  line: DealSupplierSplitLine,
+  draftKey?: string,
+): number {
+  const quantity = Math.max(0, Math.floor(Number(line.quantity) || 0))
+  if (draftKey && !dealLineDraftMatchesStoredSupplier(line, draftKey)) return quantity
+  return line.supplierAllocations.reduce(
+    (sum, allocation) => sum + Math.max(0, Math.floor(Number(allocation.quantity) || 0)),
+    0,
+  )
+}
+
 function addSlice(totals: Map<string, number>, name: string, quantity: number) {
   const label = name.trim()
   const qty = Math.max(0, Math.floor(Number(quantity) || 0))
@@ -32,8 +58,7 @@ export function dealAssignedSupplierSlices(
   const totals = new Map<string, number>()
   for (const line of lines) {
     const draftKey = drafts[line.id]
-    const storedKeys = storedSupplierKeys(line)
-    const draftUnchanged = Boolean(draftKey && storedKeys.length === 1 && storedKeys[0] === draftKey)
+    const draftUnchanged = dealLineDraftMatchesStoredSupplier(line, draftKey)
     if (draftKey && !draftUnchanged) {
       addSlice(totals, supplierNameByKey.get(draftKey) ?? "", line.quantity)
       continue
@@ -59,20 +84,18 @@ export function dealAssignedSupplierSlices(
 export function dealUnassignedPurchasedQuantity(
   lines: readonly DealSupplierSplitLine[],
   drafts: Record<string, string> = {},
+  coveredByLine: ReadonlyMap<string, number> | null = null,
 ): number {
   let assigned = 0
   let required = 0
   for (const line of lines) {
     const quantity = Math.max(0, Math.floor(Number(line.quantity) || 0))
     required += quantity
-    if (drafts[line.id]) {
-      assigned += quantity
+    if (coveredByLine?.has(line.id)) {
+      assigned += Math.min(quantity, Math.max(0, coveredByLine.get(line.id) ?? 0))
       continue
     }
-    assigned += line.supplierAllocations.reduce(
-      (sum, allocation) => sum + Math.max(0, Math.floor(Number(allocation.quantity) || 0)),
-      0,
-    )
+    assigned += dealLineAssignedPurchasedQuantity(line, drafts[line.id])
   }
   return Math.max(0, required - assigned)
 }

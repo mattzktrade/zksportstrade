@@ -2,7 +2,7 @@ import { unstable_noStore as noStore } from "next/cache"
 import { bookingFormsAwaitingApprovalHref } from "@/lib/admin/deal-link"
 import { getNegativeStockRows } from "@/lib/admin/negative-stock-query"
 import { countPurchaseOrdersAwaitingBuyPrice } from "@/lib/admin/purchase-orders"
-import { getFinanceWorkflowRows } from "@/lib/admin/workflow-views"
+import { getDashboardSaleRows, dashboardSalesSince } from "@/lib/admin/dashboard-sales"
 import { countPendingBookingApprovalRequests } from "@/lib/booking-approval/queries"
 import { listNativeBookingFormsAwaitingApprovalDealIds } from "@/lib/booking-forms/queries"
 import { fetchAllRows } from "@/lib/supabase/fetch-all-rows"
@@ -11,7 +11,6 @@ import {
   buildAdminDashboardView,
   type AdminDashboardModel,
   type DashboardPipelineDeal,
-  type DashboardSaleRow,
 } from "@/lib/admin/admin-dashboard-metrics"
 import { isOpenSourcingStage } from "@/lib/crm/sourcing-notifications"
 
@@ -40,31 +39,6 @@ async function countSourcingRequired(
   }
 }
 
-function toSaleRow(
-  row: Awaited<ReturnType<typeof getFinanceWorkflowRows>>[number],
-): DashboardSaleRow & { grossProfit?: number | null } {
-  return {
-    id: row.id,
-    dealId: row.dealId,
-    reference: row.reference,
-    dealReference: row.dealReference,
-    accountName: row.accountName,
-    eventPackage: row.eventPackage,
-    total: row.total,
-    currency: row.currency,
-    createdAt: row.createdAt,
-    paidAt: row.paidAt,
-    ownerName: row.ownerName,
-    orderStatus: row.orderStatus,
-    invoiceStatus: row.invoiceStatus,
-    dealStage: row.dealStage,
-    fulfilmentStatus: row.fulfilmentStatus,
-    overdueSince: row.overdueSince,
-    amountDue: row.amountDue,
-    grossProfit: row.grossProfit,
-  }
-}
-
 export async function getAdminDashboardModel(): Promise<AdminDashboardModel> {
   noStore()
   const supabase = await createClient()
@@ -85,7 +59,7 @@ export async function getAdminDashboardModel(): Promise<AdminDashboardModel> {
     listNativeBookingFormsAwaitingApprovalDealIds(),
     getNegativeStockRows(),
     countPurchaseOrdersAwaitingBuyPrice(),
-    getFinanceWorkflowRows(),
+    getDashboardSaleRows(dashboardSalesSince().toISOString()),
     fetchAllRows<DealPipelineRow>((from, to) =>
       supabase
         .from("deals")
@@ -112,7 +86,7 @@ export async function getAdminDashboardModel(): Promise<AdminDashboardModel> {
     purchaseOrdersAwaitingBuyPrice,
     sourcingRequired,
     activeHolds: activeHolds ?? 0,
-    workflowRows: workflowRows.map(toSaleRow),
+    workflowRows,
     pipelineDeals,
   })
 }

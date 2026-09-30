@@ -260,7 +260,6 @@ export function InventoryWorkspace({
   const dealProducts = useMemo(
     () =>
       catalogRows
-        .filter((row) => !row.is_hidden)
         .map((row) => ({
           id: row.id,
           eventName: row.race_name,
@@ -441,8 +440,8 @@ export function InventoryWorkspace({
   }) {
     if (!selected) return
     const nextHidden = next?.isHidden ?? isHidden
-    const nextPortal = next?.sellOnPortal ?? sellOnPortal
-    const nextWebsite = next?.sellOnWebsite ?? sellOnWebsite
+    const nextPortal = nextHidden ? false : (next?.sellOnPortal ?? sellOnPortal)
+    const nextWebsite = nextHidden ? false : (next?.sellOnWebsite ?? sellOnWebsite)
     const parsedPrice = websitePrice.trim() === "" ? null : Number(websitePrice)
     if (parsedPrice != null && (!Number.isFinite(parsedPrice) || parsedPrice < 0)) {
       toast.error("Enter a valid website price.")
@@ -1038,16 +1037,16 @@ export function InventoryWorkspace({
                   <div className="space-y-2 rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3">
                     <div>
                       <h3 className="text-[9px] font-semibold text-[#555961]">Product visibility</h3>
-                      <p className="mt-0.5 text-[8px] text-[#93979f]">Hidden overrides both live channels without losing their settings.</p>
+                      <p className="mt-0.5 text-[8px] text-[#93979f]">Hidden products stay off the portal and website. Staff can still add them to a deal.</p>
                     </div>
                     <label className="flex cursor-pointer items-center justify-between gap-3 rounded-md bg-white px-2.5 py-2 text-[9px]">
                       <span className="font-medium text-[#555961]">Live on agent portal</span>
-                      <input type="checkbox" checked={sellOnPortal} disabled={pending} onChange={(event) => savePublishing({ sellOnPortal: event.target.checked })} className="h-4 w-4 accent-primary" />
+                      <input type="checkbox" checked={!isHidden && sellOnPortal} disabled={pending} onChange={(event) => savePublishing({ sellOnPortal: event.target.checked, isHidden: event.target.checked ? false : isHidden })} className="h-4 w-4 accent-primary" />
                     </label>
                     <div className="rounded-md bg-white px-2.5 py-2">
                       <div className="flex items-center justify-between gap-3">
                         <label className="flex cursor-pointer items-center gap-2 text-[9px] font-medium text-[#555961]">
-                          <input type="checkbox" checked={sellOnWebsite} disabled={pending} onChange={(event) => savePublishing({ sellOnWebsite: event.target.checked })} className="h-4 w-4 accent-primary" />
+                          <input type="checkbox" checked={!isHidden && sellOnWebsite} disabled={pending} onChange={(event) => savePublishing({ sellOnWebsite: event.target.checked, isHidden: event.target.checked ? false : isHidden })} className="h-4 w-4 accent-primary" />
                           Live on website
                         </label>
                         <div className="flex items-center gap-1.5">
@@ -1075,7 +1074,7 @@ export function InventoryWorkspace({
                         <span className="block font-medium text-[#555961]">Hidden</span>
                         <span className="text-[8px] text-[#93979f]">Keep this product off the portal and website</span>
                       </span>
-                      <input type="checkbox" checked={isHidden} disabled={pending} onChange={(event) => savePublishing({ isHidden: event.target.checked })} className="h-4 w-4 accent-primary" />
+                      <input type="checkbox" checked={isHidden} disabled={pending} onChange={(event) => savePublishing({ isHidden: event.target.checked, sellOnPortal: event.target.checked ? false : sellOnPortal, sellOnWebsite: event.target.checked ? false : sellOnWebsite })} className="h-4 w-4 accent-primary" />
                     </label>
                   </div>
                 ) : null}

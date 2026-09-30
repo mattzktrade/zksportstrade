@@ -28,14 +28,21 @@ import { invoiceDisplayLabel, isOutstandingInvoiceStatus } from "@/lib/invoices/
 import { costDaySlotsForDuration } from "@/lib/inventory/day-cost-allocation"
 import {
   groupSupplierPoolOptions,
+  toPurchasedSupplierPoolKey,
   type SupplierPoolOption,
 } from "@/lib/inventory/supplier-pool"
+import { planOwnedLinkedDayCoverage } from "@/lib/inventory/linked-day-coverage"
 import {
-  dealAssignedSupplierSlices,
-  dealIsOversoldUnassigned,
-  dealLineSelectedSupplierKeys,
-  dealUnassignedPurchasedQuantity,
-} from "@/lib/inventory/deal-supplier-split"
+  assignmentForLines,
+  planSupplierAssignments,
+  type SupplierAssignmentHold,
+  type SupplierAssignmentPlan,
+  type SupplierLineAssignment,
+} from "@/lib/inventory/supplier-assignment-plan"
+import {
+  planSupplierAssignmentCogs,
+  saleProfitFromCogs,
+} from "@/lib/inventory/supplier-assignment-cogs"
 import {
   isPortalCheckoutChannel,
   orderPartyPrimary,
@@ -116,15 +123,63 @@ function dealProjectsSupplierConsumption(deal: PackageDealSaleRow): boolean {
   return deal.lines.some((line) => dealLineCanTakePurchasedSupplier(line))
 }
 
-function saleOversoldUnassigned(
-  unassignedQty: number,
-  supplierPools: SupplierPoolOption[],
-  projectedBalances: Record<string, number>,
-): boolean {
-  return dealIsOversoldUnassigned(
-    unassignedQty,
-    supplierPools.map((pool) => projectedBalances[pool.key] ?? 0),
-  )
+function storedSupplierPoolKey(
+  line: PackageDealSaleRow["lines"][number],
+): string | null {
+  const allocationKeys = [
+    ...new Set(
+      line.supplierAllocations
+        .filter((allocation) => allocation.quantity > 0 && allocation.key)
+        .map((allocation) => allocation.key),
+    ),
+  ]
+  return toPurchasedSupplierPoolKey({
+    supplierKey:
+      allocationKeys.length === 1 ? allocationKeys[0] : line.supplierKey,
+    supplierId: line.supplierId,
+    supplierName: line.supplierName,
+  })
+}
+
+function dealStockLineIds(deal: PackageDealSaleRow): string[] {
+  return deal.lines.filter(dealLineCanTakePurchasedSupplier).map((line) => line.id)
+}
+
+function emptyLineAssignment(): SupplierLineAssignment {
+  return {
+    id: "",
+    slices: [],
+    assigned: 0,
+    unassigned: 0,
+    needStock: false,
+    singleKey: null,
+  }
+}
+
+function dealAssignmentFromPlan(
+  plan: SupplierAssignmentPlan,
+  deal: PackageDealSaleRow | null | undefined,
+): SupplierLineAssignment {
+  if (!deal || !dealProjectsSupplierConsumption(deal)) {
+    return emptyLineAssignment()
+  }
+  return assignmentForLines(plan, dealStockLineIds(deal))
+}
+
+type SaleFinance = {
+  cogs: number | null
+  profit: number | null
+  margin: number | null
+}
+
+function financeFromPlannedCogs(
+  deal: PackageDealSaleRow | null | undefined,
+  revenue: number,
+  plannedCogsByDealId: Map<string, number | null>,
+  fallback: SaleFinance,
+): SaleFinance {
+  if (!deal || !dealProjectsSupplierConsumption(deal)) return fallback
+  return saleProfitFromCogs(revenue, plannedCogsByDealId.get(deal.id) ?? null)
 }
 
 function paymentTone(
@@ -164,11 +219,11 @@ function PaymentStatusCell({
           </p>
         ) : oversold ? (
           <p className="text-[10px] font-semibold leading-snug text-amber-800 dark:text-amber-200">
-            Oversold — do not fulfil
+            Add more stock to fulfil this order
           </p>
         ) : uncovered ? (
           <p className="text-[10px] font-semibold leading-snug text-amber-800 dark:text-amber-200">
-            Unassigned — do not fulfil
+            Add more stock to fulfil this order
           </p>
         ) : null}
       </div>
@@ -289,14 +344,9 @@ function layerSupplierLabel(layer: CostLayerRow): string {
   return `${source} (${remaining} left, ${formatMoney(layer.currency, Number(layer.unit_cost))})`
 }
 
-function supplierPoolLabel(option: SupplierPoolOption, projectedBalance: number): string {
-  const balance =
-    projectedBalance > 0
-      ? `+${projectedBalance} left`
-      : projectedBalance === 0
-        ? "0 balanced"
-        : `${projectedBalance} over`
-  return `${option.name} — ${balance}`
+function supplierPoolLabel(option: SupplierPoolOption, remaining: number): string {
+  const left = Math.max(0, Math.floor(Number(remaining) || 0))
+  return left > 0 ? `${option.name} — ${left} left` : `${option.name} — used up`
 }
 
 type DraftAllocation = { costLayerId: string; quantity: string }
@@ -455,79 +505,53 @@ function formatWhen(iso: string): string {
 
 function DealSupplierEditor({
   deal,
+  assignment,
   supplierPools,
-  projectedBalances,
-  drafts,
+  remainingByPool,
   pending,
   onChange,
 }: {
   deal: PackageDealSaleRow
+  assignment: SupplierLineAssignment
   supplierPools: SupplierPoolOption[]
-  projectedBalances: Record<string, number>
-  drafts: Record<string, string>
+  remainingByPool: Record<string, number>
   pending: boolean
-  onChange: (lineId: string, supplierKey: string) => void
+  onChange: (lineIds: string[], supplierKey: string) => void
 }) {
+  const stockLineIds = dealStockLineIds(deal)
   const stockLines = deal.lines.filter(dealLineCanTakePurchasedSupplier)
-  const brokeredUnassigned = stockLines.filter(
-    (line) => line.sourcingMode === "brokered" && !(drafts[line.id] ?? line.supplierKey),
-  )
-  const selectedKeys = [
-    ...new Set(stockLines.flatMap((line) => dealLineSelectedSupplierKeys(line, drafts[line.id]))),
-  ]
-  const commonKey = selectedKeys.length === 1 ? selectedKeys[0] : ""
-  const assignedQty = stockLines.reduce((sum, line) => {
-    if (drafts[line.id]) return sum + line.quantity
-    return (
-      sum +
-      line.supplierAllocations.reduce(
-        (quantity, allocation) => quantity + allocation.quantity,
-        0,
-      )
-    )
-  }, 0)
+  const brokeredUnassigned = stockLines.filter((line) => line.sourcingMode === "brokered")
   const requiredQty = stockLines.reduce((sum, line) => sum + line.quantity, 0)
-  const supplierNameByKey = new Map(supplierPools.map((supplier) => [supplier.key, supplier.name]))
-  const splitSlices = dealAssignedSupplierSlices(stockLines, drafts, supplierNameByKey)
-  const splitAcrossSuppliers = selectedKeys.length > 1 || splitSlices.length > 1
-  const visibleSlices = splitAcrossSuppliers ? splitSlices : []
-  const unassignedQty = Math.max(0, requiredQty - assignedQty)
-  const oversoldUnassigned = dealIsOversoldUnassigned(
-    unassignedQty,
-    supplierPools.map((pool) => projectedBalances[pool.key] ?? 0),
-  )
-  const placeholderName = oversoldUnassigned
-    ? "No stock left"
-    : assignedQty > 0 && assignedQty < requiredQty
-      ? `${assignedQty} of ${requiredQty} assigned`
+  const splitAcrossSuppliers = assignment.slices.length > 1
+  const commonKey = assignment.singleKey ?? ""
+  const placeholderName = assignment.needStock && assignment.assigned === 0
+    ? "Add more stock to fulfil this order"
+    : assignment.assigned > 0 && assignment.assigned < requiredQty
+      ? `${assignment.assigned} of ${requiredQty} assigned`
       : "Choose supplier…"
 
   return (
     <div className="min-w-[190px] max-w-[240px] space-y-1">
-      {brokeredUnassigned.length > 0 ? (
+      {brokeredUnassigned.length > 0 && assignment.assigned === 0 ? (
         <p className="text-[10px] leading-snug text-amber-800 dark:text-amber-200">
           Brokered stock — assign a purchased supplier to take it from buys.
         </p>
       ) : null}
-      {oversoldUnassigned ? (
+      {assignment.needStock ? (
         <p className="text-[10px] font-semibold leading-snug text-amber-800 dark:text-amber-200">
-          Oversold — do not fulfil until more stock is bought.
-        </p>
-      ) : unassignedQty > 0 ? (
-        <p className="text-[10px] font-semibold leading-snug text-amber-800 dark:text-amber-200">
-          Unassigned — do not fulfil
+          Add more stock to fulfil this order
         </p>
       ) : null}
-      {visibleSlices.length > 0 ? (
+      {splitAcrossSuppliers || (assignment.assigned > 0 && assignment.unassigned > 0) ? (
         <ul className="space-y-0.5 text-xs leading-snug">
-          {visibleSlices.map((slice) => (
-            <li key={slice.name}>
+          {assignment.slices.map((slice) => (
+            <li key={slice.key}>
               <span className="tabular-nums text-muted-foreground">{slice.quantity}×</span> {slice.name}
             </li>
           ))}
-          {unassignedQty > 0 ? (
+          {assignment.unassigned > 0 ? (
             <li className="text-amber-800 dark:text-amber-200">
-              <span className="tabular-nums">{unassignedQty}×</span> unassigned
+              <span className="tabular-nums">{assignment.unassigned}×</span> need stock
             </li>
           ) : null}
         </ul>
@@ -536,9 +560,7 @@ function DealSupplierEditor({
         <select
           value={commonKey}
           disabled={pending || supplierPools.length === 0}
-          onChange={(event) => {
-            for (const line of stockLines) onChange(line.id, event.target.value)
-          }}
+          onChange={(event) => onChange(stockLineIds, event.target.value)}
           className={cn(
             "w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs",
             splitAcrossSuppliers && "text-muted-foreground",
@@ -549,10 +571,7 @@ function DealSupplierEditor({
           ) : null}
           {supplierPools.map((supplier) => (
             <option key={supplier.key} value={supplier.key}>
-              {supplierPoolLabel(
-                supplier,
-                projectedBalances[supplier.key] ?? supplier.targetCapacity,
-              )}
+              {supplierPoolLabel(supplier, remainingByPool[supplier.key] ?? 0)}
             </option>
           ))}
         </select>
@@ -580,28 +599,20 @@ export function PackageOrdersTable({
 }) {
   const router = useRouter()
   const usesLinkedDaySlots = linkedPackages.length > 1
-  const targetSlots = usesLinkedDaySlots
-    ? costDaySlotsForDuration(currentPackageDuration, eventDate).map(inventoryDaySlot)
-    : ["unit"]
-  const durationByPackageId = new Map(
-    linkedPackages.map((pkg) => [pkg.id, pkg.duration]),
+  const targetSlots = useMemo(
+    () =>
+      usesLinkedDaySlots
+        ? costDaySlotsForDuration(currentPackageDuration, eventDate).map(inventoryDaySlot)
+        : ["unit"],
+    [usesLinkedDaySlots, currentPackageDuration, eventDate],
+  )
+  const durationByPackageId = useMemo(
+    () => new Map(linkedPackages.map((pkg) => [pkg.id, pkg.duration])),
+    [linkedPackages],
   )
   const supplierPools = useMemo(
     () => groupSupplierPoolOptions(costLayers, purchaseOrders, targetSlots),
     [costLayers, purchaseOrders, targetSlots],
-  )
-  const currentAssignments = useMemo(
-    () =>
-      Object.fromEntries(
-        deals.flatMap((deal) =>
-          dealProjectsSupplierConsumption(deal)
-            ? deal.lines
-                .filter((line) => line.sourcingMode === "owned" && line.supplierKey)
-                .map((line) => [line.id, line.supplierKey])
-            : [],
-        ),
-      ),
-    [deals],
   )
   const dealByOrderId = useMemo(() => {
     const map = new Map<string, PackageDealSaleRow>()
@@ -611,115 +622,187 @@ export function PackageOrdersTable({
     return map
   }, [deals])
   const dealById = useMemo(() => new Map(deals.map((deal) => [deal.id, deal])), [deals])
-  const [supplierDrafts, setSupplierDrafts] =
-    useState<Record<string, string>>(currentAssignments)
+  const purchasedStock = useMemo(
+    () =>
+      costLayers.reduce(
+        (sum, layer) => sum + Math.max(0, Math.floor(Number(layer.quantity) || 0)),
+        0,
+      ),
+    [costLayers],
+  )
+  const linkedCoveredByLine = useMemo(() => {
+    if (purchasedStock <= 0) return null
+    const ownedLines = deals.flatMap((deal) =>
+      dealStageHoldsPurchasedStock(deal.stage)
+        ? deal.lines
+            .filter((line) => line.sourcingMode === "owned")
+            .map((line) => ({
+              id: line.id,
+              packageId: line.packageId,
+              quantity: line.quantity,
+              createdAt: deal.createdAt,
+              reference: deal.reference,
+            }))
+        : [],
+    )
+    if (ownedLines.length === 0) return null
+    const packages =
+      linkedPackages.length > 0
+        ? linkedPackages
+        : [
+            ...new Map(
+              ownedLines.map((line) => [
+                line.packageId,
+                {
+                  id: line.packageId,
+                  duration: durationByPackageId.get(line.packageId) ?? currentPackageDuration,
+                },
+              ]),
+            ).values(),
+          ]
+    return planOwnedLinkedDayCoverage({
+      stock: purchasedStock,
+      eventDate,
+      packages,
+      lines: ownedLines,
+    })
+  }, [
+    linkedPackages,
+    purchasedStock,
+    eventDate,
+    deals,
+    currentPackageDuration,
+    durationByPackageId,
+  ])
+  const [supplierPins, setSupplierPins] = useState<Record<string, string>>({})
   const [supplierPending, startSupplierSave] = useTransition()
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [saleFilter, setSaleFilter] = useState<"all" | "confirmed" | "incomplete">("all")
   const [saleQuery, setSaleQuery] = useState("")
 
-  useEffect(() => {
-    setSupplierDrafts(currentAssignments)
-  }, [currentAssignments])
-
-  const changedSupplierAssignments = deals.flatMap((deal) =>
-    dealProjectsSupplierConsumption(deal)
-      ? deal.lines
-          .filter(
-            (line) =>
-              dealLineCanTakePurchasedSupplier(line) &&
-              supplierDrafts[line.id] &&
-              supplierDrafts[line.id] !== line.supplierKey,
-          )
-          .map((line) => ({
-            lineId: line.id,
-            supplierKey: supplierDrafts[line.id],
-          }))
-      : [],
-  )
-  const projectedConsumption = new Map(
-    supplierPools.map((supplier) => [supplier.key, new Map<string, number>()]),
-  )
-  const supplierKeyByName = new Map(
-    supplierPools.map((supplier) => [supplier.name.trim().toLowerCase(), supplier.key]),
-  )
-  const addProjectedConsumption = (
-    supplierKey: string,
-    packageDuration: string | null | undefined,
-    quantity: number,
-  ) => {
-    const consumption = projectedConsumption.get(supplierKey)
-    if (!consumption) return false
-    const slots = usesLinkedDaySlots
-      ? costDaySlotsForDuration(packageDuration, eventDate).map(inventoryDaySlot)
-      : ["unit"]
-    for (const slot of slots.length > 0 ? slots : targetSlots) {
-      consumption.set(slot, (consumption.get(slot) ?? 0) + quantity)
+  const supplierPlan = useMemo(() => {
+    const lineSlots = (packageId: string, fallbackDuration?: string | null) => {
+      const duration = durationByPackageId.get(packageId) ?? fallbackDuration
+      const slots = usesLinkedDaySlots
+        ? costDaySlotsForDuration(duration, eventDate).map(inventoryDaySlot)
+        : ["unit"]
+      return slots.length > 0 ? slots : targetSlots
     }
-    return true
-  }
+    const demands = deals.flatMap((deal) => {
+      if (!dealProjectsSupplierConsumption(deal)) return []
+      return deal.lines.filter(dealLineCanTakePurchasedSupplier).map((line) => {
+        const covered = linkedCoveredByLine?.get(line.id)
+        const coverable =
+          line.sourcingMode === "brokered"
+            ? line.quantity
+            : linkedCoveredByLine == null
+              ? line.quantity
+              : Math.min(line.quantity, Math.max(0, covered ?? 0))
+        const pin = supplierPins[line.id]?.trim() || null
+        return {
+          id: line.id,
+          dealId: deal.id,
+          dealReference: deal.reference,
+          createdAt: deal.createdAt,
+          quantity: line.quantity,
+          coverable,
+          slots: lineSlots(line.packageId),
+          preferredKey: pin ? null : storedSupplierPoolKey(line),
+          pinnedKey: pin,
+        }
+      })
+    })
+    const consumingDealOrderIds = new Set(
+      deals
+        .filter((deal) => dealProjectsSupplierConsumption(deal) && deal.orderId)
+        .map((deal) => deal.orderId),
+    )
+    const supplierKeyByName = new Map(
+      supplierPools.map((supplier) => [supplier.name.trim().toLowerCase(), supplier.key]),
+    )
+    const holds: SupplierAssignmentHold[] = []
+    for (const order of orders) {
+      if (order.status === "cancelled") continue
+      if (order.id && consumingDealOrderIds.has(order.id)) continue
+      if (
+        order.deal_id &&
+        deals.some((deal) => deal.id === order.deal_id && dealProjectsSupplierConsumption(deal))
+      ) {
+        continue
+      }
+      const slots = lineSlots(order.package_id, order.packages?.duration)
+      for (const allocation of order.supplierAllocations) {
+        const key = supplierKeyByName.get(allocation.supplier.trim().toLowerCase())
+        if (!key || allocation.quantity <= 0) continue
+        holds.push({ key, slots, quantity: allocation.quantity })
+      }
+    }
+    return planSupplierAssignments({
+      pools: supplierPools,
+      demands,
+      holds,
+    })
+  }, [
+    deals,
+    orders,
+    supplierPools,
+    supplierPins,
+    linkedCoveredByLine,
+    usesLinkedDaySlots,
+    eventDate,
+    durationByPackageId,
+    targetSlots,
+  ])
+
+  const plannedCogsByDealId = useMemo(
+    () =>
+      planSupplierAssignmentCogs({
+        plan: supplierPlan,
+        sales: deals
+          .filter((deal) => dealProjectsSupplierConsumption(deal))
+          .map((deal) => ({
+            id: deal.id,
+            lineIds: dealStockLineIds(deal),
+            createdAt: deal.createdAt,
+            reference: deal.reference,
+          })),
+        layers: costLayers,
+        purchases: purchaseOrders,
+      }),
+    [supplierPlan, deals, costLayers, purchaseOrders],
+  )
+
+  const changedSupplierAssignments = deals.flatMap((deal) => {
+    if (!dealProjectsSupplierConsumption(deal)) return []
+    return deal.lines.filter(dealLineCanTakePurchasedSupplier).flatMap((line) => {
+      const planned = supplierPlan.byLine.get(line.id)
+      if (!planned?.singleKey) return []
+      if (planned.singleKey === storedSupplierPoolKey(line)) return []
+      return [{ lineId: line.id, supplierKey: planned.singleKey }]
+    })
+  })
   let projectedUnassigned = 0
   for (const deal of deals) {
     if (!dealProjectsSupplierConsumption(deal)) continue
-    for (const line of deal.lines) {
-      if (!dealLineCanTakePurchasedSupplier(line)) continue
-      const packageDuration = durationByPackageId.get(line.packageId)
-      const draftedSupplierKey =
-        line.sourcingMode === "brokered"
-          ? supplierDrafts[line.id]
-          : (supplierDrafts[line.id] ?? line.supplierKey)
-      if (!draftedSupplierKey && line.sourcingMode === "brokered") continue
-      if (draftedSupplierKey) {
-        if (!addProjectedConsumption(draftedSupplierKey, packageDuration, line.quantity)) {
-          projectedUnassigned += line.quantity
-        }
-        continue
-      }
-      let allocatedQuantity = 0
-      for (const allocation of line.supplierAllocations) {
-        if (!addProjectedConsumption(allocation.key, packageDuration, allocation.quantity)) continue
-        allocatedQuantity += allocation.quantity
-      }
-      projectedUnassigned += Math.max(0, line.quantity - allocatedQuantity)
+    for (const lineId of dealStockLineIds(deal)) {
+      projectedUnassigned += supplierPlan.byLine.get(lineId)?.unassigned ?? 0
     }
   }
-  for (const order of orders) {
-    if (order.status === "cancelled") continue
-    const linkedDeal = dealByOrderId.get(order.id)
-    if (linkedDeal && dealProjectsSupplierConsumption(linkedDeal)) continue
-    const packageDuration =
-      durationByPackageId.get(order.package_id) ?? order.packages?.duration
-    for (const allocation of order.supplierAllocations) {
-      const supplierKey = supplierKeyByName.get(allocation.supplier.trim().toLowerCase())
-      if (
-        !supplierKey ||
-        !addProjectedConsumption(supplierKey, packageDuration, allocation.quantity)
-      ) {
-        projectedUnassigned += allocation.quantity
-        continue
-      }
-    }
-  }
-  const projectedAssigned = new Map(
-    supplierPools.map((supplier) => {
-      const consumption = projectedConsumption.get(supplier.key)
-      return [
-        supplier.key,
-        Math.max(...targetSlots.map((slot) => consumption?.get(slot) ?? 0), 0),
-      ]
-    }),
-  )
-  const projectedBalances = Object.fromEntries(
-    supplierPools.map((supplier) => [
-      supplier.key,
-      supplier.targetCapacity - (projectedAssigned.get(supplier.key) ?? 0),
-    ]),
-  )
-  const hasProjectedShortage = Object.values(projectedBalances).some(
+  const hasProjectedShortage = Object.values(supplierPlan.remainingByPool).some(
     (balance) => balance < 0,
   )
-  const supplierChangesBalanced =
-    projectedUnassigned === 0 && !hasProjectedShortage
+  const supplierChangesBalanced = !hasProjectedShortage
+
+  function pinDealSuppliers(lineIds: string[], supplierKey: string) {
+    setSupplierPins((current) => {
+      const next = { ...current }
+      for (const lineId of lineIds) {
+        if (supplierKey) next[lineId] = supplierKey
+        else delete next[lineId]
+      }
+      return next
+    })
+  }
 
   function saveSupplierChanges() {
     if (changedSupplierAssignments.length === 0 || !supplierChangesBalanced) return
@@ -732,6 +815,7 @@ export function PackageOrdersTable({
         return
       }
       toast.success(result.message)
+      setSupplierPins({})
       router.refresh()
     })
   }
@@ -782,18 +866,31 @@ export function PackageOrdersTable({
   for (const o of sorted) {
     if (o.status === "cancelled") continue
     totalRevenue += Number(o.total_amount)
-    if (o.profit.cost_known && o.profit.cogs != null && o.profit.gross_profit != null) {
-      totalCogs += o.profit.cogs
-      totalProfit += o.profit.gross_profit
+    const linkedDeal = linkedDealForOrder(o)
+    const finance = financeFromPlannedCogs(linkedDeal, Number(o.total_amount), plannedCogsByDealId, {
+      cogs: o.profit.cost_known ? o.profit.cogs : (linkedDeal?.cogs ?? null),
+      profit: o.profit.cost_known
+        ? o.profit.gross_profit
+        : linkedDeal?.grossProfit ??
+          (linkedDeal?.cogs != null ? Number(o.total_amount) - linkedDeal.cogs : null),
+      margin: o.profit.cost_known ? o.profit.margin : (linkedDeal?.margin ?? null),
+    })
+    if (finance.cogs != null && finance.profit != null) {
+      totalCogs += finance.cogs
+      totalProfit += finance.profit
       pricedCount += 1
     }
   }
   for (const deal of sortedDeals) {
     totalRevenue += deal.totalAmount
-    const cogs = deal.cogs
-    if (cogs != null) {
-      totalCogs += cogs
-      totalProfit += deal.totalAmount - cogs
+    const finance = financeFromPlannedCogs(deal, deal.totalAmount, plannedCogsByDealId, {
+      cogs: deal.cogs,
+      profit: deal.cogs == null ? deal.grossProfit : deal.totalAmount - deal.cogs,
+      margin: deal.margin,
+    })
+    if (finance.cogs != null && finance.profit != null) {
+      totalCogs += finance.cogs
+      totalProfit += finance.profit
       pricedCount += 1
     }
   }
@@ -901,9 +998,12 @@ export function PackageOrdersTable({
         <div className="space-y-2.5 rounded-lg border border-border bg-muted/20 px-3 py-2.5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">
-              Assign who should fulfil each signed order. Unsigned deals are listed for context
-              and do not use purchased stock. Unpaid signed orders still show Awaiting payment and
-              should not be fulfilled until paid. Balances update before anything is saved.
+              Assign who should fulfil each signed order. Older deals are filled first;
+              last-added orders take the shortage. One supplier is used whenever possible.
+              Changing a supplier reshuffles later deals automatically. Unsigned deals are
+              listed for context and do not use purchased stock. Unpaid signed orders still
+              show Awaiting payment and should not be fulfilled until paid. Balances update
+              before anything is saved.
             </p>
             <button
               type="button"
@@ -922,39 +1022,32 @@ export function PackageOrdersTable({
           </div>
           <div className="flex flex-wrap gap-2">
             {supplierPools.map((supplier) => {
-              const assigned = projectedAssigned.get(supplier.key) ?? 0
-              const balance = projectedBalances[supplier.key] ?? supplier.targetCapacity
+              const assigned = supplierPlan.assignedByPool[supplier.key] ?? 0
+              const remaining = Math.max(0, supplierPlan.remainingByPool[supplier.key] ?? 0)
               return (
                 <div
                   key={supplier.key}
                   className={cn(
                     "rounded-md border px-2.5 py-1.5 text-xs",
-                    balance < 0
-                      ? "border-red-300 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"
-                      : balance > 0
-                        ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300"
-                        : "border-border bg-background text-foreground",
+                    remaining > 0
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300"
+                      : "border-border bg-background text-foreground",
                   )}
                 >
                   <span className="font-medium">{supplier.name}</span>
                   <span className="ml-1.5 tabular-nums">
                     {supplier.purchased} bought · {assigned} assigned ·{" "}
-                    {balance > 0 ? `+${balance} left` : balance === 0 ? "balanced" : `${balance} over`}
+                    {remaining > 0 ? `${remaining} left` : "balanced"}
                   </span>
                 </div>
               )
             })}
             {projectedUnassigned > 0 ? (
               <div className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
-                {projectedUnassigned} paid place{projectedUnassigned === 1 ? "" : "s"} still unassigned
+                {projectedUnassigned} place{projectedUnassigned === 1 ? "" : "s"} still need stock
               </div>
             ) : null}
           </div>
-          {!supplierChangesBalanced ? (
-            <p className="text-xs text-muted-foreground">
-              Resolve every red or unassigned balance before saving.
-            </p>
-          ) : null}
         </div>
       ) : null}
 
@@ -1008,12 +1101,24 @@ export function PackageOrdersTable({
                   }}
                   costLayers={costLayers}
                   supplierPools={supplierPools}
-                  projectedBalances={projectedBalances}
-                  supplierDrafts={supplierDrafts}
+                  supplierPlan={supplierPlan}
                   supplierPending={supplierPending}
-                  onSupplierChange={(lineId, supplierKey) =>
-                    setSupplierDrafts((current) => ({ ...current, [lineId]: supplierKey }))
-                  }
+                  finance={financeFromPlannedCogs(
+                    linkedDeal,
+                    Number(o.total_amount),
+                    plannedCogsByDealId,
+                    {
+                      cogs: o.profit.cost_known ? o.profit.cogs : (linkedDeal?.cogs ?? null),
+                      profit: o.profit.cost_known
+                        ? o.profit.gross_profit
+                        : linkedDeal?.grossProfit ??
+                          (linkedDeal?.cogs != null
+                            ? Number(o.total_amount) - linkedDeal.cogs
+                            : null),
+                      margin: o.profit.cost_known ? o.profit.margin : (linkedDeal?.margin ?? null),
+                    },
+                  )}
+                  onSupplierChange={pinDealSuppliers}
                 />
               )
             })}
@@ -1022,12 +1127,14 @@ export function PackageOrdersTable({
                 key={deal.id}
                 deal={deal}
                 supplierPools={supplierPools}
-                projectedBalances={projectedBalances}
-                supplierDrafts={supplierDrafts}
+                supplierPlan={supplierPlan}
                 supplierPending={supplierPending}
-                onSupplierChange={(lineId, supplierKey) =>
-                  setSupplierDrafts((current) => ({ ...current, [lineId]: supplierKey }))
-                }
+                finance={financeFromPlannedCogs(deal, deal.totalAmount, plannedCogsByDealId, {
+                  cogs: deal.cogs,
+                  profit: deal.cogs == null ? deal.grossProfit : deal.totalAmount - deal.cogs,
+                  margin: deal.margin,
+                })}
+                onSupplierChange={pinDealSuppliers}
               />
             ))}
           </tbody>
@@ -1040,17 +1147,10 @@ export function PackageOrdersTable({
               dealByOrderId.get(o.id) ?? (o.deal_id ? dealById.get(o.deal_id) ?? null : null)
             const party = salePartyPrimary(o, linkedDeal)
             const incomplete = saleIsIncomplete(linkedDeal, o)
-            const unassignedQty = linkedDeal
-              ? dealUnassignedPurchasedQuantity(
-                  linkedDeal.lines.filter(dealLineCanTakePurchasedSupplier),
-                  supplierDrafts,
-                )
-              : 0
+            const assignment = dealAssignmentFromPlan(supplierPlan, linkedDeal)
             const uncovered = Boolean(
-              linkedDeal && dealProjectsSupplierConsumption(linkedDeal) && unassignedQty > 0,
+              linkedDeal && dealProjectsSupplierConsumption(linkedDeal) && assignment.needStock,
             )
-            const oversold =
-              uncovered && saleOversoldUnassigned(unassignedQty, supplierPools, projectedBalances)
             const body = (
               <>
                 <div className="min-w-0">
@@ -1066,10 +1166,8 @@ export function PackageOrdersTable({
                   </p>
                   {incomplete ? (
                     <p className="mt-1 text-[10px] font-semibold text-amber-800">Not complete — do not fulfil</p>
-                  ) : oversold ? (
-                    <p className="mt-1 text-[10px] font-semibold text-amber-800">Oversold — do not fulfil</p>
                   ) : uncovered ? (
-                    <p className="mt-1 text-[10px] font-semibold text-amber-800">Unassigned — do not fulfil</p>
+                    <p className="mt-1 text-[10px] font-semibold text-amber-800">Add more stock to fulfil this order</p>
                   ) : null}
                 </div>
                 <div className="shrink-0 text-right">
@@ -1108,13 +1206,8 @@ export function PackageOrdersTable({
           })}
           {visibleDeals.map((deal) => {
             const incomplete = saleIsIncomplete(deal)
-            const unassignedQty = dealUnassignedPurchasedQuantity(
-              deal.lines.filter(dealLineCanTakePurchasedSupplier),
-              supplierDrafts,
-            )
-            const uncovered = dealStageHoldsPurchasedStock(deal.stage) && unassignedQty > 0
-            const oversold =
-              uncovered && saleOversoldUnassigned(unassignedQty, supplierPools, projectedBalances)
+            const assignment = dealAssignmentFromPlan(supplierPlan, deal)
+            const uncovered = dealStageHoldsPurchasedStock(deal.stage) && assignment.needStock
             return (
             <Link
               key={deal.id}
@@ -1133,10 +1226,8 @@ export function PackageOrdersTable({
                 <p className="mt-0.5 text-[8px] text-slate-400">{dealProductLabel(deal)}</p>
                 {incomplete ? (
                   <p className="mt-1 text-[10px] font-semibold text-amber-800">Not complete — do not fulfil</p>
-                ) : oversold ? (
-                  <p className="mt-1 text-[10px] font-semibold text-amber-800">Oversold — do not fulfil</p>
                 ) : uncovered ? (
-                  <p className="mt-1 text-[10px] font-semibold text-amber-800">Unassigned — do not fulfil</p>
+                  <p className="mt-1 text-[10px] font-semibold text-amber-800">Add more stock to fulfil this order</p>
                 ) : null}
               </div>
               <div className="shrink-0 text-right">
@@ -1183,9 +1274,9 @@ function OrderSaleRows({
   onToggle,
   costLayers,
   supplierPools,
-  projectedBalances,
-  supplierDrafts,
+  supplierPlan,
   supplierPending,
+  finance,
   onSupplierChange,
 }: {
   order: AdminOrderListRow
@@ -1194,33 +1285,17 @@ function OrderSaleRows({
   onToggle: () => void
   costLayers: CostLayerRow[]
   supplierPools: SupplierPoolOption[]
-  projectedBalances: Record<string, number>
-  supplierDrafts: Record<string, string>
+  supplierPlan: SupplierAssignmentPlan
   supplierPending: boolean
-  onSupplierChange: (lineId: string, supplierKey: string) => void
+  finance: SaleFinance
+  onSupplierChange: (lineIds: string[], supplierKey: string) => void
 }) {
   const dealHref = adminOrderDealPath(order.deal_id) ?? (deal ? adminDealPath(deal.id) : null)
   const incomplete = saleIsIncomplete(deal, order)
-  const unassignedQty = deal
-    ? dealUnassignedPurchasedQuantity(
-        deal.lines.filter(dealLineCanTakePurchasedSupplier),
-        supplierDrafts,
-      )
-    : 0
+  const assignment = dealAssignmentFromPlan(supplierPlan, deal)
   const canAssignDealSupplier = Boolean(deal && dealProjectsSupplierConsumption(deal))
-  const uncovered = canAssignDealSupplier && unassignedQty > 0
-  const oversold =
-    uncovered && saleOversoldUnassigned(unassignedQty, supplierPools, projectedBalances)
-  const cogs = order.profit.cost_known ? order.profit.cogs : (deal?.cogs ?? null)
-  const profit = order.profit.cost_known
-    ? order.profit.gross_profit
-    : deal?.grossProfit ?? (cogs != null ? Number(order.total_amount) - cogs : null)
-  const margin =
-    order.profit.cost_known
-      ? order.profit.margin
-      : profit != null && Number(order.total_amount) > 0
-        ? profit / Number(order.total_amount)
-        : (deal?.margin ?? null)
+  const uncovered = canAssignDealSupplier && assignment.needStock
+  const { cogs, profit, margin } = finance
   const portalCheckout = isPortalCheckoutChannel(order.channel) && (!deal || isPortalDealSource(deal.source))
   return (
     <>
@@ -1264,9 +1339,9 @@ function OrderSaleRows({
           {canAssignDealSupplier && deal ? (
             <DealSupplierEditor
               deal={deal}
+              assignment={assignment}
               supplierPools={supplierPools}
-              projectedBalances={projectedBalances}
-              drafts={supplierDrafts}
+              remainingByPool={supplierPlan.remainingByPool}
               pending={supplierPending}
               onChange={onSupplierChange}
             />
@@ -1280,8 +1355,6 @@ function OrderSaleRows({
           label={orderPaymentLabel(order, deal)}
           tone={paymentTone(deal, order)}
           incomplete={incomplete}
-          uncovered={uncovered}
-          oversold={oversold}
         />
         <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
           {formatWhen(order.created_at)}
@@ -1321,30 +1394,23 @@ function OrderSaleRows({
 function DealSaleRows({
   deal,
   supplierPools,
-  projectedBalances,
-  supplierDrafts,
+  supplierPlan,
   supplierPending,
+  finance,
   onSupplierChange,
 }: {
   deal: PackageDealSaleRow
   supplierPools: SupplierPoolOption[]
-  projectedBalances: Record<string, number>
-  supplierDrafts: Record<string, string>
+  supplierPlan: SupplierAssignmentPlan
   supplierPending: boolean
-  onSupplierChange: (lineId: string, supplierKey: string) => void
+  finance: SaleFinance
+  onSupplierChange: (lineIds: string[], supplierKey: string) => void
 }) {
-  const cogs = deal.cogs
-  const profit = cogs == null ? deal.grossProfit : deal.totalAmount - cogs
-  const margin = profit == null || deal.totalAmount <= 0 ? deal.margin : profit / deal.totalAmount
+  const { cogs, profit, margin } = finance
   const incomplete = saleIsIncomplete(deal)
   const canAssignDealSupplier = dealStageHoldsPurchasedStock(deal.stage)
-  const unassignedQty = dealUnassignedPurchasedQuantity(
-    deal.lines.filter(dealLineCanTakePurchasedSupplier),
-    supplierDrafts,
-  )
-  const uncovered = canAssignDealSupplier && unassignedQty > 0
-  const oversold =
-    uncovered && saleOversoldUnassigned(unassignedQty, supplierPools, projectedBalances)
+  const assignment = dealAssignmentFromPlan(supplierPlan, deal)
+  const uncovered = canAssignDealSupplier && assignment.needStock
   return (
       <tr
         className={cn(
@@ -1383,9 +1449,9 @@ function DealSaleRows({
           {canAssignDealSupplier ? (
             <DealSupplierEditor
               deal={deal}
+              assignment={assignment}
               supplierPools={supplierPools}
-              projectedBalances={projectedBalances}
-              drafts={supplierDrafts}
+              remainingByPool={supplierPlan.remainingByPool}
               pending={supplierPending}
               onChange={onSupplierChange}
             />
@@ -1397,8 +1463,6 @@ function DealSaleRows({
           label={DEAL_STAGE_LABELS[deal.stage] ?? deal.stage}
           tone={paymentTone(deal)}
           incomplete={incomplete}
-          uncovered={uncovered}
-          oversold={oversold}
         />
         <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
           {formatWhen(deal.createdAt)}
@@ -1406,3 +1470,4 @@ function DealSaleRows({
       </tr>
   )
 }
+

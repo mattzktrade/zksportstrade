@@ -1,4 +1,5 @@
 import { unstable_noStore as noStore } from "next/cache"
+import { chunkList } from "@/lib/supabase/fetch-all-rows"
 import { createClient } from "@/lib/supabase/server"
 import type {
   BookingFormAdminRow,
@@ -35,18 +36,21 @@ export async function getBookingFormsForDeals(): Promise<{
   }
   const merged = [...byId.values()]
   const formIds = merged.map((form) => String(form.id))
-  const { data: events } = formIds.length
-    ? await supabase
-        .from("booking_form_events")
-        .select("id, booking_form_id, event_type, actor_email, metadata, created_at")
-        .in("booking_form_id", formIds)
-        .order("created_at", { ascending: false })
-        .limit(2000)
-    : { data: [] }
+  const eventRows: BookingFormEventRow[] = []
+  for (const chunk of chunkList(formIds, 80)) {
+    const { data: events } = await supabase
+      .from("booking_form_events")
+      .select("id, booking_form_id, event_type, actor_email, metadata, created_at")
+      .in("booking_form_id", chunk)
+      .order("created_at", { ascending: false })
+      .limit(400)
+    eventRows.push(...((events ?? []) as BookingFormEventRow[]))
+    if (eventRows.length >= 2000) break
+  }
 
   return {
     forms: merged,
-    events: (events ?? []) as BookingFormEventRow[],
+    events: eventRows.slice(0, 2000),
   }
 }
 

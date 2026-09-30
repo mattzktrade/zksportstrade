@@ -75,6 +75,23 @@ export function negativeStockRowKey(
   return `row:${row.id}`
 }
 
+/** Places still to buy after the linked-day plan, or after reserved/committed allocations. */
+export function uncoveredSoldQuantity(input: {
+  soldQty: number
+  allocatedQty: number
+  allocationLookupFailed?: boolean
+  plannedUncovered?: number | null
+  /** When set, never show more than this leftover (stale shortage rows). */
+  cap?: number | null
+}): number {
+  const sold = Math.max(0, Math.floor(Number(input.soldQty) || 0))
+  const allocated = Math.max(0, Math.floor(Number(input.allocatedQty) || 0))
+  const leftover = input.allocationLookupFailed ? sold : Math.max(0, sold - allocated)
+  if (input.plannedUncovered != null) return Math.max(0, Math.floor(input.plannedUncovered))
+  if (input.cap == null) return leftover
+  return Math.min(leftover, Math.max(0, Math.floor(Number(input.cap) || 0)))
+}
+
 export function mergeNegativeStockRows(
   primary: NegativeStockRow[],
   extra: NegativeStockRow[],

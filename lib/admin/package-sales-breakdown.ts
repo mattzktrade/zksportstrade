@@ -176,14 +176,39 @@ export function linkedPoolAttributedPipeline(input: LinkedPoolInput): number {
   )
 }
 
+const LINKED_DURATION_ORDER = [
+  "3_day",
+  "2_day",
+  "thursday_only",
+  "friday_only",
+  "saturday_only",
+  "sunday_only",
+] as const
+
+function linkedDaySlotsForDuration(
+  duration: string | null | undefined,
+  saturdayRace: boolean,
+): string[] {
+  if (duration === "3_day") {
+    return saturdayRace
+      ? ["thursday", "friday", "saturday"]
+      : ["friday", "saturday", "sunday"]
+  }
+  if (duration === "2_day") {
+    return saturdayRace ? ["friday", "saturday"] : ["saturday", "sunday"]
+  }
+  if (duration && LINKED_DAY_DURATIONS.has(duration)) {
+    return [duration.replace(/_only$/, "")]
+  }
+  return []
+}
+
 /**
- * Linked-pool Remaining for one package — same rules as inventory sync:
- * - day package: stock − 3-day commitments − that day's commitments (− 2-day on Sat/Sun)
- * - 3-day: min(Fri, Sat, Sun) remainings
- * - Sat&Sun (2-day): min(Sat, Sun), which already includes 2-day sales
- * - shell: mirrors its day sibling (or 3-day when no sellable day exists)
+ * Linked-pool remaining for one package.
  *
- * Never sum every sibling's pipeline onto every row (that produced false "191" for Velocity).
+ * Longer stays are seated first. A 3-day or 2-day row only goes negative when
+ * that SKU itself sold more than the purchase. Extra single-day sales stay on
+ * that day — a Sunday oversale does not mark the 3-day as −2.
  */
 export function linkedPoolSellableForPackage(input: {
   stock: number
@@ -194,50 +219,48 @@ export function linkedPoolSellableForPackage(input: {
   shellMirrorDuration?: string | null
 }): number {
   const stock = Math.max(0, Math.floor(input.stock))
-  const threeDay = input.members.find((m) => m.duration === "3_day")
-  const threeDayCommitted = threeDay ? packageCommittedUnits(threeDay.breakdown) : 0
-  const twoDay = input.members.find((m) => m.duration === "2_day")
-  const twoDayCommitted = twoDay ? packageCommittedUnits(twoDay.breakdown) : 0
-
-  const dayRemaining = (duration: string): number | null => {
-    const day = input.members.find((m) => m.duration === duration && m.id !== threeDay?.id)
-    if (!day) return null
-    const weekendTake =
-      duration === "saturday_only" || duration === "sunday_only" ? twoDayCommitted : 0
-    return stock - threeDayCommitted - packageCommittedUnits(day.breakdown) - weekendTake
-  }
-
   const duration = (input.shellMirrorDuration ?? input.targetDuration)?.trim() || null
-
-  if (duration === "3_day") {
-    const days = ["thursday_only", "friday_only", "saturday_only", "sunday_only"]
-      .map((d) => dayRemaining(d))
-      .filter((n): n is number => n != null)
-    if (days.length === 0) return stock - threeDayCommitted - twoDayCommitted
-    return Math.min(...days)
+  const saturdayRace = input.members.some((member) => member.duration === "thursday_only")
+  const targetSlots = linkedDaySlotsForDuration(duration, saturdayRace)
+  if (!duration || targetSlots.length === 0) {
+    const self = input.members.find((member) => member.id === input.targetId)
+    return self ? commitmentSellable({ stock, breakdown: self.breakdown }) : stock
   }
 
-  if (duration === "2_day") {
-    const sat = dayRemaining("saturday_only")
-    const sun = dayRemaining("sunday_only")
-    if (sat != null && sun != null) return Math.min(sat, sun)
-    if (sat != null) return sat
-    if (sun != null) return sun
-    return stock - threeDayCommitted - twoDayCommitted
+  const demand = new Map<string, number>()
+  for (const member of input.members) {
+    const memberDuration = member.duration?.trim() || ""
+    if (!memberDuration) continue
+    demand.set(
+      memberDuration,
+      (demand.get(memberDuration) ?? 0) + packageCommittedUnits(member.breakdown),
+    )
   }
 
-  if (duration && LINKED_DAY_DURATIONS.has(duration)) {
-    const own =
-      input.members.find((m) => m.id === input.targetId) ??
-      input.members.find((m) => m.duration === duration)
-    if (!own) return stock - threeDayCommitted - twoDayCommitted
-    const weekendTake =
-      duration === "saturday_only" || duration === "sunday_only" ? twoDayCommitted : 0
-    return stock - threeDayCommitted - packageCommittedUnits(own.breakdown) - weekendTake
+  const remaining = new Map<string, number>()
+  for (const step of LINKED_DURATION_ORDER) {
+    for (const slot of linkedDaySlotsForDuration(step, saturdayRace)) {
+      if (!remaining.has(slot)) remaining.set(slot, stock)
+    }
   }
 
-  const self = input.members.find((m) => m.id === input.targetId)
-  return self ? commitmentSellable({ stock, breakdown: self.breakdown }) : stock
+  let own = 0
+  for (const step of LINKED_DURATION_ORDER) {
+    const stepSlots = linkedDaySlotsForDuration(step, saturdayRace)
+    if (stepSlots.length === 0) continue
+    const qty = demand.get(step) ?? 0
+    const available = Math.min(...stepSlots.map((slot) => remaining.get(slot) ?? 0))
+    if (step === duration) own = available - qty
+    for (const slot of stepSlots) {
+      remaining.set(slot, (remaining.get(slot) ?? 0) - qty)
+    }
+  }
+
+  const leftover = Math.min(...targetSlots.map((slot) => remaining.get(slot) ?? 0))
+  const soldQty = demand.get(duration) ?? 0
+  if (soldQty <= 0) return leftover >= 0 ? leftover : 0
+  if (own < 0) return own
+  return Math.min(own, Math.max(0, leftover))
 }
 
 export type EffectiveSellablePackage = {

@@ -98,6 +98,14 @@ export function dealStageHoldsPurchasedStock(stage: DealStage | string): boolean
   return dealStageCountsAsSold(stage)
 }
 
+/** Numeric DL order, e.g. `DL0592` → 592. Missing or non-DL references are null. */
+export function dealReferenceNumber(reference: string | null | undefined): number | null {
+  const match = /^DL(\d+)$/i.exec((reference ?? "").trim())
+  if (!match) return null
+  const value = Number(match[1])
+  return Number.isFinite(value) ? value : null
+}
+
 /** Live pipeline that is not paid yet — must not be treated as ready to fulfil. */
 export function dealStageIsOpenPipeline(stage: DealStage | string): boolean {
   return (

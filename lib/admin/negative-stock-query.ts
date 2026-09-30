@@ -2,11 +2,13 @@ import { unstable_noStore as noStore } from "next/cache"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { dealStageCountsAsSold, DEAL_SOLD_STAGES } from "@/lib/crm/deal-types"
 import { isSupplierQuoteFresh } from "@/lib/inventory/native-availability"
+import { uncoveredQuantitiesFromLinkedDayPlan } from "@/lib/inventory/linked-day-coverage"
 import { chunkList, fetchAllRows } from "@/lib/supabase/fetch-all-rows"
 import { createClient } from "@/lib/supabase/server"
 import {
   mergeNegativeStockRows,
   NEGATIVE_STOCK_OPEN_STATUSES,
+  uncoveredSoldQuantity,
   type NegativeStockRow,
   type NegativeStockStatus,
 } from "@/lib/admin/negative-stock"
@@ -31,6 +33,7 @@ type ShortagePackageJoin = {
 type DealLineJoin = {
   id: string
   package_id: string
+  quantity?: number | null
   unit_sale_price: number | null
   expected_unit_cost: number | null
   sourcing_mode: "owned" | "brokered" | null
@@ -98,7 +101,7 @@ export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
           `
           id, reference, stage, owner_profile_id, account_id,
           crm_accounts(name),
-          deal_line_items(id, package_id, unit_sale_price, expected_unit_cost, sourcing_mode, supplier_id, supplier_quote_at)
+          deal_line_items(id, package_id, quantity, unit_sale_price, expected_unit_cost, sourcing_mode, supplier_id, supplier_quote_at)
         `,
         )
         .in("id", dealIds)
@@ -122,18 +125,22 @@ export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
         .filter(Boolean),
     ),
   ]
-  const { data: allocations } = lineIds.length
-    ? await supabase
-        .from("inventory_allocations")
-        .select("deal_line_item_id, quantity, state")
-        .in("deal_line_item_id", lineIds)
-        .in("state", ["reserved", "committed"])
-    : { data: [] as Array<{ deal_line_item_id: string; quantity: number; state: string }> }
-
   const allocatedByLine = new Map<string, number>()
-  for (const row of allocations ?? []) {
-    const id = String(row.deal_line_item_id)
-    allocatedByLine.set(id, (allocatedByLine.get(id) ?? 0) + Number(row.quantity ?? 0))
+  const allocationLookupFailed = new Set<string>()
+  for (const chunk of chunkList(lineIds, 80)) {
+    const { data: allocations, error } = await supabase
+      .from("inventory_allocations")
+      .select("deal_line_item_id, quantity, state")
+      .in("deal_line_item_id", chunk)
+      .in("state", ["reserved", "committed"])
+    if (error) {
+      for (const id of chunk) allocationLookupFailed.add(id)
+      continue
+    }
+    for (const row of allocations ?? []) {
+      const id = String(row.deal_line_item_id)
+      allocatedByLine.set(id, (allocatedByLine.get(id) ?? 0) + Number(row.quantity ?? 0))
+    }
   }
 
   const purchasedLineIds = new Set<string>()
@@ -167,6 +174,8 @@ export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
       ] as const
     }),
   )
+
+  const linkedDayPlan = await loadLinkedDayPlanUncovered(supabase, uncoveredDealLines)
 
   const brokeredRows: NegativeStockRow[] = (sourcingData ?? []).flatMap((row) => {
     const deal = row.deal_id ? dealMap.get(String(row.deal_id)) ?? null : null
@@ -227,13 +236,26 @@ export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
       deal?.lines.find((item) => item.id === row.deal_line_item_id) ??
       deal?.lines.find((item) => item.package_id === row.package_id) ??
       null
+    const lineId = row.deal_line_item_id ? String(row.deal_line_item_id) : line?.id ?? null
+    const plannedUncovered =
+      lineId && linkedDayPlan.linkedLineIds.has(lineId)
+        ? (linkedDayPlan.uncovered.get(lineId) ?? 0)
+        : null
+    const uncovered = uncoveredSoldQuantity({
+      soldQty: Number(line?.quantity ?? row.quantity ?? 0),
+      allocatedQty: lineId ? (allocatedByLine.get(lineId) ?? 0) : 0,
+      allocationLookupFailed: Boolean(lineId && allocationLookupFailed.has(lineId)),
+      plannedUncovered,
+      cap: Number(row.quantity ?? 0),
+    })
+    if (uncovered <= 0) return []
     return [
       {
         id: String(row.id),
         dealId: row.deal_id ? String(row.deal_id) : null,
-        dealLineItemId: row.deal_line_item_id ? String(row.deal_line_item_id) : line?.id ?? null,
+        dealLineItemId: lineId,
         packageId: String(row.package_id),
-        quantity: Number(row.quantity ?? 0),
+        quantity: uncovered,
         unitCost: Number(line?.expected_unit_cost ?? 0),
         unitSale: Number(line?.unit_sale_price ?? pkg?.trade_price ?? 0),
         currency: pkg?.currency || "USD",
@@ -241,8 +263,8 @@ export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
         supplierName: null,
         supplierQuoteAt: null,
         quoteFresh: false,
-        status: "open",
-        reason: "historical_reconciliation",
+        status: "open" as const,
+        reason: "historical_reconciliation" as const,
         createdAt: String(row.created_at),
         note: row.note,
         eventName: race?.name ? eventSeasonLabel(race.name, race.season) : "Event to reconcile",
@@ -286,8 +308,15 @@ export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
     if (!dealJoin || !dealStageCountsAsSold(dealJoin.stage)) return []
     const sourcingMode = (row.sourcing_mode ?? "owned") as "owned" | "brokered"
     if (purchasedLineIds.has(String(row.id))) return []
-    const allocated = allocatedByLine.get(String(row.id)) ?? 0
-    const uncovered = Math.max(0, Math.floor(Number(row.quantity) || 0) - allocated)
+    const plannedUncovered = linkedDayPlan.linkedLineIds.has(String(row.id))
+      ? (linkedDayPlan.uncovered.get(String(row.id)) ?? 0)
+      : null
+    const uncovered = uncoveredSoldQuantity({
+      soldQty: Number(row.quantity),
+      allocatedQty: allocatedByLine.get(String(row.id)) ?? 0,
+      allocationLookupFailed: allocationLookupFailed.has(String(row.id)),
+      plannedUncovered,
+    })
     if (uncovered <= 0) return []
 
     const pkg = one(row.packages as ShortagePackageJoin | ShortagePackageJoin[] | null)
@@ -377,8 +406,8 @@ async function loadSoldDealLines(
         `
         id, deal_id, package_id, quantity, unit_sale_price, expected_unit_cost,
         sourcing_mode, supplier_id, supplier_quote_at, created_at,
-        deals!inner(id, reference, stage, owner_profile_id, account_id, currency, crm_accounts(name)),
-        packages(id, name, trade_price, location, currency, races(name, season, event_date)),
+        deals!inner(id, reference, stage, owner_profile_id, account_id, currency, created_at, crm_accounts(name)),
+        packages(id, name, trade_price, location, currency, duration, inventory_group_id, inventory_is_standalone, event_date, races(name, season, event_date)),
         suppliers(id, name)
       `,
       )
@@ -387,4 +416,85 @@ async function loadSoldDealLines(
     lines.push(...((data ?? []) as SoldDealLineRow[]))
   }
   return lines
+}
+
+type SoldPackageJoin = {
+  duration?: string | null
+  inventory_group_id?: string | null
+  inventory_is_standalone?: boolean | null
+  event_date?: string | null
+}
+
+async function loadLinkedDayPlanUncovered(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  lines: SoldDealLineRow[],
+) {
+  const planLines = lines.map((row) => {
+    const pkg = one(row.packages as SoldPackageJoin | SoldPackageJoin[] | null)
+    const deal = one(
+      row.deals as
+        | { created_at?: string | null; reference?: string | null }
+        | Array<{ created_at?: string | null; reference?: string | null }>
+        | null,
+    )
+    return {
+      id: String(row.id),
+      packageId: String(row.package_id),
+      quantity: Number(row.quantity),
+      createdAt: String(deal?.created_at ?? row.created_at),
+      reference: deal?.reference ? String(deal.reference) : null,
+      inventoryGroupId: pkg?.inventory_group_id ?? null,
+      standalone: Boolean(pkg?.inventory_is_standalone),
+      duration: pkg?.duration ?? null,
+      eventDate: pkg?.event_date ?? null,
+      sourcingMode: row.sourcing_mode,
+    }
+  })
+  const groupIds = [
+    ...new Set(
+      planLines
+        .map((line) => line.inventoryGroupId?.trim())
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ]
+  const packageGroup = new Map<string, string>()
+  for (const chunk of chunkList(groupIds, 80)) {
+    const { data: groupPackages } = await supabase
+      .from("packages")
+      .select("id, inventory_group_id, inventory_is_standalone")
+      .in("inventory_group_id", chunk)
+    for (const pkg of groupPackages ?? []) {
+      if (pkg.inventory_is_standalone === true) continue
+      const groupId = String(pkg.inventory_group_id ?? "").trim()
+      if (!groupId) continue
+      packageGroup.set(String(pkg.id), groupId)
+    }
+  }
+  const purchasedByPackage = new Map<string, number>()
+  for (const chunk of chunkList([...packageGroup.keys()], 80)) {
+    const { data: layers } = await supabase
+      .from("package_cost_layers")
+      .select("package_id, quantity")
+      .in("package_id", chunk)
+    for (const layer of layers ?? []) {
+      const packageId = String(layer.package_id)
+      purchasedByPackage.set(
+        packageId,
+        (purchasedByPackage.get(packageId) ?? 0) + Math.max(0, Math.floor(Number(layer.quantity) || 0)),
+      )
+    }
+  }
+  const stockByGroup = new Map<string, number>()
+  const memberCount = new Map<string, number>()
+  for (const [packageId, groupId] of packageGroup) {
+    memberCount.set(groupId, (memberCount.get(groupId) ?? 0) + 1)
+    stockByGroup.set(
+      groupId,
+      Math.max(stockByGroup.get(groupId) ?? 0, purchasedByPackage.get(packageId) ?? 0),
+    )
+  }
+  const linkedGroupIds = new Set(
+    [...memberCount.entries()].filter(([, count]) => count >= 2).map(([groupId]) => groupId),
+  )
+  return uncoveredQuantitiesFromLinkedDayPlan(planLines, stockByGroup, linkedGroupIds)
 }

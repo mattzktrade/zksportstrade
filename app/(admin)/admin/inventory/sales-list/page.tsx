@@ -37,7 +37,6 @@ export default async function InventorySalesListPage() {
       <InventoryWorkspace
         initialRows={rows.filter(
           (row) =>
-            !row.is_hidden &&
             !row.shell_parent_package_id &&
             !nativeAvailability[row.id]?.isLegacyShell,
         )}

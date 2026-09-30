@@ -3,6 +3,7 @@ import test from "node:test"
 import {
   dealAssignedSupplierSlices,
   dealIsOversoldUnassigned,
+  dealLineAssignedPurchasedQuantity,
   dealLineSelectedSupplierKeys,
   dealUnassignedPurchasedQuantity,
   type DealSupplierSplitLine,
@@ -97,6 +98,57 @@ test("an unsaved draft to one supplier replaces the stored split", () => {
     new Map([["id:bam", "BAM Motorsport"]]),
   )
   assert.deepEqual(slices, [{ name: "BAM Motorsport", quantity: 5 }])
+})
+
+test("a saved supplier on part of a line does not hide the uncovered guests", () => {
+  const friday = line({
+    id: "friday",
+    quantity: 2,
+    supplierKey: "id:f1",
+    supplierName: "F1",
+    supplierAllocations: [{ key: "id:f1", name: "F1", quantity: 1 }],
+  })
+  assert.equal(dealLineAssignedPurchasedQuantity(friday, "id:f1"), 1)
+  assert.equal(dealUnassignedPurchasedQuantity([friday], { friday: "id:f1" }), 1)
+})
+
+test("choosing a different supplier projects the whole line", () => {
+  const friday = line({
+    id: "friday",
+    quantity: 2,
+    supplierKey: "id:f1",
+    supplierAllocations: [{ key: "id:f1", name: "F1", quantity: 1 }],
+  })
+  assert.equal(dealLineAssignedPurchasedQuantity(friday, "id:sui"), 2)
+  assert.equal(dealUnassignedPurchasedQuantity([friday], { friday: "id:sui" }), 0)
+})
+
+test("linked weekend coverage leaves the sunday sale unassigned even if a 3-day is missing an allocation", () => {
+  const covered = new Map([
+    ["three", 4],
+    ["sunday", 0],
+  ])
+  assert.equal(
+    dealUnassignedPurchasedQuantity(
+      [
+        line({
+          id: "three",
+          quantity: 4,
+          supplierKey: "id:f1",
+          supplierAllocations: [{ key: "id:f1", name: "F1", quantity: 3 }],
+        }),
+        line({
+          id: "sunday",
+          quantity: 2,
+          supplierKey: "id:f1",
+          supplierAllocations: [{ key: "id:f1", name: "F1", quantity: 2 }],
+        }),
+      ],
+      { three: "id:f1", sunday: "id:f1" },
+      covered,
+    ),
+    2,
+  )
 })
 
 test("a paid deal with no allocations is fully unassigned", () => {
