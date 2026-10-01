@@ -4985,6 +4985,20 @@ export async function createNativeDeal(input: {
       }
     }
   }
+  let sourcingFailed = false
+  if (
+    !enquiryError &&
+    (pipeline.enquiryStage === "sourcing_required" || pipeline.enquiryStage === "sourcing_complete")
+  ) {
+    const sourcingSnapshots = await loadSourcingEnquirySnapshots(gate.supabase, [dealId])
+    const created = sourcingSnapshots.get(dealId)
+    const sourcingEmail = await deliverSourcingStageNotification(
+      created ? { ...created, stage: "draft", enquiryStage: "new" } : null,
+      pipeline.enquiryStage,
+    )
+    sourcingFailed = sourcingEmail === "failed"
+  }
+  const emailNote = sourcingEmailWarning(sourcingFailed ? 1 : 0)
   revalidatePath("/admin/deals")
   revalidatePath("/admin/enquiries")
   revalidatePath(`/admin/deals/${encodeURIComponent(dealId)}`)
@@ -4994,15 +5008,16 @@ export async function createNativeDeal(input: {
     revalidatePath(`/admin/catalog/${encodeURIComponent(input.packageId.trim())}`)
   }
   const stageLabel = enquirySelectableStageLabel(pipeline.selectableStage)
+  const createdMessage = isEnquirySkipaheadStage(pipeline.selectableStage)
+    ? `Deal created at ${stageLabel}.`
+    : pipeline.reserve
+      ? "Enquiry created and stock reserved for 7 days."
+      : pipeline.selectableStage === "new"
+        ? "Enquiry created."
+        : `Enquiry created at ${stageLabel}.`
   return {
     ok: true,
-    message: isEnquirySkipaheadStage(pipeline.selectableStage)
-      ? `Deal created at ${stageLabel}.`
-      : pipeline.reserve
-        ? "Enquiry created and stock reserved for 7 days."
-        : pipeline.selectableStage === "new"
-          ? "Enquiry created."
-          : `Enquiry created at ${stageLabel}.`,
+    message: `${createdMessage}${emailNote}`,
     dealId,
     stage: pipeline.dealStage,
   }

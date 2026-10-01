@@ -1,4 +1,5 @@
 import { getServerSiteOrigin } from "@/lib/auth/site-origin"
+import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import {
   adminEnquiryListPath,
   enquiryCrmStageFromDeal,
@@ -22,6 +23,7 @@ export type SourcingEnquirySnapshot = {
   enquiryStage: string | null
   clientName: string
   interest: string
+  notes?: string
 }
 
 export type SourcingNotification = {
@@ -44,8 +46,8 @@ type DealReader = {
 }
 
 const RICH_SELECT =
-  "id, reference, stage, enquiry_stage, crm_accounts(name), deal_line_items(packages(name, races(name)))"
-const PLAIN_SELECT = "id, reference, stage, enquiry_stage"
+  "id, reference, stage, enquiry_stage, notes, crm_accounts(name), races(name, season), deal_line_items(packages(name, races(name, season)))"
+const PLAIN_SELECT = "id, reference, stage, enquiry_stage, notes"
 
 export function isOpenSourcingStage(
   deal: { stage: string; enquiry_stage?: string | null },
@@ -100,6 +102,7 @@ export function buildSourcingNotification(input: {
   const reference = displayValue(input.snapshot.reference)
   const clientName = displayValue(input.snapshot.clientName)
   const interest = displayValue(input.snapshot.interest)
+  const notes = input.snapshot.notes?.trim() ?? ""
   const origin = (input.origin ?? getServerSiteOrigin()).replace(/\/$/, "")
   const enquiryUrl = `${origin}${adminEnquiryListPath(input.snapshot.id)}`
   const headline =
@@ -116,6 +119,7 @@ export function buildSourcingNotification(input: {
     `Enquiry: ${reference}`,
     `Client: ${clientName}`,
     `Interest: ${interest}`,
+    ...(notes ? [`Notes: ${notes}`] : []),
     "",
     `Open the enquiry: ${enquiryUrl}`,
   ].join("\n")
@@ -123,7 +127,9 @@ export function buildSourcingNotification(input: {
     `<p>${escapeHtml(headline)}</p>`,
     `<p><strong>Enquiry:</strong> ${escapeHtml(reference)}<br/>`,
     `<strong>Client:</strong> ${escapeHtml(clientName)}<br/>`,
-    `<strong>Interest:</strong> ${escapeHtml(interest)}</p>`,
+    `<strong>Interest:</strong> ${escapeHtml(interest)}`,
+    notes ? `<br/><strong>Notes:</strong> ${escapeHtml(notes)}` : "",
+    `</p>`,
     `<p><a href="${escapeHtml(enquiryUrl)}">Open the enquiry</a></p>`,
   ].join("")
 
@@ -161,9 +167,13 @@ export function sourcingEnquirySnapshotFromRow(row: unknown): SourcingEnquirySna
     if (!pack) continue
     const packageName = textName(pack.name)
     const race = firstRecord(pack.races)
-    const raceName = textName(race?.name)
+    const raceName = eventLabel(race)
     if (packageName && !packages.includes(packageName)) packages.push(packageName)
     if (raceName && !events.includes(raceName)) events.push(raceName)
+  }
+  if (events.length === 0) {
+    const dealRace = eventLabel(firstRecord(record.races))
+    if (dealRace) events.push(dealRace)
   }
 
   return {
@@ -172,11 +182,20 @@ export function sourcingEnquirySnapshotFromRow(row: unknown): SourcingEnquirySna
     stage: textName(record.stage) || "draft",
     enquiryStage: textName(record.enquiry_stage) || null,
     clientName,
+    notes: textName(record.notes),
     interest: enquiryInterestLabel({
       race_name: events.join(", ") || null,
       line_summary: packages.join(", ") || null,
     }),
   }
+}
+
+function eventLabel(race: Record<string, unknown> | null): string {
+  if (!race) return ""
+  const name = textName(race.name)
+  if (!name) return ""
+  const season = typeof race.season === "number" ? race.season : Number(race.season)
+  return eventSeasonLabel(name, Number.isFinite(season) ? season : null)
 }
 
 async function readSnapshotRows(reader: DealReader, dealIds: string[], columns: string): Promise<unknown[] | null> {

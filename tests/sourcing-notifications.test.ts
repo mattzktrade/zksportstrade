@@ -124,6 +124,29 @@ test("client and package names are read from the enquiry row", () => {
   assert.match(notice?.html ?? "", /Northwind &amp; Co/)
 })
 
+test("an event-only enquiry still names the race and the notes", () => {
+  const parsed = sourcingEnquirySnapshotFromRow({
+    id: "deal-10",
+    reference: "DL0992",
+    stage: "sourcing",
+    enquiry_stage: "sourcing_required",
+    notes: "12-14 private suite on Main stand",
+    crm_accounts: { name: "Touch Premium" },
+    races: { name: "Abu Dhabi Grand Prix", season: 2026 },
+    deal_line_items: [],
+  })
+  assert.equal(parsed?.interest, "2026 Abu Dhabi Grand Prix — no package yet")
+  assert.equal(parsed?.notes, "12-14 private suite on Main stand")
+  const notice = buildSourcingNotification({
+    snapshot: { ...parsed!, stage: "draft", enquiryStage: "new" },
+    nextStage: "sourcing_required",
+    origin: "https://portal.example",
+  })
+  assert.equal(notice?.to, "matt@zk-sports.com")
+  assert.match(notice?.text ?? "", /12-14 private suite/)
+  assert.match(notice?.text ?? "", /2026 Abu Dhabi Grand Prix/)
+})
+
 test("a failed sourcing email does not replace the saved-stage message", () => {
   assert.equal(sourcingEmailWarning(0), "")
   assert.match(sourcingEmailWarning(1), /enquiry was saved/)
@@ -132,4 +155,10 @@ test("a failed sourcing email does not replace the saved-stage message", () => {
   assert.match(actions, /loadSourcingEnquirySnapshots\(gate\.supabase, \[dealId\]\)/)
   assert.match(actions, /loadSourcingEnquirySnapshots\(gate\.supabase, dealIds\)/)
   assert.match(actions, /deliverSourcingStageNotification/)
+  const createStart = actions.indexOf("export async function createNativeDeal")
+  const createEnd = actions.indexOf("const LEAD_SOURCES", createStart)
+  const createFn = actions.slice(createStart, createEnd)
+  assert.match(createFn, /enquiryStage: "new"/)
+  assert.match(createFn, /deliverSourcingStageNotification/)
+  assert.match(createFn, /sourcing_required/)
 })
