@@ -16,6 +16,7 @@ import {
   Phone,
   Plus,
   Search,
+  Upload,
   Share2,
   Snowflake,
   Store,
@@ -26,6 +27,7 @@ import {
 import { toast } from "sonner"
 import { updateEnquiryPipeline, updateEnquiryPipelineBulk, updateNativeDealWorkflow } from "@/app/(admin)/actions"
 import { addDealNote, updateEnquiryNotes } from "@/app/(admin)/admin/deals/deal-edit-actions"
+import { EnquiryBulkUploadModal } from "@/app/(admin)/admin/enquiries/bulk-upload-modal"
 import { DealCreateModal } from "@/components/admin/deal-create-modal"
 import { EnquirySelectableStageSelect } from "@/components/admin/enquiry-selectable-stage-select"
 import { EventFilter, uniqueEventFilterOptions } from "@/components/admin/event-filter"
@@ -324,6 +326,7 @@ export function EnquiriesClient({
   })
   const previewRef = useRef<HTMLElement>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [showBulkUpload, setShowBulkUpload] = useState(false)
   const [workflowStage, setWorkflowStage] = useState<EnquirySelectableStage>("new")
   const [showLogNote, setShowLogNote] = useState(false)
   const [logNote, setLogNote] = useState("")
@@ -603,13 +606,22 @@ export function EnquiriesClient({
         description="Warm if they came to us or have replied. Cold if we reached out first. Create a booking form here; sending it for approval or to the client moves it to Deals."
         action={
           currentCanManageDeals ? (
-            <button
-              type="button"
-              onClick={() => setShowCreate(true)}
-              className="flex h-9 items-center justify-center gap-1.5 rounded-md bg-primary px-4 text-[10px] font-semibold text-white"
-            >
-              <Plus className="h-3.5 w-3.5" /> New enquiry
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowBulkUpload(true)}
+                className="flex h-9 items-center justify-center gap-1.5 rounded-md border border-[#e6e8ec] bg-white px-4 text-[10px] font-semibold text-slate-700"
+              >
+                <Upload className="h-3.5 w-3.5" /> Bulk upload
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowCreate(true)}
+                className="flex h-9 items-center justify-center gap-1.5 rounded-md bg-primary px-4 text-[10px] font-semibold text-white"
+              >
+                <Plus className="h-3.5 w-3.5" /> New enquiry
+              </button>
+            </div>
           ) : null
         }
       />
@@ -1220,6 +1232,17 @@ export function EnquiriesClient({
           ) : null}
         </div>
       </AdminPanel>
+
+      {showBulkUpload ? (
+        <EnquiryBulkUploadModal
+          products={packageOptions}
+          onClose={() => setShowBulkUpload(false)}
+          onImported={() => {
+            setShowBulkUpload(false)
+            router.refresh()
+          }}
+        />
+      ) : null}
 
       {showCreate ? (
         <DealCreateModal
