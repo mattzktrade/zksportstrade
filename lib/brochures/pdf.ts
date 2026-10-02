@@ -40,13 +40,6 @@ import {
   strokeDiagonal,
 } from "@/lib/brochures/template"
 import { brochurePrintText, brochureReadable, fitTitle, wrapText } from "@/lib/brochures/text"
-import {
-  drawMarsaBoxClosing,
-  drawMarsaBoxIndex,
-  drawMarsaBoxIntro,
-  embedMarsaBoxFrontPhotos,
-  isMarsaBoxBrochure,
-} from "@/lib/brochures/marsa-box-front"
 
 const SECTION_TOP = PAGE_H - 40
 const PHOTO_BOTTOM = FOOTER_H + 16
@@ -504,23 +497,14 @@ export async function generatePackageBrochurePdf(
     throw new BrochureInsufficientImagesError(photos.length, minPhotos)
   }
 
-  const marsaFront = isMarsaBoxBrochure(content.productName)
-  const frontPhotos = marsaFront ? await embedMarsaBoxFrontPhotos(pdf) : null
-  const pages = [
-    ...(marsaFront ? (["intro", "index"] as const) : []),
-    ...brochurePagePlan(Boolean(trackMap)),
-    ...(marsaFront ? (["closing"] as const) : []),
-  ]
+  const pages = brochurePagePlan(Boolean(trackMap))
   const pageCount = pages.length
   const chrome = (page: PDFPage, index: number) => drawChrome(page, fonts, { pageIndex: index, pageCount })
 
   for (const [index, kind] of pages.entries()) {
     const page = pdf.addPage(PAGE)
     drawBackground(page, background)
-    if (kind === "intro") drawMarsaBoxIntro(page, fonts, frontPhotos?.intro ?? null, frontPhotos?.logo ?? null)
-    else if (kind === "index") drawMarsaBoxIndex(page, fonts, frontPhotos?.badges ?? null)
-    else if (kind === "closing") drawMarsaBoxClosing(page, fonts, frontPhotos?.logo ?? null)
-    else if (kind === "cover") drawBrochureCover(page, content, fonts, photos)
+    if (kind === "cover") drawBrochureCover(page, content, fonts, photos)
     else if (kind === "experience") drawExperience(page, content, fonts, splitInnerPhotos(photos).experience)
     else if (kind === "included") drawIncluded(page, content, fonts, splitInnerPhotos(photos).included)
     else if (trackMap) drawCircuit(page, content, fonts, trackMap)

@@ -17,7 +17,6 @@ import {
   splitProductHeadline,
 } from "../lib/brochures/content"
 import { enrichBrochureContent, officialProgrammeTemplate } from "../lib/brochures/enrich"
-import { isMarsaBoxBrochure } from "../lib/brochures/marsa-box-front"
 import { brochureImageFetchUrl, compressBrochureImageBytes } from "../lib/brochures/images"
 import { embedBrochureFonts } from "../lib/brochures/fonts"
 import {
@@ -139,8 +138,6 @@ describe("package brochures", () => {
       lines: ["3 DAY", "MARINA", "VIEWS", "BRUNCH"],
       accentLine: 3,
     })
-    assert.equal(isMarsaBoxBrochure("3 Days Marsa Box by ZK"), true)
-    assert.equal(isMarsaBoxBrochure("Marina Views Brunch"), false)
     assert.equal(formatBrochureIncludes(["Dining", "Open bar", "Host", "Pit walk"]).length, 4)
     assert.equal(formatBrochureIncludes(["Premium Views: Watch the start"]).at(0)?.title, "Premium Views")
     assert.equal(
