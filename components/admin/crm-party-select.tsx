@@ -39,6 +39,7 @@ export function CrmPartySelect({
   className,
   createLabel,
   onCreate,
+  onQueryChange,
 }: {
   accountId: string
   localAccounts: CrmAccountOption[]
@@ -48,6 +49,7 @@ export function CrmPartySelect({
   className?: string
   createLabel?: (query: string) => string
   onCreate?: (query: string) => void
+  onQueryChange?: (query: string) => void
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -260,6 +262,7 @@ export function CrmPartySelect({
           onChange={(event) => {
             setQuery(event.target.value)
             setOpen(true)
+            onQueryChange?.(event.target.value)
             if (!event.target.value.trim()) onSelect({ id: "", name: "", contacts: [] })
           }}
           onFocus={(event) => {

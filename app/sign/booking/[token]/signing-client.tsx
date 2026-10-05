@@ -5,7 +5,7 @@ import { useRef, useState } from "react"
 import { CheckCircle2, Download, Eraser, LockKeyhole } from "lucide-react"
 import type { PublicBookingForm } from "@/lib/booking-forms/public"
 import { BOOKING_SIGNATURE_CONSENT } from "@/lib/booking-forms/template"
-import { SignaturePad, type SignaturePadHandle } from "@/components/signature-pad"
+import { SignatureCapture, type SignatureCaptureHandle } from "@/components/signature-capture"
 import { BRAND_RED, LOGO_MAIN } from "@/lib/branding"
 
 function money(value: number, currency: string): string {
@@ -27,7 +27,7 @@ export function SigningClient({
   token: string
   form: PublicBookingForm
 }) {
-  const padRef = useRef<SignaturePadHandle | null>(null)
+  const padRef = useRef<SignatureCaptureHandle | null>(null)
   const [hasInk, setHasInk] = useState(false)
   const [signerName, setSignerName] = useState(form.snapshot.billTo.contactName)
   const [consent, setConsent] = useState(false)
@@ -47,7 +47,7 @@ export function SigningClient({
     }
     const signatureDataUrl = padRef.current?.toDataURL() ?? ""
     if (!hasInk || !padRef.current?.hasInk() || !signatureDataUrl.startsWith("data:image/png")) {
-      setError("Draw your signature in the box.")
+      setError("Add your signature by drawing it or typing it.")
       return
     }
     if (!consent) {
@@ -239,9 +239,10 @@ export function SigningClient({
                         <Eraser className="h-3.5 w-3.5" /> Clear
                       </button>
                     </div>
-                    <SignaturePad
+                    <SignatureCapture
                       padRef={padRef}
                       disabled={signed}
+                      typedName={signerName}
                       onHasInkChange={setHasInk}
                       className="mt-3 h-28 w-full border-b border-[#010101] bg-white"
                     />

@@ -9,14 +9,16 @@ export function AdminPageHeader({
   action,
 }: {
   title: string
-  description: string
+  description?: string
   action?: React.ReactNode
 }) {
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0">
         <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-[#18191c]">{title}</h1>
-        <p className="mt-0.5 hidden text-[11px] text-[#80848d] sm:block">{description}</p>
+        {description ? (
+          <p className="mt-0.5 hidden text-[11px] text-[#80848d] sm:block">{description}</p>
+        ) : null}
       </div>
       {action ? <div className="flex flex-wrap items-center gap-2 sm:shrink-0">{action}</div> : null}
     </div>
