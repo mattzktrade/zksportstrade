@@ -38,6 +38,7 @@ export const ENQUIRY_CRM_STAGES = [
   "price_sent",
   "follow_up",
   "not_interested",
+  "expired",
 ] as const
 
 export type EnquiryCrmStage = (typeof ENQUIRY_CRM_STAGES)[number]
@@ -54,6 +55,7 @@ export const ENQUIRY_CRM_STAGE_LABELS: Record<EnquiryCrmStage, string> = {
   price_sent: "Price sent",
   follow_up: "Follow-up",
   not_interested: "Not interested",
+  expired: "Expired",
 }
 
 export function isEnquiryCrmStage(value: string | null | undefined): value is EnquiryCrmStage {
@@ -206,7 +208,8 @@ export function enquiryDealStage(
     case "price_sent":
     case "follow_up":
       return "proposal"
-    case "not_interested": {
+    case "not_interested":
+    case "expired": {
       const current = currentDealStage ? canonicalDealStage(currentDealStage) : "draft"
       return current === "draft" || current === "sourcing" || current === "proposal" ? current : "draft"
     }
@@ -219,7 +222,8 @@ export function isOpenEnquiry(deal: {
   stage: DealStage | string
   enquiry_stage?: string | null
 }): boolean {
-  return isEnquiryPipelineStage(deal.stage) && enquiryCrmStageFromDeal(deal) !== "not_interested"
+  const stage = enquiryCrmStageFromDeal(deal)
+  return isEnquiryPipelineStage(deal.stage) && stage !== "not_interested" && stage !== "expired"
 }
 
 export function enquiryStageLabel(
@@ -258,6 +262,8 @@ export function enquiryStageTone(
       return "amber"
     case "not_interested":
       return "red"
+    case "expired":
+      return "gray"
     default:
       return "gray"
   }
@@ -392,6 +398,9 @@ export function nextEnquiryCrmStage(deal: {
       return "price_sent"
     case "price_sent":
       return "follow_up"
+    case "expired":
+    case "not_interested":
+      return null
     default:
       return null
   }
@@ -408,7 +417,8 @@ export function enquiryNeedsSourcing(deal: {
     stage === "sourcing_complete" ||
     stage === "price_sent" ||
     stage === "follow_up" ||
-    stage === "not_interested"
+    stage === "not_interested" ||
+    stage === "expired"
   ) {
     return false
   }
@@ -429,7 +439,13 @@ export function enquiryAttentionReason(deal: {
 export function enquiryNeedsAttention(deal: {
   next_action_due_at: string | null
   owner_profile_id: string | null
+  stage?: string
+  enquiry_stage?: string | null
 }): boolean {
+  if (deal.stage) {
+    const stage = enquiryCrmStageFromDeal({ stage: deal.stage, enquiry_stage: deal.enquiry_stage })
+    if (stage === "not_interested" || stage === "expired") return false
+  }
   return enquiryAttentionReason(deal) != null
 }
 
@@ -477,6 +493,7 @@ export function suggestedEnquiryAction(stage: EnquiryCrmStage): string {
     case "follow_up":
       return "Follow up"
     case "not_interested":
+    case "expired":
       return "No further action"
   }
 }
@@ -534,6 +551,7 @@ export function enquiryStockSummary(
     return `${deal.reserved_qty} unit${deal.reserved_qty === 1 ? "" : "s"} on hold`
   }
   const stage = enquiryCrmStageFromDeal(deal)
+  if (stage === "expired") return "Event has passed"
   if (stage === "sourcing_complete") return "Sourcing complete"
   if (stage === "sourcing_required" || brokered > 0) {
     return brokered > 0

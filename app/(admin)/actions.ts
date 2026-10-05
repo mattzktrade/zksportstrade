@@ -5315,6 +5315,19 @@ const NATIVE_DEAL_STAGES = new Set([
   "cancelled",
 ])
 
+async function activeEnquiryReservationPackages(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  dealIds: string[],
+): Promise<string[]> {
+  if (dealIds.length === 0) return []
+  const { data } = await supabase
+    .from("inventory_reservations")
+    .select("package_id")
+    .in("deal_id", dealIds)
+    .eq("status", "active")
+  return [...new Set((data ?? []).map((row) => String(row.package_id ?? "")).filter(Boolean))]
+}
+
 export async function updateEnquiryPipeline(input: {
   dealId: string
   enquiryStage: string
@@ -5348,6 +5361,8 @@ export async function updateEnquiryPipeline(input: {
   }
 
   const sourcingSnapshots = await loadSourcingEnquirySnapshots(gate.supabase, [dealId])
+  const releasedPackageIds =
+    input.enquiryStage === "expired" ? await activeEnquiryReservationPackages(gate.supabase, [dealId]) : []
   const { error } = await gate.supabase.rpc("admin_update_enquiry_pipeline", {
     p_deal_id: dealId,
     p_enquiry_stage: input.enquiryStage,
@@ -5370,8 +5385,16 @@ export async function updateEnquiryPipeline(input: {
     const { stopMarketingOutreach } = await import("@/lib/integrations/marketing-leads/outreach-stop")
     await stopMarketingOutreach(
       dealId,
-      input.enquiryStage === "not_interested" ? "not_interested" : "staff",
+      input.enquiryStage === "not_interested"
+        ? "not_interested"
+        : input.enquiryStage === "expired"
+          ? "expired"
+          : "staff",
     ).catch(() => undefined)
+  }
+  if (releasedPackageIds.length > 0) {
+    const { syncReleasedEnquiryPackages } = await import("@/lib/crm/expire-past-event-enquiries")
+    await syncReleasedEnquiryPackages(releasedPackageIds)
   }
   const sourcingEmail = await deliverSourcingStageNotification(sourcingSnapshots.get(dealId), input.enquiryStage)
   revalidatePath("/admin/deals", "layout")
@@ -5400,6 +5423,8 @@ export async function updateEnquiryPipelineBulk(input: {
 
   const nextAction = suggestedEnquiryAction(input.enquiryStage)
   const sourcingSnapshots = await loadSourcingEnquirySnapshots(gate.supabase, dealIds)
+  const releasedPackageIds =
+    input.enquiryStage === "expired" ? await activeEnquiryReservationPackages(gate.supabase, dealIds) : []
   let updated = 0
   let emailFailed = 0
   let firstError = ""
@@ -5441,13 +5466,22 @@ export async function updateEnquiryPipelineBulk(input: {
     if (sourcingEmail === "failed") emailFailed += 1
   }
 
+  if (updated > 0 && releasedPackageIds.length > 0) {
+    const { syncReleasedEnquiryPackages } = await import("@/lib/crm/expire-past-event-enquiries")
+    await syncReleasedEnquiryPackages(releasedPackageIds)
+  }
+
   if (input.enquiryStage !== "new") {
     const { stopMarketingOutreach } = await import("@/lib/integrations/marketing-leads/outreach-stop")
     await Promise.all(
       dealIds.map((dealId) =>
         stopMarketingOutreach(
           dealId,
-          input.enquiryStage === "not_interested" ? "not_interested" : "staff",
+          input.enquiryStage === "not_interested"
+            ? "not_interested"
+            : input.enquiryStage === "expired"
+              ? "expired"
+              : "staff",
         ).catch(() => undefined),
       ),
     )

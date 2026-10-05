@@ -212,11 +212,17 @@ function monthSalesTotals(rows: SalesDashboardSale[], monthKey: string, currency
   }
 }
 
+function countsTowardOpenPipeline(deal: SalesDashboardDeal): boolean {
+  if (!dealStageIsOpenPipeline(deal.stage)) return false
+  if (isEnquiryPipelineStage(deal.stage) && enquiryCrmStageFromDeal(deal) === "expired") return false
+  return true
+}
+
 function monthNewPipeline(deals: SalesDashboardDeal[], monthKey: string, currency: string): number {
   return deals
     .filter(
       (deal) =>
-        dealStageIsOpenPipeline(deal.stage) &&
+        countsTowardOpenPipeline(deal) &&
         inCurrency(deal.currency, currency) &&
         monthKeyUtc(deal.created_at) === monthKey,
     )
@@ -237,7 +243,7 @@ export function buildSalesDashboardView(input: {
   const ownedConfirmed = input.sales.filter(
     (row) => row.ownerId === input.ownerId && isConfirmedSale(row),
   )
-  const openOwned = ownedDeals.filter((deal) => dealStageIsOpenPipeline(deal.stage))
+  const openOwned = ownedDeals.filter(countsTowardOpenPipeline)
   const currency = "USD"
   const thisMonth = monthSalesTotals(ownedConfirmed, monthKey, currency)
   const lastMonth = monthSalesTotals(ownedConfirmed, previousMonthKey, currency)

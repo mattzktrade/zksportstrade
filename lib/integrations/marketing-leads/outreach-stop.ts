@@ -38,6 +38,8 @@ export async function stopMarketingOutreach(
             ? "Staff took over — marketing follow-up stopped"
             : reason === "not_interested"
               ? "Marked not interested — marketing follow-up stopped"
+              : reason === "expired"
+                ? "Enquiry expired — marketing follow-up stopped"
               : reason === "stop_keyword"
                 ? "Lead asked to stop marketing follow-up"
                 : reason === "no_channel"

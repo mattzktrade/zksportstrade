@@ -5,6 +5,7 @@ import { processNativeBookingForms } from "@/lib/integrations/process-native-boo
 import { processInstallmentInvoiceCreates } from "@/lib/integrations/process-installment-invoices"
 import { processNativeInvoiceReminders } from "@/lib/integrations/process-native-invoice-reminders"
 import { processMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-process"
+import { expirePastEventEnquiries } from "@/lib/crm/expire-past-event-enquiries"
 import type { SalesforceInventoryPullResult } from "@/lib/integrations/salesforce/pull-inventory-from-salesforce"
 
 const RETIRED_SALESFORCE_PULL: SalesforceInventoryPullResult = {
@@ -31,6 +32,7 @@ export type IntegrationCronResult = {
   staleOpenOpportunities: null
   linkedInventoryHeal: { groups: number; packagesFixed: number } | null
   marketingOutreach: Awaited<ReturnType<typeof processMarketingOutreach>>
+  expiredEnquiries: Awaited<ReturnType<typeof expirePastEventEnquiries>>
 } & Awaited<ReturnType<typeof drainIntegrationOutbox>>
 
 /**
@@ -46,6 +48,18 @@ export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {
   const installmentInvoices = await processInstallmentInvoiceCreates()
   const result = await drainIntegrationOutbox({ maxRounds: 10, skipInventoryPull: true })
   const invoiceReminders = await processNativeInvoiceReminders()
+  let expiredEnquiries: Awaited<ReturnType<typeof expirePastEventEnquiries>> = {
+    deals: 0,
+    packagesSynced: [],
+  }
+  try {
+    expiredEnquiries = await expirePastEventEnquiries()
+  } catch (error) {
+    console.error(
+      "[enquiry-expiry]",
+      error instanceof Error ? error.message : "Enquiry expiry failed.",
+    )
+  }
   let marketingOutreach: Awaited<ReturnType<typeof processMarketingOutreach>> = {
     processed: 0,
     sent: 0,
@@ -75,5 +89,6 @@ export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {
     linkedInventoryHeal: null,
     ...result,
     marketingOutreach,
+    expiredEnquiries,
   }
 }

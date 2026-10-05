@@ -13,6 +13,7 @@ export const MARKETING_OUTREACH_STOP_REASONS = [
   "replied",
   "staff",
   "not_interested",
+  "expired",
   "stop_keyword",
   "completed",
   "no_channel",

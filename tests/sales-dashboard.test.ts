@@ -95,6 +95,24 @@ test("pipeline row ids follow Enquiries then Deals, not mock CRM stages", () => 
   )
   assert.ok(SALES_PIPELINE_ROWS.some((row) => row.id === "sourcing_required"))
   assert.ok(SALES_PIPELINE_ROWS.some((row) => row.id === "ready_to_send"))
+  assert.equal(salesPipelineRowId(deal({ stage: "draft", enquiry_stage: "expired" })), "expired")
+  assert.ok(SALES_PIPELINE_ROWS.some((row) => row.id === "expired" && row.label === "Expired"))
+})
+
+test("expired enquiries stay listed but leave the open pipeline value", () => {
+  const view = buildSalesDashboardView({
+    ownerId: OWNER,
+    now: new Date("2026-09-18T12:00:00.000Z"),
+    deals: [
+      deal({ id: "live", enquiry_stage: "new", total_amount: 10000, created_at: "2026-09-08T10:00:00.000Z" }),
+      deal({ id: "past", enquiry_stage: "expired", total_amount: 80000, created_at: "2026-09-08T10:00:00.000Z" }),
+    ],
+    sales: [],
+  })
+  assert.equal(view.pipelineValue, 10000)
+  assert.equal(view.opportunityCount, 1)
+  assert.equal(view.pipelineRows.find((row) => row.id === "expired")?.count, 1)
+  assert.equal(view.pipelineRows.find((row) => row.id === "new")?.count, 1)
 })
 
 test("sales dashboard uses the salesperson's live records only", () => {

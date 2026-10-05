@@ -66,6 +66,7 @@ test("enquiry CRM stages cover the sales progression without using closed lost",
     "price_sent",
     "follow_up",
     "not_interested",
+    "expired",
   ])
   assert.equal(enquiryStageLabel("new"), "New")
   assert.equal(enquiryStageLabel("contacted"), "Contacted")
@@ -75,6 +76,9 @@ test("enquiry CRM stages cover the sales progression without using closed lost",
   assert.equal(enquiryStageLabel("price_sent"), "Price sent")
   assert.equal(enquiryStageLabel("follow_up"), "Follow-up")
   assert.equal(enquiryStageLabel("not_interested"), "Not interested")
+  assert.equal(enquiryStageLabel("expired"), "Expired")
+  assert.equal(enquiryDealStage("expired", "proposal"), "proposal")
+  assert.equal(suggestedEnquiryAction("expired"), "No further action")
   assert.equal(enquiryStageLabel("draft"), "New")
   assert.equal(enquiryStageLabel("sourcing"), "Sourcing required")
   assert.equal(enquiryStageLabel("proposal"), "Price sent")
@@ -199,6 +203,20 @@ test("advance skips sourcing when stock is already owned", () => {
   )
   assert.equal(
     isOpenEnquiry({ stage: "draft", enquiry_stage: "not_interested" }),
+    false,
+  )
+  assert.equal(isOpenEnquiry({ stage: "proposal", enquiry_stage: "expired" }), false)
+  assert.equal(
+    nextEnquiryCrmStage({ stage: "draft", enquiry_stage: "expired", lines: [] }),
+    null,
+  )
+  assert.equal(
+    enquiryNeedsAttention({
+      stage: "draft",
+      enquiry_stage: "expired",
+      owner_profile_id: null,
+      next_action_due_at: null,
+    }),
     false,
   )
 })

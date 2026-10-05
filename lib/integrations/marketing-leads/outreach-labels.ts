@@ -11,6 +11,7 @@ const STOP_LABELS: Record<MarketingOutreachStopReason, string> = {
   replied: "They replied — follow-up stopped",
   staff: "Staff took over — follow-up stopped",
   not_interested: "Marked not interested — follow-up stopped",
+  expired: "Enquiry expired — follow-up stopped",
   stop_keyword: "They asked to stop — follow-up stopped",
   completed: "All 3 stages sent",
   no_channel: "No email or phone to send to",

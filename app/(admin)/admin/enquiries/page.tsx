@@ -23,6 +23,7 @@ import {
 import { isAwaitingZkApprovalDeal, uniqueDealIds } from "@/lib/admin/deal-link"
 import { listMarketingOutreachForDeals, loadMarketingOutreachAdmin } from "@/lib/integrations/marketing-leads/outreach-store"
 import { toEnquiryOutreachBadge } from "@/lib/integrations/marketing-leads/outreach-labels"
+import { expirePastEventEnquiries } from "@/lib/crm/expire-past-event-enquiries"
 import { EnquiriesClient } from "./enquiries-client"
 
 export const dynamic = "force-dynamic"
@@ -51,6 +52,7 @@ export default async function EnquiriesPage({
   searchParams: Promise<{ enquiry?: string; stage?: string; owner?: string }>
 }) {
   const profile = await requireAdmin()
+  await expirePastEventEnquiries()
   const { enquiry: initialSelectedId, stage: stageParam, owner: ownerParam } = await searchParams
   const selectedId = initialSelectedId?.trim() || null
   const [allDeals, selectedRows, packagePicker, accountOptions, staffOptions, suppliers, bookingForms, awaitingZkDealIdsRaw, convertedThisMonth] =

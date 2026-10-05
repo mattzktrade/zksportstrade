@@ -6,6 +6,7 @@ import { dealStageCountsAsSold } from "@/lib/crm/deal-types"
 import {
   enquiryCrmStageFromDeal,
   isDealBoardStage,
+  isEnquiryPipelineStage,
 } from "@/lib/crm/deal-pipeline"
 
 export type DemandOutcome = "open" | "converted" | "won" | "lost"
@@ -75,8 +76,10 @@ export function demandDealOutcome(deal: {
   enquiry_stage?: string | null
 }): DemandOutcome {
   const enquiryStage = deal.enquiryStage ?? deal.enquiry_stage ?? null
+  const crmStage = enquiryCrmStageFromDeal({ stage: deal.stage, enquiry_stage: enquiryStage })
   if (
-    enquiryCrmStageFromDeal({ stage: deal.stage, enquiry_stage: enquiryStage }) === "not_interested" ||
+    crmStage === "not_interested" ||
+    (isEnquiryPipelineStage(deal.stage) && crmStage === "expired") ||
     deal.stage === "closed_lost" ||
     deal.stage === "cancelled"
   ) {

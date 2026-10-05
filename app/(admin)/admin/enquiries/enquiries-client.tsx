@@ -1209,7 +1209,8 @@ export function EnquiriesClient({
                 <BookingFormPanel
                   dealId={selected.id}
                   dealClosed={
-                    enquiryCrmStageFromDeal(selected) === "not_interested"
+                    enquiryCrmStageFromDeal(selected) === "not_interested" ||
+                    enquiryCrmStageFromDeal(selected) === "expired"
                   }
                   form={selectedBookingForm}
                   events={

@@ -245,7 +245,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             title: "Enquiries",
-            body: "Warm and cold enquiries through contact, sourcing, price sent, and follow-up. Meta marketing leads arrive here automatically and can get a three-stage email and WhatsApp follow-up until they reply. Create a booking form on the enquiry. Sending it for approval, or sending it to the client, moves it to Deals. Not interested stays here, not on Deals Lost.",
+            body: "Warm and cold enquiries through contact, sourcing, price sent, and follow-up. Meta marketing leads arrive here automatically and can get a three-stage email and WhatsApp follow-up until they reply. Create a booking form on the enquiry. Sending it for approval, or sending it to the client, moves it to Deals. Not interested stays here, not on Deals Lost. Expired is for an enquiry whose events have all taken place: staff can set it, and it is applied automatically once every event on that enquiry is in the past. An enquiry that still has a future event stays on its current stage.",
             href: "/admin/enquiries",
           },
           {
