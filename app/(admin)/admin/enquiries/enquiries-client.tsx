@@ -25,7 +25,13 @@ import {
   X,
 } from "lucide-react"
 import { toast } from "sonner"
-import { updateEnquiryPipeline, updateEnquiryPipelineBulk, updateNativeDealWorkflow } from "@/app/(admin)/actions"
+import {
+  updateEnquiryOwner,
+  updateEnquiryOwnerBulk,
+  updateEnquiryPipeline,
+  updateEnquiryPipelineBulk,
+  updateNativeDealWorkflow,
+} from "@/app/(admin)/actions"
 import { addDealNote, updateEnquiryNotes } from "@/app/(admin)/admin/deals/deal-edit-actions"
 import { EnquiryBulkUploadModal } from "@/app/(admin)/admin/enquiries/bulk-upload-modal"
 import { DealCreateModal } from "@/components/admin/deal-create-modal"
@@ -180,6 +186,43 @@ function EnquiryContactDetails({ email, phone }: { email: string | null; phone: 
         </a>
       ) : null}
     </div>
+  )
+}
+
+function EnquiryOwnerSelect({
+  deal,
+  staffOptions,
+  disabled,
+  onChange,
+  className,
+}: {
+  deal: DealListRow
+  staffOptions: StaffOption[]
+  disabled?: boolean
+  onChange: (ownerId: string) => void
+  className?: string
+}) {
+  const known = staffOptions.some((owner) => owner.id === deal.owner_profile_id)
+  return (
+    <select
+      value={deal.owner_profile_id ?? ""}
+      disabled={disabled}
+      aria-label={`Owner for ${deal.reference}`}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => onChange(event.target.value)}
+      className={cn(
+        "rounded-md border bg-white px-1.5 text-[9px] text-slate-800",
+        className ?? "h-8 max-w-[160px]",
+      )}
+    >
+      <option value="">Unassigned</option>
+      {deal.owner_profile_id && !known ? (
+        <option value={deal.owner_profile_id}>{deal.owner_name || "Current owner"}</option>
+      ) : null}
+      {staffOptions.map((owner) => (
+        <option key={owner.id} value={owner.id}>{owner.name}</option>
+      ))}
+    </select>
   )
 }
 
@@ -485,6 +528,44 @@ export function EnquiriesClient({
     })
   }
 
+  function saveOwner(dealId: string, ownerProfileId: string) {
+    const current = deals.find((deal) => deal.id === dealId)
+    if (current && (current.owner_profile_id ?? "") === ownerProfileId) return
+    startTransition(async () => {
+      const result = await updateEnquiryOwner({
+        dealId,
+        ownerProfileId: ownerProfileId || null,
+      })
+      if (!result.ok) {
+        toast.error(result.message)
+        return
+      }
+      toast.success(result.message)
+      router.refresh()
+    })
+  }
+
+  function applyBulkOwner(ownerProfileId: string) {
+    const ids = checkedIds.filter((id) => filtered.some((deal) => deal.id === id))
+    if (ids.length === 0) {
+      toast.error("Select at least one enquiry.")
+      return
+    }
+    startTransition(async () => {
+      const result = await updateEnquiryOwnerBulk({
+        dealIds: ids,
+        ownerProfileId: ownerProfileId === "unassigned" ? null : ownerProfileId,
+      })
+      if (!result.ok) {
+        toast.error(result.message)
+        return
+      }
+      toast.success(result.message)
+      setCheckedIds([])
+      router.refresh()
+    })
+  }
+
   function saveStage(stage: EnquirySelectableStage) {
     if (!selected) return
     startTransition(async () => {
@@ -787,6 +868,22 @@ export function EnquiriesClient({
               {checkedCount} selected
             </p>
             <select
+              value=""
+              disabled={pending}
+              aria-label="Assign owner to selected enquiries"
+              onChange={(event) => {
+                const ownerId = event.target.value
+                if (ownerId) applyBulkOwner(ownerId)
+              }}
+              className="h-8 rounded-md border bg-white px-2 text-[9px]"
+            >
+              <option value="">Assign owner…</option>
+              <option value="unassigned">Unassigned</option>
+              {staffOptions.map((owner) => (
+                <option key={owner.id} value={owner.id}>{owner.name}</option>
+              ))}
+            </select>
+            <select
               value={bulkStage}
               onChange={(event) => setBulkStage(event.target.value as EnquiryCrmStage | "")}
               className="h-8 rounded-md border bg-white px-2 text-[9px]"
@@ -944,7 +1041,16 @@ export function EnquiriesClient({
                         <EnquiryOutreachLine outreach={followUpFor(deal)} />
                       </td>
                       <td className="whitespace-nowrap px-3 py-3">
-                        <p>{deal.owner_name || "Unassigned"}</p>
+                        {currentCanManageDeals ? (
+                          <EnquiryOwnerSelect
+                            deal={deal}
+                            staffOptions={staffOptions}
+                            disabled={pending}
+                            onChange={(ownerId) => saveOwner(deal.id, ownerId)}
+                          />
+                        ) : (
+                          <p>{deal.owner_name || "Unassigned"}</p>
+                        )}
                         {enquiryAttentionReason(deal) ? (
                           <p className="mt-0.5 text-[8px] font-medium text-red-600">
                             {enquiryAttentionReason(deal)}
@@ -1139,6 +1245,25 @@ export function EnquiriesClient({
                     <EnquiryAvailability deal={selected} products={stockProducts} />
                   </div>
                 </div>
+
+                {currentCanManageDeals ? (
+                  <div className="rounded-lg border border-slate-200 p-3">
+                    <h3 className="text-[9px] font-semibold text-slate-800">Owner</h3>
+                    <p className="mt-0.5 text-[8px] text-slate-500">Changing this saves straight away.</p>
+                    <EnquiryOwnerSelect
+                      deal={selected}
+                      staffOptions={staffOptions}
+                      disabled={pending}
+                      onChange={(ownerId) => saveOwner(selected.id, ownerId)}
+                      className="mt-2 h-10 w-full"
+                    />
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-slate-200 p-3">
+                    <h3 className="text-[9px] font-semibold text-slate-800">Owner</h3>
+                    <p className="mt-1 text-[10px] font-medium text-slate-800">{selected.owner_name || "Unassigned"}</p>
+                  </div>
+                )}
 
                 {currentCanManageDeals ? (
                   <div className="rounded-lg border border-slate-200 p-3">

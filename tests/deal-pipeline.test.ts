@@ -331,6 +331,8 @@ test("sales nav and deals list keep enquiries off the later pipeline", () => {
   assert.match(enquiriesClient, /Warm \/ Cold/)
   assert.match(enquiriesClient, /not_interested/)
   assert.match(enquiriesClient, /Save notes/)
+  assert.match(enquiriesClient, /updateEnquiryOwner/)
+  assert.match(enquiriesClient, /Assign owner/)
   assert.match(enquiriesClient, /Apply to selected/)
   assert.match(enquiriesClient, /stockLeft|Availability/)
   assert.match(enquiriesClient, /BookingFormPanel/)

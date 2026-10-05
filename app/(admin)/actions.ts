@@ -82,6 +82,7 @@ import {
   enquirySelectableStageLabel,
   inboundEnquirySource,
   isEnquiryCrmStage,
+  isEnquiryPipelineStage,
   isEnquirySkipaheadStage,
   isEnquirySelectableStage,
   isEnquiryTemperature,
@@ -5326,6 +5327,126 @@ async function activeEnquiryReservationPackages(
     .in("deal_id", dealIds)
     .eq("status", "active")
   return [...new Set((data ?? []).map((row) => String(row.package_id ?? "")).filter(Boolean))]
+}
+
+async function assignEnquiryOwner(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  actorId: string,
+  dealId: string,
+  ownerProfileId: string | null,
+): Promise<ActionResult & { ownerName?: string | null }> {
+  const { data: deal, error: dealError } = await supabase
+    .from("deals")
+    .select("id, stage, owner_profile_id")
+    .eq("id", dealId)
+    .maybeSingle()
+  if (dealError) return { ok: false, message: dealError.message }
+  if (!deal) return { ok: false, message: "Enquiry was not found." }
+  if (!isEnquiryPipelineStage(deal.stage)) {
+    return { ok: false, message: "This record is already a Deal. Open it from Deals." }
+  }
+  if ((deal.owner_profile_id ?? null) === ownerProfileId) {
+    return { ok: true, message: "Owner unchanged.", ownerName: null }
+  }
+
+  let ownerName: string | null = null
+  if (ownerProfileId) {
+    const { data: owner, error: ownerError } = await supabase
+      .from("profiles")
+      .select("id, full_name, role")
+      .eq("id", ownerProfileId)
+      .maybeSingle()
+    if (ownerError) return { ok: false, message: ownerError.message }
+    if (!owner || !["admin", "finance", "sales"].includes(owner.role)) {
+      return { ok: false, message: "Selected owner is not valid." }
+    }
+    ownerName = owner.full_name?.trim() || "Staff"
+  }
+
+  const { error: updateError } = await supabase
+    .from("deals")
+    .update({
+      owner_profile_id: ownerProfileId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", dealId)
+  if (updateError) return { ok: false, message: updateError.message }
+
+  const { error: activityError } = await supabase.from("deal_activities").insert({
+    deal_id: dealId,
+    actor_profile_id: actorId,
+    action: "owner_changed",
+    summary: ownerName ? `Enquiry assigned to ${ownerName}` : "Enquiry owner removed",
+    metadata: {
+      previous_owner_profile_id: deal.owner_profile_id,
+      owner_profile_id: ownerProfileId,
+    },
+  })
+  if (activityError) return { ok: false, message: activityError.message }
+
+  return {
+    ok: true,
+    message: ownerName ? `Assigned to ${ownerName}.` : "Owner removed.",
+    ownerName,
+  }
+}
+
+export async function updateEnquiryOwner(input: {
+  dealId: string
+  ownerProfileId?: string | null
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction("deals.manage")
+  if (!gate.ok) return gate
+  const dealId = input.dealId.trim()
+  if (!UUID_RE.test(dealId)) return { ok: false, message: "Enquiry id is not valid." }
+  const ownerProfileId = input.ownerProfileId?.trim() || null
+  if (ownerProfileId && !UUID_RE.test(ownerProfileId)) {
+    return { ok: false, message: "Selected owner is not valid." }
+  }
+  const result = await assignEnquiryOwner(gate.supabase, gate.profile.id, dealId, ownerProfileId)
+  if (!result.ok) return result
+  revalidatePath("/admin/deals", "layout")
+  revalidatePath("/admin/enquiries", "layout")
+  revalidatePath("/admin")
+  return { ok: true, message: result.message }
+}
+
+export async function updateEnquiryOwnerBulk(input: {
+  dealIds: string[]
+  ownerProfileId?: string | null
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction("deals.manage")
+  if (!gate.ok) return gate
+  const ownerProfileId = input.ownerProfileId?.trim() || null
+  if (ownerProfileId && !UUID_RE.test(ownerProfileId)) {
+    return { ok: false, message: "Selected owner is not valid." }
+  }
+  const dealIds = [...new Set(input.dealIds.map((id) => id.trim()).filter((id) => UUID_RE.test(id)))]
+  if (dealIds.length === 0) return { ok: false, message: "Select at least one enquiry." }
+  if (dealIds.length > 80) return { ok: false, message: "Select up to 80 enquiries at a time." }
+
+  let updated = 0
+  let firstError = ""
+  let ownerName: string | null = null
+  for (const dealId of dealIds) {
+    const result = await assignEnquiryOwner(gate.supabase, gate.profile.id, dealId, ownerProfileId)
+    if (!result.ok) {
+      if (!firstError) firstError = result.message
+      continue
+    }
+    if (result.message !== "Owner unchanged.") updated += 1
+    if (result.ownerName) ownerName = result.ownerName
+  }
+
+  revalidatePath("/admin/deals", "layout")
+  revalidatePath("/admin/enquiries", "layout")
+  revalidatePath("/admin")
+  if (updated === 0) {
+    return { ok: false, message: firstError || "None of the selected enquiries needed an owner change." }
+  }
+  const label = ownerName ? `Assigned ${updated} to ${ownerName}.` : `Removed the owner from ${updated} enquiries.`
+  if (firstError) return { ok: true, message: `${label} ${firstError}` }
+  return { ok: true, message: label }
 }
 
 export async function updateEnquiryPipeline(input: {
