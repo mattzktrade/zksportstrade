@@ -34,7 +34,7 @@ import {
   bookingFormHandoffStatus,
   bookingFormHandoffTone,
 } from "@/lib/booking-forms/handoff-status"
-import { SignaturePad, type SignaturePadHandle } from "@/components/signature-pad"
+import { SignatureCapture, type SignatureCaptureHandle } from "@/components/signature-capture"
 import { BOOKING_SIGNATURE_CONSENT } from "@/lib/booking-forms/template"
 
 const STATUS_LABELS: Record<BookingFormAdminRow["status"], string> = {
@@ -90,7 +90,7 @@ function AdminSignatureModal({
   onClose: () => void
 }) {
   const router = useRouter()
-  const padRef = useRef<SignaturePadHandle | null>(null)
+  const padRef = useRef<SignatureCaptureHandle | null>(null)
   const inFlight = useRef(false)
   const [pending, setPending] = useState(false)
   const [name, setName] = useState(defaultName)
@@ -102,7 +102,7 @@ function AdminSignatureModal({
     if (!name.trim()) return toast.error("Enter the admin signer's full name.")
     const signatureDataUrl = padRef.current?.toDataURL() ?? ""
     if (!hasInk || !padRef.current?.hasInk() || !signatureDataUrl.startsWith("data:image/png")) {
-      return toast.error("Draw the admin signature.")
+      return toast.error("Add the admin signature by drawing it or typing it.")
     }
     if (!consent) return toast.error("Confirm the electronic signature consent.")
     inFlight.current = true
@@ -148,13 +148,14 @@ function AdminSignatureModal({
           <input value={name} onChange={(event) => setName(event.target.value)} className="mt-2 h-11 w-full rounded-md border px-3" />
         </label>
         <div className="mt-5 flex items-center justify-between">
-          <span className="text-sm font-semibold">Draw signature</span>
+          <span className="text-sm font-semibold">Signature</span>
           <button type="button" onClick={() => padRef.current?.clear()} className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500">
             <RotateCcw className="h-4 w-4" /> Clear
           </button>
         </div>
-        <SignaturePad
+        <SignatureCapture
           padRef={padRef}
+          typedName={name}
           onHasInkChange={setHasInk}
           className="mt-2 h-40 w-full rounded-lg border-2 border-dashed border-slate-300"
         />

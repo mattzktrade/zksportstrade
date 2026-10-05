@@ -15,6 +15,7 @@ import {
   ArrowLeft,
   ShoppingCart,
   ShieldCheck,
+  FilePenLine,
   FileText,
   PackageSearch,
   ChevronDown,
@@ -84,6 +85,7 @@ const navigation: NavItem[] = [
       { name: "Accounts", href: "/admin/leads", icon: Users },
       { name: "Enquiries", href: "/admin/enquiries", icon: Inbox },
       { name: "Deals", href: "/admin/deals", icon: BriefcaseBusiness },
+      { name: "Contracts", href: "/admin/contracts", icon: FilePenLine },
       { name: "Sales tracker", href: "/admin/sales-tracker", icon: TrendingUp },
       { name: "Templates", href: "/admin/templates", icon: Mail },
       // Hidden from the sidebar; page still lives at /admin/imports. Set hidden: false to bring it back.
@@ -101,6 +103,7 @@ const JUMP_KEYWORDS: Record<string, string> = {
   "/admin/leads": "leads clients companies contacts people prospects funnel",
   "/admin/enquiries": "enquiry enquiries sourcing inbound quote pipeline crm",
   "/admin/deals": "pipeline crm sales booking form",
+  "/admin/contracts": "contracts inclusion booking form signature sign agreement client",
   "/admin/sales-tracker": "sales tracker revenue demand conversion event product stock planning",
   "/admin/templates": "templates email whatsapp marketing follow-up sequence messages",
   "/admin/catalog/events": "races calendar",
@@ -132,6 +135,7 @@ function adminPageTitle(pathname: string): string {
   if (pathname.startsWith("/admin/operations")) return "Operations"
   if (pathname.startsWith("/admin/enquiries")) return "Enquiries"
   if (pathname.startsWith("/admin/deals")) return "Deals"
+  if (pathname.startsWith("/admin/contracts")) return "Contracts"
   if (pathname.startsWith("/admin/leads") || pathname.startsWith("/admin/clients")) return "Accounts"
   if (pathname.startsWith("/admin/sales-tracker")) return "Sales tracker"
   if (pathname.startsWith("/admin/templates")) return "Templates"
@@ -202,6 +206,7 @@ export function AdminLayout({
       pathname.startsWith("/admin/leads") ||
       pathname.startsWith("/admin/enquiries") ||
       pathname.startsWith("/admin/deals") ||
+      pathname.startsWith("/admin/contracts") ||
       pathname.startsWith("/admin/sales-tracker") ||
       pathname.startsWith("/admin/templates") ||
       pathname.startsWith("/admin/imports"),

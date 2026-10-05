@@ -31,6 +31,7 @@ export function isPublicApiPath(path: string): boolean {
     path.startsWith("/api/cron/") ||
     path.startsWith("/api/integrations/") ||
     path.startsWith("/api/booking-forms/") ||
+    path.startsWith("/api/contracts/") ||
     path.startsWith("/api/guest-details/")
   )
 }
@@ -40,7 +41,7 @@ export function isSessionlessApiPath(path: string): boolean {
 }
 
 export function isPublicBookingSignerPath(path: string): boolean {
-  return path.startsWith("/sign/booking/")
+  return path.startsWith("/sign/booking/") || path.startsWith("/sign/contract/")
 }
 
 export function isPublicGuestDetailsPath(path: string): boolean {
