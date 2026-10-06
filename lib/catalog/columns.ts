@@ -13,8 +13,8 @@ export const CATALOG_LIST_PACKAGE_COLUMNS =
 
 export const INVENTORY_COLUMNS = "package_id, qty_available, qty_held" as const
 
-export function withoutZkBrochureUrl(columns: string): string {
-  return columns.replace(/,?\s*zk_brochure_url\b/g, "").replace(/,\s*,/g, ", ").replace(/^,\s*/, "")
+export function withoutZkBrochureUrl<T extends string>(columns: T): T {
+  return columns.replace(/,?\s*zk_brochure_url\b/g, "").replace(/,\s*,/g, ", ").replace(/^,\s*/, "") as T
 }
 
 export function isMissingZkBrochureUrlColumnError(message?: string): boolean {

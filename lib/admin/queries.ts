@@ -450,7 +450,7 @@ export async function getAdminAgentsWithOrderStats(): Promise<AdminAgentWithStat
   })
 }
 
-async function adminPackagesSelect(
+async function adminPackagesSelect<T>(
   supabase: Awaited<ReturnType<typeof createClient>>,
   columns: string,
   options: { id: string } | { order: true },
@@ -460,10 +460,11 @@ async function adminPackagesSelect(
     return "id" in options ? query.eq("id", options.id).maybeSingle() : query.order("sort_order")
   }
   const first = await run(columns)
-  if (first.error && isMissingZkBrochureUrlColumnError(first.error.message)) {
-    return run(withoutZkBrochureUrl(columns))
-  }
-  return first
+  const result =
+    first.error && isMissingZkBrochureUrlColumnError(first.error.message)
+      ? await run(withoutZkBrochureUrl(columns))
+      : first
+  return result as unknown as { data: T | null; error: { message: string } | null }
 }
 
 export async function getAdminPackageById(packageId: string): Promise<AdminPackageRow | null> {
@@ -472,12 +473,12 @@ export async function getAdminPackageById(packageId: string): Promise<AdminPacka
   if (!id) return null
 
   const [{ data: pkg, error: pe }, { data: inv }] = await Promise.all([
-    adminPackagesSelect(supabase, ADMIN_PACKAGE_COLUMNS, { id }),
+    adminPackagesSelect<DbPackage>(supabase, ADMIN_PACKAGE_COLUMNS, { id }),
     supabase.from("package_inventory").select(INVENTORY_COLUMNS).eq("package_id", id).maybeSingle(),
   ])
   if (pe || !pkg) return null
 
-  const row = pkg as DbPackage
+  const row = pkg
 
   const [
     { data: race },
@@ -573,7 +574,7 @@ export async function getAdminCatalogListRows(options?: {
   ] =
     await Promise.all([
       supabase.from("races").select("id,name,season").order("event_date"),
-      adminPackagesSelect(supabase, CATALOG_LIST_PACKAGE_COLUMNS, { order: true }),
+      adminPackagesSelect<DbPackage[]>(supabase, CATALOG_LIST_PACKAGE_COLUMNS, { order: true }),
       supabase.from("package_inventory").select(INVENTORY_COLUMNS),
     ])
   if (re || pe || ie || !packages) return []
@@ -584,15 +585,15 @@ export async function getAdminCatalogListRows(options?: {
     ]),
   )
   const invBy = new Map((inv ?? []).map((i: DbInventory) => [i.package_id, i]))
-  const packageIds = (packages as DbPackage[]).map((p) => p.id)
+  const packageIds = packages.map((p) => p.id)
   const [layerTotalsByPkg, salesByPkg, sfInventoryByProduct] = await Promise.all([
     getCostLayerQuantityTotalsByPackage(packageIds),
     getPackageSalesBreakdownByPackage(packageIds),
     options?.includeSalesforceInventory
-      ? getSalesforceInventorySnapshotsForPackages(packages as DbPackage[])
+      ? getSalesforceInventorySnapshotsForPackages(packages)
       : Promise.resolve(new Map<string, SfInventorySnapshot>()),
   ])
-  const rows = (packages as DbPackage[]).map((p) => {
+  const rows = packages.map((p) => {
     const inventory = invBy.get(p.id) ?? null
     const layerTotals = layerTotalsByPkg.get(p.id)
     const sales = salesByPkg.get(p.id) ?? emptyPackageSalesBreakdown(p.id)
@@ -662,7 +663,7 @@ export async function getAdminPackageRows(
   const supabase = await createClient()
   const [{ data: races, error: re }, { data: packages, error: pe }, { data: inv, error: ie }] = await Promise.all([
     supabase.from("races").select("id,name,season").order("event_date"),
-    adminPackagesSelect(supabase, ADMIN_PACKAGE_COLUMNS, { order: true }),
+      adminPackagesSelect<DbPackage[]>(supabase, ADMIN_PACKAGE_COLUMNS, { order: true }),
     supabase.from("package_inventory").select(INVENTORY_COLUMNS),
   ])
   if (re || pe || ie || !packages) return []
@@ -673,14 +674,14 @@ export async function getAdminPackageRows(
     ]),
   )
   const invBy = new Map((inv ?? []).map((i: DbInventory) => [i.package_id, i]))
-  const packageIds = (packages as DbPackage[]).map((p) => p.id)
+  const packageIds = packages.map((p) => p.id)
   const includeCostLayers = options?.includeCostLayers === true
   const [layersByPkg, layerTotalsByPkg, salesByPkg, sfInventoryByProduct, availabilityRows, guestGuideById] = await Promise.all([
     includeCostLayers ? getCostLayersByPackage(packageIds) : Promise.resolve(new Map<string, CostLayerRow[]>()),
     includeCostLayers ? Promise.resolve(new Map<string, { quantity_purchased: number; quantity_remaining: number }>()) : getCostLayerQuantityTotalsByPackage(packageIds),
     getPackageSalesBreakdownByPackage(packageIds),
     options?.includeSalesforceInventory
-      ? getSalesforceInventorySnapshotsForPackages(packages as DbPackage[])
+      ? getSalesforceInventorySnapshotsForPackages(packages)
       : Promise.resolve(new Map<string, SfInventorySnapshot>()),
     getNativePackageAvailability(packageIds),
     loadGuestGuideFields(supabase, packageIds, { includeContent: false }),
@@ -688,7 +689,7 @@ export async function getAdminPackageRows(
   const availabilityByPackage = new Map(
     availabilityRows.map((availability) => [availability.package_id, availability]),
   )
-  const rows = (packages as DbPackage[]).map((p) => {
+  const rows = packages.map((p) => {
     const layers = layersByPkg.get(p.id) ?? []
     const totals = layerTotalsByPkg.get(p.id)
     const summary = includeCostLayers ? summarizePackageCost(p.currency || "USD", layers) : null
