@@ -27,7 +27,7 @@ export function LinkSharedInventoryPanel({
 }: {
   packageId: string
   packageName: string
-  duration: string | null
+  duration: string | null | undefined
   ownPurchaseUnits: number
   compact?: boolean
   alreadySharingWith?: Sibling[]
