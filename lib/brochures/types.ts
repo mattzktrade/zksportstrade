@@ -28,7 +28,14 @@ export type BrochureCreateErrorCode =
   | "insufficient_content"
 
 export type BrochureCreateResult =
-  | { ok: true; brochureUrl: string; filename: string; replaced: boolean }
+  | {
+      ok: true
+      brochureUrl: string
+      zkBrochureUrl: string
+      filename: string
+      zkFilename: string
+      replaced: boolean
+    }
   | { ok: false; message: string; code?: BrochureCreateErrorCode; brochureUrl?: string }
 
 export class BrochureInsufficientImagesError extends Error {

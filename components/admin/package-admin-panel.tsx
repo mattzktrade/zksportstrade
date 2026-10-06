@@ -226,6 +226,9 @@ export function PackageAdminPanel({
   const [featured, setFeatured] = useState(initial.featured)
   const [isHidden, setIsHidden] = useState(initial.is_hidden)
   const [brochureUrl, setBrochureUrl] = useState(typeof initial.brochure_url === "string" ? initial.brochure_url : "")
+  const [zkBrochureUrl, setZkBrochureUrl] = useState(
+    typeof initial.zk_brochure_url === "string" ? initial.zk_brochure_url : "",
+  )
   const [guestGuideUrl, setGuestGuideUrl] = useState(
     typeof initial.guest_guide_url === "string" ? initial.guest_guide_url : "",
   )
@@ -255,6 +258,7 @@ export function PackageAdminPanel({
     setFeatured(initial.featured)
     setIsHidden(initial.is_hidden)
     setBrochureUrl(typeof initial.brochure_url === "string" ? initial.brochure_url : "")
+    setZkBrochureUrl(typeof initial.zk_brochure_url === "string" ? initial.zk_brochure_url : "")
     setGuestGuideUrl(typeof initial.guest_guide_url === "string" ? initial.guest_guide_url : "")
     setTrackMap(typeof initial.track_map === "string" ? initial.track_map : "")
     setFaqs(packageFaqsFromRow(initial))
@@ -704,30 +708,40 @@ export function PackageAdminPanel({
           </DetailSection>
           <DetailSection
             title="Brochures"
-            summary={[brochureUrl.trim() ? "Sales brochure attached" : "No sales brochure", guestGuideUrl.trim() ? "Guest guide attached" : "No guest guide"].join(" · ")}
+            summary={[
+              brochureUrl.trim() ? "White-label attached" : "No white-label",
+              zkBrochureUrl.trim() ? "ZK branded attached" : "No ZK branded",
+              guestGuideUrl.trim() ? "Guest guide attached" : "No guest guide",
+            ].join(" · ")}
           >
           <div className="sm:col-span-2 space-y-3">
           <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-foreground">Sales brochure</p>
+                <p className="text-sm font-medium text-foreground">Sales brochures</p>
                 <p className="mt-1 text-xs text-muted-foreground leading-5">
-                  Creates a ZK-branded PDF from this product&apos;s photos, description and inclusions.
-                  Needs at least 3 unique photos, a short description, and 4 inclusions. Standard Paddock
-                  Club or Champions Club copy can be filled from official programme details when the name
-                  matches. Only the ZK team can generate it — portal clients just download the finished file.
+                  One click builds both PDFs from this product&apos;s photos, description and inclusions.
+                  Needs at least 3 unique photos, a short description, and 4 inclusions.{" "}
+                  <strong className="font-medium text-foreground">White-label</strong> is what agents
+                  download on the portal. <strong className="font-medium text-foreground">ZK branded</strong>{" "}
+                  is the same file plus a last page with our logo and Oliver&apos;s contact details. Only the
+                  ZK team can generate them.
                 </p>
               </div>
               <PackageBrochureActions
                 packageId={initial.id}
                 brochureUrl={brochureUrl.trim() || null}
+                zkBrochureUrl={zkBrochureUrl.trim() || null}
                 productName={name.trim() || initial.name}
                 eventName={initial.race_name}
-                onUrlChange={(url) => setBrochureUrl(url)}
+                onUrlChange={(urls) => {
+                  setBrochureUrl(urls.brochureUrl)
+                  setZkBrochureUrl(urls.zkBrochureUrl)
+                }}
               />
             </div>
             <label className="block text-xs text-muted-foreground">
-              Custom brochure URL (optional)
+              Custom white-label brochure URL (optional)
               <input
                 value={brochureUrl}
                 onChange={(e) => setBrochureUrl(e.target.value)}

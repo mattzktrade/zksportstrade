@@ -81,56 +81,66 @@ export type NativePackageAvailabilityRow = {
   uses_canonical_allocations?: boolean
 }
 
-export async function getNativePackageAvailability(
+export function mapNativePackageAvailabilityRow(
+  row: Record<string, unknown>,
+  canonical = true,
+): NativePackageAvailabilityRow {
+  return {
+    package_id: String(row.package_id),
+    race_id: String(row.race_id ?? ""),
+    name: String(row.name ?? ""),
+    duration: row.duration == null ? null : String(row.duration),
+    inventory_group_id: row.inventory_group_id == null ? null : String(row.inventory_group_id),
+    inventory_pool_id: row.inventory_pool_id == null ? null : String(row.inventory_pool_id),
+    shell_parent_package_id:
+      row.shell_parent_package_id == null ? null : String(row.shell_parent_package_id),
+    is_legacy_shell: Boolean(row.is_legacy_shell),
+    qty_available: Number(row.legacy_qty_available ?? row.qty_available ?? 0),
+    qty_held: Number(row.legacy_qty_held ?? row.qty_held ?? 0),
+    legacy_sellable: Number(row.available_quantity ?? row.legacy_sellable ?? 0),
+    layer_units_remaining: Number(row.layer_quantity_remaining ?? row.layer_units_remaining ?? 0),
+    active_reservations: Number(row.reserved_quantity ?? row.active_reservations ?? 0),
+    open_shortage_qty:
+      Number(row.historical_shortage_quantity ?? 0) + Number(row.brokered_shortage_quantity ?? 0) ||
+      Number(row.open_shortage_qty ?? 0),
+    layer_original_quantity: Number(row.layer_original_quantity ?? 0),
+    committed_quantity: Number(row.committed_quantity ?? 0),
+    historical_shortage_quantity: Number(row.historical_shortage_quantity ?? 0),
+    brokered_shortage_quantity: Number(row.brokered_shortage_quantity ?? 0),
+    net_quantity: Number(row.net_quantity ?? row.available_quantity ?? 0),
+    manual_hold_quantity: Number(row.manual_hold_quantity ?? 0),
+    uses_canonical_allocations: canonical,
+  }
+}
+
+export async function loadNativePackageAvailability(
+  supabase: SupabaseClient,
   packageIds?: readonly string[],
 ): Promise<NativePackageAvailabilityRow[]> {
-  noStore()
-  const supabase = await createClient()
   let canonicalQuery = supabase.from("inventory_availability").select("*")
   if (packageIds && packageIds.length > 0) {
     canonicalQuery = canonicalQuery.in("package_id", [...packageIds])
   }
   const { data: canonical, error: canonicalError } = await canonicalQuery
   if (!canonicalError && canonical) {
-    return canonical.map((row) => ({
-      package_id: String(row.package_id),
-      race_id: String(row.race_id),
-      name: String(row.name),
-      duration: row.duration == null ? null : String(row.duration),
-      inventory_group_id: row.inventory_group_id == null ? null : String(row.inventory_group_id),
-      inventory_pool_id: row.inventory_pool_id == null ? null : String(row.inventory_pool_id),
-      shell_parent_package_id:
-        row.shell_parent_package_id == null ? null : String(row.shell_parent_package_id),
-      is_legacy_shell: Boolean(row.is_legacy_shell),
-      qty_available: Number(row.legacy_qty_available ?? 0),
-      qty_held: Number(row.legacy_qty_held ?? 0),
-      legacy_sellable: Number(row.available_quantity ?? 0),
-      layer_units_remaining: Number(row.layer_quantity_remaining ?? 0),
-      active_reservations: Number(row.reserved_quantity ?? 0),
-      open_shortage_qty:
-        Number(row.historical_shortage_quantity ?? 0) +
-        Number(row.brokered_shortage_quantity ?? 0),
-      layer_original_quantity: Number(row.layer_original_quantity ?? 0),
-      committed_quantity: Number(row.committed_quantity ?? 0),
-      historical_shortage_quantity: Number(row.historical_shortage_quantity ?? 0),
-      brokered_shortage_quantity: Number(row.brokered_shortage_quantity ?? 0),
-      net_quantity: Number(row.net_quantity ?? row.available_quantity ?? 0),
-      manual_hold_quantity: Number(row.manual_hold_quantity ?? 0),
-      uses_canonical_allocations: true,
-    }))
+    return canonical.map((row) => mapNativePackageAvailabilityRow(row as Record<string, unknown>, true))
   }
 
-  // Compatibility fallback while the additive migration is being deployed.
   let legacyQuery = supabase.from("native_package_availability").select("*")
   if (packageIds && packageIds.length > 0) {
     legacyQuery = legacyQuery.in("package_id", [...packageIds])
   }
   const { data, error } = await legacyQuery
   if (error || !data) return []
-  return (data as NativePackageAvailabilityRow[]).map((row) => ({
-    ...row,
-    uses_canonical_allocations: false,
-  }))
+  return data.map((row) => mapNativePackageAvailabilityRow(row as Record<string, unknown>, false))
+}
+
+export async function getNativePackageAvailability(
+  packageIds?: readonly string[],
+): Promise<NativePackageAvailabilityRow[]> {
+  noStore()
+  const supabase = await createClient()
+  return loadNativePackageAvailability(supabase, packageIds)
 }
 
 /** Best-effort purchase ledger row after a cost layer is added. */

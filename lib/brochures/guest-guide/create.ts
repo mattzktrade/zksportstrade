@@ -18,6 +18,7 @@ import { MIN_BROCHURE_PHOTOS } from "@/lib/brochures/readiness"
 import { uploadPackageGuestGuidePdf } from "@/lib/brochures/storage"
 import { guestGuideFilename } from "@/lib/brochures/text"
 import { BrochureInsufficientImagesError } from "@/lib/brochures/types"
+import { isMissingZkBrochureUrlColumnError, withoutZkBrochureUrl } from "@/lib/catalog/columns"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 function revalidateGuestGuidePaths(packageId: string, raceId: string | null) {
@@ -36,11 +37,20 @@ async function loadPackageRow(
   | { row: BrochurePackageRow; raceName: string; category: string | null }
   | { error: string; code?: "missing" }
 > {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("packages")
     .select(GUEST_GUIDE_PACKAGE_SELECT)
     .eq("id", packageId)
     .maybeSingle()
+  if (error && isMissingZkBrochureUrlColumnError(error.message)) {
+    const retry = await supabase
+      .from("packages")
+      .select(withoutZkBrochureUrl(GUEST_GUIDE_PACKAGE_SELECT))
+      .eq("id", packageId)
+      .maybeSingle()
+    data = retry.data
+    error = retry.error
+  }
   if (error) {
     if (/guest_guide/i.test(error.message)) {
       return {

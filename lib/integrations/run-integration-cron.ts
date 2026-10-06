@@ -5,6 +5,7 @@ import { processNativeBookingForms } from "@/lib/integrations/process-native-boo
 import { processInstallmentInvoiceCreates } from "@/lib/integrations/process-installment-invoices"
 import { processNativeInvoiceReminders } from "@/lib/integrations/process-native-invoice-reminders"
 import { processMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-process"
+import { processAssistantInbox } from "@/lib/assistant/process"
 import { expirePastEventEnquiries } from "@/lib/crm/expire-past-event-enquiries"
 import type { SalesforceInventoryPullResult } from "@/lib/integrations/salesforce/pull-inventory-from-salesforce"
 
@@ -33,6 +34,7 @@ export type IntegrationCronResult = {
   linkedInventoryHeal: { groups: number; packagesFixed: number } | null
   marketingOutreach: Awaited<ReturnType<typeof processMarketingOutreach>>
   expiredEnquiries: Awaited<ReturnType<typeof expirePastEventEnquiries>>
+  assistantInbox: Awaited<ReturnType<typeof processAssistantInbox>>
 } & Awaited<ReturnType<typeof drainIntegrationOutbox>>
 
 /**
@@ -78,6 +80,26 @@ export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {
     }
   }
 
+  let assistantInbox: Awaited<ReturnType<typeof processAssistantInbox>> = {
+    processed: 0,
+    sent: 0,
+    drafted: 0,
+    escalated: 0,
+    failed: 0,
+  }
+  try {
+    assistantInbox = await processAssistantInbox()
+  } catch (error) {
+    assistantInbox = {
+      processed: 0,
+      sent: 0,
+      drafted: 0,
+      escalated: 0,
+      failed: 1,
+    }
+    console.error("[assistant]", error instanceof Error ? error.message : "Assistant inbox failed.")
+  }
+
   return {
     holds,
     bookingForms,
@@ -90,5 +112,6 @@ export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {
     ...result,
     marketingOutreach,
     expiredEnquiries,
+    assistantInbox,
   }
 }

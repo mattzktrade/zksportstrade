@@ -11,9 +11,10 @@ import {
 import { generatePackageBrochurePdf } from "@/lib/brochures/pdf"
 import { enrichBrochureContent } from "@/lib/brochures/enrich"
 import { MIN_BROCHURE_PHOTOS, assessBrochureReadiness } from "@/lib/brochures/readiness"
-import { uploadPackageBrochurePdf } from "@/lib/brochures/storage"
-import { brochureFilename } from "@/lib/brochures/text"
+import { uploadPackageBrochurePdf, uploadPackageZkBrochurePdf } from "@/lib/brochures/storage"
+import { brochureFilename, zkBrochureFilename } from "@/lib/brochures/text"
 import { BrochureInsufficientImagesError, type BrochureCreateResult } from "@/lib/brochures/types"
+import { isMissingZkBrochureUrlColumnError, withoutZkBrochureUrl } from "@/lib/catalog/columns"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 async function queueBrochureListingSync(
@@ -56,22 +57,32 @@ export async function createPackageBrochureForId(input: {
   const id = input.packageId.trim()
   if (!id) return { ok: false, message: "Package id is missing.", code: "missing" }
 
-  const { data, error } = await input.supabase
+  let { data, error } = await input.supabase
     .from("packages")
     .select(BROCHURE_PACKAGE_SELECT)
     .eq("id", id)
     .maybeSingle()
+  if (error && isMissingZkBrochureUrlColumnError(error.message)) {
+    const retry = await input.supabase
+      .from("packages")
+      .select(withoutZkBrochureUrl(BROCHURE_PACKAGE_SELECT))
+      .eq("id", id)
+      .maybeSingle()
+    data = retry.data
+    error = retry.error
+  }
   if (error) return { ok: false, message: error.message }
   if (!data) return { ok: false, message: "Package not found.", code: "missing" }
 
   const row = data as BrochurePackageRow
   const existing = typeof row.brochure_url === "string" ? row.brochure_url.trim() : ""
-  if (existing && !input.replace) {
+  const existingZk = typeof row.zk_brochure_url === "string" ? row.zk_brochure_url.trim() : ""
+  if ((existing || existingZk) && !input.replace) {
     return {
       ok: false,
       message: "A brochure is already attached. Confirm to replace it with a newly generated one.",
       code: "exists",
-      brochureUrl: existing,
+      brochureUrl: existing || existingZk,
     }
   }
 
@@ -93,9 +104,13 @@ export async function createPackageBrochureForId(input: {
   const ready = assessBrochureReadiness(content)
   if (!ready.ok) return { ok: false, message: ready.message, code: ready.code }
 
-  let pdf: Uint8Array
+  let whiteLabelPdf: Uint8Array
+  let zkPdf: Uint8Array
   try {
-    pdf = await generatePackageBrochurePdf(content, { minPhotos: MIN_BROCHURE_PHOTOS })
+    ;[whiteLabelPdf, zkPdf] = await Promise.all([
+      generatePackageBrochurePdf(content, { minPhotos: MIN_BROCHURE_PHOTOS, branded: false }),
+      generatePackageBrochurePdf(content, { minPhotos: MIN_BROCHURE_PHOTOS, branded: true }),
+    ])
   } catch (error) {
     if (error instanceof BrochureInsufficientImagesError) {
       return { ok: false, message: error.message, code: error.code }
@@ -103,16 +118,23 @@ export async function createPackageBrochureForId(input: {
     throw error
   }
   const filename = brochureFilename(content.productName, content.raceName)
-  const uploaded = await uploadPackageBrochurePdf(id, pdf, filename)
+  const zkFilename = zkBrochureFilename(content.productName, content.raceName)
+  const uploaded = await uploadPackageBrochurePdf(id, whiteLabelPdf, filename)
   if ("error" in uploaded) return { ok: false, message: uploaded.error }
+  const zkUploaded = await uploadPackageZkBrochurePdf(id, zkPdf, zkFilename)
+  if ("error" in zkUploaded) return { ok: false, message: zkUploaded.error }
 
   const admin = createAdminClient()
   if (!admin) return { ok: false, message: "SUPABASE_SERVICE_ROLE_KEY is required to attach the brochure." }
 
-  const { error: updateError } = await admin
+  let { error: updateError } = await admin
     .from("packages")
-    .update({ brochure_url: uploaded.url })
+    .update({ brochure_url: uploaded.url, zk_brochure_url: zkUploaded.url })
     .eq("id", id)
+  if (updateError && isMissingZkBrochureUrlColumnError(updateError.message)) {
+    const retry = await admin.from("packages").update({ brochure_url: uploaded.url }).eq("id", id)
+    updateError = retry.error
+  }
   if (updateError) return { ok: false, message: updateError.message }
 
   await queueBrochureListingSync(input.supabase, admin, id)
@@ -127,7 +149,9 @@ export async function createPackageBrochureForId(input: {
   return {
     ok: true,
     brochureUrl: uploaded.url,
+    zkBrochureUrl: zkUploaded.url,
     filename,
-    replaced: Boolean(existing),
+    zkFilename,
+    replaced: Boolean(existing || existingZk),
   }
 }

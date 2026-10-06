@@ -44,6 +44,7 @@ type DbPackage = {
   featured: boolean
   sort_order: number
   brochure_url?: string | null
+  zk_brochure_url?: string | null
   guest_guide_url?: string | null
   guest_guide?: unknown
   description?: string | null

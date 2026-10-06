@@ -26,11 +26,23 @@ import {
   planExperienceParagraphs,
   planIncludedItems,
   splitInnerPhotos,
+  ZK_CLOSING_MAILTO,
+  ZK_CLOSING_WHATSAPP,
 } from "../lib/brochures/pdf"
 import { assessBrochureReadiness } from "../lib/brochures/readiness"
-import { brochureFilename, brochurePrintText, brochureSafeText, uniqueImageUrls } from "../lib/brochures/text"
+import {
+  brochureFilename,
+  brochurePrintText,
+  brochureSafeText,
+  isFinishedBrochurePhrase,
+  stitchBrochureIncludes,
+  uniqueImageUrls,
+  wrapFinishedLines,
+  zkBrochureFilename,
+} from "../lib/brochures/text"
 import { packageBrochureStoragePath } from "../lib/brochures/storage"
 import { BrochureInsufficientImagesError, type BrochureContent } from "../lib/brochures/types"
+import { ADMIN_PACKAGE_COLUMNS, PACKAGE_COLUMNS, withoutZkBrochureUrl } from "../lib/catalog/columns"
 
 const sample: BrochureContent = {
   packageId: "pkg-test",
@@ -65,6 +77,10 @@ describe("package brochures", () => {
       brochureFilename("3 Day Champions Club", "Abu Dhabi Grand Prix 2026"),
       "abu-dhabi-gp-2026-3-day-champions-club-brochure.pdf",
     )
+    assert.equal(
+      zkBrochureFilename("3 Day Champions Club", "Abu Dhabi Grand Prix 2026"),
+      "abu-dhabi-gp-2026-3-day-champions-club-zk-brochure.pdf",
+    )
     assert.equal(brochureFilename("3 Day Legend Paddock Club"), "3-day-legend-paddock-club-brochure.pdf")
     assert.equal(
       packageBrochureStoragePath("abudhabi-champions-club-2026", "abu-dhabi-gp-2026-3-day-champions-club-brochure.pdf"),
@@ -75,6 +91,8 @@ describe("package brochures", () => {
   it("uses the same cover / what's included layout for every product", () => {
     assert.deepEqual(brochurePagePlan(false), ["cover", "experience", "included"])
     assert.deepEqual(brochurePagePlan(true), ["cover", "experience", "included", "details"])
+    assert.deepEqual(brochurePagePlan(false, true), ["cover", "experience", "included", "close"])
+    assert.deepEqual(brochurePagePlan(true, true), ["cover", "experience", "included", "details", "close"])
     assert.equal(includedPhotoSlots(3), 3)
     assert.equal(includedPhotoSlots(5), 3)
     assert.equal(includedPhotoSlots(6), 5)
@@ -267,6 +285,26 @@ describe("package brochures", () => {
     assert.doesNotMatch(asString, /zk-sports\.com/)
   })
 
+  it("adds a ZK closing page with the lockup and office contact details", async () => {
+    const whiteLabel = await generatePackageBrochurePdf(sample)
+    const branded = await generatePackageBrochurePdf(sample, { branded: true })
+    assert.equal((await PDFDocument.load(whiteLabel)).getPageCount(), 3)
+    assert.equal((await PDFDocument.load(branded)).getPageCount(), 4)
+    assert.ok(branded.byteLength > whiteLabel.byteLength)
+    const source = readFileSync("lib/brochures/pdf.ts", "utf8")
+    assert.match(source, /oliver@zk-sports\.com/)
+    assert.match(source, /\+971 55 608 9074/)
+    assert.match(source, /drawClosing/)
+    assert.equal(ZK_CLOSING_MAILTO, "mailto:oliver@zk-sports.com")
+    assert.equal(ZK_CLOSING_WHATSAPP, "https://wa.me/971556089074")
+    const brandedBytes = Buffer.from(branded).toString("latin1")
+    assert.match(brandedBytes, /mailto:oliver@zk-sports\.com/)
+    assert.match(brandedBytes, /wa\.me\/971556089074/)
+    const whiteBytes = Buffer.from(whiteLabel).toString("latin1")
+    assert.doesNotMatch(whiteBytes, /zk-sports\.com/)
+    assert.doesNotMatch(whiteBytes, /wa\.me/)
+  })
+
   it("adds a circuit page only when a track map image loads", async () => {
     const withMap = await generatePackageBrochurePdf({
       ...sample,
@@ -343,11 +381,94 @@ describe("package brochures", () => {
     )
   })
 
+  it("keeps inclusion bullets as finished phrases instead of cutting mid-sentence", async () => {
+    assert.equal(isFinishedBrochurePhrase("Located at the W Hotel, this exclusive venue provides a unique"), false)
+    assert.equal(isFinishedBrochurePhrase("Located at the W Hotel, this exclusive venue"), true)
+    assert.equal(isFinishedBrochurePhrase("You'll also take in the breathtaking panorama of the"), false)
+    assert.equal(
+      isFinishedBrochurePhrase("You'll also take in the breathtaking panorama of the superyachts and the Yas Marina below"),
+      true,
+    )
+    assert.deepEqual(
+      stitchBrochureIncludes([
+        "Stunning panoramic views of turns 11, 12, 13",
+        "14 from our VIP lounge or from our expansive, trackside terrace",
+        "Open bar",
+      ]),
+      [
+        "Stunning panoramic views of turns 11, 12, 13 and 14 from our VIP lounge or from our expansive, trackside terrace",
+        "Open bar",
+      ],
+    )
+
+    const content = {
+      ...sample,
+      includes: [
+        "Located at the W Hotel, this exclusive venue provides a unique",
+        "This is the best place to watch the Abu Dhabi F1 race",
+        "Unmatched Race Viewing & Luxury",
+        "Stunning panoramic views of turns 11, 12, 13",
+        "14 from our VIP lounge or from our expansive, trackside terrace",
+        "You'll also take in the breathtaking panorama of the superyachts and the Yas Marina below",
+        "Our package includes a premium culinary experience and a comprehensive beverage package",
+        "This is the best F1 hospitality with meet and greet",
+      ],
+    }
+    const layoutPdf = await PDFDocument.create()
+    const fonts = await embedBrochureFonts(layoutPdf)
+    const included = planIncludedItems(content, fonts)
+    const bullets = included.map((item) => `${item.title}${item.detail ? `: ${item.detail}` : ""}`)
+    assert.equal(
+      bullets.some((item) => /^14 from/i.test(item)),
+      false,
+    )
+    assert.ok(bullets.some((item) => /11, 12, 13 and 14 from our VIP lounge/i.test(item)))
+
+    const uniqueBullet = wrapFinishedLines(
+      "Located at the W Hotel, this exclusive venue provides a unique",
+      fonts.sansMedium,
+      11,
+      278,
+      2,
+    ).join(" ")
+    assert.doesNotMatch(uniqueBullet, /\bunique$/i)
+    assert.match(uniqueBullet, /exclusive venue/i)
+    assert.equal(isFinishedBrochurePhrase(uniqueBullet), true)
+
+    const longView = wrapFinishedLines(
+      "Stunning panoramic views of turns 11, 12, 13 and 14 from our VIP lounge or from our expansive, trackside terrace",
+      fonts.sansMedium,
+      11,
+      278,
+      2,
+    )
+    assert.ok(longView.length <= 2)
+    assert.equal(isFinishedBrochurePhrase(longView.join(" ")), true)
+    assert.doesNotMatch(longView.join(" "), /\b(the|a|an|of|to|with|from|for|in|on|at|by|and|or|unique|expansive)$/i)
+
+    const overlooking = wrapFinishedLines(
+      "Located at the W Hotel, this exclusive venue provides a unique experience overlooking Yas Marina",
+      fonts.sansMedium,
+      11,
+      278,
+      2,
+    ).join(" ")
+    assert.doesNotMatch(overlooking, /\bYas$/i)
+    assert.doesNotMatch(overlooking, /\bunique$/i)
+    assert.match(overlooking, /experience|venue/i)
+    assert.equal(isFinishedBrochurePhrase(overlooking), true)
+  })
+
   it("keeps generation in the admin catalog action and public download in the portal", () => {
     const action = readFileSync("app/(admin)/admin/catalog/brochure-actions.ts", "utf8")
     assert.match(action, /requireAdminAction\("cms.access"\)/)
     const portal = readFileSync("app/(portal)/packages/race/[id]/race-packages-client.tsx", "utf8")
     assert.match(portal, /View brochure/)
     assert.doesNotMatch(portal, /Create brochure/)
+    assert.doesNotMatch(portal, /Create ZK/)
+    assert.doesNotMatch(portal, /ZK branded/)
+    assert.doesNotMatch(PACKAGE_COLUMNS, /zk_brochure_url/)
+    assert.match(ADMIN_PACKAGE_COLUMNS, /zk_brochure_url/)
+    assert.doesNotMatch(withoutZkBrochureUrl(ADMIN_PACKAGE_COLUMNS), /zk_brochure_url/)
   })
 })

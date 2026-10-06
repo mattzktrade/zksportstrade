@@ -1159,6 +1159,12 @@ export function EnquiriesClient({
                     </h2>
                     <p className="mt-0.5 truncate text-[10px] text-slate-500">{selected.account_name || "—"}</p>
                     <EnquiryContactDetails email={selected.contact_email} phone={selected.contact_phone} />
+                    <Link
+                      href={`/admin/assistant/compose?deal=${selected.id}`}
+                      className="mt-2 inline-flex text-[11px] font-medium text-primary hover:underline"
+                    >
+                      Draft with assistant
+                    </Link>
                   </div>
                   <Link
                     href={adminDealPath(selected.id)}

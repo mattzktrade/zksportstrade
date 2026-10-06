@@ -1,4 +1,4 @@
-import { PDFDocument, type PDFImage, type PDFPage } from "pdf-lib"
+import { PDFArray, PDFDocument, PDFName, PDFString, type PDFImage, type PDFPage } from "pdf-lib"
 import {
   brochureCircuitFacts,
   brochureCircuitHeadline,
@@ -38,8 +38,17 @@ import {
   fillPolygon,
   safeDrawText,
   strokeDiagonal,
+  drawTracked,
+  trackedWidth,
 } from "@/lib/brochures/template"
-import { brochurePrintText, brochureReadable, fitTitle, wrapText } from "@/lib/brochures/text"
+import {
+  brochurePrintText,
+  brochureReadable,
+  fitTitle,
+  stitchBrochureIncludes,
+  wrapFinishedLines,
+  wrapText,
+} from "@/lib/brochures/text"
 
 const SECTION_TOP = PAGE_H - 40
 const PHOTO_BOTTOM = FOOTER_H + 16
@@ -54,7 +63,13 @@ const GLANCE_LEADING = 15
 const GLANCE_GAP = 8
 const INNER_PHOTOS = 3
 
-export type BrochurePageKind = "cover" | "experience" | "included" | "details"
+export const ZK_CLOSING_EMAIL = "oliver@zk-sports.com"
+export const ZK_CLOSING_PHONE = "+971 55 608 9074"
+export const ZK_CLOSING_HEADLINE = "We look forward to welcoming you"
+export const ZK_CLOSING_MAILTO = `mailto:${ZK_CLOSING_EMAIL}`
+export const ZK_CLOSING_WHATSAPP = `https://wa.me/${ZK_CLOSING_PHONE.replace(/\D/g, "")}`
+
+export type BrochurePageKind = "cover" | "experience" | "included" | "details" | "close"
 
 async function embedPhotos(pdf: PDFDocument, content: BrochureContent): Promise<PDFImage[]> {
   const urls = brochurePhotoUrls(content.heroUrl, content.galleryUrls, content.trackMapUrl)
@@ -80,9 +95,40 @@ function leftTextX() {
   return MARGIN + RAIL + 6
 }
 
-/** Cover, the experience, what's included, then the track map when one exists. */
-export function brochurePagePlan(hasTrackMap: boolean): BrochurePageKind[] {
-  return hasTrackMap ? ["cover", "experience", "included", "details"] : ["cover", "experience", "included"]
+function addUriLink(page: PDFPage, box: { x: number; y: number; width: number; height: number }, url: string) {
+  const href = url.trim()
+  if (!/^(https?:\/\/|mailto:)/i.test(href) || box.width <= 0 || box.height <= 0) return
+  const context = page.doc.context
+  const annotRef = context.register(
+    context.obj({
+      Type: "Annot",
+      Subtype: "Link",
+      Rect: [box.x, box.y, box.x + box.width, box.y + box.height],
+      Border: [0, 0, 0],
+      C: [1, 1, 1],
+      F: 4,
+      A: {
+        Type: "Action",
+        S: "URI",
+        URI: PDFString.of(href),
+      },
+    }),
+  )
+  const annotsKey = PDFName.of("Annots")
+  const existing = page.node.lookupMaybe(annotsKey, PDFArray)
+  if (existing) {
+    existing.push(annotRef)
+    return
+  }
+  page.node.set(annotsKey, context.obj([annotRef]))
+}
+
+/** Cover, the experience, what's included, the track map when one exists, then the ZK closing page when branded. */
+export function brochurePagePlan(hasTrackMap: boolean, branded = false): BrochurePageKind[] {
+  const pages: BrochurePageKind[] = ["cover", "experience", "included"]
+  if (hasTrackMap) pages.push("details")
+  if (branded) pages.push("close")
+  return pages
 }
 
 /** 5-photo What's Included column when the product has 6+ unique photos; otherwise the 3-photo column. */
@@ -198,19 +244,9 @@ function inclusionText(item: BrochureIncludeItem): string {
   return item.detail ? `${title}: ${brochureReadable(item.detail)}` : title
 }
 
-const DANGLING_WORD = /^(and|or|the|a|an|of|to|with|from|for|in|on|at|by|into|over|&)$/i
-
 /** Keep a bullet to two lines, ending on a finished phrase rather than "and..." or "the...". */
 function bulletLines(item: BrochureIncludeItem, fonts: BrochureFonts, width: number): string[] {
-  const maxWidth = width - 22
-  const lines = wrapText(inclusionText(item), fonts.sansMedium, GLANCE_SIZE, maxWidth)
-  if (lines.length <= 2) return lines
-  let words = lines.slice(0, 2).join(" ").split(/\s+/).filter(Boolean)
-  const clause = words.join(" ")
-  const commaAt = clause.lastIndexOf(",")
-  if (commaAt >= 24) words = clause.slice(0, commaAt).split(/\s+/).filter(Boolean)
-  while (words.length > 3 && DANGLING_WORD.test(words[words.length - 1] ?? "")) words.pop()
-  return wrapText(words.join(" ").replace(/[.,;:\s-]+$/, ""), fonts.sansMedium, GLANCE_SIZE, maxWidth).slice(0, 2)
+  return wrapFinishedLines(inclusionText(item), fonts.sansMedium, GLANCE_SIZE, width - 22, 2)
 }
 
 function bulletFits(y: number, lineCount: number): boolean {
@@ -284,7 +320,10 @@ export function planIncludedItems(
   fonts: BrochureFonts,
   width = TEXT_COL_W,
 ): BrochureIncludeItem[] {
-  const items = formatBrochureIncludes(content.includes, Math.max(content.includes.length, 1))
+  const items = formatBrochureIncludes(
+    stitchBrochureIncludes(content.includes),
+    Math.max(content.includes.length, 1),
+  )
   const count = takeBullets(items, fonts, includedBodyTop(fonts, width), width)
   return items.slice(0, count || (items.length ? 1 : 0))
 }
@@ -473,23 +512,101 @@ function drawCircuit(page: PDFPage, content: BrochureContent, fonts: BrochureFon
   })
 }
 
+function drawClosingContact(
+  page: PDFPage,
+  fonts: BrochureFonts,
+  text: string,
+  href: string,
+  y: number,
+  size: number,
+) {
+  const width = fonts.sansMedium.widthOfTextAtSize(text, size)
+  const x = (PAGE_W - width) / 2
+  safeDrawText(page, text, {
+    x,
+    y,
+    size,
+    font: fonts.sansMedium,
+    color: WHITE,
+  })
+  addUriLink(page, { x: x - 6, y: y - 4, width: width + 12, height: size + 8 }, href)
+}
+
+function drawClosing(page: PDFPage, fonts: BrochureFonts, logo: PDFImage | null) {
+  const headline = ZK_CLOSING_HEADLINE.toUpperCase()
+  const headlineSize = 16
+  const tracking = 3.2
+  const headlineW = trackedWidth(headline, fonts.condensedMedium, headlineSize, tracking)
+  const contactSize = 13
+
+  let logoW = 0
+  let logoH = 0
+  if (logo) {
+    const scale = Math.min(480 / logo.width, 112 / logo.height)
+    logoW = logo.width * scale
+    logoH = logo.height * scale
+  }
+
+  const stack =
+    (logo ? logoH + 28 : 0) + headlineSize + 18 + HEADING.ruleH + 30 + contactSize + 16 + contactSize
+  let y = (PAGE_H + FOOTER_H) / 2 + stack / 2
+
+  if (logo) {
+    page.drawImage(logo, {
+      x: (PAGE_W - logoW) / 2,
+      y: y - logoH,
+      width: logoW,
+      height: logoH,
+    })
+    y -= logoH + 28
+  }
+
+  drawTracked(page, headline, {
+    x: (PAGE_W - headlineW) / 2,
+    y: y - headlineSize,
+    size: headlineSize,
+    font: fonts.condensedMedium,
+    color: WHITE,
+    tracking,
+  })
+  y -= headlineSize + 16
+
+  const ruleW = HEADING.ruleW
+  page.drawRectangle({
+    x: (PAGE_W - ruleW) / 2,
+    y,
+    width: ruleW,
+    height: HEADING.ruleH,
+    color: RED,
+  })
+  y -= 32
+
+  drawClosingContact(page, fonts, ZK_CLOSING_EMAIL, ZK_CLOSING_MAILTO, y, contactSize)
+  y -= 20
+  drawClosingContact(page, fonts, ZK_CLOSING_PHONE, ZK_CLOSING_WHATSAPP, y, contactSize)
+}
+
 export async function generatePackageBrochurePdf(
   content: BrochureContent,
-  options?: { minPhotos?: number },
+  options?: { minPhotos?: number; branded?: boolean },
 ): Promise<Uint8Array> {
+  const branded = options?.branded === true
   const pdf = await PDFDocument.create()
   pdf.setTitle(`${brochurePrintText(content.productName)} · ${brochurePrintText(content.raceName)}`)
   pdf.setAuthor("ZK Sports & Entertainment")
-  pdf.setSubject("Hospitality brochure")
+  pdf.setSubject(branded ? "ZK hospitality brochure" : "Hospitality brochure")
   pdf.setCreator("ZK Sports Trade")
   pdf.setProducer("ZK Sports Trade")
   pdf.setKeywords(["ZK Sports", content.productName, content.raceName].filter(Boolean))
 
   const fonts = await embedBrochureFonts(pdf)
-  const [background, photos, trackMap] = await Promise.all([
+  const [background, photos, trackMap, logo] = await Promise.all([
     embedPublicImage(pdf, "images", "brochures", "template-bg.png"),
     embedPhotos(pdf, content),
     embedTrackMap(pdf, content),
+    branded
+      ? embedPublicImage(pdf, "images", "ZK white logo.png")
+      : Promise.resolve(null),
   ])
 
   const minPhotos = options?.minPhotos ?? 0
@@ -497,7 +614,7 @@ export async function generatePackageBrochurePdf(
     throw new BrochureInsufficientImagesError(photos.length, minPhotos)
   }
 
-  const pages = brochurePagePlan(Boolean(trackMap))
+  const pages = brochurePagePlan(Boolean(trackMap), branded)
   const pageCount = pages.length
   const chrome = (page: PDFPage, index: number) => drawChrome(page, fonts, { pageIndex: index, pageCount })
 
@@ -507,6 +624,7 @@ export async function generatePackageBrochurePdf(
     if (kind === "cover") drawBrochureCover(page, content, fonts, photos)
     else if (kind === "experience") drawExperience(page, content, fonts, splitInnerPhotos(photos).experience)
     else if (kind === "included") drawIncluded(page, content, fonts, splitInnerPhotos(photos).included)
+    else if (kind === "close") drawClosing(page, fonts, logo)
     else if (trackMap) drawCircuit(page, content, fonts, trackMap)
     chrome(page, index + 1)
   }

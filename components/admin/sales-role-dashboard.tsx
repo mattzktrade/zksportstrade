@@ -26,6 +26,8 @@ import {
 } from "lucide-react"
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { getSalesDashboardModel } from "@/lib/admin/sales-dashboard-model"
+import { createClient } from "@/lib/supabase/server"
+import { ASSISTANT_REVIEW_HREF } from "@/lib/assistant/types"
 import {
   chartTicks,
   formatCompactAxis,
@@ -215,7 +217,13 @@ function SalesTrendChart({ months, currency }: { months: SalesMonthBucket[]; cur
   )
 }
 
-function SalesDashboardView({ data }: { data: SalesDashboardModel }) {
+function SalesDashboardView({
+  data,
+  assistantReviewCount,
+}: {
+  data: SalesDashboardModel
+  assistantReviewCount: number
+}) {
   const glance = [
     {
       icon: UserPlus,
@@ -293,6 +301,22 @@ function SalesDashboardView({ data }: { data: SalesDashboardModel }) {
           )
         })}
       </section>
+
+      {assistantReviewCount > 0 ? (
+        <Card>
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <div className="min-w-0">
+              <h2 className="text-[13px] font-semibold text-[#1b1c1f]">Assistant needs you</h2>
+              <p className="mt-0.5 text-[11px] text-[#8b9198]">
+                {assistantReviewCount === 1
+                  ? "1 conversation is waiting for a human."
+                  : `${assistantReviewCount} conversations are waiting for a human.`}
+              </p>
+            </div>
+            <SectionLink href={ASSISTANT_REVIEW_HREF}>Open inbox</SectionLink>
+          </div>
+        </Card>
+      ) : null}
 
       <Card>
         <div className="flex items-start justify-between gap-3 px-4 py-3">
@@ -481,6 +505,11 @@ function SalesDashboardView({ data }: { data: SalesDashboardModel }) {
 
 export async function SalesRoleDashboard() {
   const profile = await requireAdmin()
+  const supabase = await createClient()
   const data = await getSalesDashboardModel(profile)
-  return <SalesDashboardView data={data} />
+  const review = await supabase
+    .from("assistant_conversations")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "needs_review")
+  return <SalesDashboardView data={data} assistantReviewCount={review.error ? 0 : review.count ?? 0} />
 }

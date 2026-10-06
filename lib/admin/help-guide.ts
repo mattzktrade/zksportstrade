@@ -3,6 +3,7 @@ export const HELP_TOPIC_IDS = [
   "pages",
   "rules",
   "sales",
+  "assistant",
   "inventory",
   "portal",
   "after-sale",
@@ -249,6 +250,11 @@ export const HELP_TOPICS: HelpTopic[] = [
             href: "/admin/enquiries",
           },
           {
+            title: "Assistant",
+            body: "WhatsApp and email inbox. The assistant drafts replies from live stock and product copy. High-confidence answers can auto-send. Unsure replies, prices, and agreed deals wait for you. Booking forms are prepared here, then an admin sends them as usual.",
+            href: "/admin/assistant",
+          },
+          {
             title: "Deals",
             body: "Booking form ready to send through signed, won, and lost. Portal bookings and website orders also show up here.",
             href: "/admin/deals",
@@ -415,10 +421,10 @@ export const HELP_TOPICS: HelpTopic[] = [
         title: "Send a product brochure",
         items: [
           "Open Sales list and click the product the client is interested in.",
-          "If it already has a brochure, download that PDF and send it.",
-          "If not, click Create brochure. It needs at least 3 unique photos, a short description, and 4 inclusions. Add a track map on the product if you want a third page with the circuit layout. Standard Paddock Club or Champions Club copy can be filled from official programme details when the product name matches.",
-          "Send that file to the client. Portal clients cannot create brochures — only the ZK team can.",
-          "If you change the photos or copy later, use Recreate brochure so the PDF stays current.",
+          "If brochures are already attached, download White-label for agents or ZK branded to send with our contact page.",
+          "If not, click Create brochures. It needs at least 3 unique photos, a short description, and 4 inclusions. Add a track map on the product if you want a circuit page. Standard Paddock Club or Champions Club copy can be filled from official programme details when the product name matches.",
+          "White-label is what portal clients download. ZK branded is the same PDF plus a last page with our logo and Oliver's details. Portal clients cannot create brochures — only the ZK team can.",
+          "If you change the photos or copy later, use Recreate brochures so both PDFs stay current.",
         ],
       },
       {
@@ -481,6 +487,69 @@ export const HELP_TOPICS: HelpTopic[] = [
           {
             q: "Where do Facebook / Meta marketing leads go?",
             a: "They appear on Sales → Enquiries with source Marketing, the form notes, and the person's email and phone. They can get a three-stage email and WhatsApp follow-up until they reply or someone on the team takes over. Edit the messages in Sales → Templates.",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "assistant",
+    nav: "Assistant",
+    title: "Sales assistant",
+    summary: "Automatic WhatsApp and email replies from the CRM, with a human always able to take over.",
+    keywords: [
+      "assistant",
+      "whatsapp",
+      "email",
+      "ai",
+      "inbox",
+      "auto-send",
+      "knowledge",
+      "faq",
+      "brochure",
+    ],
+    blocks: [
+      {
+        type: "p",
+        text: "Sales → Assistant is the inbox for client WhatsApp and business email. The assistant looks up live stock, product copy, FAQs, and the client’s CRM history. It sends only when it is sure. If it is not sure, it drafts a reply and emails the team.",
+      },
+      {
+        type: "steps",
+        title: "Before you turn auto-send on",
+        items: [
+          "Open Knowledge checklist and fill missing descriptions, inclusions, photos, FAQs, and brochures on products you still sell.",
+          "Put WhatsApp numbers on CRM contacts so inbound chats match the right client.",
+          "Keep the sales policy article in Knowledge. Add a few real replies so it sounds like you.",
+          "Leave Auto-send off until drafts look right. The kill switch stores inbound and sends nothing.",
+        ],
+      },
+      {
+        type: "doDont",
+        do: [
+          "Send or edit drafts from the inbox. Edited sends are saved as style examples.",
+          "Tap Save this Q&A when a human answer should be reused. Product questions go on that product’s FAQ list.",
+          "Prepare a booking form from the inbox when a deal is agreed. An admin still sends it, the same way Chelley works today.",
+        ],
+        dont: [
+          "Do not let it invent prices, inclusions, or on-ground contacts.",
+          "Do not expect it to reply on extra personal WhatsApp numbers until those numbers are on Cloud API.",
+          "Do not auto-send booking forms, invoices, or stock holds.",
+        ],
+      },
+      {
+        type: "qa",
+        items: [
+          {
+            q: "Where do WhatsApp messages go?",
+            a: "Sales → Assistant. The public ZK number needs WhatsApp Cloud API with the Business App still on the phone (coexistence). If someone types on the phone, that conversation is taken over until you resume the assistant.",
+          },
+          {
+            q: "Can it send a booking form?",
+            a: "It can prepare the draft and notify admins. Only an admin can email the form to the client. Portal clients should book on the portal instead.",
+          },
+          {
+            q: "How do I draft a reply on an existing enquiry?",
+            a: "Open the enquiry and use Draft with assistant, or Sales → Assistant → compose with the enquiry id. That creates a thread even if there is no inbound WhatsApp yet.",
           },
         ],
       },
@@ -710,7 +779,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             q: "How do I make a brochure for a product?",
-            a: "Sales list → click the product → Create brochure. It needs at least 3 unique photos, a short description, and 4 inclusions on the product. Add a track map if you want a third page with the circuit. Only the ZK team can do this, not portal clients. If a brochure is already attached, download it, or recreate it after you change the listing.",
+            a: "Sales list → click the product → Create brochures. It needs at least 3 unique photos, a short description, and 4 inclusions on the product. Add a track map if you want a circuit page. That makes a white-label PDF for agents and a ZK branded PDF with our contact page. Portal clients only see the white-label file. If brochures are already attached, download White-label or ZK branded, or recreate them after you change the listing.",
           },
           {
             q: "How do I make a guest guide for a product?",

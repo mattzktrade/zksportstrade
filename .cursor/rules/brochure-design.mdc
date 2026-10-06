@@ -9,7 +9,8 @@ Admin can generate a landscape product brochure PDF from Sales list and the prod
 
 Rules:
 - Universal black / white / ZK red (`#F90202`) template in `public/images/brochures/template-bg.png`
-- Do not put the ZK logo lockup, the red ZK mark, or "Official F1 Paddock Club Distributor" on the pages
+- Do not put the ZK logo lockup, the red ZK mark, or "Official F1 Paddock Club Distributor" on the white-label pages
+- The ZK brochure is the same PDF plus a closing page with the ZK lockup, "We look forward to welcoming you", and Oliver's email (mailto) and WhatsApp number. Portal clients download the white-label file only; sales list can download either
 - Cover headline is the package name, with the event underneath and the circuit/location as small supporting text. Every title line uses the same size and stacks in the black panel: a leading "3 Day" stays together, then one word per line, with the last word in red. A trailing number stays on the line above. A trailing "BY ZK" stays on one red line
 - Page 2 is titled The Experience and shows the description as whole sentences. Stop at the last sentence that fits. Do not end a sentence with an ellipsis
 - Page 3 is titled What's Included and shows the inclusion list as bullets. A long bullet may be shortened to two lines, but only on a finished phrase, with no ellipsis
@@ -19,7 +20,7 @@ Rules:
 - Photography-led, short readable copy — do not invent itineraries, partner logos, or prices
 - Refuse to generate without at least 3 unique photos; prompt staff to add them
 - Refuse to generate without a short description and at least 4 inclusions, unless the product is a standard F1 Paddock Club or Champions Club programme whose official copy we already store
-- Keep generation CMS-staff only; portal clients may download an attached file, not create one
+- Keep generation CMS-staff only; portal clients may download the white-label file, not create one and not receive the ZK closing page
 - Guest guide is a separate PDF next to the sales brochure on the admin product page. Do not show it on the agent portal. Cover page stays the sales cover; later pages use staff-edited guest guide copy. Empty pages are skipped. Do not invent itineraries, prices, or on-ground contact details
 - Official Singapore Velocity Terrace guest guide only: cover uses the Velocity Terrace logo, then "Presented by" and the SY logo centred under it, then the event details centred on that same column; the supplied partner marks (SY, ZK, The Team) sit in the footer on every page; the closing page uses the National Gallery location map. Do not add those logos or that map to the shared guest-guide template or the sales brochure
 - Guest guide pages are Welcome, Before race weekend, Digital ticket, Arriving, Experience, Getting there, Parking, On-ground support, Things to know, then the closing page. Discover QR/link lives on the closing page. On-ground contact lives on On-ground support. Red section headings use the bold condensed face

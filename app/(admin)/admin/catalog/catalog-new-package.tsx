@@ -163,6 +163,7 @@ export function CatalogNewPackage({
   const [createdPackageId, setCreatedPackageId] = useState<string | null>(null)
   const [savedRaceId, setSavedRaceId] = useState<string | null>(null)
   const [brochureUrlLive, setBrochureUrlLive] = useState<string | null>(null)
+  const [zkBrochureUrlLive, setZkBrochureUrlLive] = useState<string | null>(null)
   const [initialFiles, setInitialFiles] = useState<File[]>([])
   const [duration, setDuration] = useState("")
   const [inventoryIsStandalone, setInventoryIsStandalone] = useState(false)
@@ -586,13 +587,16 @@ export function CatalogNewPackage({
     start(async () => {
       const id = await persistProduct()
       if (!id) return
-      const result = await createPackageBrochure({ packageId: id, replace: Boolean(brochureUrlLive) })
+      const result = await createPackageBrochure({ packageId: id, replace: Boolean(brochureUrlLive || zkBrochureUrlLive) })
       if (!result.ok) {
         toast.error(result.message)
         return
       }
       setBrochureUrlLive(result.brochureUrl)
-      toast.success(result.replaced ? "Brochure updated." : "Brochure created.")
+      setZkBrochureUrlLive(result.zkBrochureUrl)
+      toast.success(result.replaced ? "Brochures updated." : "Brochures created.", {
+        description: "White-label is for agents. ZK branded includes our contact page.",
+      })
     })
   }
 
@@ -1063,8 +1067,11 @@ export function CatalogNewPackage({
           descriptionLabel="Description"
         />
         <div id="product-documents" className="sm:col-span-2 rounded-lg border border-border bg-muted/20 p-3 space-y-2">
-          <p className="text-sm font-medium text-foreground">Sales brochure</p>
-          <p className="text-xs leading-relaxed text-muted-foreground">Uses the photos, description, and inclusions already on this form.</p>
+          <p className="text-sm font-medium text-foreground">Sales brochures</p>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Uses the photos, description, and inclusions already on this form. Builds a white-label PDF for
+            agents and a ZK branded PDF with our closing page.
+          </p>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -1072,11 +1079,16 @@ export function CatalogNewPackage({
               onClick={generateBrochure}
               className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"
             >
-              {brochureUrlLive ? "Update brochure" : "Create brochure"}
+              {brochureUrlLive || zkBrochureUrlLive ? "Update brochures" : "Create brochures"}
             </button>
             {brochureUrlLive ? (
               <a href={brochureUrlLive} target="_blank" rel="noreferrer" className="text-sm font-medium text-foreground underline">
-                Open
+                White-label
+              </a>
+            ) : null}
+            {zkBrochureUrlLive ? (
+              <a href={zkBrochureUrlLive} target="_blank" rel="noreferrer" className="text-sm font-medium text-foreground underline">
+                ZK branded
               </a>
             ) : null}
           </div>

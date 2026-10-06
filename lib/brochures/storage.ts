@@ -35,10 +35,11 @@ async function ensureBrochureBucket(
   return null
 }
 
-export type PackagePdfKind = "brochure" | "guest-guide"
+export type PackagePdfKind = "brochure" | "zk-brochure" | "guest-guide"
 
 const LEGACY_FILE: Record<PackagePdfKind, string> = {
   brochure: "brochure.pdf",
+  "zk-brochure": "zk-brochure.pdf",
   "guest-guide": "guest-guide.pdf",
 }
 const PDF_CACHE_CONTROL = "0"
@@ -56,7 +57,11 @@ export function isPackagePdfKind(name: string, kind: PackagePdfKind): boolean {
   const n = name.toLowerCase()
   if (!n.endsWith(".pdf")) return false
   if (kind === "guest-guide") return n === "guest-guide.pdf" || n.endsWith("-guest-guide.pdf")
-  return n === "brochure.pdf" || (n.endsWith("-brochure.pdf") && !n.includes("guest-guide"))
+  if (kind === "zk-brochure") return n === "zk-brochure.pdf" || n.endsWith("-zk-brochure.pdf")
+  return (
+    n === "brochure.pdf" ||
+    (n.endsWith("-brochure.pdf") && !n.includes("guest-guide") && !n.includes("zk-brochure"))
+  )
 }
 
 /** Only stale files of the same document kind are removed so sales PDFs and guest guides can share a folder. */
@@ -167,4 +172,12 @@ export async function uploadPackageGuestGuidePdf(
   filename: string,
 ): Promise<{ url: string } | { error: string }> {
   return uploadPackagePdf(packageId, bytes, filename, "guest-guide")
+}
+
+export async function uploadPackageZkBrochurePdf(
+  packageId: string,
+  bytes: Uint8Array,
+  filename: string,
+): Promise<{ url: string } | { error: string }> {
+  return uploadPackagePdf(packageId, bytes, filename, "zk-brochure")
 }

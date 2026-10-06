@@ -63,6 +63,9 @@ describe("package guest guides", () => {
       "old-sales-brochure.pdf",
       "brochure.pdf",
       "singapore-gp-2026-3-days-velocity-terrace-brochure.pdf",
+      "old-zk-brochure.pdf",
+      "zk-brochure.pdf",
+      "singapore-gp-2026-3-days-velocity-terrace-zk-brochure.pdf",
       "old-guest-guide.pdf",
       "guest-guide.pdf",
       "singapore-gp-2026-3-days-velocity-terrace-guest-guide.pdf",
@@ -70,6 +73,15 @@ describe("package guest guides", () => {
     assert.deepEqual(
       stalePackagePdfPaths("pkg-1", names, "brochure", "singapore-gp-2026-3-days-velocity-terrace-brochure.pdf"),
       ["pkg-1/old-sales-brochure.pdf"],
+    )
+    assert.deepEqual(
+      stalePackagePdfPaths(
+        "pkg-1",
+        names,
+        "zk-brochure",
+        "singapore-gp-2026-3-days-velocity-terrace-zk-brochure.pdf",
+      ),
+      ["pkg-1/old-zk-brochure.pdf"],
     )
     assert.deepEqual(
       stalePackagePdfPaths(

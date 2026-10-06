@@ -388,6 +388,7 @@ export function InventoryWorkspace({
     return [...new Set(sanitizeHttpsUrlList(raw))]
   }, [selected])
   const selectedBrochure = sanitizeHttpsUrl(selected?.brochure_url)
+  const selectedZkBrochure = sanitizeHttpsUrl(selected?.zk_brochure_url)
   const selectedGuestGuide = sanitizeHttpsUrl(selected?.guest_guide_url)
   const selectedContents = useMemo(
     () =>
@@ -958,6 +959,7 @@ export function InventoryWorkspace({
                     <PackageBrochureActions
                       packageId={selected.id}
                       brochureUrl={selectedBrochure}
+                      zkBrochureUrl={selectedZkBrochure}
                       productName={selected.name}
                       eventName={selected.race_name}
                       compact
@@ -972,11 +974,6 @@ export function InventoryWorkspace({
                       compact
                       downloadOnly
                     />
-                    {!selectedBrochure ? (
-                      <p className="text-[8px] leading-4 text-[#93979f]">
-                        Creates a branded sales PDF from this product&apos;s photos, description and inclusions.
-                      </p>
-                    ) : null}
                   </div>
                 </div>
                 <dl className="grid grid-cols-[88px_1fr] gap-y-2 text-[9px]">

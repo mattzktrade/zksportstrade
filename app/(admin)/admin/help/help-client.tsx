@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import {
   BookOpen,
+  Bot,
   BriefcaseBusiness,
   ChevronDown,
   CircleHelp,
@@ -32,6 +33,7 @@ const TOPIC_ICONS: Record<HelpTopicId, typeof BookOpen> = {
   pages: LayoutGrid,
   rules: ShieldAlert,
   sales: BriefcaseBusiness,
+  assistant: Bot,
   inventory: Warehouse,
   portal: PackageSearch,
   "after-sale": Wrench,

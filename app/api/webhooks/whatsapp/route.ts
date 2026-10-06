@@ -7,20 +7,11 @@ import { isOutreachStopKeyword } from "@/lib/integrations/marketing-leads/outrea
 import { findActiveOutreachByPhone } from "@/lib/integrations/marketing-leads/outreach-store"
 import { stopMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-stop"
 import { safeEqualStrings } from "@/lib/crypto/timing-safe"
+import { ingestAssistantEvent } from "@/lib/assistant/ingest"
+import { collectWhatsAppInboundMessages, parseWhatsAppAssistantEvents } from "@/lib/assistant/whatsapp-parse"
 
 function header(request: Request, name: string): string {
   return request.headers.get(name)?.trim() || ""
-}
-
-function validSignature(rawBody: string, secret: string, provided: string): boolean {
-  const expected = `sha256=${createHmac("sha256", secret).update(rawBody).digest("hex")}`
-  return safeEqualStrings(provided, expected)
-}
-
-type InboundMessage = {
-  from?: string
-  type?: string
-  text?: { body?: string }
 }
 
 export async function GET(request: Request) {
@@ -42,7 +33,8 @@ export async function POST(request: Request) {
   }
   const rawBody = await request.text()
   const signature = header(request, "x-hub-signature-256")
-  if (!validSignature(rawBody, appSecret, signature)) {
+  const expected = `sha256=${createHmac("sha256", appSecret).update(rawBody).digest("hex")}`
+  if (!safeEqualStrings(signature, expected)) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
   }
 
@@ -56,11 +48,9 @@ export async function POST(request: Request) {
   const admin = createAdminClient()
   if (!admin) return NextResponse.json({ ok: true, skipped: true })
 
-  const messages = collectInboundMessages(body)
-  for (const message of messages) {
+  for (const message of collectWhatsAppInboundMessages(body)) {
     const from = (message.from ?? "").replace(/\D/g, "")
     if (from.length < 8) continue
-    if (message.type === "system") continue
     const enrollment = await findActiveOutreachByPhone(admin, from)
     if (!enrollment) continue
     const text = message.text?.body ?? ""
@@ -79,24 +69,13 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true })
-}
-
-function collectInboundMessages(body: unknown): InboundMessage[] {
-  if (!body || typeof body !== "object") return []
-  const root = body as { entry?: unknown }
-  if (!Array.isArray(root.entry)) return []
-  const out: InboundMessage[] = []
-  for (const entry of root.entry) {
-    const changes = (entry as { changes?: unknown })?.changes
-    if (!Array.isArray(changes)) continue
-    for (const change of changes) {
-      const value = (change as { value?: { messages?: unknown } })?.value
-      if (!Array.isArray(value?.messages)) continue
-      for (const message of value.messages) {
-        if (message && typeof message === "object") out.push(message as InboundMessage)
-      }
+  for (const event of parseWhatsAppAssistantEvents(body)) {
+    try {
+      await ingestAssistantEvent(event)
+    } catch (error) {
+      console.error("[assistant-whatsapp]", error instanceof Error ? error.message : "Ingest failed.")
     }
   }
-  return out
+
+  return NextResponse.json({ ok: true })
 }

@@ -4,6 +4,8 @@ import { suggestedEnquiryAction } from "@/lib/crm/deal-pipeline"
 import { isOutreachStopKeyword } from "@/lib/integrations/marketing-leads/outreach-labels"
 import { findActiveOutreachByEmail } from "@/lib/integrations/marketing-leads/outreach-store"
 import { stopMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-stop"
+import { parseAssistantEmailEvent } from "@/lib/assistant/email-parse"
+import { ingestAssistantEvent } from "@/lib/assistant/ingest"
 import { safeEqualStrings } from "@/lib/crypto/timing-safe"
 
 function secretFromRequest(request: Request): string {
@@ -39,22 +41,32 @@ export async function POST(request: Request) {
   const admin = createAdminClient()
   if (!admin) return NextResponse.json({ ok: true, skipped: true })
   const enrollment = await findActiveOutreachByEmail(admin, email)
-  if (!enrollment) return NextResponse.json({ ok: true, unmatched: true })
-
-  const reason = isOutreachStopKeyword(text) ? "stop_keyword" : "replied"
-  await stopMarketingOutreach(enrollment.deal_id, reason)
-  if (reason === "replied") {
-    await admin
-      .from("deals")
-      .update({
-        enquiry_stage: "responded",
-        next_action: suggestedEnquiryAction("responded"),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", enrollment.deal_id)
-      .in("enquiry_stage", ["new", "contacted"])
+  if (enrollment) {
+    const reason = isOutreachStopKeyword(text) ? "stop_keyword" : "replied"
+    await stopMarketingOutreach(enrollment.deal_id, reason)
+    if (reason === "replied") {
+      await admin
+        .from("deals")
+        .update({
+          enquiry_stage: "responded",
+          next_action: suggestedEnquiryAction("responded"),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", enrollment.deal_id)
+        .in("enquiry_stage", ["new", "contacted"])
+    }
   }
-  return NextResponse.json({ ok: true })
+
+  const assistantEvent = parseAssistantEmailEvent(body)
+  if (assistantEvent) {
+    try {
+      await ingestAssistantEvent(assistantEvent)
+    } catch (error) {
+      console.error("[assistant-email]", error instanceof Error ? error.message : "Ingest failed.")
+    }
+  }
+
+  return NextResponse.json({ ok: true, unmatched: !enrollment })
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

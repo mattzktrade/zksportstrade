@@ -2,7 +2,13 @@ import { cache } from "react"
 import { createClient } from "@/lib/supabase/server"
 import { isOutstandingInvoiceStatus } from "@/lib/invoices/status"
 import type { PortalProfile } from "@/lib/types/profile"
-import { CATALOG_LIST_PACKAGE_COLUMNS, INVENTORY_COLUMNS, PACKAGE_COLUMNS } from "@/lib/catalog/columns"
+import {
+  ADMIN_PACKAGE_COLUMNS,
+  CATALOG_LIST_PACKAGE_COLUMNS,
+  INVENTORY_COLUMNS,
+  isMissingZkBrochureUrlColumnError,
+  withoutZkBrochureUrl,
+} from "@/lib/catalog/columns"
 import { guestGuideFieldsFor, loadGuestGuideFields } from "@/lib/catalog/guest-guide-fields"
 import { loadPackageFaqs } from "@/lib/catalog/package-faqs"
 import type { DbInventory, DbPackage } from "@/lib/catalog/map-rows"
@@ -444,13 +450,29 @@ export async function getAdminAgentsWithOrderStats(): Promise<AdminAgentWithStat
   })
 }
 
+async function adminPackagesSelect(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  columns: string,
+  options: { id: string } | { order: true },
+) {
+  const run = (cols: string) => {
+    const query = supabase.from("packages").select(cols)
+    return "id" in options ? query.eq("id", options.id).maybeSingle() : query.order("sort_order")
+  }
+  const first = await run(columns)
+  if (first.error && isMissingZkBrochureUrlColumnError(first.error.message)) {
+    return run(withoutZkBrochureUrl(columns))
+  }
+  return first
+}
+
 export async function getAdminPackageById(packageId: string): Promise<AdminPackageRow | null> {
   const supabase = await createClient()
   const id = packageId.trim()
   if (!id) return null
 
   const [{ data: pkg, error: pe }, { data: inv }] = await Promise.all([
-    supabase.from("packages").select(PACKAGE_COLUMNS).eq("id", id).maybeSingle(),
+    adminPackagesSelect(supabase, ADMIN_PACKAGE_COLUMNS, { id }),
     supabase.from("package_inventory").select(INVENTORY_COLUMNS).eq("package_id", id).maybeSingle(),
   ])
   if (pe || !pkg) return null
@@ -551,7 +573,7 @@ export async function getAdminCatalogListRows(options?: {
   ] =
     await Promise.all([
       supabase.from("races").select("id,name,season").order("event_date"),
-      supabase.from("packages").select(CATALOG_LIST_PACKAGE_COLUMNS).order("sort_order"),
+      adminPackagesSelect(supabase, CATALOG_LIST_PACKAGE_COLUMNS, { order: true }),
       supabase.from("package_inventory").select(INVENTORY_COLUMNS),
     ])
   if (re || pe || ie || !packages) return []
@@ -586,6 +608,7 @@ export async function getAdminCatalogListRows(options?: {
       : [],
     featured: Boolean(p.featured),
     brochure_url: typeof p.brochure_url === "string" ? p.brochure_url : null,
+    zk_brochure_url: typeof p.zk_brochure_url === "string" ? p.zk_brochure_url : null,
     guest_guide_url: typeof p.guest_guide_url === "string" ? p.guest_guide_url : null,
     description: typeof p.description === "string" ? p.description : null,
     gallery_images: Array.isArray(p.gallery_images)
@@ -639,7 +662,7 @@ export async function getAdminPackageRows(
   const supabase = await createClient()
   const [{ data: races, error: re }, { data: packages, error: pe }, { data: inv, error: ie }] = await Promise.all([
     supabase.from("races").select("id,name,season").order("event_date"),
-    supabase.from("packages").select(PACKAGE_COLUMNS).order("sort_order"),
+    adminPackagesSelect(supabase, ADMIN_PACKAGE_COLUMNS, { order: true }),
     supabase.from("package_inventory").select(INVENTORY_COLUMNS),
   ])
   if (re || pe || ie || !packages) return []

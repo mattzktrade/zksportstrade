@@ -32,6 +32,7 @@ import {
   Inbox,
   CircleHelp,
   Mail,
+  Bot,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useEffect, useState } from "react"
@@ -84,6 +85,7 @@ const navigation: NavItem[] = [
     children: [
       { name: "Accounts", href: "/admin/leads", icon: Users },
       { name: "Enquiries", href: "/admin/enquiries", icon: Inbox },
+      { name: "Assistant", href: "/admin/assistant", icon: Bot },
       { name: "Deals", href: "/admin/deals", icon: BriefcaseBusiness },
       { name: "Contracts", href: "/admin/contracts", icon: FilePenLine },
       { name: "Sales tracker", href: "/admin/sales-tracker", icon: TrendingUp },
@@ -102,6 +104,7 @@ const navigation: NavItem[] = [
 const JUMP_KEYWORDS: Record<string, string> = {
   "/admin/leads": "leads clients companies contacts people prospects funnel",
   "/admin/enquiries": "enquiry enquiries sourcing inbound quote pipeline crm",
+  "/admin/assistant": "assistant whatsapp email inbox ai reply knowledge faq",
   "/admin/deals": "pipeline crm sales booking form",
   "/admin/contracts": "contracts inclusion booking form signature sign agreement client",
   "/admin/sales-tracker": "sales tracker revenue demand conversion event product stock planning",
@@ -134,6 +137,7 @@ function adminPageTitle(pathname: string): string {
   if (pathname.startsWith("/admin/finance")) return "Finance"
   if (pathname.startsWith("/admin/operations")) return "Operations"
   if (pathname.startsWith("/admin/enquiries")) return "Enquiries"
+  if (pathname.startsWith("/admin/assistant")) return "Sales assistant"
   if (pathname.startsWith("/admin/deals")) return "Deals"
   if (pathname.startsWith("/admin/contracts")) return "Contracts"
   if (pathname.startsWith("/admin/leads") || pathname.startsWith("/admin/clients")) return "Accounts"
@@ -205,6 +209,7 @@ export function AdminLayout({
     Sales:
       pathname.startsWith("/admin/leads") ||
       pathname.startsWith("/admin/enquiries") ||
+      pathname.startsWith("/admin/assistant") ||
       pathname.startsWith("/admin/deals") ||
       pathname.startsWith("/admin/contracts") ||
       pathname.startsWith("/admin/sales-tracker") ||
