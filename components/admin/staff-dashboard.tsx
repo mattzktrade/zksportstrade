@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { Suspense } from "react"
 import {
   AlertTriangle,
   Boxes,
@@ -20,7 +21,7 @@ import {
   listNativeBookingFormsAwaitingApprovalDealIds,
 } from "@/lib/booking-forms/queries"
 import { getDashboardActionCounts } from "@/lib/admin/dashboard-stats"
-import { getNegativeStockRows } from "@/lib/admin/negative-stock-query"
+import { countNegativeStockItems } from "@/lib/admin/negative-stock-query"
 import { getSalesTrackerRows } from "@/lib/admin/workflow-views"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { DEAL_STAGE_LABELS, dealSourceLabel, type DealStage } from "@/lib/crm/deal-types"
@@ -67,7 +68,25 @@ function one<T>(value: T | T[] | null | undefined): T | null {
 }
 
 /** Shared dashboard for finance until that role gets its own layout. */
-export async function StaffDashboard() {
+export function StaffDashboard() {
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto max-w-[1540px] space-y-3 p-3 sm:p-4 lg:p-5 animate-pulse">
+          <div className="h-8 w-48 rounded-md bg-muted" />
+          <div className="grid gap-3 xl:grid-cols-2">
+            <div className="h-64 rounded-xl bg-muted" />
+            <div className="h-64 rounded-xl bg-muted" />
+          </div>
+        </div>
+      }
+    >
+      <StaffDashboardLoaded />
+    </Suspense>
+  )
+}
+
+async function StaffDashboardLoaded() {
   const profile = await requireAdmin()
   const supabase = await createClient()
 
@@ -79,7 +98,7 @@ export async function StaffDashboard() {
     bookingFormsReadyToSend,
     actions,
     { data: inventory },
-    negativeStockRows,
+    negativeStock,
     salesRows,
     { data: newestDealRows },
     { data: myDeals },
@@ -91,7 +110,7 @@ export async function StaffDashboard() {
     countNativeBookingFormsReadyToSend(),
     getDashboardActionCounts(),
     supabase.from("package_inventory").select("qty_available"),
-    getNegativeStockRows(),
+    countNegativeStockItems(),
     getSalesTrackerRows(),
     supabase
       .from("deals")
@@ -117,7 +136,6 @@ export async function StaffDashboard() {
       .limit(5),
   ])
 
-  const negativeStock = negativeStockRows.length
   const totalAvailable = (inventory ?? []).reduce(
     (sum, row) => sum + Number(row.qty_available ?? 0),
     0,

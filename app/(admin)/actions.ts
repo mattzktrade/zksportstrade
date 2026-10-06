@@ -6,7 +6,8 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 import { sanitizeHttpsUrl, sanitizeHttpsUrlList } from "@/lib/auth/safe-url"
 import { normalizeCatalogImageUrl, normalizeCatalogImageUrlList } from "@/lib/images/display-image-url"
-import { deriveInventoryGroupId, isMultiDayComboDuration } from "@/lib/catalog/inventory-group"
+import { deriveInventoryGroupId, isMultiDayComboDuration, isSplittablePackageDuration } from "@/lib/catalog/inventory-group"
+import { mapLinkSharedInventoryError, resolveLinkSharedInventoryRoles } from "@/lib/inventory/link-shared-inventory"
 import { ensureShellSingleTicketsForParent } from "@/lib/catalog/ensure-shell-single-tickets"
 import { generatePackageIdFromRaceAndName } from "@/lib/catalog/generate-package-id"
 import { isPaddockClubPackageName } from "@/lib/catalog/paddock-club"
@@ -829,6 +830,165 @@ export async function updatePackageFields(input: {
 
   revalidatePackagePaths((existing as { race_id: string }).race_id, input.race_id.trim())
   return { ok: true }
+}
+
+export type InventoryShareTarget = {
+  id: string
+  name: string
+  duration: string | null
+  qty_available: number
+  bought: number
+}
+
+export async function listInventoryShareTargets(
+  packageId: string,
+): Promise<{ ok: true; targets: InventoryShareTarget[] } | { ok: false; message: string }> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  const id = packageId.trim()
+  if (!id) return { ok: false, message: "Package id is missing." }
+
+  const { data: current, error: currentErr } = await gate.supabase
+    .from("packages")
+    .select("id, race_id, duration, inventory_group_id, inventory_is_standalone")
+    .eq("id", id)
+    .maybeSingle()
+  if (currentErr) return { ok: false, message: currentErr.message }
+  if (!current) return { ok: false, message: "Package not found." }
+  if (!isSplittablePackageDuration(current.duration)) {
+    return { ok: true, targets: [] }
+  }
+
+  const raceId = String(current.race_id ?? "").trim()
+  const currentGroup =
+    current.inventory_is_standalone === true
+      ? ""
+      : String(current.inventory_group_id ?? "").trim()
+
+  const { data: rows, error } = await gate.supabase
+    .from("packages")
+    .select("id, name, duration, inventory_group_id, inventory_is_standalone, shell_parent_package_id")
+    .eq("race_id", raceId)
+    .neq("id", id)
+    .is("shell_parent_package_id", null)
+    .order("name")
+  if (error) return { ok: false, message: error.message }
+
+  const candidates = (rows ?? []).filter((row) => {
+    if (!isSplittablePackageDuration(row.duration)) return false
+    const group =
+      row.inventory_is_standalone === true ? "" : String(row.inventory_group_id ?? "").trim()
+    if (currentGroup && group && currentGroup === group) return false
+    return true
+  })
+  const ids = candidates.map((row) => String(row.id))
+  if (ids.length === 0) return { ok: true, targets: [] }
+
+  const [{ data: invRows }, { data: layerRows }] = await Promise.all([
+    gate.supabase.from("package_inventory").select("package_id, qty_available").in("package_id", ids),
+    gate.supabase.from("package_cost_layers").select("package_id, quantity").in("package_id", ids),
+  ])
+  const qtyBy = new Map<string, number>()
+  for (const row of invRows ?? []) {
+    qtyBy.set(String(row.package_id), Math.max(0, Math.floor(Number(row.qty_available) || 0)))
+  }
+  const boughtBy = new Map<string, number>()
+  for (const row of layerRows ?? []) {
+    const pkgId = String(row.package_id)
+    boughtBy.set(pkgId, (boughtBy.get(pkgId) ?? 0) + Math.max(0, Math.floor(Number(row.quantity) || 0)))
+  }
+
+  const targets = candidates
+    .map((row) => ({
+      id: String(row.id),
+      name: String(row.name ?? row.id),
+      duration: typeof row.duration === "string" ? row.duration : null,
+      qty_available: qtyBy.get(String(row.id)) ?? 0,
+      bought: boughtBy.get(String(row.id)) ?? 0,
+    }))
+    .sort((a, b) => {
+      const rank = (duration: string | null) =>
+        duration === "3_day" ? 0 : duration === "2_day" ? 1 : 2
+      return rank(a.duration) - rank(b.duration) || a.name.localeCompare(b.name)
+    })
+  return { ok: true, targets }
+}
+
+export async function linkPackageSharedInventory(input: {
+  packageId: string
+  shareWithPackageId: string
+}): Promise<ActionResult> {
+  const gate = await requireAdminAction("inventory.manage")
+  if (!gate.ok) return gate
+  const packageId = input.packageId.trim()
+  const shareWithPackageId = input.shareWithPackageId.trim()
+  if (!packageId || !shareWithPackageId) {
+    return { ok: false, message: "Choose a product to share stock with." }
+  }
+
+  const { data: current, error: currentErr } = await gate.supabase
+    .from("packages")
+    .select("id, duration")
+    .eq("id", packageId)
+    .maybeSingle()
+  if (currentErr) return { ok: false, message: currentErr.message }
+  if (!current) return { ok: false, message: "Package not found." }
+  const { data: selected, error: selectedErr } = await gate.supabase
+    .from("packages")
+    .select("id, duration")
+    .eq("id", shareWithPackageId)
+    .maybeSingle()
+  if (selectedErr) return { ok: false, message: selectedErr.message }
+  if (!selected) return { ok: false, message: "Package not found." }
+
+  const roles = resolveLinkSharedInventoryRoles({
+    currentId: packageId,
+    currentDuration: typeof current.duration === "string" ? current.duration : null,
+    selectedId: shareWithPackageId,
+    selectedDuration: typeof selected.duration === "string" ? selected.duration : null,
+  })
+
+  const { data, error } = await gate.supabase.rpc("admin_link_package_shared_inventory", {
+    p_package_id: roles.joiningId,
+    p_share_with_package_id: roles.shareWithId,
+  })
+  if (error) return { ok: false, message: mapLinkSharedInventoryError(error.message) }
+
+  const result = (data ?? {}) as {
+    discarded_units?: number
+    discarded_layer_count?: number
+    source_has_purchase_layers?: boolean
+    joining_sold?: number
+  }
+  const discarded = Math.max(0, Math.floor(Number(result.discarded_units) || 0))
+  const sold = Math.max(0, Math.floor(Number(result.joining_sold) || 0))
+  const parts = ["This product now shares stock with the selected package."]
+  if (discarded > 0 || (result.discarded_layer_count ?? 0) > 0) {
+    parts.push(
+      discarded === 1
+        ? "Removed 1 purchased unit that was recorded on the day product."
+        : `Removed ${discarded} purchased units that were recorded on the day product.`,
+    )
+  }
+  if (sold > 0) {
+    parts.push("Confirmed deals stayed on this product and now use the shared stock.")
+  }
+  if (result.source_has_purchase_layers === false && discarded > 0) {
+    parts.push(
+      "The other product still has untracked stock. Add a purchase row there if you need cost and supplier on the shared ledger.",
+    )
+  }
+
+  const { data: pkgs } = await gate.supabase
+    .from("packages")
+    .select("id, race_id")
+    .in("id", [packageId, shareWithPackageId])
+  const raceIds = [...new Set((pkgs ?? []).map((row) => String(row.race_id ?? "").trim()).filter(Boolean))]
+  revalidatePackagePaths(...raceIds)
+  revalidatePath(`/admin/catalog/${packageId}`)
+  revalidatePath(`/admin/catalog/${shareWithPackageId}`)
+  await enqueueLinkedInventoryChannelSync(gate.supabase, packageId)
+  return { ok: true, message: parts.join(" ") }
 }
 
 export async function updatePackageIntegration(input: {

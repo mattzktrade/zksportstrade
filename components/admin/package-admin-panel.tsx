@@ -25,6 +25,7 @@ import { PackageCopyFields } from "@/components/admin/package-copy-fields"
 import { PackageFaqFields } from "@/components/admin/package-faq-fields"
 import { mergePackageFaqs, parsePackageFaqs, suggestedPackageFaqs, type PackageFaqSource } from "@/lib/catalog/package-faqs"
 import { LinkedDayInventoryToolbar } from "@/components/admin/linked-day-packages-panel"
+import { LinkSharedInventoryPanel } from "@/components/admin/link-shared-inventory-panel"
 import { FulfilmentBlocksPanel } from "@/components/admin/fulfilment-blocks-panel"
 import type { WixChannelListingRow } from "@/lib/admin/wix-channel-listings"
 import type { FulfilmentBlockWithUsage } from "@/lib/admin/fulfilment-blocks"
@@ -691,18 +692,32 @@ export function PackageAdminPanel({
               <span className="block text-[11px] text-muted-foreground/80 mt-1 leading-relaxed">
                 Packages with the same key share inventory.
               </span>
-              <span className="mt-2 flex items-start gap-2 rounded-md border border-border p-2.5 text-[11px] leading-relaxed">
-                <input
-                  type="checkbox"
-                  checked={inventoryIsStandalone}
-                  onChange={(e) => setInventoryIsStandalone(e.target.checked)}
-                  className="mt-0.5"
-                />
-                <span>
-                  <strong className="text-foreground">Use separate inventory for this package.</strong>{" "}
-                  Select this when the day package was purchased independently and should not consume the
-                  3-day stock.
-                </span>
+            </label>
+            <LinkSharedInventoryPanel
+              packageId={initial.id}
+              packageName={name.trim() || initial.name}
+              duration={duration || initial.duration}
+              ownPurchaseUnits={
+                (initial.cost_layers ?? []).reduce(
+                  (sum, layer) => sum + Math.max(0, Math.floor(Number(layer.quantity) || 0)),
+                  0,
+                ) || Math.max(0, Math.floor(Number(initial.layer_units_purchased) || 0))
+              }
+              alreadySharingWith={(linkedPackages ?? [])
+                .filter((pkg) => pkg.id !== initial.id)
+                .map((pkg) => ({ id: pkg.id, name: pkg.name }))}
+            />
+            <label className="sm:col-span-2 mt-1 flex items-start gap-2 rounded-md border border-border p-2.5 text-[11px] leading-relaxed">
+              <input
+                type="checkbox"
+                checked={inventoryIsStandalone}
+                onChange={(e) => setInventoryIsStandalone(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <strong className="text-foreground">Use separate inventory for this package.</strong>{" "}
+                Select this when the day package was purchased independently and should not consume the
+                3-day stock.
               </span>
             </label>
           </DetailSection>
@@ -909,6 +924,21 @@ export function PackageAdminPanel({
               </form>
             </div>
             {linkedDayOverview ? <LinkedDayInventoryToolbar overview={linkedDayOverview} /> : null}
+            <LinkSharedInventoryPanel
+              packageId={initial.id}
+              packageName={initial.name}
+              duration={initial.duration}
+              ownPurchaseUnits={
+                (initial.cost_layers ?? []).reduce(
+                  (sum, layer) => sum + Math.max(0, Math.floor(Number(layer.quantity) || 0)),
+                  0,
+                ) || Math.max(0, Math.floor(Number(initial.layer_units_purchased) || 0))
+              }
+              compact
+              alreadySharingWith={(linkedPackages ?? [])
+                .filter((pkg) => pkg.id !== initial.id)
+                .map((pkg) => ({ id: pkg.id, name: pkg.name }))}
+            />
             <PackageCostLayers
               packageId={initial.id}
               packageName={initial.name}

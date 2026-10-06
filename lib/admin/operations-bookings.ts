@@ -3,6 +3,7 @@ import { parseAccountKinds, type AccountKind } from "@/lib/crm/account-kinds"
 import type { WorkflowOrderRow } from "@/lib/admin/workflow-views"
 import { isDirectClientAccount } from "@/lib/operations/fulfilment"
 import { createClient } from "@/lib/supabase/server"
+import { mapChunks, POSTGREST_IN_FILTER_SIZE } from "@/lib/supabase/fetch-all-rows"
 
 export type OperationsLinkedPo = {
   id: string
@@ -62,12 +63,8 @@ function one<T>(value: T | T[] | null | undefined): T | null {
 
 async function fetchInChunks<T>(ids: string[], run: (chunk: string[]) => Promise<T[]>): Promise<T[]> {
   if (ids.length === 0) return []
-  const size = 400
-  const out: T[] = []
-  for (let i = 0; i < ids.length; i += size) {
-    out.push(...(await run(ids.slice(i, i + size))))
-  }
-  return out
+  const nested = await mapChunks(ids, POSTGREST_IN_FILTER_SIZE, (chunk) => run(chunk))
+  return nested.flat()
 }
 
 function blank(value: string | null | undefined): string | null {

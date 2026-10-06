@@ -3,10 +3,23 @@ import { getSalesTrackerRows } from "@/lib/admin/workflow-views"
 import { getDemandPlanningLines } from "@/lib/crm/demand-planning-queries"
 import { SalesSourceTrackerClient } from "@/components/admin/sales-source-tracker-client"
 import { DemandPlanningClient } from "@/components/admin/demand-planning-client"
+import { AdminRouteShell } from "@/components/admin/admin-route-shell"
 
 export const dynamic = "force-dynamic"
 
-export default async function SalesTrackerPage({
+export default function SalesTrackerPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string }>
+}) {
+  return (
+    <AdminRouteShell>
+      <SalesTrackerPageBody searchParams={searchParams} />
+    </AdminRouteShell>
+  )
+}
+
+async function SalesTrackerPageBody({
   searchParams,
 }: {
   searchParams: Promise<{ view?: string }>

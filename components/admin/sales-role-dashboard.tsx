@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { Suspense, type ReactNode } from "react"
 import Link from "next/link"
 import {
   AlertTriangle,
@@ -503,13 +503,33 @@ function SalesDashboardView({
   )
 }
 
-export async function SalesRoleDashboard() {
+export function SalesRoleDashboard() {
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto max-w-[1540px] min-w-0 space-y-3 p-3 sm:p-4 lg:p-5 animate-pulse">
+          <div className="h-8 w-48 rounded-md bg-muted" />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="h-20 rounded-xl bg-muted" />
+            <div className="h-20 rounded-xl bg-muted" />
+            <div className="h-20 rounded-xl bg-muted" />
+            <div className="h-20 rounded-xl bg-muted" />
+          </div>
+          <div className="h-64 rounded-xl bg-muted" />
+        </div>
+      }
+    >
+      <SalesDashboardLoaded />
+    </Suspense>
+  )
+}
+
+async function SalesDashboardLoaded() {
   const profile = await requireAdmin()
   const supabase = await createClient()
-  const data = await getSalesDashboardModel(profile)
-  const review = await supabase
-    .from("assistant_conversations")
-    .select("id", { count: "exact", head: true })
-    .eq("status", "needs_review")
+  const [data, review] = await Promise.all([
+    getSalesDashboardModel(profile),
+    supabase.from("assistant_conversations").select("id", { count: "exact", head: true }).eq("status", "needs_review"),
+  ])
   return <SalesDashboardView data={data} assistantReviewCount={review.error ? 0 : review.count ?? 0} />
 }

@@ -1,5 +1,6 @@
 import { cache } from "react"
 import { createClient } from "@/lib/supabase/server"
+import { rememberTtl } from "@/lib/server/ttl-cache"
 import { isOutstandingInvoiceStatus } from "@/lib/invoices/status"
 import type { PortalProfile } from "@/lib/types/profile"
 import {
@@ -217,6 +218,10 @@ export async function getAdminRaceOptions(): Promise<AdminRaceOption[]> {
 }
 
 const getAdminRaceOptionsCached = cache(async (): Promise<AdminRaceOption[]> => {
+  return rememberTtl("admin-race-options", 60_000, loadAdminRaceOptions)
+})
+
+async function loadAdminRaceOptions(): Promise<AdminRaceOption[]> {
   const supabase = await createClient()
   const withCircuit =
     "id,name,short_name,circuit,date_range,event_date,location,country,country_code,season,category,image"
@@ -239,6 +244,18 @@ const getAdminRaceOptionsCached = cache(async (): Promise<AdminRaceOption[]> => 
     error = retry.error
   }
   if (error || !data) return []
+  const mapped = data.map((row) => ({
+    ...row,
+    circuit:
+      (typeof (row as { circuit?: string }).circuit === "string" &&
+        (row as { circuit?: string }).circuit?.trim()) ||
+      officialCircuitNameForRaceId(String(row.id)) ||
+      "",
+    image: typeof row.image === "string" && row.image.trim() ? row.image.trim() : null,
+    category: isEventCategory(String(row.category)) ? row.category : "formula_1",
+  })) as AdminRaceOption[]
+  if (mapped.every((row) => row.circuit)) return mapped
+
   const { data: packageCircuits } = await supabase.from("packages").select("race_id, circuit")
   const circuitByRace = new Map<string, string>()
   for (const row of packageCircuits ?? []) {
@@ -246,18 +263,10 @@ const getAdminRaceOptionsCached = cache(async (): Promise<AdminRaceOption[]> => 
     const raceId = String((row as { race_id?: string }).race_id ?? "")
     if (value && raceId && !circuitByRace.has(raceId)) circuitByRace.set(raceId, value)
   }
-  return data.map((row) => ({
-    ...row,
-    circuit:
-      (typeof (row as { circuit?: string }).circuit === "string" &&
-        (row as { circuit?: string }).circuit?.trim()) ||
-      circuitByRace.get(String(row.id)) ||
-      officialCircuitNameForRaceId(String(row.id)) ||
-      "",
-    image: typeof row.image === "string" && row.image.trim() ? row.image.trim() : null,
-    category: isEventCategory(String(row.category)) ? row.category : "formula_1",
-  })) as AdminRaceOption[]
-})
+  return mapped.map((row) =>
+    row.circuit ? row : { ...row, circuit: circuitByRace.get(String(row.id)) || "" },
+  )
+}
 
 export async function getPendingProfiles(): Promise<PortalProfile[]> {
   const supabase = await createClient()

@@ -4,8 +4,10 @@ import type { Booking } from "@/lib/types/catalog"
 import { aggregateInvoiceStatus, normalizeInvoiceStatus, pickPreferredInvoice } from "@/lib/invoices/status"
 import type { BookingApprovalRequestRow } from "@/lib/booking-approval/types"
 import type { OrderRow, PackageSnippet } from "@/lib/orders/types"
+import { isAgentPortalBooking } from "@/lib/orders/channel"
 import { computeOrderProfit, getConsumptionsForOrders, type OrderProfit } from "@/lib/admin/cost-layers"
 import { packageDurationLabel } from "@/lib/catalog/package-duration"
+import { getPortalProfile } from "@/lib/supabase/profile"
 
 type OrderInvoiceSnippet = { status: string; xero_invoice_number: string | null }
 
@@ -132,6 +134,9 @@ function mapApprovalRequestToBooking(
 
 export async function getMyBookings(): Promise<Booking[]> {
   noStore()
+  const profile = await getPortalProfile()
+  if (!profile) return []
+
   const supabase = await createClient()
 
   const { data: requestRows } = await supabase
@@ -153,6 +158,7 @@ export async function getMyBookings(): Promise<Booking[]> {
       packages ( name, circuit, event_date, tier, duration, total_capacity )
     `,
     )
+    .eq("agent_profile_id", profile.id)
     .neq("status", "approved")
     .order("created_at", { ascending: false })
 
@@ -170,6 +176,7 @@ export async function getMyBookings(): Promise<Booking[]> {
       reference,
       agent_profile_id,
       package_id,
+      channel,
       status,
       guests,
       unit_price,
@@ -192,6 +199,7 @@ export async function getMyBookings(): Promise<Booking[]> {
       )
     `,
     )
+    .eq("agent_profile_id", profile.id)
     .order("created_at", { ascending: false })
 
   if (error || !data) return approvalBookings
@@ -199,14 +207,22 @@ export async function getMyBookings(): Promise<Booking[]> {
   const orderBookings = (data as (OrderRow & {
     packages?: PackageSnippet | PackageSnippet[] | null
     invoices?: OrderInvoiceSnippet | OrderInvoiceSnippet[] | null
-  })[]).map((row) => {
-    const normalized: OrderWithPackage = {
-      ...(row as OrderRow),
-      packages: one(row.packages),
-      invoices: row.invoices,
-    }
-    return mapOrderToBooking(normalized)
-  })
+  })[])
+    .filter((row) =>
+      isAgentPortalBooking({
+        agentProfileId: row.agent_profile_id,
+        viewerProfileId: profile.id,
+        channel: row.channel,
+      }),
+    )
+    .map((row) => {
+      const normalized: OrderWithPackage = {
+        ...(row as OrderRow),
+        packages: one(row.packages),
+        invoices: row.invoices,
+      }
+      return mapOrderToBooking(normalized)
+    })
 
   return [...approvalBookings, ...orderBookings].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),

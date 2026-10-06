@@ -2,10 +2,19 @@ import { requireAdmin } from "@/lib/admin/require-admin"
 import { getAdminRaceOptions } from "@/lib/admin/queries"
 import { getClientDirectoryRows, getSalesStaffOptions } from "@/lib/crm/leads"
 import { LeadsClient } from "./leads-client"
+import { AdminRouteShell } from "@/components/admin/admin-route-shell"
 
 export const dynamic = "force-dynamic"
 
-export default async function LeadsPage() {
+export default function LeadsPage() {
+  return (
+    <AdminRouteShell>
+      <LeadsPageBody />
+    </AdminRouteShell>
+  )
+}
+
+async function LeadsPageBody() {
   const profile = await requireAdmin()
   const [clients, staffOptions, races] = await Promise.all([
     getClientDirectoryRows(),

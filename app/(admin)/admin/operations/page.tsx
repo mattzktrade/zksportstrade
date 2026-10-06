@@ -12,10 +12,23 @@ import {
 import { loadOperationsEmailTemplates } from "@/app/(admin)/admin/operations/template-actions"
 import { loadOperationsCalendarEntries } from "@/app/(admin)/admin/operations/calendar-actions"
 import { OperationsClient } from "./operations-client"
+import { AdminRouteShell } from "@/components/admin/admin-route-shell"
 
 export const dynamic = "force-dynamic"
 
-export default async function OperationsPage({
+export default function OperationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string; booking?: string; deal?: string }>
+}) {
+  return (
+    <AdminRouteShell>
+      <OperationsPageBody searchParams={searchParams} />
+    </AdminRouteShell>
+  )
+}
+
+async function OperationsPageBody({
   searchParams,
 }: {
   searchParams: Promise<{ tab?: string; booking?: string; deal?: string }>

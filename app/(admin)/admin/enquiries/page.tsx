@@ -25,6 +25,7 @@ import { listMarketingOutreachForDeals, loadMarketingOutreachAdmin } from "@/lib
 import { toEnquiryOutreachBadge } from "@/lib/integrations/marketing-leads/outreach-labels"
 import { expirePastEventEnquiries } from "@/lib/crm/expire-past-event-enquiries"
 import { EnquiriesClient } from "./enquiries-client"
+import { AdminRouteShell } from "@/components/admin/admin-route-shell"
 
 export const dynamic = "force-dynamic"
 
@@ -46,13 +47,25 @@ function parseOwnerFilter(value: string | undefined): string {
   return ""
 }
 
-export default async function EnquiriesPage({
+export default function EnquiriesPage({
   searchParams,
 }: {
   searchParams: Promise<{ enquiry?: string; stage?: string; owner?: string }>
 }) {
+  return (
+    <AdminRouteShell>
+      <EnquiriesPageBody searchParams={searchParams} />
+    </AdminRouteShell>
+  )
+}
+
+async function EnquiriesPageBody({
+  searchParams,
+}: {
+  searchParams: Promise<{ enquiry?: string; stage?: string; owner?: string }>
+}) {
+  const expiry = expirePastEventEnquiries()
   const profile = await requireAdmin()
-  await expirePastEventEnquiries()
   const { enquiry: initialSelectedId, stage: stageParam, owner: ownerParam } = await searchParams
   const selectedId = initialSelectedId?.trim() || null
   const [allDeals, selectedRows, packagePicker, accountOptions, staffOptions, suppliers, bookingForms, awaitingZkDealIdsRaw, convertedThisMonth] =
@@ -66,6 +79,7 @@ export default async function EnquiriesPage({
       getBookingFormsForDeals(),
       listNativeBookingFormsAwaitingApprovalDealIds(),
       countBoardDealsUpdatedThisMonth(DEAL_BOARD_STAGES),
+      expiry,
     ])
 
   const awaitingZkDealIds = uniqueDealIds(awaitingZkDealIdsRaw)

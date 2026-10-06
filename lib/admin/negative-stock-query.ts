@@ -1,9 +1,10 @@
+import { cache } from "react"
 import { unstable_noStore as noStore } from "next/cache"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { dealStageCountsAsSold, DEAL_SOLD_STAGES } from "@/lib/crm/deal-types"
 import { isSupplierQuoteFresh } from "@/lib/inventory/native-availability"
 import { uncoveredQuantitiesFromLinkedDayPlan } from "@/lib/inventory/linked-day-coverage"
-import { chunkList, fetchAllRows } from "@/lib/supabase/fetch-all-rows"
+import { fetchAllRows, mapChunks } from "@/lib/supabase/fetch-all-rows"
 import { createClient } from "@/lib/supabase/server"
 import {
   mergeNegativeStockRows,
@@ -51,51 +52,102 @@ type DealMapValue = {
   lines: DealLineJoin[]
 }
 
+type ExtraDealRow = {
+  id: string
+  reference: string | null
+  stage: string
+  owner_profile_id: string | null
+  account_id: string | null
+  crm_accounts: { name: string } | { name: string }[] | null
+  deal_line_items: DealLineJoin[] | null
+}
+
 function purchaseReadyDeal(deal: DealMapValue | null, dealId: string | null): boolean {
   if (!dealId) return true
   if (!deal) return false
   return dealStageCountsAsSold(deal.stage)
 }
 
-export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
+const ID_CHUNK = 80
+type AdminDb = Awaited<ReturnType<typeof createClient>>
+
+type SoldDealJoin = {
+  id: string
+  reference: string | null
+  stage: string
+  owner_profile_id: string | null
+  account_id: string | null
+  currency?: string | null
+  created_at?: string | null
+  crm_accounts: { name: string } | { name: string }[] | null
+}
+
+export async function countNegativeStockItems(): Promise<number> {
+  const supabase = await createClient()
+  const [{ count: sourcing }, { count: historical }] = await Promise.all([
+    supabase
+      .from("sourcing_shortages")
+      .select("id", { count: "exact", head: true })
+      .in("status", [...NEGATIVE_STOCK_OPEN_STATUSES]),
+    supabase
+      .from("inventory_shortages")
+      .select("id", { count: "exact", head: true })
+      .eq("shortage_type", "historical_reconciliation")
+      .eq("status", "open"),
+  ])
+  return (sourcing ?? 0) + (historical ?? 0)
+}
+
+export const getNegativeStockRows = cache(async (): Promise<NegativeStockRow[]> => {
   noStore()
   const supabase = await createClient()
-  const { data: sourcingData } = await supabase
-    .from("sourcing_shortages")
-    .select(
-      `
-      id, deal_id, deal_line_item_id, package_id, quantity, unit_cost_quoted, currency,
-      supplier_id, supplier_quote_at, status, created_at, note,
-      packages(id, name, trade_price, location, races(name, season, event_date)),
-      suppliers(id, name)
-    `,
-    )
-    .in("status", [...NEGATIVE_STOCK_OPEN_STATUSES])
-    .order("created_at", { ascending: false })
+  const [sourcingResult, historicalResult, uncoveredDealLines] = await Promise.all([
+    fetchAllRows((from, to) =>
+      supabase
+        .from("sourcing_shortages")
+        .select(
+          `
+          id, deal_id, deal_line_item_id, package_id, quantity, unit_cost_quoted, currency,
+          supplier_id, supplier_quote_at, status, created_at, note,
+          packages(id, name, trade_price, location, races(name, season, event_date)),
+          suppliers(id, name)
+        `,
+        )
+        .in("status", [...NEGATIVE_STOCK_OPEN_STATUSES])
+        .order("id")
+        .range(from, to),
+    ),
+    fetchAllRows((from, to) =>
+      supabase
+        .from("inventory_shortages")
+        .select(
+          `
+          id, deal_id, deal_line_item_id, package_id, quantity, status, created_at, note,
+          packages(id, name, trade_price, location, currency, races(name, season, event_date))
+        `,
+        )
+        .eq("shortage_type", "historical_reconciliation")
+        .eq("status", "open")
+        .order("id")
+        .range(from, to),
+    ),
+    loadSoldDealLines(supabase),
+  ])
+  const sourcingData = sourcingResult.data
+  const historicalData = historicalResult.data
 
-  const { data: historicalData } = await supabase
-    .from("inventory_shortages")
-    .select(
-      `
-      id, deal_id, deal_line_item_id, package_id, quantity, status, created_at, note,
-      packages(id, name, trade_price, location, currency, races(name, season, event_date))
-    `,
-    )
-    .eq("shortage_type", "historical_reconciliation")
-    .eq("status", "open")
-    .order("created_at", { ascending: false })
-
-  const uncoveredDealLines = await loadSoldDealLines(supabase)
-
+  const dealMap = dealMapFromSoldLines(uncoveredDealLines)
   const dealIds = [
     ...new Set(
-      [...(sourcingData ?? []), ...(historicalData ?? []), ...uncoveredDealLines]
+      [...sourcingData, ...historicalData, ...uncoveredDealLines]
         .map((row) => row.deal_id)
         .filter(Boolean),
     ),
   ] as string[]
-  const { data: deals } = dealIds.length
-    ? await supabase
+  const missingDealIds = dealIds.filter((id) => !dealMap.has(id))
+  if (missingDealIds.length > 0) {
+    const extraDeals = await mapChunks(missingDealIds, ID_CHUNK, async (chunk) => {
+      const { data, error } = await supabase
         .from("deals")
         .select(
           `
@@ -104,22 +156,30 @@ export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
           deal_line_items(id, package_id, quantity, unit_sale_price, expected_unit_cost, sourcing_mode, supplier_id, supplier_quote_at)
         `,
         )
-        .in("id", dealIds)
-    : { data: [] as Array<Record<string, unknown>> }
-
-  const ownerIds = [
-    ...new Set((deals ?? []).map((deal) => deal.owner_profile_id).filter(Boolean)),
-  ] as string[]
-  const { data: owners } = ownerIds.length
-    ? await supabase.from("profiles").select("id, full_name").in("id", ownerIds)
-    : { data: [] as Array<{ id: string; full_name: string | null }> }
+        .in("id", chunk)
+      if (error) return [] as ExtraDealRow[]
+      return (data ?? []) as ExtraDealRow[]
+    })
+    for (const deal of extraDeals.flat()) {
+      const account = one(deal.crm_accounts)
+      dealMap.set(String(deal.id), {
+        reference: deal.reference ? String(deal.reference) : null,
+        stage: String(deal.stage ?? ""),
+        ownerProfileId: deal.owner_profile_id ? String(deal.owner_profile_id) : null,
+        ownerName: null,
+        accountId: deal.account_id ? String(deal.account_id) : null,
+        accountName: account?.name ?? null,
+        lines: deal.deal_line_items ?? [],
+      })
+    }
+  }
 
   const lineIds = [
     ...new Set(
       [
-        ...(sourcingData ?? []).map((row) => row.deal_line_item_id),
-        ...(historicalData ?? []).map((row) => row.deal_line_item_id),
-        ...(uncoveredDealLines ?? []).map((row) => row.id),
+        ...sourcingData.map((row) => row.deal_line_item_id),
+        ...historicalData.map((row) => row.deal_line_item_id),
+        ...uncoveredDealLines.map((row) => row.id),
       ]
         .map((id) => (id ? String(id) : ""))
         .filter(Boolean),
@@ -127,7 +187,13 @@ export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
   ]
   const allocatedByLine = new Map<string, number>()
   const allocationLookupFailed = new Set<string>()
-  for (const chunk of chunkList(lineIds, 80)) {
+  const purchasedLineIds = new Set<string>()
+  const ownerIds = [
+    ...new Set([...dealMap.values()].map((deal) => deal.ownerProfileId).filter(Boolean)),
+  ] as string[]
+
+  const ownerName = new Map<string, string>()
+  await mapChunks(lineIds, ID_CHUNK, async (chunk) => {
     const { data: allocations, error } = await supabase
       .from("inventory_allocations")
       .select("deal_line_item_id, quantity, state")
@@ -135,49 +201,38 @@ export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
       .in("state", ["reserved", "committed"])
     if (error) {
       for (const id of chunk) allocationLookupFailed.add(id)
-      continue
+      return null
     }
     for (const row of allocations ?? []) {
       const id = String(row.deal_line_item_id)
       allocatedByLine.set(id, (allocatedByLine.get(id) ?? 0) + Number(row.quantity ?? 0))
     }
-  }
-
-  const purchasedLineIds = new Set<string>()
-  for (const chunk of chunkList(lineIds, 80)) {
-    const { data: purchasedShortages } = await supabase
-      .from("sourcing_shortages")
-      .select("deal_line_item_id")
-      .eq("status", "purchased")
-      .in("deal_line_item_id", chunk)
-    for (const row of purchasedShortages ?? []) {
-      if (row.deal_line_item_id) purchasedLineIds.add(String(row.deal_line_item_id))
-    }
-  }
-
-  const ownerName = new Map((owners ?? []).map((row) => [row.id, row.full_name ?? ""]))
-  const dealMap = new Map(
-    (deals ?? []).map((deal) => {
-      const account = one(deal.crm_accounts as { name: string } | { name: string }[] | null)
-      const lines = (deal.deal_line_items ?? []) as DealLineJoin[]
-      return [
-        String(deal.id),
-        {
-          reference: deal.reference ? String(deal.reference) : null,
-          stage: String(deal.stage ?? ""),
-          ownerProfileId: deal.owner_profile_id ? String(deal.owner_profile_id) : null,
-          ownerName: deal.owner_profile_id ? ownerName.get(String(deal.owner_profile_id)) || null : null,
-          accountId: deal.account_id ? String(deal.account_id) : null,
-          accountName: account?.name ?? null,
-          lines,
-        } satisfies DealMapValue,
-      ] as const
+    return null
+  })
+  const [, , linkedDayPlan] = await Promise.all([
+    mapChunks(lineIds, ID_CHUNK, async (chunk) => {
+      const { data: purchasedShortages } = await supabase
+        .from("sourcing_shortages")
+        .select("deal_line_item_id")
+        .eq("status", "purchased")
+        .in("deal_line_item_id", chunk)
+      for (const row of purchasedShortages ?? []) {
+        if (row.deal_line_item_id) purchasedLineIds.add(String(row.deal_line_item_id))
+      }
+      return null
     }),
-  )
+    mapChunks(ownerIds, ID_CHUNK, async (chunk) => {
+      const { data: owners } = await supabase.from("profiles").select("id, full_name").in("id", chunk)
+      for (const row of owners ?? []) ownerName.set(row.id, row.full_name ?? "")
+      return null
+    }),
+    loadLinkedDayPlanUncovered(supabase, uncoveredDealLines),
+  ])
+  for (const deal of dealMap.values()) {
+    if (deal.ownerProfileId) deal.ownerName = ownerName.get(deal.ownerProfileId) || null
+  }
 
-  const linkedDayPlan = await loadLinkedDayPlanUncovered(supabase, uncoveredDealLines)
-
-  const brokeredRows: NegativeStockRow[] = (sourcingData ?? []).flatMap((row) => {
+  const brokeredRows: NegativeStockRow[] = sourcingData.flatMap((row) => {
     const deal = row.deal_id ? dealMap.get(String(row.deal_id)) ?? null : null
     if (!purchaseReadyDeal(deal, row.deal_id ? String(row.deal_id) : null)) return []
     const pkg = one(row.packages as ShortagePackageJoin | ShortagePackageJoin[] | null)
@@ -227,7 +282,7 @@ export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
     ]
   })
 
-  const historicalRows: NegativeStockRow[] = (historicalData ?? []).flatMap((row) => {
+  const historicalRows: NegativeStockRow[] = historicalData.flatMap((row) => {
     const deal = row.deal_id ? dealMap.get(String(row.deal_id)) ?? null : null
     if (!purchaseReadyDeal(deal, row.deal_id ? String(row.deal_id) : null)) return []
     const pkg = one(row.packages as ShortagePackageJoin | ShortagePackageJoin[] | null)
@@ -363,7 +418,7 @@ export async function getNegativeStockRows(): Promise<NegativeStockRow[]> {
   })
 
   return mergeNegativeStockRows([...historicalRows, ...brokeredRows], uncoveredRows)
-}
+})
 
 type SoldDealLineRow = {
   id: string
@@ -381,9 +436,42 @@ type SoldDealLineRow = {
   suppliers: unknown
 }
 
-async function loadSoldDealLines(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-): Promise<SoldDealLineRow[]> {
+function dealMapFromSoldLines(lines: SoldDealLineRow[]): Map<string, DealMapValue> {
+  const dealMap = new Map<string, DealMapValue>()
+  for (const row of lines) {
+    const dealJoin = one(row.deals as SoldDealJoin | SoldDealJoin[] | null)
+    if (!dealJoin) continue
+    const id = String(row.deal_id)
+    const line: DealLineJoin = {
+      id: String(row.id),
+      package_id: String(row.package_id),
+      quantity: row.quantity,
+      unit_sale_price: row.unit_sale_price,
+      expected_unit_cost: row.expected_unit_cost,
+      sourcing_mode: row.sourcing_mode,
+      supplier_id: row.supplier_id,
+      supplier_quote_at: row.supplier_quote_at,
+    }
+    const existing = dealMap.get(id)
+    if (existing) {
+      existing.lines.push(line)
+      continue
+    }
+    const account = one(dealJoin.crm_accounts)
+    dealMap.set(id, {
+      reference: dealJoin.reference ? String(dealJoin.reference) : null,
+      stage: String(dealJoin.stage ?? ""),
+      ownerProfileId: dealJoin.owner_profile_id ? String(dealJoin.owner_profile_id) : null,
+      ownerName: null,
+      accountId: dealJoin.account_id ? String(dealJoin.account_id) : null,
+      accountName: account?.name ?? null,
+      lines: [line],
+    })
+  }
+  return dealMap
+}
+
+async function loadSoldDealLines(supabase: AdminDb): Promise<SoldDealLineRow[]> {
   const { data: soldDeals, error: soldDealsError } = await fetchAllRows<{ id: string }>(
     (from, to) =>
       supabase
@@ -395,11 +483,7 @@ async function loadSoldDealLines(
   )
   if (soldDealsError || soldDeals.length === 0) return []
 
-  const lines: SoldDealLineRow[] = []
-  for (const chunk of chunkList(
-    soldDeals.map((deal) => deal.id),
-    80,
-  )) {
+  const nested = await mapChunks(soldDeals.map((deal) => deal.id), ID_CHUNK, async (chunk) => {
     const { data, error } = await supabase
       .from("deal_line_items")
       .select(
@@ -412,10 +496,10 @@ async function loadSoldDealLines(
       `,
       )
       .in("deal_id", chunk)
-    if (error) continue
-    lines.push(...((data ?? []) as SoldDealLineRow[]))
-  }
-  return lines
+    if (error) return [] as SoldDealLineRow[]
+    return (data ?? []) as SoldDealLineRow[]
+  })
+  return nested.flat()
 }
 
 type SoldPackageJoin = {
@@ -425,10 +509,7 @@ type SoldPackageJoin = {
   event_date?: string | null
 }
 
-async function loadLinkedDayPlanUncovered(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  lines: SoldDealLineRow[],
-) {
+async function loadLinkedDayPlanUncovered(supabase: AdminDb, lines: SoldDealLineRow[]) {
   const planLines = lines.map((row) => {
     const pkg = one(row.packages as SoldPackageJoin | SoldPackageJoin[] | null)
     const deal = one(
@@ -458,7 +539,7 @@ async function loadLinkedDayPlanUncovered(
     ),
   ]
   const packageGroup = new Map<string, string>()
-  for (const chunk of chunkList(groupIds, 80)) {
+  await mapChunks(groupIds, ID_CHUNK, async (chunk) => {
     const { data: groupPackages } = await supabase
       .from("packages")
       .select("id, inventory_group_id, inventory_is_standalone")
@@ -469,9 +550,10 @@ async function loadLinkedDayPlanUncovered(
       if (!groupId) continue
       packageGroup.set(String(pkg.id), groupId)
     }
-  }
+    return null
+  })
   const purchasedByPackage = new Map<string, number>()
-  for (const chunk of chunkList([...packageGroup.keys()], 80)) {
+  await mapChunks([...packageGroup.keys()], ID_CHUNK, async (chunk) => {
     const { data: layers } = await supabase
       .from("package_cost_layers")
       .select("package_id, quantity")
@@ -483,7 +565,8 @@ async function loadLinkedDayPlanUncovered(
         (purchasedByPackage.get(packageId) ?? 0) + Math.max(0, Math.floor(Number(layer.quantity) || 0)),
       )
     }
-  }
+    return null
+  })
   const stockByGroup = new Map<string, number>()
   const memberCount = new Map<string, number>()
   for (const [packageId, groupId] of packageGroup) {

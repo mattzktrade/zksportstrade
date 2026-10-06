@@ -46,3 +46,57 @@ export function chunkList<T>(items: T[], size = 200): T[][] {
   }
   return chunks
 }
+
+/** PostgREST `.in()` filters on GET blow up past ~80 UUIDs and return `fetch failed`. */
+export const POSTGREST_IN_FILTER_SIZE = 80
+export const POSTGREST_CHUNK_CONCURRENCY = 2
+
+const TRANSIENT_FETCH = /fetch failed|ECONNRESET|ETIMEDOUT|UND_ERR|socket hang up|network/i
+
+export function isTransientPostgrestError(error: { message?: string } | null | undefined): boolean {
+  return Boolean(error?.message && TRANSIENT_FETCH.test(error.message))
+}
+
+let activeRequests = 0
+const requestWaiters: Array<() => void> = []
+const MAX_CONCURRENT_REQUESTS = 6
+
+/** Share one process-wide cap so overlapping admin pages cannot stampede PostgREST. */
+export async function withRequestGate<T>(run: () => Promise<T>): Promise<T> {
+  if (activeRequests >= MAX_CONCURRENT_REQUESTS) {
+    await new Promise<void>((resolve) => requestWaiters.push(resolve))
+  }
+  activeRequests += 1
+  try {
+    return await run()
+  } finally {
+    activeRequests -= 1
+    requestWaiters.shift()?.()
+  }
+}
+
+export async function delayMs(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Walk id/filter chunks a few at a time instead of one PostgREST round-trip after another. */
+export async function mapChunks<T, R>(
+  items: readonly T[],
+  size: number,
+  mapper: (chunk: T[], index: number) => Promise<R>,
+  concurrency = POSTGREST_CHUNK_CONCURRENCY,
+): Promise<R[]> {
+  const chunks = chunkList([...items], size)
+  const results: R[] = new Array(chunks.length)
+  const limit = Math.max(1, concurrency)
+  for (let i = 0; i < chunks.length; i += limit) {
+    const batch = chunks.slice(i, i + limit)
+    const batchResults = await Promise.all(
+      batch.map((chunk, offset) => withRequestGate(() => mapper(chunk, i + offset))),
+    )
+    for (let offset = 0; offset < batchResults.length; offset += 1) {
+      results[i + offset] = batchResults[offset]
+    }
+  }
+  return results
+}

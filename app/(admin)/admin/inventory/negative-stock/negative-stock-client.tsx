@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useEffect, useMemo, useState, useTransition } from "react"
 import Link from "next/link"
 import { AlertTriangle, ArrowUpDown, CalendarClock, CircleDollarSign, Download, PackageSearch, Search } from "lucide-react"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
@@ -29,7 +29,9 @@ import { cn } from "@/lib/utils"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 import { pageSearchProps } from "@/lib/browser/laptop-qol"
 import { toast } from "sonner"
+import { writeNegativeStockClientCache } from "@/lib/admin/negative-stock-client-cache"
 import {
+  fetchNegativeStockRows,
   reconcileHistoricalInventory,
   type HistoricalInventoryReconciliationResult,
 } from "./actions"
@@ -111,7 +113,8 @@ function downloadCsv(rows: NegativeStockRow[]) {
   URL.revokeObjectURL(url)
 }
 
-export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
+export function NegativeStockClient({ rows: initialRows }: { rows: NegativeStockRow[] }) {
+  const [rows, setRows] = useState(initialRows)
   const [reconciling, startReconciliation] = useTransition()
   const [reconciliation, setReconciliation] = useState<HistoricalInventoryReconciliationResult | null>(null)
   const [listState, setListState] = usePersistedAdminFilters(
@@ -119,6 +122,11 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
     DEFAULT_NEGATIVE_STOCK_LIST,
   )
   const { sortKey, sortDescending, ...filters } = listState
+
+  useEffect(() => {
+    setRows(initialRows)
+    writeNegativeStockClientCache(initialRows)
+  }, [initialRows])
 
   const eventOptions = useMemo(
     () =>
@@ -159,8 +167,16 @@ export function NegativeStockClient({ rows }: { rows: NegativeStockRow[] }) {
     startReconciliation(async () => {
       const result = await reconcileHistoricalInventory(apply)
       setReconciliation(result)
-      if (result.ok) toast.success(result.message)
-      else toast.error(result.message)
+      if (!result.ok) {
+        toast.error(result.message)
+        return
+      }
+      toast.success(result.message)
+      if (!apply) return
+      const fresh = await fetchNegativeStockRows()
+      if (!fresh.ok) return
+      setRows(fresh.rows)
+      writeNegativeStockClientCache(fresh.rows)
     })
   }
 

@@ -19,7 +19,7 @@ const nextConfig = {
     // Keep a just-visited tab in the client router so going back is instant.
     // Mutations still call router.refresh(). Checkout re-checks stock on submit.
     staleTimes: {
-      dynamic: 30,
+      dynamic: 60,
       static: 180,
     },
   },

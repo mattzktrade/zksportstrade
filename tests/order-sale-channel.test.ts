@@ -1,10 +1,54 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import { test } from "node:test"
 import {
   classifySalesChannel,
+  isAgentPortalBooking,
+  isPortalCheckoutChannel,
   orderPartyPrimary,
   orderSaleChannelLabel,
 } from "../lib/orders/channel"
+
+test("My Bookings only includes the signed-in agent's portal checkouts", () => {
+  const agent = "agent-1"
+  assert.equal(
+    isAgentPortalBooking({ agentProfileId: agent, viewerProfileId: agent, channel: "trade_portal" }),
+    true,
+  )
+  assert.equal(
+    isAgentPortalBooking({ agentProfileId: agent, viewerProfileId: agent, channel: "partner_api" }),
+    true,
+  )
+  assert.equal(
+    isAgentPortalBooking({ agentProfileId: agent, viewerProfileId: agent, channel: null }),
+    true,
+  )
+  assert.equal(
+    isAgentPortalBooking({ agentProfileId: agent, viewerProfileId: agent, channel: "native_deal" }),
+    false,
+  )
+  assert.equal(
+    isAgentPortalBooking({ agentProfileId: agent, viewerProfileId: agent, channel: "admin" }),
+    false,
+  )
+  assert.equal(
+    isAgentPortalBooking({ agentProfileId: agent, viewerProfileId: agent, channel: "wix" }),
+    false,
+  )
+  assert.equal(
+    isAgentPortalBooking({
+      agentProfileId: agent,
+      viewerProfileId: "admin-staff",
+      channel: "trade_portal",
+    }),
+    false,
+  )
+  assert.equal(isPortalCheckoutChannel("native_deal"), false)
+
+  const querySource = readFileSync("lib/orders/queries.ts", "utf8")
+  assert.match(querySource, /isAgentPortalBooking/)
+  assert.match(querySource, /\.eq\("agent_profile_id", profile\.id\)/)
+})
 
 test("native deal orders are offline sales, not portal checkouts", () => {
   assert.equal(classifySalesChannel("native_deal"), "offline")

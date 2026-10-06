@@ -1,9 +1,11 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { describe, it } from "node:test"
 import {
   decideSessionGate,
   hasSupabaseAuthCookie,
+  isClientRouterRequest,
+  isFreshAccessToken,
   isPublicPath,
   isRouterPrefetch,
   isSessionlessApiPath,
@@ -48,6 +50,28 @@ describe("session-guard paths", () => {
     assert.equal(isRouterPrefetch({ get: (name) => (name === "purpose" ? "prefetch" : null) }), true)
     assert.equal(isRouterPrefetch({ get: (name) => (name === "x-middleware-prefetch" ? "1" : null) }), true)
     assert.equal(isRouterPrefetch({ get: () => null }), false)
+  })
+
+  it("detects App Router RSC navigations", () => {
+    assert.equal(isClientRouterRequest({ get: (name) => (name === "RSC" ? "1" : null) }), true)
+    assert.equal(isClientRouterRequest({ get: (name) => (name === "Next-Router-State-Tree" ? "%5B%22%22%5D" : null) }), true)
+    assert.equal(isClientRouterRequest({ get: (name) => (name === "next-router-prefetch" ? "1" : null) }), true)
+    assert.equal(isClientRouterRequest({ get: () => null }), false)
+  })
+
+  it("treats a far-future access token cookie as fresh", () => {
+    const exp = Math.floor(Date.now() / 1000) + 3600
+    const payload = Buffer.from(JSON.stringify({ exp, sub: "user-1" })).toString("base64url")
+    const token = `eyJhbGciOiJub25lIn0.${payload}.sig`
+    assert.equal(
+      isFreshAccessToken([{ name: "sb-abc-auth-token", value: JSON.stringify({ access_token: token, expires_at: exp }) }]),
+      true,
+    )
+    assert.equal(
+      isFreshAccessToken([{ name: "sb-abc-auth-token", value: JSON.stringify({ access_token: token, expires_at: exp - 3590 }) }]),
+      false,
+    )
+    assert.equal(isFreshAccessToken([{ name: "theme", value: "dark" }]), false)
   })
 })
 
@@ -220,6 +244,23 @@ describe("navigation prefetch wiring", () => {
     const prefetchBlock = mw.slice(prefetchAt, mw.indexOf("let supabaseResponse"))
     assert.match(prefetchBlock, /NextResponse\.next/)
     assert.doesNotMatch(prefetchBlock, /auth\.getUser/)
+  })
+
+  it("middleware skips Auth on in-app RSC when the access token is still fresh", () => {
+    const mw = readFileSync("lib/supabase/middleware.ts", "utf8")
+    const freshAt = mw.indexOf("isFreshAccessToken")
+    const rscAt = mw.indexOf("isClientRouterRequest")
+    const getUserAt = mw.indexOf("auth.getUser")
+    assert.ok(freshAt >= 0)
+    assert.ok(rscAt >= 0)
+    assert.ok(freshAt < getUserAt)
+    assert.ok(rscAt < getUserAt)
+  })
+
+  it("does not blank admin or portal shells with a shared loading.tsx", () => {
+    assert.equal(existsSync("app/(admin)/admin/loading.tsx"), false)
+    assert.equal(existsSync("app/(admin)/admin/catalog/loading.tsx"), false)
+    assert.equal(existsSync("app/(portal)/loading.tsx"), false)
   })
 
   it("shell nav does not prefetch, so a stalled hover request cannot swallow the click", () => {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useMemo, useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
@@ -43,6 +43,8 @@ import {
   type ClientDirectoryRow,
   type StaffOption,
 } from "@/lib/crm/lead-types"
+import { fetchClientDirectoryPage } from "@/app/(admin)/admin/leads/actions"
+import { writeLeadsClientCache } from "@/lib/admin/leads-client-cache"
 import { cn } from "@/lib/utils"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
 import { isModifiedClick, openInNewTab, pageSearchProps } from "@/lib/browser/laptop-qol"
@@ -107,9 +109,9 @@ function matchesQuery(client: ClientDirectoryRow, query: string): boolean {
 }
 
 export function LeadsClient({
-  clients,
-  staffOptions,
-  races,
+  clients: initialClients,
+  staffOptions: initialStaffOptions,
+  races: initialRaces,
   currentProfileId,
 }: {
   clients: ClientDirectoryRow[]
@@ -117,8 +119,16 @@ export function LeadsClient({
   races: AdminRaceOption[]
   currentProfileId: string
 }) {
-  const router = useRouter()
+  const [clients, setClients] = useState(initialClients)
+  const [staffOptions, setStaffOptions] = useState(initialStaffOptions)
+  const [races, setRaces] = useState(initialRaces)
+  const refreshPromise = useRef<Promise<{
+    clients: ClientDirectoryRow[]
+    staffOptions: StaffOption[]
+    races: AdminRaceOption[]
+  }> | null>(null)
   const [pending, startTransition] = useTransition()
+  const router = useRouter()
   const [listState, setListState] = usePersistedAdminFilters("zk-admin-leads-filters-v3", {
     view: "accounts" as View,
     query: "",
@@ -141,6 +151,39 @@ export function LeadsClient({
   const [contacts, setContacts] = useState<DraftContact[]>([emptyContact()])
   const [raceIds, setRaceIds] = useState<string[]>([])
   const [notes, setNotes] = useState("")
+
+  function requestFreshPage() {
+    if (refreshPromise.current) return refreshPromise.current
+    const request = fetchClientDirectoryPage().then((result) => {
+      if (!result.ok) throw new Error(result.message)
+      return {
+        clients: result.clients,
+        staffOptions: result.staffOptions,
+        races: result.races,
+      }
+    })
+    refreshPromise.current = request
+    void request.then(
+      () => {
+        if (refreshPromise.current === request) refreshPromise.current = null
+      },
+      () => {
+        if (refreshPromise.current === request) refreshPromise.current = null
+      },
+    )
+    return request
+  }
+
+  function applyDirectory(page: {
+    clients: ClientDirectoryRow[]
+    staffOptions: StaffOption[]
+    races: AdminRaceOption[]
+  }) {
+    setClients(page.clients)
+    setStaffOptions(page.staffOptions)
+    setRaces(page.races)
+    writeLeadsClientCache(page.clients, page.staffOptions, page.races)
+  }
 
   const q = query.trim().toLowerCase()
   const unassignedCount = clients.filter((client) => !client.owner_profile_id).length
@@ -207,7 +250,11 @@ export function LeadsClient({
         router.push(adminAccountPath(result.accountId))
         return
       }
-      router.refresh()
+      try {
+        applyDirectory(await requestFreshPage())
+      } catch {
+        /* keep current list */
+      }
     })
   }
 
@@ -222,7 +269,23 @@ export function LeadsClient({
         return
       }
       toast.success(result.message)
-      router.refresh()
+      const owner = staffOptions.find((item) => item.id === nextOwnerId)
+      setClients((current) =>
+        current.map((client) =>
+          client.id === accountId
+            ? {
+                ...client,
+                owner_profile_id: nextOwnerId || null,
+                owner_name: nextOwnerId ? owner?.name ?? client.owner_name : null,
+              }
+            : client,
+        ),
+      )
+      try {
+        applyDirectory(await requestFreshPage())
+      } catch {
+        /* optimistic owner change stays */
+      }
     })
   }
 
@@ -537,7 +600,9 @@ export function LeadsClient({
           onClose={() => setShowBulkUpload(false)}
           onImported={() => {
             setShowBulkUpload(false)
-            router.refresh()
+            void requestFreshPage()
+              .then(applyDirectory)
+              .catch(() => undefined)
           }}
         />
       ) : null}

@@ -1,6 +1,7 @@
 import { cache } from "react"
 import { createClient } from "@/lib/supabase/server"
 import {
+  ACCESS_TOKEN_REFRESH_SKEW_MS,
   PROFILE_LOAD_TIMEOUT_MESSAGE,
   PROFILE_LOOKUP_TIMEOUT_MS,
   SESSION_LOOKUP_TIMEOUT_MS,
@@ -13,15 +14,22 @@ const PROFILE_COLUMNS =
 
 export const getPortalProfile = cache(async (): Promise<PortalProfile | null> => {
   const supabase = await createClient()
-  // Middleware already verified the session. This second getUser() has no platform
-  // cap, so a stalled Auth call used to sit for ~30s with the click looking dead.
-  const userResult = await withTimeout(supabase.auth.getUser(), SESSION_LOOKUP_TIMEOUT_MS)
-  let user = userResult.ok ? userResult.value.data.user : null
+  // Prefer the local session cookie. getUser() hits Auth over the network and
+  // used to stall ~30s with the click looking dead. Refresh via getUser only
+  // when the access token is missing or close to expiry.
+  const sessionResult = await withTimeout(supabase.auth.getSession(), 1_500)
+  const session = sessionResult.ok ? sessionResult.value.data.session : null
+  const expiresAtMs = typeof session?.expires_at === "number" ? session.expires_at * 1000 : 0
+  const sessionFresh = Boolean(session?.user) && expiresAtMs - Date.now() > ACCESS_TOKEN_REFRESH_SKEW_MS
+  let user = sessionFresh ? session?.user ?? null : null
+  let userLookupFailed = false
   if (!user) {
-    const sessionResult = await withTimeout(supabase.auth.getSession(), 1_500)
-    user = sessionResult.ok ? (sessionResult.value.data.session?.user ?? null) : null
+    const userResult = await withTimeout(supabase.auth.getUser(), SESSION_LOOKUP_TIMEOUT_MS)
+    user = userResult.ok ? userResult.value.data.user : null
+    userLookupFailed = !userResult.ok
+    if (!user) user = session?.user ?? null
   }
-  if (!user && !userResult.ok) {
+  if (!user && userLookupFailed) {
     throw new Error(PROFILE_LOAD_TIMEOUT_MESSAGE)
   }
   if (!user) return null

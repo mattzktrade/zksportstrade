@@ -1,8 +1,10 @@
 import { parseAccountKinds } from "@/lib/crm/account-kinds"
 import { parseAccountLeadStage, parseAccountLifecycle } from "@/lib/crm/account-lifecycle"
 import { CMS_STAFF_ROLES } from "@/lib/auth/permissions"
+import { cache } from "react"
 import { unstable_noStore as noStore } from "next/cache"
-import { chunkList, fetchAllRows } from "@/lib/supabase/fetch-all-rows"
+import { ADMIN_READ_TTL_MS, rememberTtl } from "@/lib/server/ttl-cache"
+import { fetchAllRows, mapChunks } from "@/lib/supabase/fetch-all-rows"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 import type {
@@ -134,7 +136,7 @@ type DirectoryOrderRow = {
   created_at: string
 }
 
-export async function getClientDirectoryRows(): Promise<ClientDirectoryRow[]> {
+export const getClientDirectoryRows = cache(async (): Promise<ClientDirectoryRow[]> => {
   noStore()
   const supabase = await createClient()
   const [accountsRes, contactsRes, dealsRes] = await Promise.all([
@@ -160,6 +162,7 @@ export async function getClientDirectoryRows(): Promise<ClientDirectoryRow[]> {
       supabase
         .from("deals")
         .select("account_id, total_amount, updated_at, stage, order_id")
+        .not("account_id", "is", null)
         .order("id")
         .range(from, to),
     ),
@@ -188,15 +191,13 @@ export async function getClientDirectoryRows(): Promise<ClientDirectoryRow[]> {
     ...new Set(data.map((row) => row.portal_profile_id).filter(Boolean)),
   ] as string[]
 
-  const owners: Array<{ id: string; full_name: string | null; email: string }> = []
-  const historicalOrders: DirectoryOrderRow[] = []
-  await Promise.all([
-    ...chunkList(ownerIds).map(async (chunk) => {
+  const [ownerChunks, orderChunks] = await Promise.all([
+    mapChunks(ownerIds, 80, async (chunk) => {
       const { data: rows } = await supabase.from("profiles").select("id, full_name, email").in("id", chunk)
-      owners.push(...(rows ?? []))
+      return rows ?? []
     }),
-    ...chunkList(portalProfileIds).map(async (chunk) => {
-      const { data: rows } = await fetchAllRows<DirectoryOrderRow>((from, to) =>
+    mapChunks(portalProfileIds, 80, async (chunk) => {
+      const { data: rows, error } = await fetchAllRows<DirectoryOrderRow>((from, to) =>
         supabase
           .from("orders")
           .select("agent_profile_id, total_amount, status, created_at")
@@ -204,9 +205,11 @@ export async function getClientDirectoryRows(): Promise<ClientDirectoryRow[]> {
           .order("id")
           .range(from, to),
       )
-      historicalOrders.push(...rows)
+      return error ? [] : rows
     }),
   ])
+  const owners = ownerChunks.flat()
+  const historicalOrders = orderChunks.flat()
   const ownerName = new Map(
     (owners ?? []).map((row) => [row.id, row.full_name?.trim() || row.email]),
   )
@@ -263,10 +266,14 @@ export async function getClientDirectoryRows(): Promise<ClientDirectoryRow[]> {
   }).sort((a, b) => {
     return b.last_activity_at.localeCompare(a.last_activity_at) || a.name.localeCompare(b.name)
   })
-}
+})
 
 export async function getSalesStaffOptions(): Promise<StaffOption[]> {
   noStore()
+  return rememberTtl("sales-staff-options", ADMIN_READ_TTL_MS, loadSalesStaffOptions)
+}
+
+async function loadSalesStaffOptions(): Promise<StaffOption[]> {
   const supabase = createAdminClient() ?? (await createClient())
   const { data, error } = await supabase
     .from("profiles")

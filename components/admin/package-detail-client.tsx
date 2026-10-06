@@ -216,6 +216,7 @@ export function PackageDetailClient({
             initial={livePkg}
             races={races}
             wixListings={liveWixListings}
+            linkedPackages={liveLinkedPackages}
             section="details"
             onDeleted={() => router.push("/admin/catalog")}
           />

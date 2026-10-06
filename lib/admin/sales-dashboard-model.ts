@@ -1,5 +1,7 @@
+import { cache } from "react"
 import { unstable_noStore as noStore } from "next/cache"
 import { dashboardSalesSince, getDashboardSaleRows } from "@/lib/admin/dashboard-sales"
+import { ADMIN_READ_TTL_MS, rememberTtl } from "@/lib/server/ttl-cache"
 import {
   buildSalesDashboardView,
   type SalesDashboardDeal,
@@ -83,8 +85,7 @@ async function recentActivitiesByDeal(): Promise<
   return byDeal
 }
 
-export async function getSalesDashboardModel(profile: { id: string }): Promise<SalesDashboardModel> {
-  noStore()
+async function loadSalesDashboardModel(profile: { id: string }): Promise<SalesDashboardModel> {
   const [deals, workflowRows, activities] = await Promise.all([
     getDealListRows({ summary: true }),
     getDashboardSaleRows(dashboardSalesSince().toISOString()),
@@ -100,3 +101,8 @@ export async function getSalesDashboardModel(profile: { id: string }): Promise<S
     sales: workflowRows.map(toSaleRow),
   })
 }
+
+export const getSalesDashboardModel = cache(async (profile: { id: string }): Promise<SalesDashboardModel> => {
+  noStore()
+  return rememberTtl(`sales-dashboard:${profile.id}`, ADMIN_READ_TTL_MS, () => loadSalesDashboardModel(profile))
+})

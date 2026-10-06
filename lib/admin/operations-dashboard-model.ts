@@ -1,6 +1,8 @@
+import { cache } from "react"
 import { unstable_noStore as noStore } from "next/cache"
 import { loadOperationsCalendarEntries } from "@/app/(admin)/admin/operations/calendar-actions"
 import { getNegativeStockRows } from "@/lib/admin/negative-stock-query"
+import { ADMIN_READ_TTL_MS, rememberTtl } from "@/lib/server/ttl-cache"
 import {
   buildOperationsDashboardView,
   type OperationsDashboardBookingInput,
@@ -96,8 +98,7 @@ async function loadUpcomingRaces(): Promise<OperationsDashboardRaceInput[]> {
   })
 }
 
-export async function getOperationsDashboardModel(): Promise<OperationsDashboardModel> {
-  noStore()
+async function loadOperationsDashboardModel(): Promise<OperationsDashboardModel> {
   const [bookings, calendarEntries, purchaseOrders, negativeStock, races] = await Promise.all([
     getOperationsWorkflowRows(),
     loadOperationsCalendarEntries(),
@@ -121,3 +122,8 @@ export async function getOperationsDashboardModel(): Promise<OperationsDashboard
     races,
   })
 }
+
+export const getOperationsDashboardModel = cache(async (): Promise<OperationsDashboardModel> => {
+  noStore()
+  return rememberTtl("operations-dashboard", ADMIN_READ_TTL_MS, loadOperationsDashboardModel)
+})

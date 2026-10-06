@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import test from "node:test"
-import { chunkList, fetchAllRows } from "../lib/supabase/fetch-all-rows"
+import { chunkList, fetchAllRows, isTransientPostgrestError, mapChunks, withRequestGate } from "../lib/supabase/fetch-all-rows"
 
 test("fetchAllRows returns an empty list when the first page is empty", async () => {
   const { data, error } = await fetchAllRows(async () => ({ data: [], error: null }))
@@ -45,4 +46,59 @@ test("fetchAllRows surfaces a real error on the first page", async () => {
 test("chunkList splits ids for filtered follow-up queries", () => {
   assert.deepEqual(chunkList([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]])
   assert.deepEqual(chunkList([], 200), [])
+})
+
+test("mapChunks runs a few chunks at a time and keeps order", async () => {
+  const seen: number[] = []
+  const started: number[] = []
+  const results = await mapChunks(
+    [1, 2, 3, 4, 5],
+    2,
+    async (chunk, index) => {
+      started.push(index)
+      await new Promise((resolve) => setTimeout(resolve, 20 - index * 5))
+      seen.push(index)
+      return chunk.reduce((sum, value) => sum + value, 0)
+    },
+    2,
+  )
+  assert.deepEqual(results, [3, 7, 5])
+  assert.deepEqual(started, [0, 1, 2])
+  assert.ok(seen[0] === 0 || seen[0] === 1)
+  assert.deepEqual(
+    await mapChunks([] as number[], 80, async () => 1),
+    [],
+  )
+})
+
+test("treats supabase fetch failed as a transient PostgREST error", () => {
+  assert.equal(isTransientPostgrestError({ message: "TypeError: fetch failed" }), true)
+  assert.equal(isTransientPostgrestError({ message: "permission denied" }), false)
+  assert.equal(isTransientPostgrestError(null), false)
+})
+
+test("withRequestGate never runs more than six jobs at once", async () => {
+  let current = 0
+  let peak = 0
+  await Promise.all(
+    Array.from({ length: 20 }, () =>
+      withRequestGate(async () => {
+        current += 1
+        peak = Math.max(peak, current)
+        await new Promise((resolve) => setTimeout(resolve, 15))
+        current -= 1
+      }),
+    ),
+  )
+  assert.ok(peak <= 6, `peak concurrency was ${peak}`)
+  assert.ok(peak >= 2)
+})
+
+test("admin workflow id filters stay small enough for PostgREST GET URLs", () => {
+  const workflow = readFileSync("lib/admin/workflow-views.ts", "utf8")
+  const bookings = readFileSync("lib/admin/operations-bookings.ts", "utf8")
+  assert.match(workflow, /POSTGREST_IN_FILTER_SIZE/)
+  assert.match(bookings, /POSTGREST_IN_FILTER_SIZE/)
+  assert.doesNotMatch(workflow, /const size = 400/)
+  assert.doesNotMatch(bookings, /const size = 400/)
 })

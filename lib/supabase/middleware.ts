@@ -6,6 +6,8 @@ import {
   SIGNOUT_TIMEOUT_MS,
   decideSessionGate,
   hasSupabaseAuthCookie,
+  isClientRouterRequest,
+  isFreshAccessToken,
   isRouterPrefetch,
   isSessionlessApiPath,
   withTimeout,
@@ -72,6 +74,18 @@ export async function updateSession(request: NextRequest) {
       return markPrivate(res)
     }
     return res
+  }
+
+  // In-app RSC navigations already passed a full document load. Skip Auth +
+  // profile when the access token is still valid so each click is not another
+  // 500ms–6s getUser. Layouts still call requireAdmin / getPortalProfile.
+  const cookies = request.cookies.getAll()
+  if (
+    isClientRouterRequest(request.headers) &&
+    hasSupabaseAuthCookie(cookies.map((cookie) => cookie.name)) &&
+    isFreshAccessToken(cookies)
+  ) {
+    return markPrivate(NextResponse.next({ request }))
   }
 
   let supabaseResponse = NextResponse.next({ request })

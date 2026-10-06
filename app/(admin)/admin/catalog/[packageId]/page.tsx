@@ -17,6 +17,7 @@ import { parseAdminPackageTab } from "@/lib/admin/package-link"
 import { getPackageGuestList } from "@/lib/admin/package-guest-list"
 import { hasCmsPermission } from "@/lib/auth/permissions"
 import { PageLoadingSpinner } from "@/components/page-loading-spinner"
+import { AdminRouteShell } from "@/components/admin/admin-route-shell"
 import type { CostLayerRow } from "@/lib/admin/cost-layers"
 import type { LinkedInventoryPackage } from "@/lib/admin/linked-inventory"
 
@@ -32,7 +33,15 @@ type Props = {
   searchParams: Promise<{ tab?: string }>
 }
 
-export default async function AdminPackageDetailPage({ params, searchParams }: Props) {
+export default function AdminPackageDetailPage({ params, searchParams }: Props) {
+  return (
+    <AdminRouteShell fallback={<PageLoadingSpinner />}>
+      <PackageDetailBody params={params} searchParams={searchParams} />
+    </AdminRouteShell>
+  )
+}
+
+async function PackageDetailBody({ params, searchParams }: Props) {
   const profile = await requireAdmin()
   const { packageId } = await params
   const { tab } = await searchParams

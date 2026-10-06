@@ -15,6 +15,12 @@ import { applyUnlinkedDealSalesToRemaining, stockLayerKey, summarizeMappedSuppli
 import { createClient } from "@/lib/supabase/server"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { pickCurrentInvoice } from "@/lib/invoices/status"
+import {
+  delayMs,
+  isTransientPostgrestError,
+  mapChunks,
+  POSTGREST_IN_FILTER_SIZE,
+} from "@/lib/supabase/fetch-all-rows"
 
 export type WorkflowOrderRow = {
   id: string
@@ -208,17 +214,29 @@ type OperationEmbed = {
   internal_notes: string | null
 }
 
+async function queryChunk<T>(
+  label: string,
+  run: () => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const { data, error } = await run()
+    if (!error) return (data ?? []) as T[]
+    if (!isTransientPostgrestError(error) || attempt === 2) {
+      console.error(label, error.message)
+      return (data ?? []) as T[]
+    }
+    await delayMs(250 * (attempt + 1))
+  }
+  return []
+}
+
 async function fetchInChunks<T>(
   ids: string[],
   run: (chunk: string[]) => Promise<T[]>,
 ): Promise<T[]> {
   if (ids.length === 0) return []
-  const size = 400
-  const out: T[] = []
-  for (let i = 0; i < ids.length; i += size) {
-    out.push(...(await run(ids.slice(i, i + size))))
-  }
-  return out
+  const nested = await mapChunks(ids, POSTGREST_IN_FILTER_SIZE, (chunk) => run(chunk))
+  return nested.flat()
 }
 
 function invoiceStatusFromDeal(stage: string | null | undefined, orderStatus: string): string | null {
@@ -497,48 +515,30 @@ async function getUnlinkedDealWorkflowRows(stages: readonly string[]): Promise<W
     ownerIds.length
       ? supabase.from("profiles").select("id, full_name").in("id", ownerIds)
       : Promise.resolve({ data: [] as Array<{ id: string; full_name: string }> }),
-    fetchInChunks(dealIds, async (chunk) => {
-      const { data: rows, error: formError } = await supabase
-        .from("booking_forms")
-        .select("deal_id, revision, status, sent_at, client_signed_at, zk_signed_at, completed_at")
-        .in("deal_id", chunk)
-        .order("revision", { ascending: false })
-      if (formError) console.error("[getUnlinkedDealWorkflowRows] booking forms", formError.message)
-      return (rows ?? []) as Array<{
-        deal_id: string
-        revision: number
-        status: string
-        sent_at: string | null
-        client_signed_at: string | null
-        zk_signed_at: string | null
-        completed_at: string | null
-      }>
-    }),
-    fetchInChunks(dealIds, async (chunk) => {
-      const { data: rows, error: opsError } = await supabase
-        .from("deal_operations")
-        .select(
-          "deal_id, fulfilment_status, guest_details_status, communication_status, supplier_status, delivery_status",
-        )
-        .in("deal_id", chunk)
-      if (opsError) console.error("[getUnlinkedDealWorkflowRows] deal operations", opsError.message)
-      return (rows ?? []) as Array<{
-        deal_id: string
-        fulfilment_status: string
-        guest_details_status: string
-        communication_status: string
-        supplier_status: string
-        delivery_status: string
-      }>
-    }),
-    fetchInChunks(dealIds, async (chunk) => {
-      const { data: rows, error: guestError } = await supabase
-        .from("deal_guests")
-        .select("deal_id, details_complete")
-        .in("deal_id", chunk)
-      if (guestError) console.error("[getUnlinkedDealWorkflowRows] deal guests", guestError.message)
-      return (rows ?? []) as Array<{ deal_id: string; details_complete: boolean }>
-    }),
+    fetchInChunks(dealIds, (chunk) =>
+      queryChunk("[getUnlinkedDealWorkflowRows] booking forms", () =>
+        supabase
+          .from("booking_forms")
+          .select("deal_id, revision, status, sent_at, client_signed_at, zk_signed_at, completed_at")
+          .in("deal_id", chunk)
+          .order("revision", { ascending: false }),
+      ),
+    ),
+    fetchInChunks(dealIds, (chunk) =>
+      queryChunk("[getUnlinkedDealWorkflowRows] deal operations", () =>
+        supabase
+          .from("deal_operations")
+          .select(
+            "deal_id, fulfilment_status, guest_details_status, communication_status, supplier_status, delivery_status",
+          )
+          .in("deal_id", chunk),
+      ),
+    ),
+    fetchInChunks(dealIds, (chunk) =>
+      queryChunk("[getUnlinkedDealWorkflowRows] deal guests", () =>
+        supabase.from("deal_guests").select("deal_id, details_complete").in("deal_id", chunk),
+      ),
+    ),
   ])
   const ownerNames = new Map((ownersResult.data ?? []).map((owner) => [owner.id, owner.full_name]))
   const bookingFormByDeal = new Map<string, (typeof bookingForms)[number]>()
@@ -684,101 +684,80 @@ export async function getWorkflowOrderRows(options?: { sinceIso?: string }): Pro
     agents,
     consumptionsByOrder,
   ] = await Promise.all([
-    fetchInChunks(orderIds, async (chunk) => {
-      const { data: rows, error: invoiceError } = await supabase
-        .from("invoices")
-        .select(
-          `
+    fetchInChunks(orderIds, (chunk) =>
+      queryChunk("[getWorkflowOrderRows] invoices", () =>
+        supabase
+          .from("invoices")
+          .select(
+            `
           id, order_id, status, created_at, xero_invoice_number, xero_sync_status,
           xero_sync_error, due_date, overdue_since, cancellation_eligible_at,
           payment_reminder_count, last_payment_reminder_at, xero_amount_due,
           xero_amount_paid, paid_at
         `,
-        )
-        .in("order_id", chunk)
-        .order("created_at", { ascending: false })
-      if (invoiceError) console.error("[getWorkflowOrderRows] invoices", invoiceError.message)
-      return (rows ?? []) as InvoiceEmbed[]
-    }),
-    fetchInChunks(dealIdsFromOrders, async (chunk) => {
-      const { data: rows, error: dealError } = await supabase
-        .from("deals")
-        .select(
-          "id, order_id, reference, stage, source, account_id, primary_contact_id, owner_profile_id, next_action, next_action_due_at",
-        )
-        .in("id", chunk)
-      if (dealError) console.error("[getWorkflowOrderRows] deals", dealError.message)
-      return (rows ?? []) as DealEmbed[]
-    }),
-    fetchInChunks(orderIds, async (chunk) => {
-      const { data: rows, error: dealError } = await supabase
-        .from("deals")
-        .select(
-          "id, order_id, reference, stage, source, account_id, primary_contact_id, owner_profile_id, next_action, next_action_due_at",
-        )
-        .in("order_id", chunk)
-      if (dealError) console.error("[getWorkflowOrderRows] deals-by-order", dealError.message)
-      return (rows ?? []) as DealEmbed[]
-    }),
-    fetchInChunks(orderIds, async (chunk) => {
-      const { data: rows, error: lineError } = await supabase
-        .from("order_line_items")
-        .select("order_id, package_id, description, quantity, sort_order")
-        .in("order_id", chunk)
-        .order("sort_order")
-      if (lineError) console.error("[getWorkflowOrderRows] line items", lineError.message)
-      return (rows ?? []) as LineEmbed[]
-    }),
-    fetchInChunks(orderIds, async (chunk) => {
-      const { data: rows, error: opError } = await supabase
-        .from("order_operations")
-        .select(
-          `
+          )
+          .in("order_id", chunk)
+          .order("created_at", { ascending: false }),
+      ),
+    ),
+    fetchInChunks(dealIdsFromOrders, (chunk) =>
+      queryChunk("[getWorkflowOrderRows] deals", () =>
+        supabase
+          .from("deals")
+          .select(
+            "id, order_id, reference, stage, source, account_id, primary_contact_id, owner_profile_id, next_action, next_action_due_at",
+          )
+          .in("id", chunk),
+      ),
+    ),
+    fetchInChunks(orderIds, (chunk) =>
+      queryChunk("[getWorkflowOrderRows] deals-by-order", () =>
+        supabase
+          .from("deals")
+          .select(
+            "id, order_id, reference, stage, source, account_id, primary_contact_id, owner_profile_id, next_action, next_action_due_at",
+          )
+          .in("order_id", chunk),
+      ),
+    ),
+    fetchInChunks(orderIds, (chunk) =>
+      queryChunk("[getWorkflowOrderRows] line items", () =>
+        supabase
+          .from("order_line_items")
+          .select("order_id, package_id, description, quantity, sort_order")
+          .in("order_id", chunk)
+          .order("sort_order"),
+      ),
+    ),
+    fetchInChunks(orderIds, (chunk) =>
+      queryChunk("[getWorkflowOrderRows] operations", () =>
+        supabase
+          .from("order_operations")
+          .select(
+            `
           order_id, fulfilment_status, guest_details_status, communication_status,
           supplier_status, delivery_status, owner_profile_id, guest_details_due_at,
           supplier_due_at, delivery_due_at, internal_notes
         `,
-        )
-        .in("order_id", chunk)
-      if (opError) console.error("[getWorkflowOrderRows] operations", opError.message)
-      return (rows ?? []) as OperationEmbed[]
-    }),
-    fetchInChunks(orderIds, async (chunk) => {
-      const { data: rows, error: guestError } = await supabase
-        .from("order_guests")
-        .select("id, order_id, details_complete")
-        .in("order_id", chunk)
-      if (guestError) console.error("[getWorkflowOrderRows] guests", guestError.message)
-      return (rows ?? []) as Array<{ id: string; order_id: string; details_complete: boolean }>
-    }),
-    fetchInChunks(orderIds, async (chunk) => {
-      const { data: rows, error: supplierError } = await supabase
-        .from("order_supplier_fulfilments")
-        .select("order_id, quantity, status, suppliers(name)")
-        .in("order_id", chunk)
-      if (supplierError) {
-        console.error("[getWorkflowOrderRows] supplier fulfilments", supplierError.message)
-      }
-      return (rows ?? []) as Array<{
-        order_id: string
-        quantity: number
-        status: string
-        suppliers: { name: string } | { name: string }[] | null
-      }>
-    }),
-    fetchInChunks(agentIds, async (chunk) => {
-      const { data: rows, error: profileError } = await supabase
-        .from("profiles")
-        .select("id, full_name, company_name, email")
-        .in("id", chunk)
-      if (profileError) console.error("[getWorkflowOrderRows] agents", profileError.message)
-      return (rows ?? []) as Array<{
-        id: string
-        full_name: string | null
-        company_name: string | null
-        email: string
-      }>
-    }),
+          )
+          .in("order_id", chunk),
+      ),
+    ),
+    fetchInChunks(orderIds, (chunk) =>
+      queryChunk("[getWorkflowOrderRows] guests", () =>
+        supabase.from("order_guests").select("id, order_id, details_complete").in("order_id", chunk),
+      ),
+    ),
+    fetchInChunks(orderIds, (chunk) =>
+      queryChunk("[getWorkflowOrderRows] supplier fulfilments", () =>
+        supabase.from("order_supplier_fulfilments").select("order_id, quantity, status, suppliers(name)").in("order_id", chunk),
+      ),
+    ),
+    fetchInChunks(agentIds, (chunk) =>
+      queryChunk("[getWorkflowOrderRows] agents", () =>
+        supabase.from("profiles").select("id, full_name, company_name, email").in("id", chunk),
+      ),
+    ),
     getConsumptionsForOrders(orderIds),
   ])
 

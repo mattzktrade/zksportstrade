@@ -78,6 +78,22 @@ export function isPortalCheckoutChannel(channel: string | null | undefined): boo
   return normalized === "trade_portal" || normalized === "partner_api" || normalized === ""
 }
 
+/**
+ * Trade-portal My Bookings is only the signed-in agent's own checkout orders.
+ * Staff CRM deals (`native_deal` / `admin`) and Wix orders must not appear there,
+ * including when an admin RLS policy would otherwise return every order.
+ */
+export function isAgentPortalBooking(input: {
+  agentProfileId: string | null | undefined
+  viewerProfileId: string
+  channel?: string | null
+}): boolean {
+  const viewer = input.viewerProfileId.trim()
+  const agent = input.agentProfileId?.trim() ?? ""
+  if (!viewer || !agent || agent !== viewer) return false
+  return isPortalCheckoutChannel(input.channel)
+}
+
 export function orderPartyPrimary(input: {
   agentCompany?: string | null
   agentName?: string | null

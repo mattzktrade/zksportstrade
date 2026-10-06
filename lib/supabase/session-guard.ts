@@ -87,8 +87,115 @@ export function isRouterPrefetch(headers: { get(name: string): string | null }):
   )
 }
 
+/** App Router click/back navigations (RSC flight), not a full document load. */
+export function isClientRouterRequest(headers: { get(name: string): string | null }): boolean {
+  return (
+    isRouterPrefetch(headers) ||
+    headers.get("RSC") === "1" ||
+    headers.get("rsc") === "1" ||
+    Boolean(headers.get("Next-Router-State-Tree")) ||
+    Boolean(headers.get("next-router-state-tree"))
+  )
+}
+
 export function hasSupabaseAuthCookie(cookieNames: readonly string[]): boolean {
   return cookieNames.some((name) => name.includes("-auth-token"))
+}
+
+/** Refresh the Auth cookie when fewer than this many ms remain. */
+export const ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000
+
+function decodeBase64Url(value: string): string | null {
+  try {
+    const normalized = value.replace(/-/g, "+").replace(/_/g, "/")
+    const pad = normalized.length % 4 === 0 ? "" : "=".repeat(4 - (normalized.length % 4))
+    const binary = (typeof atob === "function" ? atob : null)?.(normalized + pad)
+    if (binary != null) return binary
+    return Buffer.from(normalized + pad, "base64").toString("utf8")
+  } catch {
+    return null
+  }
+}
+
+function jwtExpMs(accessToken: string): number | null {
+  const payloadPart = accessToken.split(".")[1]
+  if (!payloadPart) return null
+  const decoded = decodeBase64Url(payloadPart)
+  if (!decoded) return null
+  try {
+    const payload = JSON.parse(decoded) as { exp?: unknown }
+    return typeof payload.exp === "number" ? payload.exp * 1000 : null
+  } catch {
+    return null
+  }
+}
+
+function parseAuthCookieJson(raw: string): Record<string, unknown> | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  const candidates = [trimmed]
+  if (trimmed.startsWith("base64-")) {
+    const decoded = decodeBase64Url(trimmed.slice(7))
+    if (decoded) candidates.push(decoded)
+  }
+  try {
+    candidates.push(decodeURIComponent(trimmed))
+  } catch {
+    /* ignore */
+  }
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const record = parsed as Record<string, unknown>
+        if (record.access_token || record.expires_at || record.currentSession) {
+          const session = record.currentSession
+          if (session && typeof session === "object") return session as Record<string, unknown>
+          return record
+        }
+      }
+    } catch {
+      /* try next encoding */
+    }
+  }
+  return null
+}
+
+function accessTokenExpiresAtMs(payload: Record<string, unknown>): number | null {
+  const expiresAt = payload.expires_at
+  if (typeof expiresAt === "number" && Number.isFinite(expiresAt)) {
+    return expiresAt > 1e12 ? expiresAt : expiresAt * 1000
+  }
+  if (typeof payload.access_token === "string") {
+    return jwtExpMs(payload.access_token)
+  }
+  return null
+}
+
+/** Local JWT/cookie expiry only — layouts still call Auth when this is false. */
+export function isFreshAccessToken(
+  cookies: ReadonlyArray<{ name: string; value: string }>,
+  skewMs = ACCESS_TOKEN_REFRESH_SKEW_MS,
+): boolean {
+  const grouped = new Map<string, Array<{ name: string; value: string }>>()
+  for (const cookie of cookies) {
+    if (!cookie.name.includes("-auth-token")) continue
+    const base = cookie.name.replace(/\.\d+$/, "")
+    const list = grouped.get(base) ?? []
+    list.push(cookie)
+    grouped.set(base, list)
+  }
+  for (const list of grouped.values()) {
+    const raw = [...list]
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+      .map((cookie) => cookie.value)
+      .join("")
+    const payload = parseAuthCookieJson(raw)
+    if (!payload) continue
+    const expiresAt = accessTokenExpiresAtMs(payload)
+    if (expiresAt != null && expiresAt - Date.now() > skewMs) return true
+  }
+  return false
 }
 
 export async function withTimeout<T>(

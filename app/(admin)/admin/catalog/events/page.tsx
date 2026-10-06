@@ -3,10 +3,19 @@ import { createClient } from "@/lib/supabase/server"
 import { isEventCategory } from "@/lib/catalog/event-categories"
 import { officialCircuitNameForRaceId, isMissingRaceCircuitColumnError } from "@/lib/catalog/race-circuit"
 import { EventsClient, type NativeEventRow } from "./events-client"
+import { AdminRouteShell } from "@/components/admin/admin-route-shell"
 
 export const dynamic = "force-dynamic"
 
-export default async function EventsPage() {
+export default function EventsPage() {
+  return (
+    <AdminRouteShell>
+      <EventsPageBody />
+    </AdminRouteShell>
+  )
+}
+
+async function EventsPageBody() {
   await requireAdmin()
   const supabase = await createClient()
   const withCircuit =
@@ -15,7 +24,7 @@ export default async function EventsPage() {
     "id, name, short_name, location, country, country_code, event_date, date_range, image, season, category, is_archived"
   const [eventsResult, packagesResult] = await Promise.all([
     supabase.from("races").select(withCircuit).order("event_date"),
-    supabase.from("packages").select("race_id, circuit"),
+    supabase.from("packages").select("race_id"),
   ])
   const events =
     eventsResult.error && isMissingRaceCircuitColumnError(eventsResult.error.message)

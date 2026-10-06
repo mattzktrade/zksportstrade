@@ -11,6 +11,7 @@ import { getSuppliers } from "@/lib/inventory/suppliers"
 import { DEAL_BOARD_STAGES, adminEnquiryListPath, isDealBoardStage, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
 import { isAwaitingZkApprovalDeal, uniqueDealIds } from "@/lib/admin/deal-link"
 import { DealsClient } from "./deals-client"
+import { AdminRouteShell } from "@/components/admin/admin-route-shell"
 
 export const dynamic = "force-dynamic"
 
@@ -30,7 +31,19 @@ function isDealBoardFilter(
   return typeof value === "string" && (DEAL_BOARD_FILTERS as readonly string[]).includes(value)
 }
 
-export default async function DealsPage({
+export default function DealsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ deal?: string; pipeline?: string }>
+}) {
+  return (
+    <AdminRouteShell>
+      <DealsPageBody searchParams={searchParams} />
+    </AdminRouteShell>
+  )
+}
+
+async function DealsPageBody({
   searchParams,
 }: {
   searchParams: Promise<{ deal?: string; pipeline?: string }>

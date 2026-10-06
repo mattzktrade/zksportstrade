@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { Suspense, type ReactNode } from "react"
 import Link from "next/link"
 import { AlertTriangle, Banknote, ChevronRight, CircleDollarSign, Receipt, Truck } from "lucide-react"
 import { OperationsDashboardCalendar } from "@/components/admin/operations-dashboard-calendar"
@@ -386,7 +386,23 @@ function OperationsDashboardView({ data }: { data: OperationsDashboardModel }) {
   )
 }
 
-export async function OperationsRoleDashboard() {
+export function OperationsRoleDashboard() {
+  return (
+    <Suspense fallback={<div className="mx-auto max-w-[1540px] space-y-3 p-3 sm:p-4 lg:p-5 animate-pulse">
+      <div className="h-8 w-48 rounded-md bg-muted" />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="h-20 rounded-xl bg-muted" />
+        <div className="h-20 rounded-xl bg-muted" />
+        <div className="h-20 rounded-xl bg-muted" />
+      </div>
+      <div className="h-64 rounded-xl bg-muted" />
+    </div>}>
+      <OperationsDashboardLoaded />
+    </Suspense>
+  )
+}
+
+async function OperationsDashboardLoaded() {
   const data = await getOperationsDashboardModel()
   return <OperationsDashboardView data={data} />
 }

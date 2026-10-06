@@ -73,3 +73,20 @@ export async function reconcileHistoricalInventory(
       : `Previewed ${dealCount} historical deal${dealCount === 1 ? "" : "s"}: ${allocatedQuantity} can be allocated and ${shortageQuantity} require purchase records.`,
   }
 }
+
+export async function fetchNegativeStockRows(): Promise<
+  | { ok: true; rows: import("@/lib/admin/negative-stock").NegativeStockRow[] }
+  | { ok: false; message: string }
+> {
+  const gate = await requireAdminAction()
+  if (!gate.ok) return gate
+  try {
+    const { getNegativeStockRows } = await import("@/lib/admin/negative-stock-query")
+    return { ok: true, rows: await getNegativeStockRows() }
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "Negative stock could not be loaded.",
+    }
+  }
+}

@@ -1,5 +1,7 @@
+import { cache } from "react"
 import { unstable_noStore as noStore } from "next/cache"
 import { computeOrderProfit, getConsumptionsForOrders } from "@/lib/admin/cost-layers"
+import { ADMIN_READ_TTL_MS, rememberTtl } from "@/lib/server/ttl-cache"
 import type { DashboardSaleRow } from "@/lib/admin/admin-dashboard-metrics"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { chunkList, fetchAllRows } from "@/lib/supabase/fetch-all-rows"
@@ -141,8 +143,14 @@ function emptySale(overrides: Partial<DashboardSaleSource> & Pick<DashboardSaleS
   }
 }
 
-export async function getDashboardSaleRows(sinceIso: string): Promise<DashboardSaleSource[]> {
+export const getDashboardSaleRows = cache(async (sinceIso: string): Promise<DashboardSaleSource[]> => {
   noStore()
+  return rememberTtl(`dashboard-sale-rows:${sinceIso.slice(0, 10)}`, ADMIN_READ_TTL_MS, () =>
+    loadDashboardSaleRows(sinceIso),
+  )
+})
+
+async function loadDashboardSaleRows(sinceIso: string): Promise<DashboardSaleSource[]> {
   const supabase = await createClient()
   const dealColumns =
     "id, reference, stage, account_id, owner_profile_id, order_id, currency, total_amount, created_at, closed_at"
