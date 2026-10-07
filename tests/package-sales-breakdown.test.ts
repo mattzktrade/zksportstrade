@@ -308,6 +308,20 @@ test("leftover physical qty does not hide a purchased-stock shortage on admin ne
   assert.equal(rows[0].effective_sellable, 6)
 })
 
+test("sales list remaining qty is purchased stock minus sales once cost layers load", () => {
+  const rows: EffectiveSellablePackage[] = [
+    {
+      id: "alpine",
+      inventory: { qty_available: 27, qty_held: 0 },
+      layer_units_purchased: 27,
+      sales_breakdown: sold("alpine", 12),
+    },
+  ]
+  applyEffectiveSellable(rows)
+  assert.equal(rows[0].effective_net, 15)
+  assert.equal(rows[0].effective_sellable, 15)
+})
+
 test("linked weekend sales reduce 3-day remaining even without single-day SKUs", () => {
   const queries = readFileSync("lib/catalog/queries.ts", "utf8")
   assert.match(queries, /attachStorefrontAvailability/)

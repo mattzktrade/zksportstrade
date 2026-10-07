@@ -41,10 +41,23 @@ describe("CMS role permissions", () => {
   it("allows sales to manage deals but not stock overrides", () => {
     assert.equal(hasCmsPermission({ role: "sales" }, "deals.manage"), true)
     assert.equal(hasCmsPermission({ role: "sales" }, "accounts.manage"), true)
+    assert.equal(hasCmsPermission({ role: "sales" }, "inventory.view"), true)
     assert.equal(hasCmsPermission({ role: "sales" }, "inventory.hold"), true)
     assert.equal(hasCmsPermission({ role: "sales" }, "operations.manage"), true)
     assert.equal(hasCmsPermission({ role: "sales" }, "inventory.adjust"), false)
     assert.equal(hasCmsPermission({ role: "sales" }, "integrations.manage"), false)
+  })
+
+  it("lets sales read purchased stock quantities so the sales list matches admin", () => {
+    const sql = readFileSync(
+      "supabase/migrations/20261007140000_sales_read_cost_layer_quantities.sql",
+      "utf8",
+    )
+    assert.match(sql, /package_cost_layers_select_cms_staff/)
+    assert.match(sql, /has_cms_permission\('inventory.view'\)/)
+    assert.doesNotMatch(sql, /is_cms_operator\(\)/)
+    const costLayers = readFileSync("lib/admin/cost-layers.ts", "utf8")
+    assert.match(costLayers, /createAdminClient\(\) \?\? \(await createClient\(\)\)/)
   })
 
   it("lets sales and finance prepare booking forms, finance and admin countersign, and only admin send them", () => {

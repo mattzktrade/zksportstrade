@@ -1,5 +1,6 @@
 import { unstable_noStore as noStore } from "next/cache"
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 
 export type CostLayerRow = {
@@ -121,7 +122,10 @@ export async function getCostLayerQuantityTotalsByPackage(
   const out = new Map<string, { quantity_purchased: number; quantity_remaining: number }>()
   const ids = [...new Set(packageIds.map((id) => id.trim()).filter(Boolean))]
   if (ids.length === 0) return out
-  const supabase = supabaseClient ?? (await createClient())
+  // Sales logins are blocked from package_cost_layers by older RLS. The sales
+  // list still needs purchased quantities, so prefer the service role when the
+  // caller did not pass a client. Full layer rows (buy prices) stay user-scoped.
+  const supabase = supabaseClient ?? createAdminClient() ?? (await createClient())
   const batches: string[][] = []
   for (let i = 0; i < ids.length; i += IN_FILTER_BATCH) {
     batches.push(ids.slice(i, i + IN_FILTER_BATCH))
