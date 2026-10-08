@@ -35,9 +35,9 @@ Default on a new product is `supplier_direct` so we never mint ZK QRs for Paddoc
 ## Operations process
 
 1. **Guests** — names, headshots, email (email needed to send a digital pass to that person).
-2. **Tickets in** — Issue ZK passes, or receive physical/external stock. Skip supplier inbound for `zk_digital`.
-3. **Assign** — one open ticket per guest. Physical serials are unique. Unassigned paper sits in the booking pool.
-4. **Send** — email guests, email the booking contact a pack, or copy links. A successful digital email **marks delivered** (no proof photo). Copy-link needs “I’ve sent these”.
+2. **Tickets in** — Issue ZK passes, or receive physical/external stock. Skip / autofill supplier inbound for `zk_digital`.
+3. **Send** — email guests, email the booking contact a pack, or copy links. A successful digital email **marks delivered** (no proof photo). Copy-link needs “I’ve sent these”.
+4. **Allocate seats** — table / paddock / seat notes after tickets exist.
 5. **Door / collect** — `/admin/check-in`. Camera or name search. Success shows headshot, name, day, table, dietary.
 6. **After event** — existing thank-you for direct clients.
 
@@ -47,7 +47,7 @@ Default on a new product is `supplier_direct` so we never mint ZK QRs for Paddoc
 - Agent / corporate: pack to the ops contact, unless staff ticks “Email guests directly”.
 - Trade portal: sent / not sent / arrived only — no raw QR.
 
-**Digital send From address (testing):** `Jenny Kent <contact@zk-sport.trade>` via the connected Resend domain. Switch to `jenny@zk-sports.com` (or sales) when that domain is verified. Env override: `TICKET_EMAIL_FROM`.
+**Digital send From address:** `Jenny Kent` on the connected Resend mailbox (`ORDER_EMAIL_FROM` / `AUTH_EMAIL_FROM`, currently `confirmation@zk-sports.trade`). Override with `TICKET_EMAIL_FROM` only if that domain is also verified. Switch the display mailbox to Jenny’s zk-sports.com address when that domain is on Resend.
 
 ## Status machine
 
@@ -60,11 +60,11 @@ Reissue always **voids the old QR first**. Old links show VOID; old QRs fail at 
 ## Reliability rules
 
 - Server row is the source of truth. QR is a signed pointer (`ZK1.{ticketId}.{hmac}`).
-- Admit is an atomic update (`issued|sent|delivered` → `arrived`). Two phones cannot both get green.
+- Admit is an atomic insert of `(ticket, door date)`. Two phones cannot both get green on the same day. A 3-day pass scans again on the next valid day.
 - Wrong day, wrong event, void, cancelled → reject with an explicit reason.
 - Manual name search logs `method = manual`.
 - Undo arrival (10 minutes, with reason) requires `operations.manage`.
-- Cannot mint more open tickets than paid quantity, or a second open ticket for the same guest.
+- Cannot mint more open tickets than paid quantity, or a second open ticket for the same guest. Walk-up / emergency passes on the product Guest list are the exception (capped at 40 live per product, not counted against a booking).
 - Lost phone: name + headshot. Do not invent a second live QR without voiding.
 
 ## Phases
@@ -78,8 +78,8 @@ Reissue always **voids the old QR first**. Old links show VOID; old QRs fail at 
 
 ## Staff setup still needed
 
-- [x] Resend from `contact@zk-sport.trade` for ticket emails (testing)
-- [ ] Apply migration `20261008120000_internal_ticketing.sql` on the live database (`package_id` / `race_id` are **text**, matching catalog IDs)
+- [x] Resend ticket mail from Jenny on the verified `zk-sports.trade` mailbox
+- [ ] Apply migrations `20261008120000_internal_ticketing.sql` and `20261008163000_ticket_admissions_walk_up.sql` on the live database (`package_id` / `race_id` are **text**; walk-up tickets and next-day scans need the second file)
 - [ ] Set `TICKET_SIGNING_SECRET` in Vercel (any long random string; keep it forever — changing it makes old QRs fail)
 - [ ] Apple / Google Wallet certificates — **not needed yet**. Guest page works without them. Do this later if you want “Add to Wallet”.
 - [ ] Switch ticket From address to Jenny’s zk-sports.com mailbox when that domain is on Resend
@@ -90,11 +90,18 @@ Reissue always **voids the old QR first**. Old links show VOID; old QRs fail at 
 - Engine (no I/O): `lib/tickets/`
 - Ops actions: `app/(admin)/admin/operations/ticket-actions.ts`
 - Check-in: `app/(admin)/admin/check-in/`
-- Guest pass: `app/t/[token]/`
+- Guest pass: `app/t/[token]/` (PDF in `lib/tickets/pdf.ts`)
+- Walk-up / emergency tickets: product Guest list (`components/admin/package-walk-up-tickets.tsx`)
+- Follow-up migration: `supabase/migrations/20261008163000_ticket_admissions_walk_up.sql`
+- Staff headshots: `app/(admin)/admin/operations/guest-editor.tsx`
 - Migration: `supabase/migrations/20261008120000_internal_ticketing.sql`
 
 ## Changelog
 
 - **2026-10-08** — First version of this doc. Built Phases A–D plus Help, offline scan queue, and ZK guest-guide defaults. Ticket mail uses `contact@zk-sport.trade` until the company domain is connected. Wallet buttons are on the guest pass and stay disabled until Apple/Google issuer env is set. Cancelling a booking voids live tickets.
 - **2026-10-08** — Migration FK fix: `tickets.package_id` and `tickets.race_id` are text (catalog IDs are not UUIDs).
+- **2026-10-08** — Ticket email uses the verified `zk-sports.trade` from-address (not `zk-sport.trade`). Operations board is mobile-safe, skips supplier inbound for ZK digital, and allocates seats after tickets.
+- **2026-10-08** — Manage guests can add, replace, and preview headshots on phone and desktop (deal, operations board, product guest list). Guest pass page and PDF use the brochure black / white / ZK red look, with the last name word in red and the headshot on the pass.
+- **2026-10-08** — Guest ticket and PDF match the dark pass mock: GUEST TICKET, package and event as labelled text (no icons), attending-day chips, white QR, Save PDF / photos backup, and wallet buttons fully on the page. Circuit/venue subtitles such as a product “Test” line are not shown.
+- **2026-10-08** — Product Guest list can mint a walk-up / emergency ZK pass with no guest row. Check-in pads for phones, filters the name list by door day, and a multi-day QR admits again the next morning (same-day rescan still blocked).
 

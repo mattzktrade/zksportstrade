@@ -104,15 +104,20 @@ export function validDaysForGuest(input: {
   return costDaySlotsForDuration(input.packageDuration, input.eventDate)
 }
 
+const DAY_CHIP_LABELS: Record<CostDaySlot, string> = {
+  thursday_only: "Thursday",
+  friday_only: "Friday",
+  saturday_only: "Saturday",
+  sunday_only: "Sunday",
+}
+
+export function validDayChipLabels(days: readonly CostDaySlot[]): string[] {
+  if (!days.length) return ["Event days"]
+  return days.map((day) => DAY_CHIP_LABELS[day] ?? day)
+}
+
 export function validDayLabels(days: readonly CostDaySlot[]): string {
-  const labels: Record<CostDaySlot, string> = {
-    thursday_only: "Thursday",
-    friday_only: "Friday",
-    saturday_only: "Saturday",
-    sunday_only: "Sunday",
-  }
-  if (!days.length) return "Event days"
-  return days.map((day) => labels[day]).join(", ")
+  return validDayChipLabels(days).join(", ")
 }
 
 export function daySlotForDate(eventDate: string | null | undefined, dateIso: string): CostDaySlot | null {
@@ -121,6 +126,53 @@ export function daySlotForDate(eventDate: string | null | undefined, dateIso: st
     if (dateIsoForDaySlot(eventDate, day) === dateIso) return day
   }
   return isCostDaySlot(dateIso) ? dateIso : null
+}
+
+export function parseArrivedDates(value: unknown, arrivedAt?: string | null): string[] {
+  const fromArray = Array.isArray(value)
+    ? value.map((item) => String(item).slice(0, 10)).filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(item))
+    : []
+  const legacy = arrivedAt?.slice(0, 10) ?? ""
+  if (/^\d{4}-\d{2}-\d{2}$/.test(legacy) && !fromArray.includes(legacy)) fromArray.push(legacy)
+  return [...new Set(fromArray)].sort()
+}
+
+export function ticketArrivedOnIsoDate(
+  ticket: Pick<TicketRecord, "arrivedDates" | "arrivedAt">,
+  dateIso: string,
+): boolean {
+  return parseArrivedDates(ticket.arrivedDates, ticket.arrivedAt).includes(dateIso)
+}
+
+export type DoorDayOption = {
+  slot: CostDaySlot
+  iso: string
+  label: string
+}
+
+export function doorDayOptions(
+  eventDate: string | null | undefined,
+  tickets: readonly { validDays: readonly CostDaySlot[] }[],
+): DoorDayOption[] {
+  const labels: Record<CostDaySlot, string> = {
+    thursday_only: "Thursday",
+    friday_only: "Friday",
+    saturday_only: "Saturday",
+    sunday_only: "Sunday",
+  }
+  const slots = new Set<CostDaySlot>()
+  for (const ticket of tickets) {
+    for (const day of ticket.validDays) slots.add(day)
+  }
+  const ordered: CostDaySlot[] = ["thursday_only", "friday_only", "saturday_only", "sunday_only"]
+  const fromTickets = ordered.filter((slot) => slots.has(slot))
+  const use = fromTickets.length ? fromTickets : ordered.filter((slot) => dateIsoForDaySlot(eventDate, slot))
+  return use
+    .map((slot) => {
+      const iso = dateIsoForDaySlot(eventDate, slot)
+      return iso ? { slot, iso, label: labels[slot] } : null
+    })
+    .filter((row): row is DoorDayOption => Boolean(row))
 }
 
 export function ticketValidOnIsoDate(ticket: Pick<TicketRecord, "eventDate" | "validDays">, dateIso: string): boolean {

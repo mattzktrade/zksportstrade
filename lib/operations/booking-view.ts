@@ -36,5 +36,6 @@ export function bookingStepInput(
     hasOpsContact: Boolean(row.operationsContactId || row.contactName || row.operationsContactEmail),
     guestDetailsDeadline: row.guestDetailsDeadline,
     deliveryDueAt: row.deliveryDueAt,
+    ticketingMode: row.ticketingMode,
   }
 }

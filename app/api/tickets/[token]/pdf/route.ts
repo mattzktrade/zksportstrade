@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { checkRateLimit, clientIpFromHeaders } from "@/lib/auth/rate-limit"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { buildTicketPdf } from "@/lib/tickets/pdf"
-import { getPublicTicketView } from "@/lib/tickets/public"
+import { getPublicTicketHeadshotBytes, getPublicTicketView } from "@/lib/tickets/public"
 import { isTicketPublicToken } from "@/lib/tickets/url"
 
 export const runtime = "nodejs"
@@ -18,6 +18,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ tok
   }
   const view = await getPublicTicketView(token)
   if (!view) return NextResponse.json({ error: "Ticket not found." }, { status: 404 })
+  const headshotBytes = view.hasHeadshot ? await getPublicTicketHeadshotBytes(token) : null
   const bytes = await buildTicketPdf({
     guestName: view.guestName,
     eventLabel: view.eventLabel,
@@ -27,6 +28,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ tok
     shortCode: view.shortCode,
     qrPayload: view.qrPayload,
     voided: view.voided,
+    headshotBytes,
   })
   const admin = createAdminClient()
   if (admin && !view.voided) {

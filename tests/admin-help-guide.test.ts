@@ -60,6 +60,12 @@ describe("admin help guide", () => {
     const checkIn = searchHelp("check-in")
     assert.ok(checkIn.topics.some((topic) => topic.id === "after-sale" || topic.id === "questions"))
     assert.ok(checkIn.questions.some((item) => /check guests in/i.test(item.q)))
+
+    const headshot = searchHelp("headshot")
+    assert.ok(headshot.questions.some((item) => /headshot/i.test(item.q)))
+
+    const walkUp = searchHelp("walk-up")
+    assert.ok(walkUp.questions.some((item) => /last-minute ticket/i.test(item.q)))
   })
 
   it("ignores unknown hashes", () => {

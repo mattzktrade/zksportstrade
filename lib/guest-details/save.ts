@@ -20,7 +20,7 @@ import {
   type PublicGuestDetailsForm,
 } from "@/lib/guest-details/public"
 import { missingGuestDetailsSchema, guestDetailsMigrationMessage } from "@/lib/guest-details/schema"
-import { headshotBelongsToInvite, normalisedHeadshotPath } from "@/lib/guest-details/storage"
+import { acceptedGuestFormHeadshotPath, normalisedHeadshotPath } from "@/lib/guest-details/storage"
 import { syncDealWorkflowFromOperations } from "@/lib/operations/sync-deal-workflow"
 import { createAdminClient } from "@/lib/supabase/admin"
 
@@ -272,25 +272,28 @@ export async function savePublicGuestDetailsForm(input: {
       if (!canSubmit.ok) return { ok: false, message: canSubmit.message }
     }
 
-    const desired = desiredGuestsFromForm(formInput).map((row) => {
-      const path = row.headshotPath ? normalisedHeadshotPath(row.headshotPath) : null
-      return {
-        ...row,
-        id: safeUuid(row.id),
-        headshotPath: path && headshotBelongsToInvite(path, invite.id) ? path : null,
-      }
-    })
+    const rawDesired = desiredGuestsFromForm(formInput).map((row) => ({
+      ...row,
+      id: safeUuid(row.id),
+    }))
 
     const orderId = invite.orderId || booking.orderId
     const now = new Date().toISOString()
-    const leadDesired = desired.find((row) => row.isLeadGuest && row.fullName)
+    const leadDesired = rawDesired.find((row) => row.isLeadGuest && row.fullName)
 
-    if (desired.length > 0) {
+    if (rawDesired.length > 0) {
       if (orderId) await copyDealGuestsToOrder(admin, booking.dealId, orderId)
       const table = orderId ? "order_guests" : "deal_guests"
       const parent = orderId ? "order_id" : "deal_id"
       const parentId = orderId ?? booking.dealId
       const existing = await loadExistingGuests(admin, table, parent, parentId)
+      const previousById = new Map(
+        existing.map((row) => [row.id, row.headshot_path ? normalisedHeadshotPath(row.headshot_path) : null]),
+      )
+      const desired = rawDesired.map((row) => ({
+        ...row,
+        headshotPath: acceptedGuestFormHeadshotPath(row.headshotPath, invite.id, row.id ? previousById.get(row.id) : null),
+      }))
       const plan = planGuestFormUpserts(
         existing.map((row) => ({
           id: row.id,
@@ -411,7 +414,7 @@ export async function savePublicGuestDetailsForm(input: {
       }
     }
 
-    const namedCount = desired.filter((row) => row.fullName).length
+    const namedCount = rawDesired.filter((row) => row.fullName).length
     const ticketQuantity = sameGuestQuantity(places) ?? places[0]?.quantity ?? booking.quantity
     const currentOps = orderId
       ? await admin

@@ -24,10 +24,14 @@ export function OperationsTicketsPanel({
   dealId,
   orderId,
   canManage,
+  stepNumber = 5,
+  onModeChange,
 }: {
   dealId: string | null
   orderId: string | null
   canManage: boolean
+  stepNumber?: number
+  onModeChange?: (mode: TicketingMode) => void
 }) {
   const [pending, start] = useTransition()
   const [mode, setMode] = useState<TicketingMode>("supplier_direct")
@@ -49,6 +53,7 @@ export function OperationsTicketsPanel({
       }
       setError(null)
       setMode(result.mode)
+      onModeChange?.(result.mode)
       setTickets(result.tickets)
       setGuests(result.guests)
       setQuantity(result.quantity)
@@ -80,15 +85,15 @@ export function OperationsTicketsPanel({
   }
 
   return (
-    <section className="rounded-lg border bg-white p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-[12px] font-semibold">6. Tickets</h3>
-          <p className="mt-1 text-[11px] text-slate-500">
+    <section className="min-w-0 overflow-x-auto rounded-lg border bg-white p-4">
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-[12px] font-semibold">{stepNumber}. Tickets</h3>
+          <p className="mt-1 break-words text-[11px] text-slate-500">
             Issue, send, or collect here. Digital send marks the booking delivered. Door staff use Check-in.
           </p>
         </div>
-        <Link href="/admin/check-in" className="text-[11px] font-semibold text-primary">
+        <Link href="/admin/check-in" className="shrink-0 text-[11px] font-semibold text-primary">
           Open check-in
         </Link>
       </div>
@@ -104,9 +109,10 @@ export function OperationsTicketsPanel({
             onChange={(event) => {
               const next = event.target.value as TicketingMode
               setMode(next)
+              onModeChange?.(next)
               run(() => saveBookingTicketMode({ dealId, orderId, mode: next }))
             }}
-            className="mt-1 block h-9 min-w-56 rounded-md border bg-white px-2"
+            className="mt-1 block h-9 w-full min-w-0 max-w-full rounded-md border bg-white px-2 sm:w-64"
           >
             {TICKETING_MODES.map((value) => (
               <option key={value} value={value}>
@@ -142,8 +148,103 @@ export function OperationsTicketsPanel({
       {live.length === 0 ? (
         <p className="mt-4 text-[11px] text-slate-400">No tickets issued yet.</p>
       ) : (
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full text-left text-[11px]">
+        <>
+        <div className="mt-4 space-y-3 md:hidden">
+          {live.map((ticket) => (
+            <div key={ticket.id} className="min-w-0 space-y-2 rounded-md border p-3 text-[11px]">
+              <p className="break-words font-medium">{ticket.guestName}</p>
+              {ticket.guestEmail ? <p className="break-all text-slate-400">{ticket.guestEmail}</p> : null}
+              {ticket.physicalSerial ? <p className="text-slate-500">Serial {ticket.physicalSerial}</p> : null}
+              <p className="font-mono text-slate-600">{ticket.shortCode}</p>
+              <p className="capitalize text-slate-500">{ticket.status.replace("_", " ")}</p>
+              <div className="flex flex-wrap gap-2">
+                {ticket.publicUrl && ticket.kind !== "physical" ? (
+                  <button
+                    type="button"
+                    className="font-semibold text-primary"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(ticket.publicUrl)
+                      toast.success("Link copied")
+                    }}
+                  >
+                    Copy link
+                  </button>
+                ) : null}
+                {ticket.kind === "physical" && !ticket.physicalSerial && canManage ? (
+                  <span className="flex min-w-0 flex-wrap items-center gap-1">
+                    <select
+                      value={guestForTicket[ticket.id] ?? ""}
+                      onChange={(event) =>
+                        setGuestForTicket((current) => ({ ...current, [ticket.id]: event.target.value }))
+                      }
+                      className="h-8 min-w-0 flex-1 rounded border px-1"
+                    >
+                      <option value="">Guest</option>
+                      {unassignedGuests.map((guest) => (
+                        <option key={`${guest.source}:${guest.id}`} value={`${guest.source}:${guest.id}`}>
+                          {guest.fullName}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={serials[ticket.id] ?? ""}
+                      onChange={(event) => setSerials((current) => ({ ...current, [ticket.id]: event.target.value }))}
+                      placeholder="Serial"
+                      className="h-8 w-full min-w-0 rounded border px-2"
+                    />
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => {
+                        const selected = guestForTicket[ticket.id]?.split(":") ?? []
+                        if (selected.length !== 2) {
+                          toast.error("Pick a guest")
+                          return
+                        }
+                        run(() =>
+                          assignBookingPhysicalSerial({
+                            dealId,
+                            ticketId: ticket.id,
+                            guestSource: selected[0] as "order" | "deal",
+                            guestId: selected[1]!,
+                            serial: serials[ticket.id] ?? "",
+                          }),
+                        )
+                      }}
+                      className="font-semibold text-primary"
+                    >
+                      Assign
+                    </button>
+                  </span>
+                ) : null}
+                {ticket.kind === "physical" && ticket.status !== "delivered" && canManage ? (
+                  <button
+                    type="button"
+                    className="font-semibold text-primary"
+                    onClick={() => run(() => collectBookingPhysicalTicket({ dealId, orderId, ticketId: ticket.id }))}
+                  >
+                    Collected
+                  </button>
+                ) : null}
+                {canManage ? (
+                  <button
+                    type="button"
+                    className="text-slate-500"
+                    onClick={() => {
+                      const reason = window.prompt("Void reason (name change, lost phone…)") ?? ""
+                      if (!reason.trim()) return
+                      run(() => reissueBookingTicket({ dealId, ticketId: ticket.id, reason }))
+                    }}
+                  >
+                    Void / reissue
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 hidden min-w-0 overflow-x-auto md:block">
+          <table className="w-full min-w-[480px] text-left text-[11px]">
             <thead className="text-[8px] uppercase tracking-wide text-slate-400">
               <tr>
                 <th className="py-2 pr-3">Guest</th>
@@ -252,6 +353,7 @@ export function OperationsTicketsPanel({
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {canManage && digital.length > 0 ? (
@@ -285,7 +387,7 @@ export function OperationsTicketsPanel({
             value={tracking}
             onChange={(event) => setTracking(event.target.value)}
             placeholder="Tracking number"
-            className="h-9 w-48 rounded-md border px-2 text-[11px]"
+            className="h-9 w-full min-w-0 max-w-xs rounded-md border px-2 text-[11px]"
           />
           <button
             type="button"

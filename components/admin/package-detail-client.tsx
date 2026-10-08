@@ -243,7 +243,14 @@ export function PackageDetailClient({
             section="visibility"
           />
         ) : activeTab === "guest-list" ? (
-          <PackageGuestList data={guestList} canManage={canManageGuests} />
+          <PackageGuestList
+            data={guestList}
+            canManage={canManageGuests}
+            packageId={livePkg.id}
+            eventDate={livePkg.event_date ?? null}
+            duration={livePkg.duration ?? null}
+            ticketingMode={livePkg.ticketing_mode ?? null}
+          />
         ) : (
           <PackageOrdersTable
             orders={orders}

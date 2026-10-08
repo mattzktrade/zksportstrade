@@ -1,9 +1,16 @@
-import { ticketValidOnIsoDate, earliestValidDate, isAdmittableStatus, ticketKindForMode } from "@/lib/tickets/model"
+import {
+  ticketValidOnIsoDate,
+  earliestValidDate,
+  isAdmittableStatus,
+  ticketArrivedOnIsoDate,
+  ticketKindForMode,
+} from "@/lib/tickets/model"
 import type {
   AdmitApplyResult,
   IssueCheckInput,
   ScanDecision,
   TicketRecord,
+  TicketingMode,
 } from "@/lib/tickets/types"
 
 export function canIssueTickets(input: IssueCheckInput): { ok: true } | { ok: false; message: string } {
@@ -19,6 +26,16 @@ export function canIssueTickets(input: IssueCheckInput): { ok: true } | { ok: fa
   const quantity = Math.max(0, Math.floor(Number(input.quantity) || 0))
   if (input.openTicketCount >= quantity) {
     return { ok: false, message: "Cannot issue more tickets than places on the booking." }
+  }
+  return { ok: true }
+}
+
+export function canIssueWalkUpTicket(input: { mode: TicketingMode; liveWalkUpCount: number }): { ok: true } | { ok: false; message: string } {
+  if (ticketKindForMode(input.mode) !== "zk_digital") {
+    return { ok: false, message: "Walk-up ZK passes are only for products we scan at our door." }
+  }
+  if (input.liveWalkUpCount >= 40) {
+    return { ok: false, message: "There are already 40 live walk-up tickets on this product. Void unused ones first." }
   }
   return { ok: true }
 }
@@ -84,11 +101,14 @@ export function decideScan(input: {
     return { code: "wrong_day", message: "This ticket is not valid today.", ticket }
   }
   if (ticket.status === "arrived" || ticket.arrivedAt) {
-    return {
-      code: "already_arrived",
-      message: "Already arrived. Do not let a second person in on this code.",
-      ticket,
+    if (ticketArrivedOnIsoDate(ticket, input.todayIso)) {
+      return {
+        code: "already_arrived",
+        message: "Already arrived today. Do not let a second person in on this code.",
+        ticket,
+      }
     }
+    return { code: "ok", message: "Admit this guest.", ticket }
   }
   if (!isAdmittableStatus(ticket.status)) {
     return { code: "not_admittable", message: "This ticket is not ready to scan.", ticket }
@@ -96,11 +116,19 @@ export function decideScan(input: {
   return { code: "ok", message: "Admit this guest.", ticket }
 }
 
-export function applyAdmit(ticket: TicketRecord, atIso: string, staffId: string): AdmitApplyResult {
+export function applyAdmit(
+  ticket: TicketRecord,
+  atIso: string,
+  staffId: string,
+  doorDate = atIso.slice(0, 10),
+): AdmitApplyResult {
   if (ticket.bookingCancelled) return { ok: false, code: "cancelled" }
   if (ticket.status === "void" || ticket.voidedAt) return { ok: false, code: "void" }
-  if (ticket.status === "arrived" || ticket.arrivedAt) return { ok: false, code: "already_arrived" }
-  if (!isAdmittableStatus(ticket.status)) return { ok: false, code: "not_admittable" }
+  if (ticketArrivedOnIsoDate(ticket, doorDate)) return { ok: false, code: "already_arrived" }
+  if (!isAdmittableStatus(ticket.status) && ticket.status !== "arrived") {
+    return { ok: false, code: "not_admittable" }
+  }
+  const arrivedDates = [...new Set([...(ticket.arrivedDates ?? []), doorDate])].sort()
   return {
     ok: true,
     ticket: {
@@ -108,6 +136,7 @@ export function applyAdmit(ticket: TicketRecord, atIso: string, staffId: string)
       status: "arrived",
       arrivedAt: atIso,
       arrivedBy: staffId,
+      arrivedDates,
     },
   }
 }

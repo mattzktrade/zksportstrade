@@ -21,6 +21,7 @@ export type PublicTicketView = {
   qrDataUrl: string
   qrPayload: string
   supplierUrl: string | null
+  hasHeadshot: boolean
   wallet: { apple: WalletPassStatus; google: WalletPassStatus }
 }
 
@@ -31,18 +32,20 @@ export async function getPublicTicketView(token: string): Promise<PublicTicketVi
   const ticket = await loadTicketByPublicToken(admin, token)
   if (!ticket || ticket.kind === "physical") return null
 
-  let guestName = "Guest"
+  let guestName = ticket.holderName?.trim() || (ticket.walkUp ? "Walk-up guest" : "Guest")
   let packageName = "Hospitality"
   let eventLabel = ticket.eventDate ?? "Event"
+  let headshotPath: string | null = null
   if (ticket.guest) {
     const table = ticket.guest.source === "order" ? "order_guests" : "deal_guests"
-    const { data } = await admin.from(table).select("full_name").eq("id", ticket.guest.id).maybeSingle()
+    const { data } = await admin.from(table).select("full_name, headshot_path").eq("id", ticket.guest.id).maybeSingle()
     guestName = String(data?.full_name ?? "").trim() || guestName
+    headshotPath = String((data as { headshot_path?: string | null } | null)?.headshot_path ?? "").trim() || null
   }
   if (ticket.packageId) {
     const { data } = await admin
       .from("packages")
-      .select("name, circuit, races(name, season)")
+      .select("name, races(name, season)")
       .eq("id", ticket.packageId)
       .maybeSingle()
     packageName = String(data?.name ?? packageName)
@@ -66,7 +69,25 @@ export async function getPublicTicketView(token: string): Promise<PublicTicketVi
     qrDataUrl: ticket.status === "void" ? "" : await ticketQrPngDataUrl(payload),
     qrPayload: payload,
     supplierUrl: ticket.supplierUrl,
+    hasHeadshot: Boolean(headshotPath),
     wallet: walletPassStatus(),
+  }
+}
+
+export async function getPublicTicketHeadshotBytes(token: string): Promise<Uint8Array | null> {
+  if (!isTicketPublicToken(token)) return null
+  const admin = createAdminClient()
+  if (!admin) return null
+  const ticket = await loadTicketByPublicToken(admin, token)
+  if (!ticket || ticket.kind === "physical" || !ticket.guest) return null
+  const table = ticket.guest.source === "order" ? "order_guests" : "deal_guests"
+  const { data } = await admin.from(table).select("headshot_path").eq("id", ticket.guest.id).maybeSingle()
+  const path = String((data as { headshot_path?: string | null } | null)?.headshot_path ?? "").trim()
+  if (!path) return null
+  try {
+    return await downloadGuestHeadshot(path)
+  } catch {
+    return null
   }
 }
 

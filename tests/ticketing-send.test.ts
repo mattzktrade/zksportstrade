@@ -3,7 +3,13 @@ import test from "node:test"
 import { resolveTicketRecipients, ticketLinkLine } from "../lib/tickets/send"
 import type { TicketSendRow } from "../lib/tickets/send"
 import type { TicketGuestRow } from "../lib/tickets/store"
-import { getTicketEmailFromAddress, DEFAULT_TICKET_EMAIL_FROM } from "../lib/email/config"
+import {
+  getTicketEmailFromAddress,
+  DEFAULT_TICKET_EMAIL_FROM,
+  fromHeaderWithName,
+  isUnverifiedResendDomainError,
+  mailboxFromFromHeader,
+} from "../lib/email/config"
 import { buildOperationsEmailDraft, operationsEmailHtml, operationsEmailKindLabel } from "../lib/operations/emails"
 
 function ticket(overrides: Partial<TicketSendRow> = {}): TicketSendRow {
@@ -28,6 +34,9 @@ function ticket(overrides: Partial<TicketSendRow> = {}): TicketSendRow {
     deliveredAt: null,
     arrivedAt: null,
     arrivedBy: null,
+    arrivedDates: [],
+    walkUp: false,
+    holderName: null,
     voidedAt: null,
     voidedReason: null,
     trackingNumber: null,
@@ -109,13 +118,34 @@ test("agent bookings pack to the ops contact unless email guests is ticked", () 
   assert.equal(direct.guestMails.length, 1)
 })
 
-test("ticket emails use the connected contact@zk-sport.trade mailbox when Resend is configured", () => {
-  const previous = process.env.RESEND_API_KEY
-  process.env.RESEND_API_KEY = "re_test"
-  delete process.env.TICKET_EMAIL_FROM
-  assert.equal(getTicketEmailFromAddress(), DEFAULT_TICKET_EMAIL_FROM)
-  assert.match(DEFAULT_TICKET_EMAIL_FROM, /contact@zk-sport\.trade/)
-  process.env.RESEND_API_KEY = previous
+test("ticket emails use Jenny on the verified Resend mailbox, not zk-sport.trade", () => {
+  const previous = {
+    key: process.env.RESEND_API_KEY,
+    ticket: process.env.TICKET_EMAIL_FROM,
+    auth: process.env.AUTH_EMAIL_FROM,
+    order: process.env.ORDER_EMAIL_FROM,
+  }
+  try {
+    process.env.RESEND_API_KEY = "re_test"
+    delete process.env.TICKET_EMAIL_FROM
+    delete process.env.AUTH_EMAIL_FROM
+    process.env.ORDER_EMAIL_FROM = "ZK Bookings <confirmation@zk-sports.trade>"
+    assert.equal(getTicketEmailFromAddress(), "Jenny Kent <confirmation@zk-sports.trade>")
+    assert.match(DEFAULT_TICKET_EMAIL_FROM, /zk-sports\.trade/)
+    assert.doesNotMatch(DEFAULT_TICKET_EMAIL_FROM, /zk-sport\.trade/)
+    assert.equal(mailboxFromFromHeader("ZK Bookings <confirmation@zk-sports.trade>"), "confirmation@zk-sports.trade")
+    assert.equal(fromHeaderWithName("ZK Bookings <confirmation@zk-sports.trade>", "Jenny Kent"), "Jenny Kent <confirmation@zk-sports.trade>")
+    assert.equal(isUnverifiedResendDomainError("The zk-sport.trade domain is not verified. Please, add and verify your domain on https://resend.com/domains"), true)
+  } finally {
+    if (previous.key === undefined) delete process.env.RESEND_API_KEY
+    else process.env.RESEND_API_KEY = previous.key
+    if (previous.ticket === undefined) delete process.env.TICKET_EMAIL_FROM
+    else process.env.TICKET_EMAIL_FROM = previous.ticket
+    if (previous.auth === undefined) delete process.env.AUTH_EMAIL_FROM
+    else process.env.AUTH_EMAIL_FROM = previous.auth
+    if (previous.order === undefined) delete process.env.ORDER_EMAIL_FROM
+    else process.env.ORDER_EMAIL_FROM = previous.order
+  }
 })
 
 test("ticket link lines leave a blank line so email html can turn the URL into a button", () => {

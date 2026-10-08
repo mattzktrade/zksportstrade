@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import test from "node:test"
 import { buildGuestDrafts } from "../app/(admin)/admin/operations/guest-editor"
 import type { OperationsGuest } from "../lib/admin/workflow-views"
@@ -40,6 +41,21 @@ test("keeps existing guests and fills the remaining slots", () => {
   assert.equal(drafts[0]?.fullName, "Alex Reed")
   assert.equal(drafts[0]?.isLeadGuest, true)
   assert.equal(drafts.filter((row) => !row.id).length, 3)
+})
+
+test("keeps a saved headshot on the draft so staff can see it", () => {
+  const drafts = buildGuestDrafts(
+    [guest({ id: "a", fullName: "Alex Reed", isLeadGuest: true, sortOrder: 0, headshotPath: "staff/deal-1/p.jpg" })],
+    1,
+  )
+  assert.equal(drafts[0]?.headshotPath, "staff/deal-1/p.jpg")
+})
+
+test("Manage guests editor can add and preview a headshot", () => {
+  const src = readFileSync("app/(admin)/admin/operations/guest-editor.tsx", "utf8")
+  assert.match(src, /Add headshot/)
+  assert.match(src, /Photo on file/)
+  assert.match(src, /uploadOperationsGuestHeadshot/)
 })
 
 test("guest details status becomes complete when every name is in", () => {

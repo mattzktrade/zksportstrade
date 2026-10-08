@@ -2,6 +2,7 @@ import { unstable_noStore as noStore } from "next/cache"
 import { parseAccountKinds, type AccountKind } from "@/lib/crm/account-kinds"
 import type { WorkflowOrderRow } from "@/lib/admin/workflow-views"
 import { isDirectClientAccount } from "@/lib/operations/fulfilment"
+import { resolvedTicketingMode } from "@/lib/tickets/model"
 import { createClient } from "@/lib/supabase/server"
 import { mapChunks, POSTGREST_IN_FILTER_SIZE } from "@/lib/supabase/fetch-all-rows"
 
@@ -32,6 +33,7 @@ export type OperationsBookingRow = WorkflowOrderRow & {
   hasDeliveryProof: boolean
   isDirectClient: boolean
   accountKinds: AccountKind[]
+  ticketingMode: string | null
 }
 
 export type OperationsAccountContact = {
@@ -83,6 +85,7 @@ type OpsRow = {
   supplier_details_sent_at: string | null
   thank_you_skipped_at: string | null
   delivery_due_at: string | null
+  ticketing_mode: string | null
 }
 
 const EMPTY_OPS: OpsRow = {
@@ -96,33 +99,34 @@ const EMPTY_OPS: OpsRow = {
   supplier_details_sent_at: null,
   thank_you_skipped_at: null,
   delivery_due_at: null,
+  ticketing_mode: null,
 }
 
 const OPS_SELECT_CORE =
   "supplier_fulfilment_method, client_delivery_method, delivery_method, collection_point, collection_time, contact_on_site, supplier_details_sent_at, thank_you_skipped_at, delivery_due_at"
 const OPS_SELECT = `${OPS_SELECT_CORE}, supplier_notes`
+const OPS_SELECT_TICKETING = `${OPS_SELECT}, ticketing_mode`
 
 async function loadOpsRows(
   supabase: Awaited<ReturnType<typeof createClient>>,
   kind: "order" | "deal",
   ids: string[],
 ): Promise<Array<OpsRow & { order_id?: string; deal_id?: string }>> {
-  const queried =
-    kind === "order"
-      ? await supabase.from("order_operations").select(`order_id, ${OPS_SELECT}`).in("order_id", ids)
-      : await supabase.from("deal_operations").select(`deal_id, ${OPS_SELECT}`).in("deal_id", ids)
-  if (!queried.error) return (queried.data ?? []) as Array<OpsRow & { order_id?: string; deal_id?: string }>
-  if (/supplier_notes/i.test(queried.error.message)) {
-    const retry =
-      kind === "order"
-        ? await supabase.from("order_operations").select(`order_id, ${OPS_SELECT_CORE}`).in("order_id", ids)
-        : await supabase.from("deal_operations").select(`deal_id, ${OPS_SELECT_CORE}`).in("deal_id", ids)
-    return ((retry.data ?? []) as Array<Omit<OpsRow, "supplier_notes"> & { order_id?: string; deal_id?: string }>).map(
-      (row) => ({
-        ...row,
-        supplier_notes: null,
-      }),
-    )
+  const table = kind === "order" ? "order_operations" : "deal_operations"
+  const idCol = kind === "order" ? "order_id" : "deal_id"
+  const selects = [`${idCol}, ${OPS_SELECT_TICKETING}`, `${idCol}, ${OPS_SELECT}`, `${idCol}, ${OPS_SELECT_CORE}`]
+  for (const select of selects) {
+    const queried = await supabase.from(table).select(select).in(idCol, ids)
+    if (queried.error) {
+      if (!/ticketing_mode|supplier_notes/i.test(queried.error.message)) return []
+      continue
+    }
+    return ((queried.data ?? []) as Array<Partial<OpsRow> & { order_id?: string; deal_id?: string }>).map((row) => ({
+      ...EMPTY_OPS,
+      ...row,
+      supplier_notes: row.supplier_notes ?? null,
+      ticketing_mode: row.ticketing_mode ?? null,
+    }))
   }
   return []
 }
@@ -168,11 +172,27 @@ export async function enrichOperationsBookings(rows: WorkflowOrderRow[]): Promis
     fetchInChunks(dealIds, async (chunk) => {
       const { data } = await supabase
         .from("deal_line_items")
-        .select("deal_id, fulfilment_cost_layer_id")
+        .select("deal_id, fulfilment_cost_layer_id, package_id")
         .in("deal_id", chunk)
-      return (data ?? []) as Array<{ deal_id: string; fulfilment_cost_layer_id: string | null }>
+      return (data ?? []) as Array<{ deal_id: string; fulfilment_cost_layer_id: string | null; package_id: string | null }>
     }),
   ])
+
+  const packageIds = [...new Set(dealLines.map((row) => row.package_id).filter((id): id is string => Boolean(id)))]
+  const packageModeRows = await fetchInChunks(packageIds, async (chunk) => {
+    const { data, error } = await supabase.from("packages").select("id, ticketing_mode").in("id", chunk)
+    if (error && /ticketing_mode/i.test(error.message)) {
+      return chunk.map((id) => ({ id, ticketing_mode: null as string | null }))
+    }
+    return (data ?? []) as Array<{ id: string; ticketing_mode: string | null }>
+  })
+  const ticketingModeByPackage = new Map(packageModeRows.map((row) => [String(row.id), row.ticketing_mode]))
+  const packageTicketingModeByDeal = new Map<string, string | null>()
+  for (const line of dealLines) {
+    const dealId = String(line.deal_id)
+    if (packageTicketingModeByDeal.has(dealId)) continue
+    packageTicketingModeByDeal.set(dealId, line.package_id ? ticketingModeByPackage.get(String(line.package_id)) ?? null : null)
+  }
 
   const layerIds = [
     ...new Set(
@@ -299,6 +319,10 @@ export async function enrichOperationsBookings(rows: WorkflowOrderRow[]): Promis
       hasDeliveryProof: (UUID_RE.test(row.id) && proofOrders.has(row.id)) || Boolean(row.dealId && proofDeals.has(row.dealId)),
       isDirectClient: isDirectClientAccount(accountKinds),
       accountKinds,
+      ticketingMode: resolvedTicketingMode(
+        ops.ticketing_mode,
+        row.dealId ? packageTicketingModeByDeal.get(row.dealId) : null,
+      ),
     }
   })
 }

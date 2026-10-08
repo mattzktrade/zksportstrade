@@ -16,8 +16,8 @@ export const DEFAULT_BOOKINGS_CC = "bookings@zk-sports.com"
 export const DEFAULT_CHELLEY_CC = "chelley@zk-sports.com"
 export const DEFAULT_OPERATIONS_CC = "jenny@zk-sports.com"
 export const OPERATIONS_EMAIL_SENDER_NAME = "Jenny Kent"
-/** Connected Resend mailbox while zk-sports.com is not verified. */
-export const DEFAULT_TICKET_EMAIL_FROM = "Jenny Kent <contact@zk-sport.trade>"
+/** Fallback only if AUTH/ORDER from-address is missing. Must be a Resend-verified domain. */
+export const DEFAULT_TICKET_EMAIL_FROM = "Jenny Kent <confirmation@zk-sports.trade>"
 
 /** Never CC these, even if a leftover Vercel env var still lists them. */
 export const NEVER_CC_ADDRESSES = new Set(["matt@zk-sports.com"])
@@ -75,10 +75,29 @@ export function getResendApiKey(): string | null {
   return process.env.RESEND_API_KEY?.trim() || null
 }
 
-/** Ticket delivery mail. Uses the connected Resend domain until Jenny's mailbox is verified. */
+export function mailboxFromFromHeader(from: string | null | undefined): string | null {
+  const trimmed = stripSurroundingQuotes(from ?? "")
+  if (!trimmed) return null
+  const angled = trimmed.match(/<([^>]+)>/)
+  const email = (angled?.[1] ?? trimmed).trim()
+  return email.includes("@") ? email : null
+}
+
+export function fromHeaderWithName(from: string, name: string): string {
+  const email = mailboxFromFromHeader(from)
+  return email ? `${name} <${email}>` : stripSurroundingQuotes(from)
+}
+
+export function isUnverifiedResendDomainError(message: string | null | undefined): boolean {
+  return /domain is not verified/i.test(message ?? "")
+}
+
+/** Ticket delivery mail. Jenny's name on the connected Resend mailbox (zk-sports.trade). */
 export function getTicketEmailFromAddress(): string | null {
   const explicit = stripSurroundingQuotes(process.env.TICKET_EMAIL_FROM?.trim() ?? "")
   if (explicit) return explicit
+  const connected = getResendFromAddress()
+  if (connected) return fromHeaderWithName(connected, OPERATIONS_EMAIL_SENDER_NAME)
   if (getResendApiKey()) return DEFAULT_TICKET_EMAIL_FROM
-  return getResendFromAddress()
+  return null
 }

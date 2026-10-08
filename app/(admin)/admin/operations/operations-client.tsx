@@ -94,10 +94,10 @@ export function OperationsClient({
   }
 
   return (
-    <div className="space-y-3 p-3 sm:p-4 lg:p-5">
+    <div className="min-w-0 max-w-full space-y-3 overflow-x-hidden p-3 sm:p-4 lg:p-5">
       <AdminPageHeader
         title="Operations"
-        description="Work each signed booking in order: guests, supplier, fulfil, then thank-you for direct clients."
+        description="Work each signed booking in order: guests, tickets, seats, then thank-you for direct clients."
       />
       <div className="flex flex-wrap gap-2">
         {(

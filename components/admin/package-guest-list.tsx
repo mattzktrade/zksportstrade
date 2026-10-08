@@ -26,6 +26,7 @@ import {
   savePackageGuestNames,
 } from "@/app/(admin)/admin/catalog/guest-list-actions"
 import { OperationsGuestEditor } from "@/app/(admin)/admin/operations/guest-editor"
+import { PackageWalkUpTickets } from "@/components/admin/package-walk-up-tickets"
 import type { OperationsGuest } from "@/lib/admin/workflow-views"
 import type { PackageGuestListData, PackageGuestListSeat } from "@/lib/admin/package-guest-list-model"
 import {
@@ -50,9 +51,13 @@ type TicketFilter = "" | GuestTicketStatus | "issued_any"
 type Props = {
   data: PackageGuestListData
   canManage: boolean
+  packageId: string
+  eventDate: string | null
+  duration: string | null
+  ticketingMode: string | null
 }
 
-export function PackageGuestList({ data, canManage }: Props) {
+export function PackageGuestList({ data, canManage, packageId, eventDate, duration, ticketingMode }: Props) {
   const router = useRouter()
   const [pending, start] = useTransition()
   const [day, setDay] = useState<GuestListDayId>("all")
@@ -134,6 +139,14 @@ export function PackageGuestList({ data, canManage }: Props) {
 
   return (
     <div className="space-y-4 p-4 sm:p-5">
+      <PackageWalkUpTickets
+        packageId={packageId}
+        eventDate={eventDate}
+        duration={duration}
+        ticketingMode={ticketingMode}
+        canManage={canManage}
+      />
+
       <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
         <AdminStatCard
           icon={Users}
@@ -332,6 +345,8 @@ export function PackageGuestList({ data, canManage }: Props) {
           expectedCount={editorSeats.length}
           existing={editorSeats.filter((seat) => seat.guestId).map(seatToOperationsGuest)}
           pending={pending}
+          dealId={editorSeats[0]?.dealId}
+          orderId={editorSeats[0]?.orderId}
           onClose={() => setEditorSeats(null)}
           onSave={(guests) => {
             start(async () => {
@@ -445,6 +460,7 @@ function GuestRow({
           <GuestNameButton
             missing={missing}
             name={seat.guestName}
+            hasPhoto={Boolean(seat.headshotPath)}
             dayLabel={showDayLabel ? guestListSeatDayShortLabel(seat.daySlots) : null}
             canManage={canManage}
             onEdit={onEditGuests}
@@ -622,6 +638,7 @@ function GuestMobileCard({
         <GuestNameButton
           missing={missing}
           name={seat.guestName}
+          hasPhoto={Boolean(seat.headshotPath)}
           dayLabel={showDayLabel ? guestListSeatDayShortLabel(seat.daySlots) : null}
           canManage={canManage}
           onEdit={onEditGuests}
@@ -710,12 +727,14 @@ function GuestMobileCard({
 function GuestNameButton({
   missing,
   name,
+  hasPhoto,
   dayLabel,
   canManage,
   onEdit,
 }: {
   missing: boolean
   name: string | null
+  hasPhoto?: boolean
   dayLabel?: string | null
   canManage: boolean
   onEdit: () => void
@@ -741,7 +760,10 @@ function GuestNameButton({
       className="text-left font-semibold text-[#202124] hover:underline disabled:hover:no-underline"
     >
       <span className="block">{name}</span>
-      {dayLabel ? <span className="text-[10px] font-medium text-[#92969e]">{dayLabel}</span> : null}
+      <span className={`block text-[10px] font-medium ${hasPhoto ? "text-emerald-700" : "text-[#92969e]"}`}>
+        {hasPhoto ? "Photo on file" : "No photo"}
+        {dayLabel ? ` · ${dayLabel}` : ""}
+      </span>
     </button>
   )
 }

@@ -827,8 +827,14 @@ export function DealDetailClient({
                         ) : null}
                       </p>
                       <p className="mt-0.5 text-[9px] text-slate-500">
-                        {[guest.email, guest.phone, guest.nationality].filter(Boolean).join(" · ") ||
-                          "Details pending"}
+                        {[
+                          guest.headshotPath ? "Photo on file" : "No photo",
+                          guest.email,
+                          guest.phone,
+                          guest.nationality,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || "Details pending"}
                       </p>
                       {guest.dietaryRequirements || guest.specialRequests ? (
                         <p className="mt-1 text-[9px] text-slate-500">
@@ -1600,6 +1606,8 @@ export function DealDetailClient({
           expectedCount={guestQty || guests.length || 1}
           existing={guests}
           pending={pending}
+          dealId={deal.id}
+          orderId={deal.order_id}
           onClose={() => setGuestManagerOpen(false)}
           onSave={saveGuests}
           onDelete={(guestId) => {

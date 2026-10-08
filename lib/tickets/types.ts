@@ -64,6 +64,9 @@ export type TicketRecord = {
   deliveredAt: string | null
   arrivedAt: string | null
   arrivedBy: string | null
+  arrivedDates: string[]
+  walkUp: boolean
+  holderName: string | null
   voidedAt: string | null
   voidedReason: string | null
   trackingNumber: string | null

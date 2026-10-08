@@ -288,7 +288,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             title: "Check-in",
-            body: "On the door: scan the ZK QR or search the guest name. The headshot is the check. Undo a scan within 10 minutes if you tap the wrong person.",
+            body: "On the door: pick the door day (Friday / Saturday / Sunday), then scan the ZK QR or search the name. The list only shows people due that day. A 3-day pass scans again the next morning — the same day it will say already in. The photo is the check. Undo a scan within 10 minutes if you tap the wrong person.",
             href: "/admin/check-in",
           },
           {
@@ -697,16 +697,16 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           {
             title: "Queue",
-            body: "Signed bookings by next step: guests, supplier, fulfil, then thank-you for direct clients.",
+            body: "Signed bookings by next step: guests, tickets, seats, then thank-you for direct clients. ZK digital skips supplier inbound.",
             href: "/admin/operations",
           },
           {
             title: "Guest form",
-            body: "Send the guest details form from the booking board. Names and headshots land here and on the product Guest list.",
+            body: "Send the guest details form from the booking board, or open Manage guests to type names and add headshots yourself. You can see if a photo is already on file and replace it. Names and headshots land here and on the product Guest list.",
           },
           {
             title: "Tickets",
-            body: "On the booking board, issue ZK passes, email them from contact@zk-sport.trade, or receive and assign physical serials. A successful digital send marks delivered. Set the product ticketing mode first — supplier-handled for official F1, ZK digital only where we scan.",
+            body: "On the booking board, issue ZK passes, email them from Jenny on the connected zk-sports.trade mailbox, or receive and assign physical serials. Issue tickets before allocating seats. For a last-minute extra with no guest row, open the product Guest list and Create walk-up ticket. ZK digital skips supplier inbound. A successful digital send marks delivered.",
           },
           {
             title: "Proof of delivery",
@@ -796,7 +796,15 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             q: "How do we check guests in?",
-            a: "Operations → Check-in on your phone. Pick the event, scan the QR or search the name, and match the headshot. If someone lost their phone, check them in from the name list. Void and reissue from the booking if the ticket itself is wrong.",
+            a: "Operations → Check-in on your phone. Pick the event and the door day, scan the QR or search the name, and match the headshot. The list is filtered to that day so a 400-guest weekend is not one giant list. A 3-day ticket is meant to scan again the next day. If someone lost their phone, check them in from the name list. Void and reissue from the booking if the ticket itself is wrong.",
+          },
+          {
+            q: "How do I issue a last-minute ticket with no guest details?",
+            a: "Open the product → Guest list → Create walk-up ticket. You can leave the name blank, copy the link, or type an email. It is a real ZK pass for our door, not an official F1 ticket. Void it from the same list if it is not used.",
+          },
+          {
+            q: "How do I add a guest headshot?",
+            a: "Open Manage guests on the deal, the operations board, or the product Guest list. Each person has a Headshot box: you can see the photo if one is already there, or tap Add headshot, then Save guests. Guests can also upload on the guest details form.",
           },
           {
             q: "Available stock looks too low / too high.",

@@ -25,6 +25,30 @@ export function guestHeadshotObjectPath(inviteId: string, fileId: string, ext: "
   return `${inviteId}/${fileId}.${ext}`
 }
 
+export function staffHeadshotObjectPath(scopeId: string, fileId: string, ext: "jpg" | "png"): string {
+  return `staff/${scopeId}/${fileId}.${ext}`
+}
+
+export function isSafeHeadshotObjectPath(path: string): boolean {
+  const n = normalisedHeadshotPath(path)
+  if (!n || n.includes("..") || n.includes("\\") || n.startsWith("/") || n.length > 240) return false
+  return /^[a-z0-9][a-z0-9/_-]*\.(jpg|jpeg|png)$/i.test(n)
+}
+
+/** Public form uploads must stay on the invite prefix; staff photos already on the guest row may be kept. */
+export function acceptedGuestFormHeadshotPath(
+  submitted: string | null | undefined,
+  inviteId: string,
+  existingPath: string | null | undefined,
+): string | null {
+  const path = submitted ? normalisedHeadshotPath(submitted) : null
+  if (!path || !isSafeHeadshotObjectPath(path)) return null
+  if (headshotBelongsToInvite(path, inviteId)) return path
+  const existing = existingPath ? normalisedHeadshotPath(existingPath) : null
+  if (existing && path === existing) return path
+  return null
+}
+
 export function headshotBelongsToInvite(path: string, inviteId: string): boolean {
   const normalised = normalisedHeadshotPath(path)
   return (

@@ -5,7 +5,7 @@ import { getPortalProfile } from "@/lib/supabase/profile"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { extractShortCodeFromText, extractTicketTokenFromText, verifyTicketQrPayload, ticketSigningSecret } from "@/lib/tickets/crypto"
 import { guestHeadshotDataUrl } from "@/lib/tickets/public"
-import { validDayLabels } from "@/lib/tickets/model"
+import { parseArrivedDates, parseValidDays, validDayLabels } from "@/lib/tickets/model"
 import {
   admitTicketRow,
   loadTicketById,
@@ -24,8 +24,7 @@ export type CheckInEventOption = {
   raceId: string
   eventDate: string | null
   label: string
-  arrived: number
-  remaining: number
+  total: number
 }
 
 export type CheckInGuest = {
@@ -34,10 +33,13 @@ export type CheckInGuest = {
   shortCode: string
   status: string
   daysLabel: string
+  validDays: string[]
+  eventDate: string | null
   tableNumber: string | null
   dietary: string | null
   headshotUrl: string | null
   arrivedAt: string | null
+  arrivedDates: string[]
 }
 
 export type CheckInScanResult = {
@@ -97,11 +99,9 @@ export async function loadCheckInEvents(): Promise<Result<{ events: CheckInEvent
         raceId: raceId || key,
         eventDate: eventDate || null,
         label,
-        arrived: 0,
-        remaining: 0,
+        total: 0,
       }
-      if (row.status === "arrived") current.arrived += 1
-      else current.remaining += 1
+      current.total += 1
       grouped.set(key, current)
     }
     return { ok: true, message: "Loaded.", events: [...grouped.values()].sort((a, b) => (a.eventDate ?? "").localeCompare(b.eventDate ?? "")) }
@@ -120,7 +120,8 @@ export async function loadCheckInGuests(input: {
 }): Promise<Result<{ guests: CheckInGuest[] }>> {
   const session = await viewGate()
   if (!session) return { ok: false, message: "Operations permission is required." }
-  let query = session.admin.from("tickets").select("*").neq("status", "void")
+  const admin = session.admin
+  let query = admin.from("tickets").select("*").neq("status", "void")
   if (input.raceId && input.raceId.includes("|") === false && input.raceId.length > 8) {
     query = query.eq("race_id", input.raceId)
   }
@@ -128,6 +129,16 @@ export async function loadCheckInGuests(input: {
   const { data, error } = await query.order("short_code")
   if (error) return { ok: false, message: error.message }
   const guests: CheckInGuest[] = []
+  const bookingGuests = new Map<string, Awaited<ReturnType<typeof loadBookingGuests>>>()
+  async function guestsFor(dealId: string | null, orderId: string | null) {
+    if (!dealId && !orderId) return []
+    const key = `${orderId ?? ""}:${dealId ?? ""}`
+    const cached = bookingGuests.get(key)
+    if (cached) return cached
+    const people = await loadBookingGuests(admin, { dealId, orderId })
+    bookingGuests.set(key, people)
+    return people
+  }
   for (const row of data ?? []) {
     const ticket = {
       id: String(row.id),
@@ -135,23 +146,30 @@ export async function loadCheckInGuests(input: {
       orderId: row.order_id ? String(row.order_id) : null,
       orderGuestId: row.order_guest_id ? String(row.order_guest_id) : null,
       dealGuestId: row.deal_guest_id ? String(row.deal_guest_id) : null,
-      validDays: Array.isArray(row.valid_days) ? row.valid_days.map(String) : [],
+      validDays: parseValidDays(row.valid_days),
+      eventDate: row.event_date ? String(row.event_date).slice(0, 10) : null,
       shortCode: String(row.short_code),
       status: String(row.status),
       arrivedAt: row.arrived_at ? String(row.arrived_at) : null,
+      arrivedDates: parseArrivedDates(row.arrived_dates, row.arrived_at ? String(row.arrived_at) : null),
+      holderName: typeof row.holder_name === "string" ? row.holder_name.trim() : "",
+      walkUp: row.walk_up === true,
     }
-    const people = await loadBookingGuests(session.admin, { dealId: ticket.dealId, orderId: ticket.orderId })
+    const people = await guestsFor(ticket.dealId, ticket.orderId)
     const guest = people.find((person) => person.id === ticket.orderGuestId || person.id === ticket.dealGuestId)
     guests.push({
       ticketId: ticket.id,
-      guestName: guest?.fullName || "Unassigned",
+      guestName: guest?.fullName || ticket.holderName || (ticket.walkUp ? "Walk-up guest" : "Unassigned"),
       shortCode: ticket.shortCode,
       status: ticket.status,
-      daysLabel: validDayLabels(ticket.validDays as never),
+      daysLabel: validDayLabels(ticket.validDays),
+      validDays: ticket.validDays,
+      eventDate: ticket.eventDate,
       tableNumber: guest?.tableNumber ?? null,
       dietary: guest?.dietaryRequirements ?? null,
       headshotUrl: await guestHeadshotDataUrl(guest?.headshotPath),
       arrivedAt: ticket.arrivedAt,
+      arrivedDates: ticket.arrivedDates,
     })
   }
   return { ok: true, message: "Loaded.", guests }
@@ -223,7 +241,7 @@ export async function scanCheckInTicket(input: {
     result: {
       code: admitted.code,
       message: admitted.message,
-      guestName: guest?.fullName || "Guest",
+      guestName: guest?.fullName || ticket.holderName || (ticket.walkUp ? "Walk-up guest" : "Guest"),
       shortCode: ticket.shortCode,
       daysLabel: validDayLabels(ticket.validDays),
       tableNumber: guest?.tableNumber ?? null,
@@ -243,12 +261,13 @@ export async function manualCheckInTicket(input: {
   return scanCheckInTicket({ raw: input.ticketId, raceId: input.raceId, todayIso: input.todayIso, method: "manual" })
 }
 
-export async function undoCheckIn(input: { ticketId: string; reason: string }): Promise<Result> {
+export async function undoCheckIn(input: { ticketId: string; reason: string; doorDate?: string | null }): Promise<Result> {
   const session = await manageGate()
   if (!session) return { ok: false, message: "Operations permission is required." }
   return undoArrival(session.admin, {
     ticketId: input.ticketId,
     actorId: session.profile.id,
     reason: input.reason,
+    doorDate: input.doorDate,
   })
 }

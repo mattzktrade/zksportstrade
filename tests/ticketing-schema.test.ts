@@ -32,6 +32,16 @@ describe("internal ticketing schema", () => {
     assert.match(sql, /grant execute on function public\.admit_ticket/)
   })
 
+  it("follow-up migration admits per door day and allows walk-up tickets", () => {
+    const next = readFileSync("supabase/migrations/20261008163000_ticket_admissions_walk_up.sql", "utf8")
+    assert.match(next, /ticket_admissions/)
+    assert.match(next, /walk_up/)
+    assert.match(next, /holder_name/)
+    assert.match(next, /p_door_date/)
+    assert.match(next, /status not in \('issued', 'sent', 'delivered', 'arrived'\)/)
+    assert.match(next, /walk_up = true and package_id is not null/)
+  })
+
   it("adds tickets_ready to operations email kinds", () => {
     assert.match(sql, /'tickets_ready'/)
   })

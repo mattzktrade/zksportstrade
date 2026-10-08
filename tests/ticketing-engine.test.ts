@@ -5,11 +5,12 @@ import {
   applyAdmit,
   applyVoid,
   canIssueTickets,
+  canIssueWalkUpTicket,
   canReceivePhysicalPool,
   decideScan,
   serialIsAvailable,
 } from "../lib/tickets/engine"
-import { guestTicketStatusFromTicket, ticketKindForMode, ticketValidOnIsoDate } from "../lib/tickets/model"
+import { doorDayOptions, guestTicketStatusFromTicket, ticketKindForMode, ticketValidOnIsoDate } from "../lib/tickets/model"
 import type { TicketRecord } from "../lib/tickets/types"
 
 const SECRET = "test-ticket-secret"
@@ -36,6 +37,9 @@ function ticket(overrides: Partial<TicketRecord> = {}): TicketRecord {
     deliveredAt: null,
     arrivedAt: null,
     arrivedBy: null,
+    arrivedDates: [],
+    walkUp: false,
+    holderName: null,
     voidedAt: null,
     voidedReason: null,
     trackingNumber: null,
@@ -168,4 +172,50 @@ test("multi-day tickets are valid on each listed day only", () => {
   assert.equal(ticketValidOnIsoDate(three, "2026-11-21"), true)
   assert.equal(ticketValidOnIsoDate(three, "2026-11-22"), true)
   assert.equal(ticketValidOnIsoDate(three, "2026-11-19"), false)
+})
+
+test("a 3-day pass scans again the next day, but not twice on the same day", () => {
+  const friday = applyAdmit(
+    ticket({ validDays: ["friday_only", "saturday_only", "sunday_only"] }),
+    "2026-11-20T17:00:00Z",
+    "staff-1",
+    "2026-11-20",
+  )
+  assert.equal(friday.ok, true)
+  const sameDay = decideScan({
+    payloadOk: true,
+    ticket: friday.ok ? friday.ticket : ticket(),
+    selectedRaceId: "race-1",
+    todayIso: "2026-11-20",
+  })
+  assert.equal(sameDay.code, "already_arrived")
+  const saturday = decideScan({
+    payloadOk: true,
+    ticket: friday.ok ? friday.ticket : ticket(),
+    selectedRaceId: "race-1",
+    todayIso: "2026-11-21",
+  })
+  assert.equal(saturday.code, "ok")
+  const second = applyAdmit(friday.ok ? friday.ticket : ticket(), "2026-11-21T17:00:00Z", "staff-2", "2026-11-21")
+  assert.equal(second.ok, true)
+})
+
+test("walk-up tickets are only for products ZK scans", () => {
+  assert.equal(canIssueWalkUpTicket({ mode: "zk_digital", liveWalkUpCount: 0 }).ok, true)
+  assert.equal(canIssueWalkUpTicket({ mode: "hybrid", liveWalkUpCount: 0 }).ok, true)
+  assert.equal(canIssueWalkUpTicket({ mode: "physical", liveWalkUpCount: 0 }).ok, false)
+  assert.equal(canIssueWalkUpTicket({ mode: "external_digital", liveWalkUpCount: 0 }).ok, false)
+  assert.equal(canIssueWalkUpTicket({ mode: "supplier_direct", liveWalkUpCount: 0 }).ok, false)
+  assert.equal(canIssueWalkUpTicket({ mode: "zk_digital", liveWalkUpCount: 40 }).ok, false)
+})
+
+test("door day chips follow the ticket valid days", () => {
+  const days = doorDayOptions("2026-11-22", [
+    { validDays: ["friday_only", "saturday_only", "sunday_only"] },
+    { validDays: ["saturday_only"] },
+  ])
+  assert.deepEqual(
+    days.map((day) => day.label),
+    ["Friday", "Saturday", "Sunday"],
+  )
 })

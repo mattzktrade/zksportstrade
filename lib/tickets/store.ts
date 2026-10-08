@@ -4,13 +4,16 @@ import { operationsTicketStatus } from "@/lib/admin/workflow-status"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { newTicketSecrets, signTicketQrPayload, ticketSigningSecret } from "@/lib/tickets/crypto"
 import {
+  applyAdmit,
   canIssueTickets,
+  canIssueWalkUpTicket,
   canReceivePhysicalPool,
   decideScan,
   serialIsAvailable,
 } from "@/lib/tickets/engine"
 import {
   guestTicketStatusFromTicket,
+  parseArrivedDates,
   parsePhysicalLocation,
   parseTicketKind,
   parseTicketStatus,
@@ -116,6 +119,9 @@ export function mapTicketRow(row: TicketRow, cancelled = false): TicketRecord {
     deliveredAt: asString(row.delivered_at),
     arrivedAt: asString(row.arrived_at),
     arrivedBy: asString(row.arrived_by),
+    arrivedDates: parseArrivedDates(row.arrived_dates, asString(row.arrived_at)),
+    walkUp: row.walk_up === true,
+    holderName: asString(row.holder_name),
     voidedAt: asString(row.voided_at),
     voidedReason: asString(row.voided_reason),
     trackingNumber: asString(row.tracking_number),
@@ -390,6 +396,8 @@ async function insertTicket(
     validDays: CostDaySlot[]
     physicalSerial?: string | null
     physicalLocation?: PhysicalLocation | null
+    walkUp?: boolean
+    holderName?: string | null
     actorId: string
   },
 ): Promise<TicketRecord & { publicToken: string }> {
@@ -416,6 +424,9 @@ async function insertTicket(
     issued_at: now,
     issued_by: input.actorId,
     updated_at: now,
+    ...(input.walkUp
+      ? { walk_up: true, holder_name: blank(input.holderName) }
+      : {}),
   }
   const { data, error } = await db.from("tickets").insert(payload).select("*").maybeSingle()
   if (error) throw new Error(error.message)
@@ -480,6 +491,91 @@ export async function issueTicketsForNamedGuests(
   }
   if (!issued) return { ok: false, message: "Every named guest already has a live ticket." }
   return { ok: true, issued, message: issued === 1 ? "Issued 1 ticket." : `Issued ${issued} tickets.` }
+}
+
+export type WalkUpTicketRow = TicketRecord & { publicToken: string }
+
+export async function loadWalkUpTickets(db: TicketsDb, packageId: string): Promise<WalkUpTicketRow[]> {
+  const { data, error } = await db
+    .from("tickets")
+    .select("*")
+    .eq("package_id", packageId)
+    .eq("walk_up", true)
+    .neq("status", "void")
+    .order("created_at", { ascending: false })
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((row) => ({
+    ...mapTicketRow(row as TicketRow),
+    publicToken: String((row as TicketRow).public_token ?? ""),
+  }))
+}
+
+export async function issueWalkUpTicket(
+  db: TicketsDb,
+  input: {
+    packageId: string
+    actorId: string
+    holderName?: string | null
+    validDays?: CostDaySlot[]
+  },
+): Promise<{ ok: true; ticket: WalkUpTicketRow; message: string } | { ok: false; message: string }> {
+  const { data: pkg, error } = await db
+    .from("packages")
+    .select(
+      "id, name, duration, event_date, race_id, circuit, ticketing_mode, ticketing_venue_name, races(name, season, event_date)",
+    )
+    .eq("id", input.packageId)
+    .maybeSingle()
+  if (error) {
+    if (missingTicketingSchema(error.message) || /walk_up|holder_name|tickets_parent/i.test(error.message)) {
+      return { ok: false, message: "Apply the latest ticketing migration to create walk-up tickets." }
+    }
+    return { ok: false, message: error.message }
+  }
+  if (!pkg) return { ok: false, message: "Product not found." }
+  const mode = parseTicketingMode(asString((pkg as { ticketing_mode?: string }).ticketing_mode)) ?? "supplier_direct"
+  const kind = ticketKindForMode(mode)
+  if (!kind || kind === "physical" || kind === "external_digital") {
+    return { ok: false, message: "Walk-up passes are only for products we scan at our door (ZK digital or hybrid)." }
+  }
+  const existing = await loadWalkUpTickets(db, input.packageId)
+  const check = canIssueWalkUpTicket({ mode, liveWalkUpCount: existing.length })
+  if (!check.ok) return check
+  const raceRaw = (pkg as { races?: { name?: string; event_date?: string } | Array<{ name?: string; event_date?: string }> }).races
+  const race = Array.isArray(raceRaw) ? raceRaw[0] : raceRaw
+  const eventDate =
+    asString(race?.event_date)?.slice(0, 10) ?? asString((pkg as { event_date?: string }).event_date)?.slice(0, 10) ?? null
+  const duration = asString((pkg as { duration?: string }).duration)
+  const validDays = input.validDays?.length
+    ? input.validDays
+    : validDaysForGuest({ packageDuration: duration, eventDate })
+  try {
+    const created = await insertTicket(db, {
+      kind,
+      dealId: null,
+      orderId: null,
+      packageId: input.packageId,
+      raceId: asString((pkg as { race_id?: string }).race_id),
+      eventDate,
+      venueName: asString((pkg as { ticketing_venue_name?: string }).ticketing_venue_name),
+      guest: null,
+      validDays,
+      walkUp: true,
+      holderName: input.holderName,
+      actorId: input.actorId,
+    })
+    return {
+      ok: true,
+      ticket: created,
+      message: `Issued walk-up pass ${created.shortCode}. Copy the link or email it now.`,
+    }
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : "Could not issue that ticket."
+    if (/parent_check|walk_up|null value.*deal_id/i.test(message)) {
+      return { ok: false, message: "Apply the latest ticketing migration to create walk-up tickets." }
+    }
+    return { ok: false, message }
+  }
 }
 
 export async function receivePhysicalTickets(
@@ -731,6 +827,36 @@ export async function saveBookingTicketingMode(
       { onConflict: "deal_id" },
     )
   }
+  if (parsed === "zk_digital") {
+    await ensureZkDigitalFulfilmentDefaults(db, context)
+  }
+}
+
+async function ensureZkDigitalFulfilmentDefaults(
+  db: TicketsDb,
+  context: Pick<BookingTicketContext, "dealId" | "orderId">,
+) {
+  const patch = { client_delivery_method: "send_digital" }
+  if (context.orderId) {
+    const { data } = await db
+      .from("order_operations")
+      .select("client_delivery_method")
+      .eq("order_id", context.orderId)
+      .maybeSingle()
+    if (!String((data as { client_delivery_method?: string } | null)?.client_delivery_method ?? "").trim()) {
+      await db.from("order_operations").update(patch).eq("order_id", context.orderId)
+    }
+  }
+  if (context.dealId) {
+    const { data } = await db
+      .from("deal_operations")
+      .select("client_delivery_method")
+      .eq("deal_id", context.dealId)
+      .maybeSingle()
+    if (!String((data as { client_delivery_method?: string } | null)?.client_delivery_method ?? "").trim()) {
+      await db.from("deal_operations").update(patch).eq("deal_id", context.dealId)
+    }
+  }
 }
 
 export async function recordScanAttempt(
@@ -780,19 +906,37 @@ export async function admitTicketRow(
     p_ticket_id: input.ticket.id,
     p_staff_id: input.actorId,
     p_method: input.method,
+    p_door_date: input.todayIso,
   })
   if (error) {
+    const admitted = applyAdmit(input.ticket, new Date().toISOString(), input.actorId, input.todayIso)
+    if (!admitted.ok) {
+      await recordScanAttempt(db, {
+        ticketId: input.ticket.id,
+        raceId: input.selectedRaceId,
+        code: admitted.code,
+        method: input.method,
+        actorId: input.actorId,
+      })
+      return { code: admitted.code, message: decision.message, ticket: input.ticket }
+    }
+    await db.from("ticket_admissions").insert({
+      ticket_id: input.ticket.id,
+      door_date: input.todayIso,
+      arrived_by: input.actorId,
+      method: input.method,
+    })
     const { data: updated, error: updateError } = await db
       .from("tickets")
       .update({
         status: "arrived",
         arrived_at: new Date().toISOString(),
         arrived_by: input.actorId,
+        arrived_dates: admitted.ticket.arrivedDates,
         updated_at: new Date().toISOString(),
       })
       .eq("id", input.ticket.id)
-      .in("status", ["issued", "sent", "delivered"])
-      .is("arrived_at", null)
+      .in("status", ["issued", "sent", "delivered", "arrived"])
       .select("*")
       .maybeSingle()
     if (updateError) throw new Error(updateError.message)
@@ -837,7 +981,7 @@ export async function admitTicketRow(
   })
   const messages: Record<ScanCode, string> = {
     ok: "Welcome.",
-    already_arrived: "Already arrived.",
+    already_arrived: "Already arrived today.",
     void: "This ticket was voided.",
     cancelled: "This booking is cancelled.",
     wrong_day: "This ticket is not valid today.",
@@ -858,31 +1002,60 @@ export async function admitTicketRow(
 
 export async function undoArrival(
   db: TicketsDb,
-  input: { ticketId: string; actorId: string; reason: string },
+  input: { ticketId: string; actorId: string; reason: string; doorDate?: string | null },
 ): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
   const ticket = await loadTicketById(db, input.ticketId)
   if (!ticket) return { ok: false, message: "Ticket not found." }
-  if (ticket.status !== "arrived" || !ticket.arrivedAt) return { ok: false, message: "This guest is not marked arrived." }
-  const arrivedMs = new Date(ticket.arrivedAt).getTime()
+  const doorDate = input.doorDate && /^\d{4}-\d{2}-\d{2}$/.test(input.doorDate)
+    ? input.doorDate
+    : ticket.arrivedAt?.slice(0, 10) ?? null
+  const { data: todayRow } = doorDate
+    ? await db
+        .from("ticket_admissions")
+        .select("arrived_at")
+        .eq("ticket_id", ticket.id)
+        .eq("door_date", doorDate)
+        .maybeSingle()
+    : { data: null }
+  const stamp = String(todayRow?.arrived_at ?? ticket.arrivedAt ?? "")
+  if (!stamp) return { ok: false, message: "This guest is not marked arrived." }
+  const arrivedMs = new Date(stamp).getTime()
   if (Number.isFinite(arrivedMs) && Date.now() - arrivedMs > 10 * 60 * 1000) {
     return { ok: false, message: "Undo is only available for 10 minutes after a scan." }
   }
-  const next = statusAfterUndoArrival(ticket)
+  if (doorDate) {
+    await db.from("ticket_admissions").delete().eq("ticket_id", ticket.id).eq("door_date", doorDate)
+  }
+  const { data: remaining } = await db
+    .from("ticket_admissions")
+    .select("door_date, arrived_at, arrived_by")
+    .eq("ticket_id", ticket.id)
+    .order("door_date", { ascending: false })
+  const dates = (remaining ?? []).map((row) => String(row.door_date).slice(0, 10)).filter(Boolean)
+  const stillIn = dates.length > 0
+  const next = stillIn ? "arrived" : statusAfterUndoArrival(ticket)
+  const latest = remaining?.[0]
   const now = new Date().toISOString()
   const { error } = await db
     .from("tickets")
     .update({
       status: next,
-      arrived_at: null,
-      arrived_by: null,
+      arrived_at: stillIn ? (latest?.arrived_at ?? ticket.arrivedAt) : null,
+      arrived_by: stillIn ? (latest?.arrived_by ?? ticket.arrivedBy) : null,
+      arrived_dates: dates,
       updated_at: now,
     })
     .eq("id", ticket.id)
-    .eq("status", "arrived")
   if (error) return { ok: false, message: error.message }
   await appendEvent(db, ticket.id, "undone", input.actorId, input.reason.trim() || "Undo scan")
-  await syncGuestTicketFields(db, { ...ticket, status: next, arrivedAt: null, arrivedBy: null })
-  return { ok: true, message: "Arrival undone." }
+  await syncGuestTicketFields(db, {
+    ...ticket,
+    status: next,
+    arrivedAt: stillIn ? ticket.arrivedAt : null,
+    arrivedBy: stillIn ? ticket.arrivedBy : null,
+    arrivedDates: dates,
+  })
+  return { ok: true, message: stillIn ? "Today's scan undone. Earlier days stay marked in." : "Arrival undone." }
 }
 
 export function ticketQrPayload(ticketId: string, secret = ticketSigningSecret()): string {

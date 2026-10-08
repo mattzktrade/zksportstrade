@@ -11,6 +11,8 @@ import {
   type CheckInGuest,
   type CheckInScanResult,
 } from "./actions"
+import { doorDayOptions, ticketArrivedOnIsoDate, ticketValidOnIsoDate } from "@/lib/tickets/model"
+import type { CostDaySlot } from "@/lib/inventory/day-cost-allocation"
 
 const QUEUE_KEY = "zk-checkin-queue"
 const GUESTS_CACHE_PREFIX = "zk-checkin-guests:"
@@ -84,7 +86,27 @@ export function CheckInClient({ canScan }: { canScan: boolean }) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
 
-  const selected = useMemo(() => events.find((event) => `${event.raceId}|${event.eventDate ?? ""}` === eventKey), [events, eventKey])
+  const selected = useMemo(
+    () => events.find((event) => `${event.raceId}|${event.eventDate ?? ""}` === eventKey),
+    [events, eventKey],
+  )
+
+  const doorDays = useMemo(
+    () =>
+      doorDayOptions(
+        selected?.eventDate ?? guests[0]?.eventDate,
+        guests.map((guest) => ({ validDays: guest.validDays as CostDaySlot[] })),
+      ),
+    [guests, selected?.eventDate],
+  )
+
+  const dueToday = useMemo(
+    () =>
+      guests.filter((guest) =>
+        ticketValidOnIsoDate({ eventDate: guest.eventDate, validDays: guest.validDays as CostDaySlot[] }, todayIso),
+      ),
+    [guests, todayIso],
+  )
 
   function refreshEvents() {
     start(async () => {
@@ -135,6 +157,14 @@ export function CheckInClient({ canScan }: { canScan: boolean }) {
     if (eventKey) refreshGuests(eventKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventKey])
+
+  useEffect(() => {
+    if (!doorDays.length) return
+    if (doorDays.some((day) => day.iso === todayIso)) return
+    const today = new Date().toISOString().slice(0, 10)
+    const match = doorDays.find((day) => day.iso === today) ?? doorDays[0]
+    if (match) setTodayIso(match.iso)
+  }, [doorDays, todayIso])
 
   async function handleScan(raw: string, method: "qr" | "short_code" | "manual" | "offline" = "qr") {
     if (!canScan) {
@@ -241,44 +271,70 @@ export function CheckInClient({ canScan }: { canScan: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraOn, eventKey, todayIso])
 
-  const filtered = guests.filter((guest) => {
+  const filtered = dueToday.filter((guest) => {
     const q = search.trim().toLowerCase()
     if (!q) return true
     return `${guest.guestName} ${guest.shortCode}`.toLowerCase().includes(q)
   })
+  const inToday = dueToday.filter((guest) => ticketArrivedOnIsoDate(guest, todayIso)).length
+  const leftToday = dueToday.length - inToday
 
   return (
-    <div className="mx-auto max-w-xl space-y-4 pb-16">
-      <div>
-        <h1 className="text-xl font-semibold">Check-in</h1>
-        <p className="mt-1 text-sm text-slate-500">Scan the ZK QR or search the guest name. The photo is the check, not the screenshot.</p>
+    <div className="mx-auto box-border w-full max-w-xl min-w-0 space-y-4 pb-[max(6rem,calc(env(safe-area-inset-bottom)+2.5rem))] pt-3 pl-[max(1.25rem,env(safe-area-inset-left))] pr-[max(1.25rem,env(safe-area-inset-right))]">
+      <div className="min-w-0">
+        <h1 className="hidden text-xl font-semibold sm:block">Check-in</h1>
+        <p className="text-sm leading-5 text-slate-500 sm:mt-1">
+          Scan the ZK QR or search the name. The photo is the check, not the screenshot. Door day filters the list — a
+          3-day pass still scans again tomorrow.
+        </p>
       </div>
 
-      <label className="block text-[11px] font-medium text-slate-600">
+      <label className="block min-w-0 text-[11px] font-medium text-slate-600">
         Event
         <select
           value={eventKey}
           onChange={(event) => setEventKey(event.target.value)}
-          className="mt-1 h-11 w-full rounded-lg border bg-white px-3 text-sm"
+          className="mt-1 h-11 w-full min-w-0 max-w-full truncate rounded-lg border bg-white px-3 text-sm"
         >
           {events.length === 0 ? <option value="">No tickets issued yet</option> : null}
           {events.map((event) => (
             <option key={`${event.raceId}|${event.eventDate ?? ""}`} value={`${event.raceId}|${event.eventDate ?? ""}`}>
-              {event.label} · {event.arrived} in · {event.remaining} left
+              {event.label}
+              {event.total ? ` · ${event.total}` : ""}
             </option>
           ))}
         </select>
       </label>
 
-      <label className="block text-[11px] font-medium text-slate-600">
-        Door date
-        <input
-          type="date"
-          value={todayIso}
-          onChange={(event) => setTodayIso(event.target.value)}
-          className="mt-1 h-11 w-full rounded-lg border bg-white px-3 text-sm"
-        />
-      </label>
+      <div className="min-w-0">
+        <p className="text-[11px] font-medium text-slate-600">Door day</p>
+        {doorDays.length > 0 ? (
+          <div className="-mx-1 mt-1 flex gap-2 overflow-x-auto px-1 pb-1">
+            {doorDays.map((day) => (
+              <button
+                key={day.iso}
+                type="button"
+                onClick={() => setTodayIso(day.iso)}
+                className={`h-10 shrink-0 rounded-full px-4 text-sm font-semibold ${
+                  todayIso === day.iso ? "bg-primary text-white" : "border border-slate-200 bg-white text-slate-700"
+                }`}
+              >
+                {day.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <input
+            type="date"
+            value={todayIso}
+            onChange={(event) => setTodayIso(event.target.value)}
+            className="mt-1 h-11 w-full min-w-0 rounded-lg border bg-white px-3 text-sm"
+          />
+        )}
+        <p className="mt-1 text-[11px] text-slate-400">
+          {dueToday.length} due {inToday ? `· ${inToday} in` : ""} · {leftToday} left
+        </p>
+      </div>
 
       <button
         type="button"
@@ -300,10 +356,14 @@ export function CheckInClient({ canScan }: { canScan: boolean }) {
           if (raw.trim()) void handleScan(raw.trim(), "short_code")
           event.currentTarget.reset()
         }}
-        className="flex gap-2"
+        className="flex min-w-0 gap-2"
       >
-        <input name="code" placeholder="ZK-ABC123 or paste QR text" className="h-11 flex-1 rounded-lg border px-3 text-sm" />
-        <button type="submit" className="h-11 rounded-lg border px-4 text-sm font-semibold">
+        <input
+          name="code"
+          placeholder="ZK-ABC123 or paste QR text"
+          className="h-11 min-w-0 flex-1 rounded-lg border px-3 text-sm"
+        />
+        <button type="submit" className="h-11 shrink-0 rounded-lg border px-4 text-sm font-semibold">
           Go
         </button>
       </form>
@@ -315,9 +375,9 @@ export function CheckInClient({ canScan }: { canScan: boolean }) {
       ) : null}
 
       {result ? (
-        <div className={`rounded-2xl p-5 text-white ${toneFor(result.code)}`}>
+        <div className={`rounded-2xl p-4 text-white sm:p-5 ${toneFor(result.code)}`}>
           <p className="text-xs font-semibold uppercase tracking-wide">{result.code.replace("_", " ")}</p>
-          <p className="mt-1 text-2xl font-bold">{result.guestName || result.message}</p>
+          <p className="mt-1 text-2xl font-bold break-words">{result.guestName || result.message}</p>
           <p className="mt-1 text-sm">{result.message}</p>
           {result.headshotUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -334,7 +394,7 @@ export function CheckInClient({ canScan }: { canScan: boolean }) {
                 const reason = window.prompt("Undo reason") ?? ""
                 if (!reason.trim()) return
                 start(async () => {
-                  const undone = await undoCheckIn({ ticketId: result.ticketId!, reason })
+                  const undone = await undoCheckIn({ ticketId: result.ticketId!, reason, doorDate: todayIso })
                   if (!undone.ok) toast.error(undone.message)
                   else {
                     toast.success(undone.message)
@@ -355,37 +415,47 @@ export function CheckInClient({ canScan }: { canScan: boolean }) {
         value={search}
         onChange={(event) => setSearch(event.target.value)}
         placeholder="Search name"
-        className="h-11 w-full rounded-lg border px-3 text-sm"
+        className="h-11 w-full min-w-0 rounded-lg border px-3 text-sm"
       />
 
-      <ul className="divide-y rounded-xl border bg-white">
-        {filtered.map((guest) => (
-          <li key={guest.ticketId} className="flex items-center gap-3 px-3 py-2">
-            {guest.headshotUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={guest.headshotUrl} alt="" className="h-10 w-10 rounded-full object-cover" />
-            ) : (
-              <span className="h-10 w-10 rounded-full bg-slate-200" />
-            )}
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold">{guest.guestName}</p>
-              <p className="text-[11px] text-slate-500">
-                {guest.shortCode} · {guest.status}
-                {guest.tableNumber ? ` · Table ${guest.tableNumber}` : ""}
-              </p>
-            </div>
-            {canScan && guest.status !== "arrived" ? (
-              <button
-                type="button"
-                className="text-[11px] font-semibold text-primary"
-                onClick={() => void handleScan(guest.ticketId, "manual")}
-              >
-                Check in
-              </button>
-            ) : null}
-          </li>
-        ))}
-        {filtered.length === 0 ? <li className="px-3 py-6 text-center text-sm text-slate-400">No guests on this list.</li> : null}
+      <ul className="divide-y overflow-hidden rounded-xl border bg-white">
+        {filtered.map((guest) => {
+          const arrivedToday = ticketArrivedOnIsoDate(guest, todayIso)
+          return (
+            <li key={guest.ticketId} className="flex min-w-0 items-center gap-3 px-3.5 py-3.5 sm:px-4">
+              {guest.headshotUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={guest.headshotUrl} alt="" className="h-11 w-11 shrink-0 rounded-full object-cover" />
+              ) : (
+                <span className="h-11 w-11 shrink-0 rounded-full bg-slate-200" />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">{guest.guestName}</p>
+                <p className="truncate text-[11px] text-slate-500">
+                  {guest.shortCode}
+                  {guest.tableNumber ? ` · Table ${guest.tableNumber}` : ""}
+                  {arrivedToday ? " · in today" : guest.status === "arrived" ? " · in on an earlier day" : ""}
+                </p>
+              </div>
+              {canScan && !arrivedToday ? (
+                <button
+                  type="button"
+                  className="shrink-0 rounded-full bg-primary/10 px-3 py-1.5 text-[11px] font-semibold text-primary"
+                  onClick={() => void handleScan(guest.ticketId, "manual")}
+                >
+                  Check in
+                </button>
+              ) : arrivedToday ? (
+                <span className="shrink-0 rounded-full bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold text-emerald-700">
+                  In
+                </span>
+              ) : null}
+            </li>
+          )
+        })}
+        {filtered.length === 0 ? (
+          <li className="px-3 py-6 text-center text-sm text-slate-400">No guests due on this door day.</li>
+        ) : null}
       </ul>
     </div>
   )

@@ -7,8 +7,21 @@ import { parseAttendanceDay } from "@/lib/guest-details/model"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { saveOrderGuests, deleteOrderGuest } from "@/app/(admin)/admin/operations/actions"
+import { sendTicketClientEmail } from "@/lib/email/send-ticket-email"
+import { isCostDaySlot, type CostDaySlot } from "@/lib/inventory/day-cost-allocation"
+import { buildOperationsEmailDraft } from "@/lib/operations/emails"
+import { validDayLabels } from "@/lib/tickets/model"
+import { ticketLinkLine } from "@/lib/tickets/send"
+import {
+  issueWalkUpTicket,
+  loadWalkUpTickets,
+  markTicketsSentDelivered,
+  missingTicketingSchema,
+  voidAndReissueTicket,
+} from "@/lib/tickets/store"
+import { ticketPublicUrl } from "@/lib/tickets/url"
 
-type Result = { ok: true; message: string } | { ok: false; message: string }
+type Result<T extends object = object> = ({ ok: true; message: string } & T) | { ok: false; message: string }
 
 type GuestNameDraft = {
   id?: string
@@ -267,4 +280,135 @@ export async function saveGuestListBooking(input: {
     const message = errorMessage(error)
     return { ok: false, message: migrationMessage(message) ?? message }
   }
+}
+
+export type WalkUpTicketView = {
+  id: string
+  shortCode: string
+  holderName: string | null
+  status: string
+  daysLabel: string
+  publicUrl: string
+  publicToken: string
+}
+
+function walkUpView(row: { id: string; shortCode: string; holderName: string | null; status: string; validDays: CostDaySlot[]; publicToken: string }): WalkUpTicketView {
+  return {
+    id: row.id,
+    shortCode: row.shortCode,
+    holderName: row.holderName,
+    status: row.status,
+    daysLabel: validDayLabels(row.validDays),
+    publicUrl: ticketPublicUrl(row.publicToken),
+    publicToken: row.publicToken,
+  }
+}
+
+export async function loadPackageWalkUpTickets(packageId: string): Promise<Result<{ tickets: WalkUpTicketView[] }>> {
+  const gate = await guestListGate()
+  if (!gate) return { ok: false, message: "Operations permission is required." }
+  try {
+    const tickets = await loadWalkUpTickets(gate.admin, packageId)
+    return { ok: true, message: "Loaded.", tickets: tickets.map(walkUpView) }
+  } catch (error) {
+    const message = errorMessage(error)
+    if (missingTicketingSchema(message) || /walk_up/i.test(message)) {
+      return { ok: true, message: "Loaded.", tickets: [] }
+    }
+    return { ok: false, message }
+  }
+}
+
+export async function issuePackageWalkUpTicket(input: {
+  packageId: string
+  holderName?: string
+  email?: string
+  validDays?: string[]
+}): Promise<Result<{ ticket: WalkUpTicketView }>> {
+  const gate = await guestListGate()
+  if (!gate) return { ok: false, message: "Operations permission is required." }
+  const days = (input.validDays ?? []).filter((day): day is CostDaySlot => isCostDaySlot(day))
+  const issued = await issueWalkUpTicket(gate.admin, {
+    packageId: input.packageId,
+    actorId: gate.profile.id,
+    holderName: blank(input.holderName),
+    validDays: days.length ? days : undefined,
+  })
+  if (!issued.ok) return issued
+  const ticket = walkUpView(issued.ticket)
+  const email = blank(input.email)?.toLowerCase()
+  if (email) {
+    const sent = await sendWalkUpMail(gate.profile.id, ticket, email, issued.ticket.holderName || "there")
+    if (!sent.ok) {
+      revalidateGuestList()
+      return { ok: true, message: `${issued.message} Email did not send: ${sent.message}`, ticket }
+    }
+    await markTicketsSentDelivered(gate.admin, { ticketIds: [issued.ticket.id], actorId: gate.profile.id, delivered: true })
+  }
+  revalidateGuestList()
+  revalidatePath("/admin/check-in")
+  return { ok: true, message: issued.message, ticket }
+}
+
+export async function sendPackageWalkUpTicket(input: {
+  ticketId: string
+  email: string
+}): Promise<Result> {
+  const gate = await guestListGate()
+  if (!gate) return { ok: false, message: "Operations permission is required." }
+  const email = blank(input.email)?.toLowerCase()
+  if (!email) return { ok: false, message: "Enter an email address." }
+  const { data, error } = await gate.admin.from("tickets").select("*").eq("id", input.ticketId).maybeSingle()
+  if (error || !data) return { ok: false, message: "Ticket not found." }
+  const ticket = walkUpView({
+    id: String(data.id),
+    shortCode: String(data.short_code),
+    holderName: typeof data.holder_name === "string" ? data.holder_name : null,
+    status: String(data.status),
+    validDays: Array.isArray(data.valid_days) ? data.valid_days.filter((day: unknown): day is CostDaySlot => isCostDaySlot(String(day))) : [],
+    publicToken: String(data.public_token ?? ""),
+  })
+  const sent = await sendWalkUpMail(gate.profile.id, ticket, email, ticket.holderName || "there")
+  if (!sent.ok) return sent
+  await markTicketsSentDelivered(gate.admin, { ticketIds: [ticket.id], actorId: gate.profile.id, delivered: true })
+  revalidateGuestList()
+  return { ok: true, message: `Sent ${ticket.shortCode} to ${email}.` }
+}
+
+export async function voidPackageWalkUpTicket(input: { ticketId: string; reason: string }): Promise<Result> {
+  const gate = await guestListGate()
+  if (!gate) return { ok: false, message: "Operations permission is required." }
+  const result = await voidAndReissueTicket(gate.admin, {
+    ticketId: input.ticketId,
+    actorId: gate.profile.id,
+    reason: input.reason.trim() || "Walk-up voided",
+  })
+  if (result.ok) {
+    revalidateGuestList()
+    revalidatePath("/admin/check-in")
+  }
+  return result
+}
+
+async function sendWalkUpMail(
+  _actorId: string,
+  ticket: WalkUpTicketView,
+  email: string,
+  toName: string,
+): Promise<Result> {
+  const draft = buildOperationsEmailDraft({
+    kind: "tickets_ready",
+    contactName: toName,
+    accountName: "ZK Sports",
+    eventLabel: "your hospitality",
+    quantity: 1,
+    ticketLinksBlock: ticketLinkLine(ticket.holderName || ticket.shortCode, ticket.publicToken),
+  })
+  const result = await sendTicketClientEmail({
+    to: email,
+    subject: draft.subject,
+    body: draft.body,
+  })
+  if (!result.ok) return { ok: false, message: result.error ?? result.skipped ?? "Could not send that email." }
+  return { ok: true, message: "Sent." }
 }

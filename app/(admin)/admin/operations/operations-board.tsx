@@ -41,10 +41,12 @@ import {
   supplierFulfilmentLabel,
   supplierNeedsNamesSent,
   supplierNeedsTicketsIn,
+  ticketingModeSkipsSupplierInbound,
   unpaidCloseToEvent,
   type OperationsBoardStep,
 } from "@/lib/operations/fulfilment"
 import { GUEST_TICKET_STATUSES } from "@/lib/admin/package-guest-list-model"
+import type { TicketingMode } from "@/lib/tickets/types"
 
 function orderIdOf(row: OperationsBookingRow): string | null {
   return row.id.startsWith("deal:") ? null : row.id
@@ -60,8 +62,8 @@ const STEPS: Array<{ id: OperationsBoardStep; title: string }> = [
   { id: "ops_contact", title: "Ops contact" },
   { id: "guests", title: "Guest details" },
   { id: "supplier", title: "Tickets from supplier" },
+  { id: "fulfil", title: "Tickets" },
   { id: "allocate", title: "Allocate seats" },
-  { id: "fulfil", title: "Fulfil and proof" },
   { id: "after_event", title: "After the event" },
 ]
 
@@ -94,6 +96,7 @@ export function OperationsBoard({
   })
   const [proofNote, setProofNote] = useState("")
   const [proofFile, setProofFile] = useState<File | null>(null)
+  const [liveTicketingMode, setLiveTicketingMode] = useState<TicketingMode | null>(null)
 
   const input = bookingStepInput(row, supporting.emails)
   const paid = isOperationsPaid(input)
@@ -106,13 +109,16 @@ export function OperationsBoard({
   const lockedClient = lockedClientDelivery(plan.supplier)
   const clientValue = lockedClient ?? plan.client
   const supplierMethod = parseSupplierFulfilmentMethod(plan.supplier)
+  const ticketingMode = liveTicketingMode ?? row.ticketingMode
+  const skipSupplier = ticketingModeSkipsSupplierInbound(ticketingMode)
 
+  const stepInput = useMemo(() => ({ ...input, ticketingMode }), [input, ticketingMode])
   const activeStep = useMemo(() => {
     for (const step of STEPS) {
-      if (operationsBoardStepStatus(step.id, input) === "current") return step.id
+      if (operationsBoardStepStatus(step.id, stepInput) === "current") return step.id
     }
     return "guests"
-  }, [input])
+  }, [stepInput])
 
   function run(action: () => Promise<{ ok: boolean; message: string }>) {
     start(async () => {
@@ -153,25 +159,42 @@ export function OperationsBoard({
     run(() => addOperationsDeliveryProof(data))
   }
 
+  function saveSeat(
+    guest: OperationsGuest,
+    index: number,
+    patch: Partial<{ ticketNumber: string | null; tableNumber: string | null; paddockTour: string | null; ticketStatus: string | null }>,
+  ) {
+    return saveGuestListSeat({
+      guestId: guest.id,
+      orderId: guest.orderId,
+      dealId: guest.dealId,
+      slotIndex: guest.sortOrder ?? index,
+      ticketNumber: patch.ticketNumber !== undefined ? patch.ticketNumber : guest.ticketNumber,
+      tableNumber: patch.tableNumber !== undefined ? patch.tableNumber : guest.tableNumber,
+      paddockTour: patch.paddockTour !== undefined ? patch.paddockTour : guest.paddockTour,
+      ticketStatus: patch.ticketStatus !== undefined ? patch.ticketStatus : guest.ticketStatus,
+    })
+  }
+
   return (
-    <div className="space-y-3">
+    <div className="min-w-0 max-w-full space-y-3">
       <button type="button" onClick={onBack} className="inline-flex items-center gap-1 text-[10px] font-semibold text-primary">
         <ArrowLeft className="h-3.5 w-3.5" />
         Back to queue
       </button>
 
-      <div className="rounded-lg border bg-white p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
+      <div className="min-w-0 rounded-lg border bg-white p-4">
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
             {row.dealId ? (
-              <Link href={`/admin/deals/${row.dealId}`} className="text-lg font-semibold text-primary hover:underline">
+              <Link href={`/admin/deals/${row.dealId}`} className="break-words text-lg font-semibold text-primary hover:underline">
                 {row.dealReference || row.reference}
               </Link>
             ) : (
-              <h2 className="text-lg font-semibold">{row.dealReference || row.reference}</h2>
+              <h2 className="break-words text-lg font-semibold">{row.dealReference || row.reference}</h2>
             )}
             <AccountNameLink accountId={row.accountId} name={row.accountName} className="mt-1 block font-medium" />
-            <p className="mt-1 max-w-2xl text-[11px] leading-snug text-slate-600">{row.eventPackage}</p>
+            <p className="mt-1 max-w-2xl break-words text-[11px] leading-snug text-slate-600">{row.eventPackage}</p>
             <p className="mt-1 text-[10px] text-slate-400">{formatEventDate(row.eventDate)}</p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -182,13 +205,13 @@ export function OperationsBoard({
         </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <ol className="rounded-lg border bg-white p-3 text-[11px]">
+      <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]">
+        <ol className="min-w-0 rounded-lg border bg-white p-3 text-[11px]">
           {STEPS.map((step) => {
-            const status = operationsBoardStepStatus(step.id, input)
+            const status = operationsBoardStepStatus(step.id, stepInput)
             if (status === "skipped") return null
             return (
-              <li key={step.id} className={`border-b px-1 py-2 last:border-0 ${step.id === activeStep ? "font-semibold text-primary" : "text-slate-600"}`}>
+              <li key={step.id} className={`break-words border-b px-1 py-2 last:border-0 ${step.id === activeStep ? "font-semibold text-primary" : "text-slate-600"}`}>
                 <span className="mr-2 text-[9px] uppercase tracking-wide text-slate-400">
                   {status === "done" ? "Done" : status === "current" ? "Now" : "Next"}
                 </span>
@@ -198,16 +221,16 @@ export function OperationsBoard({
           })}
         </ol>
 
-        <div className="space-y-3">
-          <section className="rounded-lg border bg-white p-4">
+        <div className="min-w-0 space-y-3">
+          <section className="min-w-0 overflow-x-auto rounded-lg border bg-white p-4">
             <h3 className="text-[12px] font-semibold">1. Paid</h3>
-            <p className="mt-1 text-[11px] text-slate-500">Finance owns this. Xero marks it paid automatically.</p>
+            <p className="mt-1 break-words text-[11px] text-slate-500">Finance owns this. Xero marks it paid automatically.</p>
             <p className="mt-2 text-[11px]">{paid ? "Paid." : "Awaiting payment."}</p>
           </section>
 
-          <section className="rounded-lg border bg-white p-4">
+          <section className="min-w-0 overflow-x-auto rounded-lg border bg-white p-4">
             <h3 className="text-[12px] font-semibold">2. Operations contact</h3>
-            <p className="mt-1 text-[11px] text-slate-500">Guest and ticket emails go to this person, not necessarily the person who bought.</p>
+            <p className="mt-1 break-words text-[11px] text-slate-500">Guest and ticket emails go to this person, not necessarily the person who bought.</p>
             {row.dealId && canManage ? (
               <div className="mt-3 space-y-2">
                 <select
@@ -237,7 +260,7 @@ export function OperationsBoard({
                   <p className="text-[10px] text-slate-400">Using the deal’s primary contact until you pick someone else.</p>
                 )}
                 {row.accountId ? (
-                  <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="grid min-w-0 gap-2 sm:grid-cols-2">
                     <input
                       value={newContact.fullName}
                       onChange={(event) => setNewContact((current) => ({ ...current, fullName: event.target.value }))}
@@ -270,7 +293,7 @@ export function OperationsBoard({
                           return result
                         })
                       }
-                      className="h-9 rounded-md border px-3 text-[11px] font-semibold"
+                      className="h-9 w-full min-w-0 rounded-md border px-3 text-[11px] font-semibold"
                     >
                       Add and use
                     </button>
@@ -282,7 +305,7 @@ export function OperationsBoard({
             )}
           </section>
 
-          <section className="rounded-lg border bg-white p-4">
+          <section className="min-w-0 overflow-x-auto rounded-lg border bg-white p-4">
             <h3 className="text-[12px] font-semibold">3. Guest details</h3>
             <p className="mt-1 text-[11px] text-slate-500">
               {row.completeGuestCount}/{row.quantity} complete
@@ -293,9 +316,29 @@ export function OperationsBoard({
                 <button type="button" onClick={() => setEmailKind("operations_intro")}>Intro email</button>
                 <button type="button" onClick={() => setEmailKind("guest_details")}>Request guests</button>
                 <button type="button" onClick={() => setEmailKind("guest_details_reminder")}>Reminder</button>
-                <button type="button" onClick={() => setGuestsOpen(true)}>Edit names</button>
+                <button type="button" onClick={() => setGuestsOpen(true)}>Manage guests</button>
               </div>
             ) : null}
+            <div className="mt-3 divide-y divide-slate-100">
+              {guests.length === 0 ? (
+                <p className="py-2 text-[11px] text-slate-400">No names yet. Open Manage guests to add people and photos.</p>
+              ) : (
+                guests.map((guest) => (
+                  <button
+                    key={guest.id}
+                    type="button"
+                    disabled={!canManage}
+                    onClick={() => setGuestsOpen(true)}
+                    className="flex w-full min-w-0 items-center justify-between gap-3 py-2 text-left disabled:cursor-default"
+                  >
+                    <span className="min-w-0 truncate text-[11px] font-medium">{guest.fullName || "Unnamed"}</span>
+                    <span className={`shrink-0 text-[10px] font-semibold ${guest.headshotPath ? "text-emerald-700" : "text-slate-400"}`}>
+                      {guest.headshotPath ? "Photo on file" : "No photo"}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
             {lastEmailAt(supporting.emails, row.dealId, "guest_details") ? (
               <p className="mt-2 text-[10px] text-slate-400">
                 Last asked {new Date(lastEmailAt(supporting.emails, row.dealId, "guest_details")!).toLocaleDateString("en-GB")}
@@ -303,9 +346,15 @@ export function OperationsBoard({
             ) : null}
           </section>
 
-          <section className="rounded-lg border bg-white p-4">
+          <section className="min-w-0 overflow-x-auto rounded-lg border bg-white p-4">
             <h3 className="text-[12px] font-semibold">4. Tickets from supplier</h3>
-            <div className="mt-3 grid sm:grid-cols-2 sm:divide-x sm:divide-slate-200">
+            {skipSupplier ? (
+              <p className="mt-2 break-words text-[11px] text-slate-500">
+                Not needed. ZK issues the digital passes in the Tickets step, so supplier inbound is skipped.
+              </p>
+            ) : (
+            <div className="min-w-0">
+            <div className="mt-3 grid min-w-0 sm:grid-cols-2 sm:divide-x sm:divide-slate-200">
               <div className="space-y-3 sm:pr-4">
                 <p className="text-[11px] font-semibold">From the supplier</p>
                 <select
@@ -459,12 +508,73 @@ export function OperationsBoard({
                 </button>
               ) : null}
             </div>
+            </div>
+            )}
           </section>
 
-          <section className="rounded-lg border bg-white p-4">
-            <h3 className="text-[12px] font-semibold">5. Allocate seats</h3>
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full text-left text-[11px]">
+          <OperationsTicketsPanel
+            dealId={row.dealId}
+            orderId={orderIdOf(row)}
+            canManage={canManage}
+            stepNumber={5}
+            onModeChange={setLiveTicketingMode}
+          />
+
+          <section className="min-w-0 rounded-lg border bg-white p-4">
+            <h3 className="text-[12px] font-semibold">6. Allocate seats</h3>
+            <p className="mt-1 break-words text-[11px] text-slate-500">Table, paddock, and seat notes after tickets are issued.</p>
+            <div className="mt-3 space-y-3 md:hidden">
+              {guests.length === 0 ? <p className="text-[11px] text-slate-400">No guests yet.</p> : null}
+              {guests.map((guest, index) => (
+                <div key={guest.id} className="min-w-0 space-y-2 rounded-md border p-3">
+                  <p className="break-words font-medium text-[11px]">{guest.fullName || "Unnamed"}</p>
+                  <label className="block text-[10px] font-semibold text-slate-500">
+                    Ticket
+                    <input
+                      defaultValue={guest.ticketNumber ?? ""}
+                      disabled={!canManage}
+                      onBlur={(event) => run(() => saveSeat(guest, index, { ticketNumber: event.target.value }))}
+                      className="mt-1 h-9 w-full rounded border px-2 text-[11px]"
+                    />
+                  </label>
+                  <label className="block text-[10px] font-semibold text-slate-500">
+                    Table
+                    <input
+                      defaultValue={guest.tableNumber ?? ""}
+                      disabled={!canManage}
+                      onBlur={(event) => run(() => saveSeat(guest, index, { tableNumber: event.target.value }))}
+                      className="mt-1 h-9 w-full rounded border px-2 text-[11px]"
+                    />
+                  </label>
+                  <label className="block text-[10px] font-semibold text-slate-500">
+                    Paddock
+                    <input
+                      defaultValue={guest.paddockTour ?? ""}
+                      disabled={!canManage}
+                      onBlur={(event) => run(() => saveSeat(guest, index, { paddockTour: event.target.value }))}
+                      className="mt-1 h-9 w-full rounded border px-2 text-[11px]"
+                    />
+                  </label>
+                  <label className="block text-[10px] font-semibold text-slate-500">
+                    Status
+                    <select
+                      defaultValue={guest.ticketStatus ?? "pending"}
+                      disabled={!canManage}
+                      onChange={(event) => run(() => saveSeat(guest, index, { ticketStatus: event.target.value }))}
+                      className="mt-1 h-9 w-full rounded border bg-white px-2 text-[11px]"
+                    >
+                      {GUEST_TICKET_STATUSES.map((status) => (
+                        <option key={status} value={status}>
+                          {status}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 hidden min-w-0 overflow-x-auto md:block">
+              <table className="w-full min-w-[520px] text-left text-[11px]">
                 <thead className="text-[8px] uppercase tracking-wide text-slate-400">
                   <tr>
                     <th className="py-2 pr-3">Guest</th>
@@ -482,20 +592,7 @@ export function OperationsBoard({
                         <input
                           defaultValue={guest.ticketNumber ?? ""}
                           disabled={!canManage}
-                          onBlur={(event) =>
-                            run(() =>
-                              saveGuestListSeat({
-                                guestId: guest.id,
-                                orderId: guest.orderId,
-                                dealId: guest.dealId,
-                                slotIndex: guest.sortOrder ?? index,
-                                ticketNumber: event.target.value,
-                                tableNumber: guest.tableNumber,
-                                paddockTour: guest.paddockTour,
-                                ticketStatus: guest.ticketStatus,
-                              }),
-                            )
-                          }
+                          onBlur={(event) => run(() => saveSeat(guest, index, { ticketNumber: event.target.value }))}
                           className="h-8 w-28 rounded border px-2"
                         />
                       </td>
@@ -503,20 +600,7 @@ export function OperationsBoard({
                         <input
                           defaultValue={guest.tableNumber ?? ""}
                           disabled={!canManage}
-                          onBlur={(event) =>
-                            run(() =>
-                              saveGuestListSeat({
-                                guestId: guest.id,
-                                orderId: guest.orderId,
-                                dealId: guest.dealId,
-                                slotIndex: guest.sortOrder ?? index,
-                                ticketNumber: guest.ticketNumber,
-                                tableNumber: event.target.value,
-                                paddockTour: guest.paddockTour,
-                                ticketStatus: guest.ticketStatus,
-                              }),
-                            )
-                          }
+                          onBlur={(event) => run(() => saveSeat(guest, index, { tableNumber: event.target.value }))}
                           className="h-8 w-20 rounded border px-2"
                         />
                       </td>
@@ -524,20 +608,7 @@ export function OperationsBoard({
                         <input
                           defaultValue={guest.paddockTour ?? ""}
                           disabled={!canManage}
-                          onBlur={(event) =>
-                            run(() =>
-                              saveGuestListSeat({
-                                guestId: guest.id,
-                                orderId: guest.orderId,
-                                dealId: guest.dealId,
-                                slotIndex: guest.sortOrder ?? index,
-                                ticketNumber: guest.ticketNumber,
-                                tableNumber: guest.tableNumber,
-                                paddockTour: event.target.value,
-                                ticketStatus: guest.ticketStatus,
-                              }),
-                            )
-                          }
+                          onBlur={(event) => run(() => saveSeat(guest, index, { paddockTour: event.target.value }))}
                           className="h-8 w-24 rounded border px-2"
                         />
                       </td>
@@ -545,20 +616,7 @@ export function OperationsBoard({
                         <select
                           defaultValue={guest.ticketStatus ?? "pending"}
                           disabled={!canManage}
-                          onChange={(event) =>
-                            run(() =>
-                              saveGuestListSeat({
-                                guestId: guest.id,
-                                orderId: guest.orderId,
-                                dealId: guest.dealId,
-                                slotIndex: guest.sortOrder ?? index,
-                                ticketNumber: guest.ticketNumber,
-                                tableNumber: guest.tableNumber,
-                                paddockTour: guest.paddockTour,
-                                ticketStatus: event.target.value,
-                              }),
-                            )
-                          }
+                          onChange={(event) => run(() => saveSeat(guest, index, { ticketStatus: event.target.value }))}
                           className="h-8 rounded border bg-white px-1"
                         >
                           {GUEST_TICKET_STATUSES.map((status) => (
@@ -582,10 +640,8 @@ export function OperationsBoard({
             </div>
           </section>
 
-          <OperationsTicketsPanel dealId={row.dealId} orderId={orderIdOf(row)} canManage={canManage} />
-
-          <section className="rounded-lg border bg-white p-4">
-            <h3 className="text-[12px] font-semibold">6b. Proof (if you still need a screenshot)</h3>
+          <section className="min-w-0 overflow-x-auto rounded-lg border bg-white p-4">
+            <h3 className="text-[12px] font-semibold">7. Proof (if you still need a screenshot)</h3>
             <p className="mt-1 text-[11px] text-slate-500">
               Digital ZK tickets mark delivered when they are emailed. Use this only for supplier-handled or one-off proof.
             </p>
@@ -649,8 +705,8 @@ export function OperationsBoard({
           </section>
 
           {row.isDirectClient ? (
-            <section className="rounded-lg border bg-white p-4">
-              <h3 className="text-[12px] font-semibold">7. After the event</h3>
+            <section className="min-w-0 overflow-x-auto rounded-lg border bg-white p-4">
+              <h3 className="text-[12px] font-semibold">8. After the event</h3>
               <p className="mt-1 text-[11px] text-slate-500">Direct clients only. One click sends the thank-you template.</p>
               {canManage && row.dealId ? (
                 <div className="mt-3 flex flex-wrap gap-3">
@@ -697,6 +753,8 @@ export function OperationsBoard({
           expectedCount={row.quantity}
           existing={guests}
           pending={pending}
+          dealId={row.dealId}
+          orderId={orderIdOf(row)}
           onClose={() => setGuestsOpen(false)}
           onSave={(drafts: GuestDraft[]) => {
             start(async () => {

@@ -376,7 +376,7 @@ export function AdminLayout({
         </div>
       </aside>
 
-      <div className="lg:pl-[224px]">
+      <div className="min-w-0 lg:pl-[224px]">
         <header className="sticky top-0 z-30 border-b border-[#e9eaee] bg-white pt-[env(safe-area-inset-top)]">
           <div className="flex h-14 items-center justify-between gap-3 px-3 sm:h-16 sm:px-4 lg:px-7">
             <button
@@ -402,7 +402,7 @@ export function AdminLayout({
           </div>
         </header>
 
-        <main className="min-h-[calc(100dvh-64px)] min-w-0">{children}</main>
+        <main className="min-h-[calc(100dvh-64px)] min-w-0 overflow-x-clip">{children}</main>
       </div>
     </div>
   )

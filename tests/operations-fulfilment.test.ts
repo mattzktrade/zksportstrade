@@ -12,8 +12,10 @@ import {
   operationsQueueBucket,
   operationsQueueSortKey,
   operationsSortDeadline,
+  operationsBoardStepStatus,
   supplierInboundComplete,
   thankYouDue,
+  ticketingModeSkipsSupplierInbound,
   unpaidCloseToEvent,
 } from "../lib/operations/fulfilment"
 
@@ -89,6 +91,21 @@ test("queue starts on guests, then supplier inbound, then fulfil", () => {
     ),
     "ready_to_fulfil",
   )
+})
+
+test("ZK digital skips supplier inbound so the queue moves to tickets", () => {
+  assert.equal(ticketingModeSkipsSupplierInbound("zk_digital"), true)
+  assert.equal(ticketingModeSkipsSupplierInbound("supplier_direct"), false)
+  const guestsDone = base({
+    guestDetailsStatus: "complete",
+    completeGuestCount: 4,
+    ticketingMode: "zk_digital",
+  })
+  assert.equal(supplierInboundComplete(guestsDone), true)
+  assert.equal(operationsQueueBucket(guestsDone, today), "ready_to_fulfil")
+  assert.equal(operationsBoardStepStatus("supplier", guestsDone, today), "skipped")
+  assert.equal(operationsBoardStepStatus("fulfil", guestsDone, today), "current")
+  assert.equal(operationsBoardStepStatus("allocate", guestsDone, today), "todo")
 })
 
 test("names-only inbound is complete when names are sent, without tickets received", () => {

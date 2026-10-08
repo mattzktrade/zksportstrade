@@ -1,9 +1,14 @@
 "use client"
 
-import { useState } from "react"
-import { Plus, X } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Plus, Upload, X } from "lucide-react"
+import { toast } from "sonner"
 import type { OperationsGuest } from "@/lib/admin/workflow-views"
 import { useEscapeToClose } from "@/hooks/use-escape-to-close"
+import {
+  guestHeadshotPreviewUrl,
+  uploadOperationsGuestHeadshot,
+} from "@/app/(admin)/admin/operations/guest-headshot-actions"
 
 export type GuestDraft = {
   key: string
@@ -19,6 +24,7 @@ export type GuestDraft = {
   sortOrder?: number
   attendanceDay?: string | null
   headshotPath?: string | null
+  headshotPreviewUrl?: string | null
 }
 
 function emptyDraft(isLeadGuest = false): GuestDraft {
@@ -34,6 +40,7 @@ function emptyDraft(isLeadGuest = false): GuestDraft {
     isLeadGuest,
     attendanceDay: null,
     headshotPath: null,
+    headshotPreviewUrl: null,
   }
 }
 
@@ -52,6 +59,7 @@ function fromExisting(guest: OperationsGuest): GuestDraft {
     sortOrder: guest.sortOrder,
     attendanceDay: guest.attendanceDay ?? null,
     headshotPath: guest.headshotPath ?? null,
+    headshotPreviewUrl: null,
   }
 }
 
@@ -75,6 +83,8 @@ export function OperationsGuestEditor({
   expectedCount,
   existing,
   pending,
+  dealId,
+  orderId,
   onClose,
   onSave,
   onDelete,
@@ -84,12 +94,39 @@ export function OperationsGuestEditor({
   expectedCount: number
   existing: OperationsGuest[]
   pending: boolean
+  dealId?: string | null
+  orderId?: string | null
   onClose: () => void
   onSave: (guests: GuestDraft[]) => void
   onDelete: (guestId: string) => void
 }) {
   const [drafts, setDrafts] = useState(() => buildGuestDrafts(existing, expectedCount))
   useEscapeToClose(true, onClose)
+
+  useEffect(() => {
+    let cancelled = false
+    const rows = drafts.filter((row) => row.headshotPath && !row.headshotPreviewUrl)
+    if (!rows.length) return
+    void Promise.all(
+      rows.map(async (row) => {
+        const result = await guestHeadshotPreviewUrl(row.headshotPath!)
+        return [row.key, result.ok ? result.url : ""] as const
+      }),
+    ).then((loaded) => {
+      if (cancelled) return
+      setDrafts((current) =>
+        current.map((row) => {
+          const hit = loaded.find(([key]) => key === row.key)
+          return hit?.[1] ? { ...row, headshotPreviewUrl: hit[1] } : row
+        }),
+      )
+    })
+    return () => {
+      cancelled = true
+    }
+    // Load previews once when the editor opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function update(key: string, patch: Partial<GuestDraft>) {
     setDrafts((current) =>
@@ -106,35 +143,32 @@ export function OperationsGuestEditor({
   const needed = Math.max(0, expectedCount - namedCount)
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true">
-      <div className="flex max-h-[92dvh] w-full max-w-3xl min-h-0 flex-col overflow-hidden rounded-xl bg-white shadow-xl">
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b px-5 py-4">
-          <div>
+    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/45 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true">
+      <div className="flex max-h-[96dvh] w-full max-w-3xl min-h-0 min-w-0 flex-col overflow-hidden rounded-t-xl bg-white shadow-xl sm:rounded-xl">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b px-4 py-4 sm:px-5">
+          <div className="min-w-0">
             <h2 className="text-sm font-semibold">{title}</h2>
-            <p className="mt-0.5 text-[9px] text-slate-400">{subtitle}</p>
-            <p className="mt-1 text-[10px] text-slate-500">
+            <p className="mt-0.5 break-words text-[9px] text-slate-400">{subtitle}</p>
+            <p className="mt-1 break-words text-[10px] text-slate-500">
               {namedCount}/{expectedCount || namedCount || 1} names entered
               {needed > 0 ? ` · ${needed} still to add` : ""}. Fill every guest below, then save once.
             </p>
           </div>
-          <button type="button" onClick={onClose}>
+          <button type="button" onClick={onClose} className="shrink-0" aria-label="Close">
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden px-4 py-4 sm:px-5">
           {drafts.map((draft, index) => (
-            <div key={draft.key} className="rounded-lg border border-slate-200 p-3">
-              <div className="mb-2 flex items-center justify-between gap-3">
+            <div key={draft.key} className="min-w-0 rounded-lg border border-slate-200 p-3">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                 <p className="text-[10px] font-semibold text-slate-600">
                   Guest {index + 1}
                   {draft.attendanceDay ? (
                     <span className="ml-2 font-medium normal-case text-slate-400">
                       {draft.attendanceDay.replace("_only", "").replace(/^./, (letter) => letter.toUpperCase())}
                     </span>
-                  ) : null}
-                  {draft.headshotPath ? (
-                    <span className="ml-2 font-medium text-emerald-600">Headshot on file</span>
                   ) : null}
                 </p>
                 <div className="flex items-center gap-3">
@@ -170,13 +204,20 @@ export function OperationsGuestEditor({
                   ) : null}
                 </div>
               </div>
+              <GuestHeadshotField
+                draft={draft}
+                dealId={dealId}
+                orderId={orderId}
+                disabled={pending}
+                onChange={(patch) => update(draft.key, patch)}
+              />
               <input
                 value={draft.fullName}
                 onChange={(event) => update(draft.key, { fullName: event.target.value })}
                 placeholder="Full name"
-                className="h-9 w-full rounded-md border px-3 text-[10px]"
+                className="mt-3 h-9 w-full min-w-0 rounded-md border px-3 text-[10px]"
               />
-              <div className="mt-2 grid grid-cols-2 gap-2">
+              <div className="mt-2 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
                 <input
                   type="email"
                   value={draft.email}
@@ -203,7 +244,7 @@ export function OperationsGuestEditor({
                   className="h-9 rounded-md border px-3 text-[10px]"
                 />
               </div>
-              <div className="mt-2 grid grid-cols-2 gap-2">
+              <div className="mt-2 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
                 <input
                   value={draft.dietaryRequirements}
                   onChange={(event) => update(draft.key, { dietaryRequirements: event.target.value })}
@@ -229,7 +270,7 @@ export function OperationsGuestEditor({
           </button>
         </div>
 
-        <div className="flex shrink-0 justify-end gap-2 border-t px-5 py-4">
+        <div className="flex shrink-0 justify-end gap-2 border-t px-4 py-4 sm:px-5">
           <button type="button" onClick={onClose} className="h-9 rounded-md border px-4 text-[10px] font-semibold">
             Cancel
           </button>
@@ -241,6 +282,134 @@ export function OperationsGuestEditor({
           >
             {pending ? "Saving…" : namedCount > 1 ? `Save ${namedCount} guests` : "Save guests"}
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const MAX_HEADSHOT_BYTES = 5 * 1024 * 1024
+const HEADSHOT_EDGE = 1400
+
+async function prepareHeadshotFile(file: File): Promise<File> {
+  const jpegOrPng = file.type === "image/jpeg" || file.type === "image/png"
+  if (jpegOrPng && file.size > 0 && file.size <= MAX_HEADSHOT_BYTES) return file
+  try {
+    const bitmap = await createImageBitmap(file)
+    const scale = Math.min(1, HEADSHOT_EDGE / Math.max(bitmap.width, bitmap.height, 1))
+    const width = Math.max(1, Math.round(bitmap.width * scale))
+    const height = Math.max(1, Math.round(bitmap.height * scale))
+    const canvas = document.createElement("canvas")
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext("2d")
+    if (!ctx) throw new Error("Could not read that photo.")
+    ctx.drawImage(bitmap, 0, 0, width, height)
+    bitmap.close()
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9))
+    if (!blob || blob.size > MAX_HEADSHOT_BYTES) {
+      throw new Error("Headshot must be a JPG or PNG under 5 MB.")
+    }
+    return new File([blob], "headshot.jpg", { type: "image/jpeg" })
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("5 MB")) throw error
+    throw new Error("Headshot must be a JPG or PNG under 5 MB. On iPhone, pick a photo and keep it as JPG.")
+  }
+}
+
+function GuestHeadshotField({
+  draft,
+  dealId,
+  orderId,
+  disabled,
+  onChange,
+}: {
+  draft: GuestDraft
+  dealId?: string | null
+  orderId?: string | null
+  disabled: boolean
+  onChange: (patch: Partial<GuestDraft>) => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const photo = draft.headshotPreviewUrl
+  const hasPath = Boolean(draft.headshotPath)
+  const loadingPreview = hasPath && !photo
+
+  async function onFile(file: File | undefined) {
+    if (!file) return
+    setUploading(true)
+    try {
+      const prepared = await prepareHeadshotFile(file)
+      const data = new FormData()
+      data.set("file", prepared)
+      data.set("dealId", dealId ?? "")
+      data.set("orderId", orderId ?? "")
+      const result = await uploadOperationsGuestHeadshot(data)
+      if (!result.ok) throw new Error(result.message)
+      onChange({
+        headshotPath: result.path,
+        headshotPreviewUrl: result.previewUrl || URL.createObjectURL(prepared),
+      })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not upload that photo.")
+    } finally {
+      setUploading(false)
+      if (inputRef.current) inputRef.current.value = ""
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <p className="text-[10px] font-semibold text-slate-700">Headshot</p>
+      <div className="mt-2 flex min-w-0 items-center gap-3">
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(event) => void onFile(event.target.files?.[0])}
+        />
+        {photo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={photo} alt="Guest headshot" className="h-20 w-20 shrink-0 object-cover ring-2 ring-[#F90202]" />
+        ) : loadingPreview ? (
+          <div className="h-20 w-20 shrink-0 animate-pulse bg-slate-200" />
+        ) : (
+          <div className="flex h-20 w-20 shrink-0 items-center justify-center bg-white text-center text-[9px] font-semibold leading-tight text-slate-400 ring-1 ring-dashed ring-slate-300">
+            No
+            <br />
+            photo
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className={`text-[11px] font-semibold ${hasPath ? "text-emerald-700" : "text-slate-700"}`}>
+            {hasPath ? "Photo on file" : "No photo yet"}
+          </p>
+          <p className="mt-0.5 text-[9px] leading-4 text-slate-500">
+            Used at the door. JPG or PNG, under 5 MB. Add it here if the guest form did not.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={disabled || uploading}
+              onClick={() => inputRef.current?.click()}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-[10px] font-semibold text-white disabled:opacity-50"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              {uploading ? "Uploading…" : hasPath ? "Replace photo" : "Add headshot"}
+            </button>
+            {hasPath ? (
+              <button
+                type="button"
+                disabled={disabled || uploading}
+                onClick={() => onChange({ headshotPath: null, headshotPreviewUrl: null })}
+                className="h-9 px-2 text-[10px] font-semibold text-slate-500 disabled:opacity-50"
+              >
+                Remove
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>

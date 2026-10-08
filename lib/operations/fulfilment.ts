@@ -36,8 +36,8 @@ export const OPERATIONS_BOARD_STEPS = [
   "ops_contact",
   "guests",
   "supplier",
-  "allocate",
   "fulfil",
+  "allocate",
   "after_event",
 ] as const
 
@@ -73,6 +73,8 @@ export type OperationsStepInput = {
   guestDetailsDeadline?: string | null
   deliveryDueAt?: string | null
   unpaidWarningDays?: number
+  /** Resolved booking/product mode. `zk_digital` skips supplier inbound. */
+  ticketingMode?: string | null
 }
 
 export function isSupplierFulfilmentMethod(value: string | null | undefined): value is SupplierFulfilmentMethod {
@@ -192,10 +194,15 @@ export function isOperationsDelivered(input: Pick<OperationsStepInput, "delivery
   return operationsTicketStatus(input) === "delivered"
 }
 
+export function ticketingModeSkipsSupplierInbound(mode: string | null | undefined): boolean {
+  return mode === "zk_digital"
+}
+
 export function supplierInboundComplete(input: Pick<
   OperationsStepInput,
-  "supplierFulfilmentMethod" | "supplierDetailsSentAt" | "ticketsReceivedAt" | "supplierStatus"
+  "supplierFulfilmentMethod" | "supplierDetailsSentAt" | "ticketsReceivedAt" | "supplierStatus" | "ticketingMode"
 >): boolean {
+  if (ticketingModeSkipsSupplierInbound(input.ticketingMode)) return true
   const method = parseSupplierFulfilmentMethod(input.supplierFulfilmentMethod)
   if (!method) return false
   if (NAMES_ONLY_INBOUND.has(method)) return Boolean(input.supplierDetailsSentAt)
@@ -285,7 +292,7 @@ export function operationsNextStepLabel(bucket: OperationsQueueBucket): string {
     case "waiting_supplier":
       return "Tickets / names to supplier"
     case "ready_to_fulfil":
-      return "Fulfil to client"
+      return "Issue or send tickets"
     case "awaiting_event":
       return "Wait for event"
     case "after_event":
@@ -310,15 +317,19 @@ export function operationsBoardStepStatus(
       if (guestsAreComplete(input)) return "done"
       return bucket === "needs_guests" ? "current" : "todo"
     case "supplier":
+      if (ticketingModeSkipsSupplierInbound(input.ticketingMode)) return "skipped"
       if (!guestsAreComplete(input)) return "todo"
       if (supplierInboundComplete(input)) return "done"
       return bucket === "waiting_supplier" ? "current" : "todo"
-    case "allocate":
-      return isOperationsDelivered(input) ? "done" : "todo"
     case "fulfil":
       if (isOperationsDelivered(input)) return "done"
       if (!guestsAreComplete(input) || !supplierInboundComplete(input)) return "todo"
       return "current"
+    case "allocate":
+      if (!isOperationsDelivered(input) && (!guestsAreComplete(input) || !supplierInboundComplete(input))) {
+        return "todo"
+      }
+      return isOperationsDelivered(input) ? "done" : "todo"
     case "after_event":
       if (!input.isDirectClient) return "skipped"
       if (input.thankYouSentAt || input.thankYouSkippedAt) return "done"

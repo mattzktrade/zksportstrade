@@ -100,6 +100,17 @@ test("fulfilment plan keeps supplier notes and client collection details on thei
   assert.doesNotMatch(supplierBlock, /Collection \/ meet point/)
 })
 
+test("operations board issues tickets before allocating seats and skips supplier for ZK digital", () => {
+  const source = readFileSync(join(root, "app/(admin)/admin/operations/operations-board.tsx"), "utf8")
+  const supplierStep = source.indexOf('id: "supplier"')
+  const ticketsStep = source.indexOf('id: "fulfil"')
+  const allocateStep = source.indexOf('id: "allocate"')
+  assert.ok(supplierStep > 0 && ticketsStep > supplierStep && allocateStep > ticketsStep)
+  assert.ok(source.indexOf("OperationsTicketsPanel") < source.lastIndexOf("Allocate seats"))
+  assert.match(source, /skipSupplier/)
+  assert.match(source, /min-w-0/)
+})
+
 test("saving the fulfilment plan copies supplier notes onto linked purchase orders", () => {
   const source = readFileSync(join(root, "app/(admin)/admin/operations/board-actions.ts"), "utf8")
   assert.match(source, /applyOpsSupplierNoteToPurchaseOrder/)
