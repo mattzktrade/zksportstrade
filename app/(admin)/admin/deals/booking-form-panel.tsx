@@ -7,6 +7,7 @@ import {
   Copy,
   Download,
   FileSignature,
+  Loader2,
   Mail,
   PenLine,
   RotateCcw,
@@ -21,10 +22,12 @@ import {
   resendNativeBookingForm,
   saveNativeBookingFormDraft,
   sendSavedNativeBookingForm,
+  completeNativeBookingForm,
   signNativeBookingFormAsAdmin,
   voidNativeBookingForm,
 } from "./booking-form-actions"
-import { BookingFormEditor, BodyPortal } from "./booking-form-editor"
+import { BookingFormEditor } from "./booking-form-editor"
+import { AdminModalScrim } from "@/components/admin/admin-list-preview"
 import type {
   BookingFormAdminRow,
   BookingFormEventRow,
@@ -93,6 +96,7 @@ function AdminSignatureModal({
   const padRef = useRef<SignatureCaptureHandle | null>(null)
   const inFlight = useRef(false)
   const [pending, setPending] = useState(false)
+  const [done, setDone] = useState(false)
   const [name, setName] = useState(defaultName)
   const [consent, setConsent] = useState(false)
   const [hasInk, setHasInk] = useState(false)
@@ -117,8 +121,8 @@ function AdminSignatureModal({
         toast.error(result.message)
         return
       }
+      setDone(true)
       toast.success(result.message)
-      onClose()
       router.refresh()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not complete the agreement.")
@@ -128,47 +132,85 @@ function AdminSignatureModal({
     }
   }
 
+  function close() {
+    if (pending) return
+    onClose()
+  }
+
   return (
-    <BodyPortal>
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4" data-escape-close="" onClick={onClose}>
-      <div className="w-full max-w-xl rounded-xl bg-white p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-bold">ZK countersignature</h2>
-            <p className="mt-1 text-sm text-slate-500">{form.document_ref} · client signature recorded</p>
-          </div>
-          <button type="button" onClick={onClose}><X className="h-5 w-5" /></button>
+    <AdminModalScrim
+      onClose={close}
+      closeOnBackdropClick={!pending}
+      zClassName="z-[200]"
+      panelClassName="relative max-w-xl overflow-y-auto"
+    >
+      {pending ? (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-white/95 px-6 text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-slate-800" />
+          <p className="text-base font-semibold">Recording ZK signature…</p>
+          <p className="text-sm text-slate-500">The agreement will show as signed as soon as this finishes.</p>
         </div>
-        <div className="mt-5 rounded-lg bg-amber-50 p-4 text-sm leading-6 text-amber-950">
-          Review the PDF before signing. Completing this step locks the final agreement and advances
-          the deal to Signed.
-        </div>
-        <label className="mt-5 block text-sm font-semibold">
-          Admin full name
-          <input value={name} onChange={(event) => setName(event.target.value)} className="mt-2 h-11 w-full rounded-md border px-3" />
-        </label>
-        <div className="mt-5 flex items-center justify-between">
-          <span className="text-sm font-semibold">Signature</span>
-          <button type="button" onClick={() => padRef.current?.clear()} className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500">
-            <RotateCcw className="h-4 w-4" /> Clear
+      ) : null}
+      {done ? (
+        <div className="flex min-h-full flex-col items-center justify-center px-6 py-12 text-center">
+          <CheckCircle2 className="h-12 w-12 text-emerald-600" />
+          <h2 className="mt-4 text-xl font-bold">Agreement signed</h2>
+          <p className="mt-2 max-w-sm text-sm leading-6 text-slate-600">
+            The ZK countersignature is recorded. The final PDF, order, and invoice are being finished in the background.
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="mt-6 h-11 w-full max-w-xs rounded-md bg-[#010101] font-bold text-white"
+          >
+            Done
           </button>
         </div>
-        <SignatureCapture
-          padRef={padRef}
-          typedName={name}
-          onHasInkChange={setHasInk}
-          className="mt-2 h-40 w-full rounded-lg border-2 border-dashed border-slate-300"
-        />
-        <label className="mt-4 flex items-start gap-3 text-sm leading-6 text-slate-600">
-          <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="mt-1 accent-[#F90202]" />
-          <span>{BOOKING_SIGNATURE_CONSENT}</span>
-        </label>
-        <button type="button" disabled={pending} onClick={submit} className="mt-5 h-11 w-full rounded-md bg-[#010101] font-bold text-white disabled:opacity-50">
-          {pending ? "Completing agreement…" : "Sign and complete agreement"}
-        </button>
-      </div>
-    </div>
-    </BodyPortal>
+      ) : (
+        <div className="flex min-h-full flex-col">
+          <div className="flex items-start justify-between gap-4 px-5 pt-5 sm:px-6 sm:pt-6">
+            <div>
+              <h2 className="text-lg font-bold">ZK countersignature</h2>
+              <p className="mt-1 text-sm text-slate-500">{form.document_ref} · client signature recorded</p>
+            </div>
+            <button type="button" onClick={close} className="flex h-11 w-11 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label="Close">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="px-5 pb-2 sm:px-6">
+            <div className="mt-5 rounded-lg bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+              Review the PDF before signing. Completing this step locks the final agreement and advances
+              the deal to Signed.
+            </div>
+            <label className="mt-5 block text-sm font-semibold">
+              Admin full name
+              <input value={name} onChange={(event) => setName(event.target.value)} className="mt-2 h-11 w-full rounded-md border px-3" />
+            </label>
+            <div className="mt-5 flex items-center justify-between">
+              <span className="text-sm font-semibold">Signature</span>
+              <button type="button" onClick={() => padRef.current?.clear()} className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500">
+                <RotateCcw className="h-4 w-4" /> Clear
+              </button>
+            </div>
+            <SignatureCapture
+              padRef={padRef}
+              typedName={name}
+              onHasInkChange={setHasInk}
+              className="mt-2 h-32 w-full rounded-lg border-2 border-dashed border-slate-300 sm:h-40"
+            />
+            <label className="mt-4 flex items-start gap-3 text-sm leading-6 text-slate-600">
+              <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-[#F90202]" />
+              <span>{BOOKING_SIGNATURE_CONSENT}</span>
+            </label>
+          </div>
+          <div className="sticky bottom-0 mt-auto border-t bg-white px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6">
+            <button type="button" disabled={pending} onClick={submit} className="h-12 w-full rounded-md bg-[#010101] font-bold text-white disabled:opacity-50">
+              {pending ? "Recording signature…" : "Sign and complete agreement"}
+            </button>
+          </div>
+        </div>
+      )}
+    </AdminModalScrim>
   )
 }
 
@@ -460,6 +502,16 @@ export function BookingFormPanel({
             {form.status === "awaiting_zk_signature" && currentCanSign ? (
               <button type="button" onClick={() => setShowSignature(true)} className="h-9 rounded-md bg-[#010101] text-[9px] font-semibold text-white">
                 <span className="inline-flex items-center gap-1"><PenLine className="h-3.5 w-3.5" /> Review &amp; sign</span>
+              </button>
+            ) : null}
+            {form.status === "zk_signed" && currentCanSign ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => run(() => completeNativeBookingForm(form.id))}
+                className="h-9 rounded-md bg-[#010101] text-[9px] font-semibold text-white disabled:opacity-50"
+              >
+                Finish generating document
               </button>
             ) : null}
             {active && form.status !== "zk_signed" && currentCanManageDeals ? (

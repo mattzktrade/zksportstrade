@@ -12,7 +12,9 @@ import {
   canSignNativeBookingForm,
 } from "@/lib/auth/permissions"
 import { getServerSiteOrigin } from "@/lib/auth/site-origin"
-import { generateBookingFormPdf, type PdfSignature } from "@/lib/booking-forms/pdf"
+import { generateBookingFormPdf } from "@/lib/booking-forms/pdf"
+import { completeZkSignedBookingForm } from "@/lib/booking-forms/complete"
+import { scheduleAfterResponse } from "@/lib/booking-forms/schedule"
 import { syncBookingFormDealInventory } from "@/lib/booking-forms/inventory-sync"
 import { getRequestEvidence } from "@/lib/booking-forms/request-evidence"
 import {
@@ -47,14 +49,12 @@ import { snapshotClientCcEmails, type BookingFormAccountEmailOption } from "@/li
 import { loadAccountEmailOptions } from "@/lib/booking-forms/deal-cc-emails"
 import type { BookingFormSnapshot } from "@/lib/booking-forms/types"
 import {
-  sendCompletedBookingFormEmail,
   sendManualNativeBookingFormEmail,
   sendNativeBookingFormEmail,
   sendBookingFormReadyToSendNotification,
 } from "@/lib/email/send-booking-form"
 import { adminDealListPath } from "@/lib/crm/deal-pipeline"
 import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
-import { ensureNativeDealOrderAndInvoice } from "@/lib/crm/deal-order-automation"
 
 type Result =
   | { ok: true; message: string; previewUrl?: string }
@@ -633,20 +633,20 @@ export async function signNativeBookingFormAsAdmin(input: {
       throw new Error("The client must sign before a ZK admin.")
     }
 
-    const signatureBytes = parseSignaturePng(input.signatureDataUrl)
-    const signatureHash = sha256(signatureBytes)
-    const evidenceHash = sha256(
-      stableJson({
-        bookingFormId: form.id,
-        signerRole: "zk_admin",
-        signerName,
-        signerEmail,
-        signatureHash,
-        snapshotHash: form.snapshot_hash,
-      }),
-    )
-    const signaturePath = `forms/${form.document_ref}/signatures/zk-admin-${signatureHash.slice(0, 16)}.png`
     if (form.status !== "zk_signed") {
+      const signatureBytes = parseSignaturePng(input.signatureDataUrl)
+      const signatureHash = sha256(signatureBytes)
+      const evidenceHash = sha256(
+        stableJson({
+          bookingFormId: form.id,
+          signerRole: "zk_admin",
+          signerName,
+          signerEmail,
+          signatureHash,
+          snapshotHash: form.snapshot_hash,
+        }),
+      )
+      const signaturePath = `forms/${form.document_ref}/signatures/zk-admin-${signatureHash.slice(0, 16)}.png`
       const requestHeaders = await headers()
       const requestEvidence = getRequestEvidence(requestHeaders)
       await uploadBookingDocument(signaturePath, signatureBytes, "image/png", true)
@@ -665,96 +665,35 @@ export async function signNativeBookingFormAsAdmin(input: {
       if (signError) throw new Error(signError.message)
     }
 
-    const { data: signatures, error: signaturesError } = await gate.supabase
-      .from("booking_form_signatures")
-      .select(
-        "signer_role, signer_name, signer_email, signature_path, signed_at, ip_address, location, user_agent, evidence_hash",
-      )
-      .eq("booking_form_id", form.id)
-    if (signaturesError || !signatures) {
-      throw new Error(signaturesError?.message ?? "Could not load signature evidence.")
-    }
-    const byRole = new Map(signatures.map((row) => [String(row.signer_role), row]))
-    const clientRow = byRole.get("client")
-    const adminRow = byRole.get("zk_admin")
-    if (!clientRow || !adminRow) throw new Error("Both signatures are required.")
-
-    const toPdfSignature = async (
-      row: NonNullable<typeof clientRow>,
-      role: "client" | "zk_admin",
-    ): Promise<PdfSignature> => ({
-      signerRole: role,
-      signerName: String(row.signer_name),
-      signerEmail: String(row.signer_email),
-      signaturePath: String(row.signature_path),
-      signedAt: String(row.signed_at),
-      ipAddress: row.ip_address ? String(row.ip_address) : null,
-      location: row.location ? String(row.location) : null,
-      userAgent: row.user_agent ? String(row.user_agent) : null,
-      evidenceHash: String(row.evidence_hash),
-      pngBytes: await downloadBookingDocument(String(row.signature_path)),
-    })
-    const [clientSignature, adminSignature] = await Promise.all([
-      toPdfSignature(clientRow, "client"),
-      toPdfSignature(adminRow, "zk_admin"),
-    ])
-    const snapshot = form.snapshot_data as BookingFormSnapshot
-    const finalPdf = await generateBookingFormPdf(snapshot, {
-      client: clientSignature,
-      zkAdmin: adminSignature,
-    })
-    const finalPath = `forms/${form.document_ref}/completed.pdf`
-    await uploadBookingDocument(finalPath, finalPdf, "application/pdf", true)
-    const { error: finalError } = await gate.supabase.rpc("admin_finalize_native_booking_form", {
-      p_booking_form_id: form.id,
-      p_final_pdf_path: finalPath,
-    })
-    if (finalError) throw new Error(finalError.message)
-
-    let invoiceWarning: string | null = null
-    try {
-      const orderResult = await ensureNativeDealOrderAndInvoice(String(form.deal_id))
-      invoiceWarning = orderResult.warning ?? null
-    } catch (automationError) {
-      invoiceWarning = errorMessage(automationError)
-      const admin = createAdminClient()
-      await admin
-        ?.from("deals")
-        .update({
-          stage: "signed",
-          next_action: "Retry native order and Xero invoice creation",
-          next_action_due_at: new Date().toISOString(),
-        })
-        .eq("id", form.deal_id)
-    }
-
-    const email = await sendCompletedBookingFormEmail({
-      clientEmail: snapshot.billTo.contactEmail,
-      clientName: snapshot.billTo.contactName,
-      adminEmail: signerEmail,
-      documentRef: snapshot.documentRef,
-      eventName: snapshot.deal.title,
-      pdf: finalPdf,
-      ccEmails: snapshotClientCcEmails(snapshot),
-    })
-    if (!email.ok) {
-      const detail = email.error ?? email.skipped ?? "Completion email failed."
-      const admin = createAdminClient()
-      await admin?.from("booking_forms").update({ last_error: detail }).eq("id", form.id)
-    } else {
-      const admin = createAdminClient()
-      await admin?.from("booking_forms").update({ last_error: null }).eq("id", form.id)
-    }
-
+    const adminEmail = signerEmail
+    const formId = String(form.id)
+    const actorProfileId = gate.profile.id
+    scheduleAfterResponse(() =>
+      completeZkSignedBookingForm({ bookingFormId: formId, adminEmail, actorProfileId }),
+    )
     revalidateNativeBookingFormPages(String(form.deal_id))
     return {
       ok: true,
-      message: invoiceWarning
-        ? `Booking form completed, but order/invoice automation needs attention: ${invoiceWarning}`
-        : email.ok
-          ? "Booking form completed, order created, and Xero invoice queued."
-          : "Booking form and order completed; the agreement email could not be sent.",
+      message: "ZK signature recorded. Completing the agreement now.",
     }
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) }
+  }
+}
+
+export async function completeNativeBookingForm(bookingFormId: string): Promise<Result> {
+  const gate = await bookingFormGate("adminSign")
+  if (!gate) return permissionDenied("adminSign")
+  try {
+    const { data: auth } = await gate.supabase.auth.getUser()
+    const adminEmail = auth.user?.email?.trim().toLowerCase()
+    if (!adminEmail) throw new Error("Your admin account does not have an email address.")
+    await completeZkSignedBookingForm({
+      bookingFormId,
+      adminEmail,
+      actorProfileId: gate.profile.id,
+    })
+    return { ok: true, message: "Booking form completed." }
   } catch (error) {
     return { ok: false, message: errorMessage(error) }
   }

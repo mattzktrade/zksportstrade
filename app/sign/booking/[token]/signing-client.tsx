@@ -2,7 +2,7 @@
 
 import Image from "next/image"
 import { useRef, useState } from "react"
-import { CheckCircle2, Download, Eraser, LockKeyhole } from "lucide-react"
+import { CheckCircle2, Download, Eraser, Loader2, LockKeyhole } from "lucide-react"
 import type { PublicBookingForm } from "@/lib/booking-forms/public"
 import { BOOKING_SIGNATURE_CONSENT } from "@/lib/booking-forms/template"
 import { SignatureCapture, type SignatureCaptureHandle } from "@/components/signature-capture"
@@ -106,26 +106,33 @@ export function SigningClient({
   })
 
   return (
-    <main className="min-h-screen bg-[#f3f3f3] px-4 py-8 text-[#010101] sm:px-6 lg:py-12">
+    <main className="min-h-screen bg-[#f3f3f3] px-3 py-5 text-[#010101] sm:px-6 sm:py-8 lg:py-12">
+      {submitting ? (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-white/95 px-6 text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-[#010101]" />
+          <p className="text-base font-semibold">Recording your signature…</p>
+          <p className="text-sm text-[#6b6b6b]">This usually takes a couple of seconds.</p>
+        </div>
+      ) : null}
       <div className="mx-auto max-w-4xl">
-        <section className="rounded-xl border border-[#e5e5e5] bg-white shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-8 px-8 py-8 sm:px-10">
+        <section className="overflow-hidden rounded-xl border border-[#e5e5e5] bg-white shadow-sm">
+          <div className="flex flex-col gap-5 px-4 py-5 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-8 sm:px-8 sm:py-8 lg:px-10">
             <div>
               <Image
                 src={LOGO_MAIN.src}
                 alt="ZK Sports & Entertainment"
                 width={LOGO_MAIN.width}
                 height={LOGO_MAIN.height}
-                className="h-10 w-auto"
+                className="h-9 w-auto sm:h-10"
                 sizes="200px"
                 priority
               />
-              <div className="mt-3 flex items-center gap-1.5 text-[11px] text-[#6b6b6b]">
-                <LockKeyhole className="h-3.5 w-3.5" />
+              <div className="mt-3 flex items-start gap-1.5 text-[11px] leading-5 text-[#6b6b6b] sm:items-center">
+                <LockKeyhole className="mt-0.5 h-3.5 w-3.5 shrink-0 sm:mt-0" />
                 Encrypted secure link · expires {expiry} UTC
               </div>
             </div>
-            <div className="text-right text-xs leading-6 text-[#010101]">
+            <div className="text-xs leading-6 text-[#010101] sm:text-right">
               {snapshot.seller.addressLines.map((line) => (
                 <div key={line}>{line}</div>
               ))}
@@ -133,21 +140,21 @@ export function SigningClient({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-start justify-between gap-8 px-8 pb-4 sm:px-10">
+          <div className="flex flex-col gap-5 px-4 pb-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-8 sm:px-8 lg:px-10">
             <div>
-              <h1 className="text-2xl font-bold" style={{ color: BRAND_RED }}>
+              <h1 className="text-xl font-bold sm:text-2xl" style={{ color: BRAND_RED }}>
                 Quote N° {snapshot.documentRef}
               </h1>
               <p className="mt-3 text-sm">Date : {isoDate(snapshot.createdAt)}</p>
             </div>
-            <div className="text-right">
+            <div className="sm:text-right">
               <div className="text-sm font-bold" style={{ color: BRAND_RED }}>
                 BILL TO:
               </div>
               <div className="mt-2 space-y-0.5 text-sm leading-6">
                 <div className="font-semibold">{snapshot.billTo.accountName}</div>
                 <div className="font-semibold">{snapshot.billTo.contactName}</div>
-                <div>{snapshot.billTo.contactEmail}</div>
+                <div className="break-all">{snapshot.billTo.contactEmail}</div>
                 {snapshot.billTo.addressLines.map((line) => (
                   <div key={line}>{line}</div>
                 ))}
@@ -155,7 +162,7 @@ export function SigningClient({
             </div>
           </div>
 
-          <div className="px-8 py-8 sm:px-10">
+          <div className="px-4 py-6 sm:px-8 sm:py-8 lg:px-10">
             <h2 className="text-center text-base font-bold underline decoration-1 underline-offset-8">
               {snapshot.deal.title}
             </h2>
@@ -163,8 +170,33 @@ export function SigningClient({
               <p className="mt-4 text-center text-xs text-[#6b6b6b]">Prices include 5% VAT</p>
             ) : null}
 
-            <div className="mt-8 overflow-hidden rounded-md border border-[#e5e5e5]">
-              <table className="w-full border-collapse text-sm">
+            <div className="mt-6 space-y-3 sm:hidden">
+              {snapshot.lines.map((line) => (
+                <div
+                  key={`${line.packageId}-${line.description}`}
+                  className="rounded-md border border-[#e5e5e5] p-3"
+                >
+                  <p className="text-sm font-medium leading-6">{line.description}</p>
+                  <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <dt className="text-[#6b6b6b]">Price</dt>
+                      <dd className="mt-0.5 tabular-nums">{money(line.unitPrice, line.currency)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[#6b6b6b]">Qty</dt>
+                      <dd className="mt-0.5 tabular-nums">{line.quantity}</dd>
+                    </div>
+                    <div className="text-right">
+                      <dt className="text-[#6b6b6b]">Total</dt>
+                      <dd className="mt-0.5 font-semibold tabular-nums">{money(line.lineTotal, line.currency)}</dd>
+                    </div>
+                  </dl>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-8 hidden overflow-x-auto rounded-md border border-[#e5e5e5] sm:block">
+              <table className="w-full min-w-[520px] border-collapse text-sm">
                 <thead>
                   <tr className="bg-[#f0f0f0] text-[#6b6b6b]">
                     <th className="border-r border-[#e5e5e5] px-4 py-3 text-left font-semibold">Product</th>
@@ -190,7 +222,7 @@ export function SigningClient({
               </table>
             </div>
 
-            <div className="mt-8 ml-auto w-full max-w-xs space-y-2.5 text-sm">
+            <div className="mt-6 w-full space-y-2.5 text-sm sm:mt-8 sm:ml-auto sm:max-w-xs">
               <div className="flex justify-between">
                 <span>Section total</span>
                 <span className="tabular-nums">{money(snapshot.subtotal, snapshot.currency)}</span>
@@ -209,7 +241,7 @@ export function SigningClient({
               </div>
             </div>
 
-            <div className="mt-12 grid gap-10 md:grid-cols-[1fr_280px] md:items-end">
+            <div className="mt-8 grid gap-8 sm:mt-12 sm:gap-10 md:grid-cols-[1fr_280px] md:items-end">
               <p className="text-xs font-bold uppercase leading-6 tracking-wide">
                 {snapshot.acknowledgement}
               </p>
@@ -244,7 +276,7 @@ export function SigningClient({
                       disabled={signed}
                       typedName={signerName}
                       onHasInkChange={setHasInk}
-                      className="mt-3 h-28 w-full border-b border-[#010101] bg-white"
+                      className="mt-3 h-32 w-full border-b border-[#010101] bg-white sm:h-28"
                     />
                     <p className="mt-2 text-xs text-[#6b6b6b]">Date : {isoDate(new Date().toISOString())}</p>
                   </>
@@ -253,7 +285,7 @@ export function SigningClient({
             </div>
           </div>
 
-          <div className="border-t border-[#e5e5e5] px-8 py-8 sm:px-10">
+          <div className="border-t border-[#e5e5e5] px-4 py-6 sm:px-8 sm:py-8 lg:px-10">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-lg font-bold">Agreement documents</h2>
               <a
@@ -284,7 +316,7 @@ export function SigningClient({
           </div>
 
           {!declined && !signed ? (
-            <div className="border-t border-[#e5e5e5] px-8 py-8 sm:px-10">
+            <div className="border-t border-[#e5e5e5] px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-8 sm:py-8 lg:px-10">
               <label className="block text-sm font-semibold" htmlFor="signer-name">
                 Full legal name
               </label>
@@ -300,7 +332,7 @@ export function SigningClient({
                   type="checkbox"
                   checked={consent}
                   onChange={(event) => setConsent(event.target.checked)}
-                  className="mt-1 h-4 w-4 accent-[#F90202]"
+                  className="mt-1 h-5 w-5 shrink-0 accent-[#F90202]"
                 />
                 <span>{BOOKING_SIGNATURE_CONSENT}</span>
               </label>

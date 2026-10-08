@@ -658,7 +658,7 @@ export async function generateBookingFormPdf(
   drawSignatureBlock(writer, "CLIENT", signatures.client, clientImage, MARGIN, yTop)
   drawSignatureBlock(
     writer,
-    "SELLER — ZK ADMIN",
+    "SELLER — ZK",
     signatures.zkAdmin,
     adminImage,
     MARGIN + blockWidth + 18,
@@ -681,7 +681,7 @@ export async function generateBookingFormPdf(
       { gapAfter: 14 },
     )
     for (const signature of [signatures.client, signatures.zkAdmin]) {
-      writer.heading(signature.signerRole === "client" ? "CLIENT SIGNER" : "ZK ADMIN SIGNER", 10)
+      writer.heading(signature.signerRole === "client" ? "CLIENT SIGNER" : "ZK SIGNER", 10)
       writer.text(`Name: ${signature.signerName}`, { gapAfter: 1 })
       writer.text(`Email: ${signature.signerEmail}`, { gapAfter: 1 })
       writer.text(`Signed: ${new Date(signature.signedAt).toISOString()}`, { gapAfter: 1 })

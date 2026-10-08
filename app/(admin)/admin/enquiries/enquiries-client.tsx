@@ -163,7 +163,15 @@ function EnquiryOutreachLine({ outreach }: { outreach?: EnquiryOutreachBadge }) 
   )
 }
 
-function EnquiryContactDetails({ email, phone }: { email: string | null; phone: string | null }) {
+function EnquiryContactDetails({
+  email,
+  phone,
+  wrap = false,
+}: {
+  email: string | null
+  phone: string | null
+  wrap?: boolean
+}) {
   if (!email && !phone) return null
   return (
     <div className="mt-0.5 space-y-0.5 text-[8px] text-slate-500">
@@ -171,7 +179,7 @@ function EnquiryContactDetails({ email, phone }: { email: string | null; phone: 
         <a
           href={`mailto:${email}`}
           onClick={(event) => event.stopPropagation()}
-          className="block truncate hover:text-primary hover:underline"
+          className={cn("block hover:text-primary hover:underline", wrap ? "break-all" : "truncate")}
         >
           {email}
         </a>
@@ -180,7 +188,7 @@ function EnquiryContactDetails({ email, phone }: { email: string | null; phone: 
         <a
           href={`tel:${phone}`}
           onClick={(event) => event.stopPropagation()}
-          className="block truncate hover:text-primary hover:underline"
+          className={cn("block hover:text-primary hover:underline", wrap ? "break-all" : "truncate")}
         >
           {phone}
         </a>
@@ -1150,36 +1158,38 @@ export function EnquiriesClient({
               onClose={closePreview}
               previewRef={previewRef}
             >
-              <div className="space-y-4 p-5">
+              <div className="space-y-5 p-4 pb-8 sm:space-y-4 sm:p-5">
                 <div className="flex items-start gap-2">
                   <div className="min-w-0 flex-1">
                     <p className="text-[11px] font-semibold text-primary">{selected.reference}</p>
-                    <h2 className="mt-1 truncate text-[15px] font-semibold text-slate-900">
+                    <h2 className="mt-1 text-[18px] font-semibold leading-snug text-slate-900 sm:truncate sm:text-[15px]">
                       {selected.contact_name || selected.account_name || "Enquiry"}
                     </h2>
-                    <p className="mt-0.5 truncate text-[10px] text-slate-500">{selected.account_name || "—"}</p>
-                    <EnquiryContactDetails email={selected.contact_email} phone={selected.contact_phone} />
+                    {selected.account_name && selected.account_name !== selected.contact_name ? (
+                      <p className="mt-0.5 text-[10px] leading-5 text-slate-500 sm:truncate">{selected.account_name}</p>
+                    ) : null}
+                    <EnquiryContactDetails email={selected.contact_email} phone={selected.contact_phone} wrap />
                     <Link
                       href={`/admin/assistant/compose?deal=${selected.id}`}
-                      className="mt-2 inline-flex text-[11px] font-medium text-primary hover:underline"
+                      className="mt-3 inline-flex min-h-11 items-center text-[11px] font-medium text-primary hover:underline sm:mt-2 sm:min-h-0"
                     >
                       Draft with assistant
                     </Link>
                   </div>
                   <Link
                     href={adminDealPath(selected.id)}
-                    className="shrink-0 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700 sm:h-auto sm:w-auto sm:p-1"
                     aria-label="Open enquiry page"
                   >
-                    <Maximize2 className="h-4 w-4" />
+                    <Maximize2 className="h-5 w-5 sm:h-4 sm:w-4" />
                   </Link>
                   <button
                     type="button"
                     onClick={closePreview}
-                    className="shrink-0 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700 sm:h-auto sm:w-auto sm:p-1"
                     aria-label="Close enquiry preview"
                   >
-                    <X className="h-4 w-4" />
+                    <X className="h-5 w-5 sm:h-4 sm:w-4" />
                   </button>
                 </div>
 
@@ -1236,7 +1246,7 @@ export function EnquiriesClient({
                       value={notesDraft}
                       onChange={(event) => setNotesDraft(event.target.value)}
                       placeholder="Other options, dates, budget, or anything they were not sure about."
-                      className="mt-2 min-h-24 w-full rounded-md border p-2 text-[9px] text-slate-700"
+                      className="mt-2 min-h-28 w-full rounded-md border p-3 text-[13px] text-slate-700 sm:min-h-24 sm:p-2 sm:text-[9px]"
                     />
                   ) : (
                     <p className="mt-2 rounded-md bg-slate-50 p-2 text-[9px] text-slate-600">
@@ -1261,7 +1271,7 @@ export function EnquiriesClient({
                       staffOptions={staffOptions}
                       disabled={pending}
                       onChange={(ownerId) => saveOwner(selected.id, ownerId)}
-                      className="mt-2 h-10 w-full"
+                      className="mt-2 h-11 w-full text-[13px] sm:h-10 sm:text-[9px]"
                     />
                   </div>
                 ) : (
@@ -1284,7 +1294,7 @@ export function EnquiriesClient({
                         setWorkflowStage(stage)
                         saveStage(stage)
                       }}
-                      className="mt-2 h-10 w-full rounded-md border bg-white px-2 text-[9px]"
+                      className="mt-2 h-11 w-full rounded-md border bg-white px-3 text-[13px] sm:h-10 sm:px-2 sm:text-[9px]"
                     />
                     <p className="mt-2 text-[10px] font-medium text-slate-800">Next: {nextStep}</p>
                   </div>

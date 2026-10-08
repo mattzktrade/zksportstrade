@@ -54,7 +54,7 @@ export function AdminBodyPortal({ children }: { children: ReactNode }) {
     setTarget(document.body)
   }, [])
   if (!target) return null
-  return createPortal(children, target)
+  return createPortal(<div className="admin-overlay">{children}</div>, target)
 }
 
 /** List-row preview: in-flow sidebar on desktop, true fullscreen sheet on smaller screens. */

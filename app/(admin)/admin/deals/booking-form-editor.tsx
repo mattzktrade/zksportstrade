@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState, type ReactNode } from "react"
-import { createPortal } from "react-dom"
 import { FileText, Plus, RotateCcw, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import {
@@ -21,19 +20,11 @@ import {
 } from "@/lib/booking-forms/edits"
 import { defaultPaymentSchedule } from "@/lib/booking-forms/payment-schedule"
 import { BookingFormPaymentScheduleFields } from "./booking-form-payment-schedule-fields"
+import { AdminModalScrim } from "@/components/admin/admin-list-preview"
 
 const inputClass = "mt-2 h-11 w-full rounded-md border px-3 font-normal"
 const textareaClass = "mt-2 w-full rounded-md border p-3 font-normal"
 const smallInputClass = "mt-1 h-10 w-full rounded-md border px-3 font-normal text-sm"
-
-export function BodyPortal({ children }: { children: ReactNode }) {
-  const [target, setTarget] = useState<HTMLElement | null>(null)
-  useEffect(() => {
-    setTarget(document.body)
-  }, [])
-  if (!target) return null
-  return createPortal(children, target)
-}
 
 function Section({
   title,
@@ -288,13 +279,14 @@ export function BookingFormEditor({
   }
 
   return (
-    <BodyPortal>
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4" data-escape-close="" onClick={onClose}>
-      <div
-        className="flex max-h-[94vh] min-h-0 w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="shrink-0 flex items-start justify-between gap-4 border-b px-6 py-5">
+    <AdminModalScrim
+      onClose={onClose}
+      closeOnBackdropClick={!pending && !previewing}
+      zClassName="z-[200]"
+      panelClassName="max-w-4xl overflow-hidden"
+    >
+        <div className="flex h-full min-h-0 flex-col">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b px-4 py-4 sm:px-6 sm:py-5">
           <div>
             <h2 className="text-lg font-bold">
               {reissueFromId ? "Edit booking form" : canSend ? "Review booking form before sending" : "Prepare booking form"}
@@ -307,12 +299,12 @@ export function BookingFormEditor({
                 : " Saving does not email the client. Use notify so an approved admin can send it."}
             </p>
           </div>
-          <button type="button" onClick={onClose}>
+          <button type="button" onClick={onClose} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label="Close">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
           {loading || !edits ? (
             <p className="text-sm text-slate-500">Loading booking form…</p>
           ) : (
@@ -666,7 +658,7 @@ export function BookingFormEditor({
           )}
         </div>
 
-        <div className="shrink-0 border-t bg-slate-50 px-6 py-4">
+        <div className="shrink-0 border-t bg-slate-50 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6">
           {canSend ? (
             <p className="mb-3 text-xs leading-5 text-amber-900">
               Sending locks this snapshot, reserves stock for seven days, and emails the client. Saving
@@ -678,7 +670,7 @@ export function BookingFormEditor({
               should send it to the client.
             </p>
           )}
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
             <button type="button" onClick={onClose} className="h-11 rounded-md border px-4 font-semibold">
               Cancel
             </button>
@@ -686,7 +678,7 @@ export function BookingFormEditor({
               type="button"
               disabled={pending || previewing || !edits}
               onClick={previewPdf}
-              className="inline-flex h-11 items-center gap-2 rounded-md border px-4 font-semibold disabled:opacity-50"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md border px-4 font-semibold disabled:opacity-50"
             >
               <FileText className="h-4 w-4" />
               {previewing ? "Building PDF…" : "Preview PDF"}
@@ -704,7 +696,7 @@ export function BookingFormEditor({
                 type="button"
                 disabled={pending || !edits}
                 onClick={() => edits && onNotify(edits)}
-                className="ml-auto h-11 rounded-md bg-[#010101] px-4 font-bold text-white disabled:opacity-50"
+                className="h-11 rounded-md bg-[#010101] px-4 font-bold text-white disabled:opacity-50 sm:ml-auto"
               >
                 {pending ? "Sending for approval…" : "Send for approval"}
               </button>
@@ -722,7 +714,7 @@ export function BookingFormEditor({
                   type="button"
                   disabled={pending || !edits}
                   onClick={() => edits && onSend(edits, "signing_link")}
-                  className="ml-auto h-11 rounded-md bg-[#010101] px-4 font-bold text-white disabled:opacity-50"
+                  className="h-11 rounded-md bg-[#010101] px-4 font-bold text-white disabled:opacity-50 sm:ml-auto"
                 >
                   {pending ? "Creating and sending…" : "Confirm, reserve & send"}
                 </button>
@@ -730,8 +722,7 @@ export function BookingFormEditor({
             )}
           </div>
         </div>
-      </div>
-    </div>
-    </BodyPortal>
+        </div>
+    </AdminModalScrim>
   )
 }

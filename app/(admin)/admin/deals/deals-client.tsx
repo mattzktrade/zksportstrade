@@ -66,6 +66,7 @@ import Link from "next/link"
 import { BookingFormPanel, BookingFormHandoffCallout } from "./booking-form-panel"
 import { DealFinancePanel } from "./deal-finance-panel"
 import { updateDealCommercials, deleteDeal } from "./deal-edit-actions"
+import { formatShortDate } from "@/lib/format/date"
 
 type PipelineView = "all" | "mine" | "team"
 type PipelineStageId =
@@ -104,23 +105,11 @@ function money(value: number, currency = "USD"): string {
 }
 
 function shortDate(value: string | null): string {
-  if (!value) return "—"
-  return new Date(`${value}T00:00:00`).toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  })
+  return formatShortDate(value)
 }
 
 function formatCreatedDate(value: string | null): string {
-  if (!value) return "—"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "—"
-  return date.toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  })
+  return formatShortDate(value)
 }
 
 function dealReferenceNumber(reference: string): number {
@@ -921,12 +910,12 @@ export function DealsClient({
               onClose={closePreview}
               previewRef={previewRef}
             >
-              <div className="space-y-4 p-5">
+              <div className="space-y-4 p-4 sm:p-5">
                 <div className="flex min-w-0 flex-col gap-3">
                   <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
                       <h2
-                        className="truncate text-[12px] font-semibold"
+                        className="text-[16px] font-semibold leading-snug sm:truncate sm:text-[12px]"
                         title={`${selected.reference} — ${selected.account_name || "Deal"}`}
                       >
                         <Link href={adminDealPath(selected.id)} className="text-primary hover:underline">
@@ -935,7 +924,7 @@ export function DealsClient({
                         {" — "}
                         {selected.account_name || "Deal"}
                       </h2>
-                      <p className="mt-1 truncate text-[8px] text-slate-400">
+                      <p className="mt-1 text-[8px] leading-5 text-slate-400 sm:truncate">
                         {selected.recent_activities[0]
                           ? `Last update by ${selected.recent_activities[0].actor_name || "someone"} · ${new Date(selected.recent_activities[0].created_at).toLocaleString("en-GB")}`
                           : `Updated ${new Date(selected.updated_at).toLocaleString("en-GB")}`}
@@ -944,16 +933,16 @@ export function DealsClient({
                     <button
                       type="button"
                       onClick={closePreview}
-                      className="shrink-0 p-0.5 text-slate-400 hover:text-slate-700"
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700 sm:h-auto sm:w-auto sm:p-0.5"
                       aria-label="Close deal preview"
                     >
-                      <X className="h-4 w-4" />
+                      <X className="h-5 w-5 sm:h-4 sm:w-4" />
                     </button>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Link
                       href={adminDealPath(selected.id)}
-                      className="flex h-8 shrink-0 items-center rounded-md border px-2 text-[8px] font-semibold"
+                      className="flex h-11 shrink-0 items-center rounded-md border px-3 text-[8px] font-semibold sm:h-8 sm:px-2"
                     >
                       Open page
                     </Link>
@@ -962,7 +951,7 @@ export function DealsClient({
                       onClick={openDealEditor}
                       disabled={commercialEditLocked}
                       title={commercialEditLocked ? "Void the active form first, or edit before an order exists." : "Edit deal"}
-                      className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2 text-[8px] font-semibold disabled:opacity-40"
+                      className="flex h-11 shrink-0 items-center gap-1.5 rounded-md border px-3 text-[8px] font-semibold disabled:opacity-40 sm:h-8 sm:px-2"
                     >
                       <Pencil className="h-3 w-3" /> Edit deal
                     </button>
@@ -975,7 +964,7 @@ export function DealsClient({
                           ? "This deal has a portal order, so it cannot be deleted."
                           : "Delete this deal"
                       }
-                      className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-red-200 px-2 text-[8px] font-semibold text-red-600 disabled:opacity-40"
+                      className="flex h-11 shrink-0 items-center gap-1.5 rounded-md border border-red-200 px-3 text-[8px] font-semibold text-red-600 disabled:opacity-40 sm:h-8 sm:px-2"
                     >
                       <Trash2 className="h-3 w-3" /> Delete
                     </button>
@@ -989,7 +978,7 @@ export function DealsClient({
                       : []
                   }
                 />
-                <dl className="grid grid-cols-[125px_1fr] gap-y-2.5 border-y py-4 text-[9px]">
+                <dl className="grid grid-cols-1 gap-3 border-y py-4 text-[9px] sm:grid-cols-[125px_1fr] sm:gap-y-2.5">
                   <dt className="text-slate-400">Client / Company</dt><dd className="font-medium">{selected.account_id && selected.account_name ? <Link href={adminAccountPath(selected.account_id)} className="text-primary hover:underline">{selected.account_name}</Link> : "—"}</dd>
                   <dt className="text-slate-400">Contact</dt><dd>{selected.account_id && selected.primary_contact_id && selected.contact_name ? <Link href={adminContactPath(selected.account_id, selected.primary_contact_id)} className="text-primary hover:underline">{selected.contact_name}</Link> : "—"}</dd>
                   <dt className="text-slate-400">Event / Package</dt><dd>{selected.race_name || "—"}<br /><span className="text-slate-500">{selected.line_summary || "—"}</span></dd>
@@ -1053,7 +1042,7 @@ export function DealsClient({
                         inputClassName="mt-1 h-9 w-full rounded-md border px-2 text-[9px] text-slate-800"
                       />
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <label className="text-[8px] font-medium text-slate-500">
                         Action due
                         <input

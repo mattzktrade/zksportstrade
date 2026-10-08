@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server"
+import { after, NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { revalidateNativeBookingFormPages } from "@/lib/booking-forms/revalidate"
 import {
@@ -112,43 +112,51 @@ export async function POST(request: NextRequest) {
     }
 
     const snapshot = form.snapshot_data as BookingFormSnapshot
-    const { data: clientSignature } = await admin
-      .from("booking_form_signatures")
-      .select(
-        "signer_role, signer_name, signer_email, signature_path, signed_at, ip_address, location, user_agent, evidence_hash",
-      )
-      .eq("booking_form_id", form.id)
-      .eq("signer_role", "client")
-      .maybeSingle()
-    if (clientSignature && form.unsigned_pdf_path) {
+    const formId = String(form.id)
+    const unsignedPath = form.unsigned_pdf_path ? String(form.unsigned_pdf_path) : ""
+    const documentRef = String(form.document_ref)
+    const accountName = snapshot.billTo.accountName
+    const eventName = snapshot.deal.title
+    const dealId = form.deal_id ? String(form.deal_id) : null
+
+    after(async () => {
       try {
-        await writeClientSignedBookingPdf({
-          snapshot,
-          unsignedPath: String(form.unsigned_pdf_path),
-          clientSignature,
+        const { data: clientSignature } = await admin
+          .from("booking_form_signatures")
+          .select(
+            "signer_role, signer_name, signer_email, signature_path, signed_at, ip_address, location, user_agent, evidence_hash",
+          )
+          .eq("booking_form_id", formId)
+          .eq("signer_role", "client")
+          .maybeSingle()
+        if (clientSignature && unsignedPath) {
+          await writeClientSignedBookingPdf({
+            snapshot,
+            unsignedPath,
+            clientSignature,
+          })
+        }
+        const notification = await sendClientSignedBookingFormNotification({
+          documentRef,
+          clientName: signerName,
+          accountName,
+          eventName,
+          dealsUrl: `${getServerSiteOrigin()}/admin/deals`,
         })
+        await admin
+          .from("booking_forms")
+          .update({
+            last_error: notification.ok
+              ? null
+              : notification.error ?? notification.skipped ?? "Admin signature notification failed.",
+          })
+          .eq("id", formId)
       } catch (pdfError) {
-        console.warn("[booking-forms] could not write client-signed PDF:", pdfError)
+        console.warn("[booking-forms] client-sign follow-up failed:", pdfError)
       }
-    }
-
-    const notification = await sendClientSignedBookingFormNotification({
-      documentRef: String(form.document_ref),
-      clientName: signerName,
-      accountName: snapshot.billTo.accountName,
-      eventName: snapshot.deal.title,
-      dealsUrl: `${getServerSiteOrigin()}/admin/deals`,
     })
-    await admin
-      .from("booking_forms")
-      .update({
-        last_error: notification.ok
-          ? null
-          : notification.error ?? notification.skipped ?? "Admin signature notification failed.",
-      })
-      .eq("id", form.id)
 
-    revalidateNativeBookingFormPages(form.deal_id ? String(form.deal_id) : null)
+    revalidateNativeBookingFormPages(dealId)
     return NextResponse.json({ ok: true })
   } catch (error) {
     console.error("[booking-forms] sign:", error instanceof Error ? error.message : error)
