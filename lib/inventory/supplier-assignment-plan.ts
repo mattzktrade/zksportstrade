@@ -41,6 +41,7 @@ export type SupplierLineAssignment = {
   unassigned: number
   needStock: boolean
   singleKey: string | null
+  slots: readonly string[]
 }
 
 export type SupplierAssignmentPlan = {
@@ -125,7 +126,11 @@ function consume(
   }
 }
 
-function emptyAssignment(id: string, unassigned: number): SupplierLineAssignment {
+function emptyAssignment(
+  id: string,
+  unassigned: number,
+  slots: readonly string[] = ["unit"],
+): SupplierLineAssignment {
   return {
     id,
     slices: [],
@@ -133,6 +138,7 @@ function emptyAssignment(id: string, unassigned: number): SupplierLineAssignment
     unassigned,
     needStock: unassigned > 0,
     singleKey: null,
+    slots,
   }
 }
 
@@ -140,6 +146,7 @@ function toAssignment(
   id: string,
   quantity: number,
   slices: SupplierAssignmentSlice[],
+  slots: readonly string[],
 ): SupplierLineAssignment {
   const merged = new Map<string, SupplierAssignmentSlice>()
   for (const slice of slices) {
@@ -159,6 +166,7 @@ function toAssignment(
     unassigned,
     needStock: unassigned > 0,
     singleKey: unassigned === 0 && keys.length === 1 ? keys[0] : null,
+    slots,
   }
 }
 
@@ -333,14 +341,14 @@ function assignDealGroup(
 
   if (pools.length === 0) {
     for (const row of work) {
-      byLine.set(row.demand.id, emptyAssignment(row.demand.id, row.quantity))
+      byLine.set(row.demand.id, emptyAssignment(row.demand.id, row.quantity, row.slots))
     }
     return
   }
 
   for (const row of work) {
     if (row.need <= 0) {
-      byLine.set(row.demand.id, emptyAssignment(row.demand.id, row.quantity))
+      byLine.set(row.demand.id, emptyAssignment(row.demand.id, row.quantity, row.slots))
       row.need = 0
     }
   }
@@ -409,7 +417,7 @@ function assignDealGroup(
 
   for (const row of work) {
     if (byLine.has(row.demand.id) && row.slices.length === 0) continue
-    byLine.set(row.demand.id, toAssignment(row.demand.id, row.quantity, row.slices))
+    byLine.set(row.demand.id, toAssignment(row.demand.id, row.quantity, row.slices, row.slots))
   }
 }
 
@@ -435,12 +443,10 @@ export function planSupplierAssignments(input: {
     ]),
   ]
   const remaining = cloneRemaining(pools, allSlots)
-  const assignedByPool: Record<string, number> = {}
-  for (const pool of pools) assignedByPool[pool.key] = 0
 
   for (const hold of input.holds ?? []) {
     if (!nameByKey.has(hold.key)) continue
-    assignedByPool[hold.key] = (assignedByPool[hold.key] ?? 0) + applyHold(remaining, hold)
+    applyHold(remaining, hold)
   }
 
   const groupOrder: string[] = []
@@ -460,19 +466,22 @@ export function planSupplierAssignments(input: {
     assignDealGroup(remaining, pools, nameByKey, groups.get(key) ?? [], byLine)
   }
 
-  for (const row of byLine.values()) {
-    for (const slice of row.slices) {
-      assignedByPool[slice.key] = (assignedByPool[slice.key] ?? 0) + slice.quantity
-    }
-  }
-
   const slots = allSlots.length > 0 ? allSlots : ["unit"]
+  const assignedByPool: Record<string, number> = {}
   const remainingByPool: Record<string, number> = {}
   for (const pool of pools) {
     const bySlot = remaining.get(pool.key)
-    remainingByPool[pool.key] = bySlot
-      ? Math.min(...slots.map((slot) => Math.max(0, bySlot.get(slot) ?? 0)))
-      : 0
+    let peakUsed = 0
+    let leftover = 0
+    if (bySlot) {
+      leftover = Math.min(...slots.map((slot) => Math.max(0, bySlot.get(slot) ?? 0)))
+      for (const slot of slots) {
+        const start = slotCapacity(pool, slot)
+        peakUsed = Math.max(peakUsed, start - Math.max(0, bySlot.get(slot) ?? 0))
+      }
+    }
+    assignedByPool[pool.key] = peakUsed
+    remainingByPool[pool.key] = leftover
   }
 
   return { byLine, assignedByPool, remainingByPool }
@@ -483,6 +492,7 @@ export function assignmentForLines(
   lineIds: readonly string[],
 ): SupplierLineAssignment {
   const slicesByKey = new Map<string, SupplierAssignmentSlice>()
+  const slots: string[] = []
   let assigned = 0
   let unassigned = 0
   for (const lineId of lineIds) {
@@ -490,6 +500,9 @@ export function assignmentForLines(
     if (!row) continue
     assigned += row.assigned
     unassigned += row.unassigned
+    for (const slot of row.slots) {
+      if (!slots.includes(slot)) slots.push(slot)
+    }
     for (const slice of row.slices) {
       const current = slicesByKey.get(slice.key)
       if (current) current.quantity += slice.quantity
@@ -507,5 +520,6 @@ export function assignmentForLines(
     unassigned,
     needStock: unassigned > 0,
     singleKey: unassigned === 0 && keys.length === 1 ? keys[0] : null,
+    slots: slots.length > 0 ? slots : ["unit"],
   }
 }

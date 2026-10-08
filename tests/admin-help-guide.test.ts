@@ -56,6 +56,10 @@ describe("admin help guide", () => {
     const assistant = searchHelp("assistant")
     assert.ok(assistant.topics.some((topic) => topic.id === "assistant"))
     assert.ok(assistant.questions.some((item) => /whatsapp/i.test(item.q) || /whatsapp/i.test(item.a)))
+
+    const checkIn = searchHelp("check-in")
+    assert.ok(checkIn.topics.some((topic) => topic.id === "after-sale" || topic.id === "questions"))
+    assert.ok(checkIn.questions.some((item) => /check guests in/i.test(item.q)))
   })
 
   it("ignores unknown hashes", () => {

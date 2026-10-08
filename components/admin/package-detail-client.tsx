@@ -23,6 +23,7 @@ import {
   linkedPoolSellableForPackage,
   type LinkedSellableMember,
 } from "@/lib/admin/package-sales-breakdown"
+import { signedPackageSaleCount } from "@/lib/admin/package-sale-scope"
 
 const TABS: { id: AdminPackageTab; label: string }[] = [
   { id: "details", label: "Details" },
@@ -144,7 +145,7 @@ export function PackageDetailClient({
   const raceMatch = races.find((r) => r.id === livePkg.race_id)
   const displayTitle = adminCatalogProductTitleFromPackage(livePkg, raceMatch)
   const sellable = sellableQty(livePkg, liveLinkedPackages)
-  const saleCount = orders.length + deals.length
+  const saleCount = signedPackageSaleCount({ orders, deals })
 
   return (
     <div className="space-y-6 min-w-0">
@@ -249,6 +250,7 @@ export function PackageDetailClient({
             deals={deals}
             purchaseOrders={purchaseOrders}
             linkedPackages={liveLinkedPackages}
+            currentPackageId={livePkg.id}
             currentPackageDuration={livePkg.duration}
             eventDate={livePkg.event_date}
             costLayers={(() => {

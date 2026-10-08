@@ -6,6 +6,7 @@ import { savePackageGuestGuideContent } from "@/app/(admin)/admin/catalog/brochu
 import { PackageGuestGuideActions } from "@/components/admin/package-guest-guide-actions"
 import {
   emptyGuestGuideContent,
+  starterGuestGuideContent,
   matchesOfficialGuestGuide,
   officialSingaporeVelocityTerraceGuestGuide,
   parseGuestGuide,
@@ -15,7 +16,7 @@ import type { GuestGuideContent, GuestGuidePage, GuestGuidePageKey } from "@/lib
 const PAGE_HINTS: Record<GuestGuidePageKey, string> = {
   welcome: "Opening welcome. This page is required. First line is usually Welcome to, second line is the venue name.",
   beforeWeekend: "Key dates before arrival. Use a date, title and body for each deadline.",
-  digitalTicket: "How the TicketBud QR ticket works, plus the before-arrival checklist.",
+  digitalTicket: "How the ZK digital ticket and QR check-in work. Singapore 2026 Velocity Terrace still uses the official TicketBud copy.",
   arriving: "Venue facts and numbered arrival steps.",
   experience: "What guests enjoy once they are in.",
   gettingThere: "Travel sections such as MRT, taxi and late arrival.",
@@ -85,7 +86,7 @@ function initialGuide(input: {
 }): GuestGuideContent {
   return (
     parseGuestGuide(input.stored) ??
-    (matchesOfficialGuestGuide(input) ? officialSingaporeVelocityTerraceGuestGuide() : emptyGuestGuideContent())
+    (matchesOfficialGuestGuide(input) ? officialSingaporeVelocityTerraceGuestGuide() : starterGuestGuideContent())
   )
 }
 

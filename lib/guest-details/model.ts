@@ -13,6 +13,8 @@ export type GuestAttendanceMode = (typeof GUEST_ATTENDANCE_MODES)[number]
 export type GuestFormPerson = {
   id: string
   fullName: string
+  email?: string
+  phone?: string
   isLeadGuest: boolean
   headshotPath: string | null
 }
@@ -110,6 +112,8 @@ export function emptyGuestFormPeople(quantity: number): GuestFormPerson[] {
   return Array.from({ length: count }, (_, index) => ({
     id: "",
     fullName: "",
+    email: "",
+    phone: "",
     isLeadGuest: index === 0,
     headshotPath: null,
   }))
@@ -129,11 +133,14 @@ export function flattenGuestFormPeople(input: {
   return input.days.flatMap((day) => [...(input.perDayGuests[day] ?? [])])
 }
 
+const GUEST_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 export function guestDetailsFormCanSubmit(input: {
   mode: GuestAttendanceMode
   sameGuests: readonly GuestFormPerson[]
   perDayGuests: Readonly<Record<string, readonly GuestFormPerson[]>>
   days: readonly CostDaySlot[]
+  requireGuestEmail?: boolean
 }): { ok: true } | { ok: false; message: string } {
   const people = namedPeople(flattenGuestFormPeople(input))
   if (!people.length) {
@@ -148,6 +155,12 @@ export function guestDetailsFormCanSubmit(input: {
       return {
         ok: false,
         message: `Upload a clear headshot for ${person.fullName.trim()}.`,
+      }
+    }
+    if (input.requireGuestEmail && !GUEST_EMAIL_RE.test(person.email?.trim() ?? "")) {
+      return {
+        ok: false,
+        message: `Add an email for ${person.fullName.trim()} so we can send their digital ticket.`,
       }
     }
   }
@@ -209,6 +222,8 @@ export function isGuestDetailsUrlParagraph(text: string): boolean {
 export type GuestFormSeedGuest = {
   id: string
   fullName: string | null
+  email?: string | null
+  phone?: string | null
   isLeadGuest: boolean
   headshotPath: string | null
   attendanceDay: string | null
@@ -219,6 +234,8 @@ function toFormPerson(guest: GuestFormSeedGuest): GuestFormPerson {
   return {
     id: guest.id,
     fullName: guest.fullName?.trim() ?? "",
+    email: guest.email?.trim() ?? "",
+    phone: guest.phone?.trim() ?? "",
     isLeadGuest: Boolean(guest.isLeadGuest),
     headshotPath: guest.headshotPath?.trim() || null,
   }
@@ -239,7 +256,7 @@ export function padGuestFormPeople(
   const rows = people.map((person) => ({ ...person }))
   const needed = Math.max(1, Math.floor(Number(quantity) || 1))
   while (rows.length < needed) {
-    rows.push({ id: "", fullName: "", isLeadGuest: false, headshotPath: null })
+    rows.push({ id: "", fullName: "", email: "", phone: "", isLeadGuest: false, headshotPath: null })
   }
   if (assignLeadIfMissing && rows.length && !rows.some((row) => row.isLeadGuest)) {
     rows[0] = { ...rows[0]!, isLeadGuest: true }
@@ -288,6 +305,8 @@ export function seedGuestDetailsForm(input: {
 export type DesiredGuestRow = {
   id: string | null
   fullName: string | null
+  email?: string | null
+  phone?: string | null
   isLeadGuest: boolean
   headshotPath: string | null
   attendanceDay: CostDaySlot | null
@@ -322,6 +341,8 @@ function personToDesired(
   return {
     id,
     fullName,
+    email: person.email?.trim() || null,
+    phone: person.phone?.trim() || null,
     isLeadGuest: Boolean(person.isLeadGuest) && Boolean(fullName),
     headshotPath,
     attendanceDay,

@@ -199,3 +199,115 @@ test("changing the assigned supplier changes COGS immediately", () => {
   assert.equal(planSupplierAssignmentCogs({ plan: f1, sales, layers }).get("deal"), 10000)
   assert.equal(planSupplierAssignmentCogs({ plan: go, sales, layers }).get("deal"), 25000)
 })
+
+test("a 2-day buy sold as individual days uses each day's cost split", () => {
+  const plan = planSupplierAssignments({
+    pools: [
+      {
+        key: "id:bam",
+        name: "BAM Motorsport",
+        purchased: 2,
+        targetCapacity: 2,
+        capacityBySlot: { saturday: 2, sunday: 2 },
+      },
+    ],
+    demands: [
+      {
+        id: "sat",
+        dealId: "deal-sat",
+        dealReference: "DL1481",
+        createdAt: "2026-10-05T17:18:00Z",
+        quantity: 2,
+        coverable: 2,
+        slots: ["saturday"],
+      },
+      {
+        id: "sun",
+        dealId: "deal-sun",
+        dealReference: "DL1441",
+        createdAt: "2026-10-06T03:42:00Z",
+        quantity: 2,
+        coverable: 2,
+        slots: ["sunday"],
+      },
+    ],
+  })
+  const cogs = planSupplierAssignmentCogs({
+    plan,
+    sales: [
+      { id: "deal-sat", lineIds: ["sat"], createdAt: "2026-10-05T17:18:00Z", reference: "DL1481" },
+      { id: "deal-sun", lineIds: ["sun"], createdAt: "2026-10-06T03:42:00Z", reference: "DL1441" },
+    ],
+    layers: [
+      {
+        id: "l1",
+        quantity: 2,
+        unit_cost: 11365,
+        received_at: "2026-01-01T00:00:00Z",
+        supplier_id: "bam",
+        day_components: [
+          { day_slot: "saturday", quantity_total: 2, unit_cost_component: 5682.5 },
+          { day_slot: "sunday", quantity_total: 2, unit_cost_component: 5682.5 },
+        ],
+      },
+    ],
+  })
+  assert.equal(cogs.get("deal-sat"), 11365)
+  assert.equal(cogs.get("deal-sun"), 11365)
+})
+
+test("a 2-day sale costs both day components of the same buy", () => {
+  const plan = planSupplierAssignments({
+    pools: [
+      {
+        key: "id:bam",
+        name: "BAM Motorsport",
+        purchased: 2,
+        targetCapacity: 2,
+        capacityBySlot: { saturday: 2, sunday: 2 },
+      },
+    ],
+    demands: [
+      {
+        id: "weekend",
+        dealId: "deal-weekend",
+        dealReference: "DL0880",
+        createdAt: "2026-09-28T16:03:00Z",
+        quantity: 1,
+        coverable: 1,
+        slots: ["saturday", "sunday"],
+      },
+      {
+        id: "sat",
+        dealId: "deal-sat",
+        dealReference: "DL1481",
+        createdAt: "2026-10-05T17:18:00Z",
+        quantity: 1,
+        coverable: 1,
+        slots: ["saturday"],
+      },
+    ],
+  })
+  const cogs = planSupplierAssignmentCogs({
+    plan,
+    sales: [
+      { id: "deal-weekend", lineIds: ["weekend"], createdAt: "2026-09-28T16:03:00Z" },
+      { id: "deal-sat", lineIds: ["sat"], createdAt: "2026-10-05T17:18:00Z" },
+    ],
+    layers: [
+      {
+        id: "l1",
+        quantity: 2,
+        unit_cost: 11365,
+        received_at: "2026-01-01T00:00:00Z",
+        supplier_id: "bam",
+        day_components: [
+          { day_slot: "saturday", quantity_total: 2, cost_weight: 0.5 },
+          { day_slot: "sunday", quantity_total: 2, cost_weight: 0.5 },
+        ],
+      },
+    ],
+  })
+  assert.equal(cogs.get("deal-weekend"), 11365)
+  assert.equal(cogs.get("deal-sat"), 5682.5)
+})

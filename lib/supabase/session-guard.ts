@@ -32,7 +32,8 @@ export function isPublicApiPath(path: string): boolean {
     path.startsWith("/api/integrations/") ||
     path.startsWith("/api/booking-forms/") ||
     path.startsWith("/api/contracts/") ||
-    path.startsWith("/api/guest-details/")
+    path.startsWith("/api/guest-details/") ||
+    path.startsWith("/api/tickets/")
   )
 }
 
@@ -46,6 +47,10 @@ export function isPublicBookingSignerPath(path: string): boolean {
 
 export function isPublicGuestDetailsPath(path: string): boolean {
   return path.startsWith("/guest-details/")
+}
+
+export function isPublicTicketPath(path: string): boolean {
+  return path.startsWith("/t/")
 }
 
 export function isAuthRoute(path: string): boolean {
@@ -75,6 +80,7 @@ export function isPublicPath(path: string): boolean {
     isResetPasswordPage(path) ||
     isPublicBookingSignerPath(path) ||
     isPublicGuestDetailsPath(path) ||
+    isPublicTicketPath(path) ||
     isPublicApiPath(path)
   )
 }

@@ -13,6 +13,8 @@ function people(value: unknown): GuestFormPerson[] {
     return {
       id: String(record.id ?? ""),
       fullName: String(record.fullName ?? ""),
+      email: String(record.email ?? ""),
+      phone: String(record.phone ?? ""),
       isLeadGuest: record.isLeadGuest === true,
       headshotPath: record.headshotPath ? String(record.headshotPath) : null,
     }

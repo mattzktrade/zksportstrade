@@ -39,6 +39,13 @@ export type AdminOrderInvoice = {
   xero_invoice_number: string | null
 }
 
+export type AdminOrderLineItem = {
+  packageId: string
+  quantity: number
+  unitPrice: number
+  lineTotal: number
+}
+
 export type AdminOrderSupplierAllocation = {
   supplier: string
   quantity: number
@@ -69,6 +76,7 @@ export type AdminOrderListRow = OrderRow & {
   account: AdminOrderAccount | null
   contact: AdminOrderContact | null
   invoice: AdminOrderInvoice | null
+  lines: AdminOrderLineItem[]
   supplierAllocations: AdminOrderSupplierAllocation[]
   supplierConsumptions: AdminOrderSupplierConsumption[]
   deliveryProofs: AdminOrderDeliveryProof[]
@@ -366,7 +374,7 @@ async function hydrateAdminOrders(rows: RawAdminOrder[]): Promise<AdminOrderList
   const orderIds = rows.map((r) => r.id)
   const accountIds = [...new Set(rows.map((row) => row.crm_account_id).filter(Boolean).map(String))]
   const contactIds = [...new Set(rows.map((row) => row.crm_contact_id).filter(Boolean).map(String))]
-  const [consumptionsByOrder, deliveryProofResult, accountResult, contactResult] = await Promise.all([
+  const [consumptionsByOrder, deliveryProofResult, accountResult, contactResult, lineResult] = await Promise.all([
     getConsumptionsForOrders(orderIds),
     orderIds.length > 0
       ? supabase
@@ -381,7 +389,34 @@ async function hydrateAdminOrders(rows: RawAdminOrder[]): Promise<AdminOrderList
     contactIds.length > 0
       ? supabase.from("crm_contacts").select("id, full_name").in("id", contactIds)
       : Promise.resolve({ data: [] as AdminOrderContact[] }),
+    orderIds.length > 0
+      ? supabase
+          .from("order_line_items")
+          .select("order_id, package_id, quantity, unit_price, line_total")
+          .in("order_id", orderIds)
+      : Promise.resolve({
+          data: [] as Array<{
+            order_id: string
+            package_id: string
+            quantity: number
+            unit_price: number
+            line_total: number
+          }>,
+        }),
   ])
+  const linesByOrder = new Map<string, AdminOrderLineItem[]>()
+  for (const row of lineResult.data ?? []) {
+    const orderId = String(row.order_id ?? "")
+    if (!orderId) continue
+    const list = linesByOrder.get(orderId) ?? []
+    list.push({
+      packageId: String(row.package_id ?? ""),
+      quantity: Math.max(0, Math.floor(Number(row.quantity) || 0)),
+      unitPrice: Number(row.unit_price) || 0,
+      lineTotal: Number(row.line_total) || 0,
+    })
+    linesByOrder.set(orderId, list)
+  }
   const deliveryProofRows = deliveryProofResult.data
   const accountsById = new Map(
     (accountResult.data ?? []).map((row) => [String(row.id), { id: String(row.id), name: String(row.name ?? "") }]),
@@ -434,6 +469,7 @@ async function hydrateAdminOrders(rows: RawAdminOrder[]): Promise<AdminOrderList
       account: accountId ? accountsById.get(accountId) ?? null : null,
       contact: contactId ? contactsById.get(contactId) ?? null : null,
       invoice: pickPreferredInvoice(row.invoices) ?? one(row.invoices),
+      lines: linesByOrder.get(row.id) ?? [],
       supplierAllocations: [...suppliers.entries()].map(([supplier, quantity]) => ({ supplier, quantity })),
       supplierConsumptions: consumptions.map((c) => ({
         costLayerId: c.cost_layer_id,

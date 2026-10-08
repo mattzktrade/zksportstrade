@@ -5,6 +5,7 @@ export const OPERATIONS_EMAIL_KINDS = [
   "names_sent",
   "collection_details",
   "tickets_sent",
+  "tickets_ready",
   "after_event",
 ] as const
 
@@ -20,6 +21,7 @@ export type OperationsEmailDraftInput = {
   deadline?: string | null
   collectionPoint?: string | null
   collectionTime?: string | null
+  ticketLinksBlock?: string | null
   template?: { subject: string; body: string } | null
 }
 
@@ -70,6 +72,8 @@ export function operationsEmailKindLabel(kind: OperationsEmailKind): string {
       return "Collection / delivery details"
     case "tickets_sent":
       return "Tickets sent"
+    case "tickets_ready":
+      return "Tickets ready"
     case "after_event":
       return "After the event"
   }
@@ -187,6 +191,20 @@ export const DEFAULT_OPERATIONS_EMAIL_TEMPLATES: Record<OperationsEmailKind, { s
       JENNY_SIGN_OFF,
     ].join("\n"),
   },
+  tickets_ready: {
+    subject: "Your tickets for {{event}}",
+    body: [
+      "Hi {{first_name}},",
+      "",
+      "Your tickets for {{event}} are ready. Open the link below on your phone, check the name and day, and keep it handy for arrival.",
+      "",
+      "{{ticket_links_block}}",
+      "",
+      "If anything looks wrong, reply to this email and I will help straight away.",
+      "",
+      JENNY_SIGN_OFF,
+    ].join("\n"),
+  },
   after_event: {
     subject: "Thank you for {{event}}",
     body: [
@@ -203,7 +221,7 @@ export function guestDetailsBlock(formUrl?: string | null): string {
   const url = formUrl?.trim() ?? ""
   if (!url) return REPLY_DETAILS_BLOCK
   return [
-    "Please complete this guest details form. You only need each guest’s full name and a clear recent headshot. You can save and finish later, or tick one person as the lead guest if the rest of the names are still to follow.",
+    "Please complete this guest details form. You only need each guest’s full name, a clear recent headshot, and an email if we are sending them a digital ticket. You can save and finish later, or tick one person as the lead guest if the rest of the names are still to follow.",
     "",
     url,
     "",
@@ -256,6 +274,7 @@ export function buildOperationsEmailDraft(input: OperationsEmailDraftInput): Omi
     deadline_clause: deadline ? ` (${deadline})` : "",
     collection_point: input.collectionPoint?.trim() || "TBC",
     collection_time: input.collectionTime?.trim() || "TBC",
+    ticket_links_block: input.ticketLinksBlock?.trim() || "I will send your ticket link in a follow-up.",
   })
   return {
     kind: input.kind,
@@ -279,6 +298,9 @@ export function operationsEmailHtml(body: string): string {
       const url = block.replaceAll("<br/>", "").trim()
       if (/^https?:\/\/\S+\/guest-details\/[A-Za-z0-9_-]{40,60}\/?$/.test(url)) {
         return `<p style="margin:0 0 14px"><a href="${url}" style="display:inline-block;background:#F90202;color:#ffffff;padding:12px 18px;border-radius:6px;text-decoration:none;font-weight:700">Complete guest details</a></p>`
+      }
+      if (/^https?:\/\/\S+\/t\/[A-Za-z0-9_-]{40,60}\/?$/.test(url)) {
+        return `<p style="margin:0 0 14px"><a href="${url}" style="display:inline-block;background:#F90202;color:#ffffff;padding:12px 18px;border-radius:6px;text-decoration:none;font-weight:700">Open your ticket</a></p>`
       }
       return `<p style="margin:0 0 14px">${text}</p>`
     })

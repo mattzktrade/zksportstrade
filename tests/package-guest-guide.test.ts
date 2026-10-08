@@ -5,8 +5,10 @@ import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from "pdf-lib"
 import type { BrochureContent } from "../lib/brochures/types"
 import {
   assessGuestGuideReadiness,
+  defaultZkDigitalTicketPage,
   emptyGuestGuideContent,
   guestGuideHeadline,
+  starterGuestGuideContent,
   guestGuidePagePlan,
   matchesOfficialGuestGuide,
   officialSingaporeVelocityTerraceGuestGuide,
@@ -164,6 +166,10 @@ describe("package guest guides", () => {
     assert.ok(existsSync(VELOCITY_TERRACE_SY_LOGO.replace(/^\//, "public/")))
     assert.ok(existsSync(VELOCITY_TERRACE_ZK_LOGO.replace(/^\//, "public/")))
     assert.ok(existsSync(VELOCITY_TERRACE_THE_TEAM_LOGO.replace(/^\//, "public/")))
+    const digital = official.pages.find((page) => page.key === "digitalTicket")
+    assert.match(JSON.stringify(digital), /TicketBud/)
+    assert.doesNotMatch(JSON.stringify(defaultZkDigitalTicketPage()), /TicketBud/)
+    assert.doesNotMatch(JSON.stringify(starterGuestGuideContent()), /TicketBud/)
   })
 
   it("parses stored JSON and skips empty pages", () => {

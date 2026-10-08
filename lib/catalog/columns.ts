@@ -5,7 +5,10 @@ export const PACKAGE_COLUMNS =
   "id, race_id, name, circuit, location, country, country_code, event_date, date_range, trade_price, currency, total_capacity, is_enquiry, is_hidden, requires_booking_approval, image, tier, duration, inventory_group_id, inventory_is_standalone, shell_parent_package_id, includes, featured, sort_order, brochure_url, description, gallery_images, track_map, product_code, salesforce_product_id, salesforce_product_family, retail_price_multiplier, wix_retail_price, sell_on_trade_portal, sell_on_wix, sell_on_partners, integration_sync_status, integration_synced_at, integration_sync_error" as const
 
 /** Staff-only. Portal listing queries must keep using PACKAGE_COLUMNS. */
-export const ADMIN_PACKAGE_COLUMNS = `${PACKAGE_COLUMNS}, zk_brochure_url` as const
+export const TICKETING_PACKAGE_COLUMNS =
+  "ticketing_mode, ticketing_venue_name, ticketing_doors_time, ticketing_require_headshot" as const
+
+export const ADMIN_PACKAGE_COLUMNS = `${PACKAGE_COLUMNS}, zk_brochure_url, ${TICKETING_PACKAGE_COLUMNS}` as const
 
 /** Admin catalog list fields, including the client-facing assets used by the quick preview. */
 export const CATALOG_LIST_PACKAGE_COLUMNS =
@@ -19,6 +22,21 @@ export function withoutZkBrochureUrl<T extends string>(columns: T): T {
 
 export function isMissingZkBrochureUrlColumnError(message?: string): boolean {
   return /zk_brochure_url/i.test(message ?? "") && /does not exist/i.test(message ?? "")
+}
+
+export function withoutTicketingColumns<T extends string>(columns: T): T {
+  return columns
+    .replace(/,?\s*ticketing_mode\b/g, "")
+    .replace(/,?\s*ticketing_venue_name\b/g, "")
+    .replace(/,?\s*ticketing_doors_time\b/g, "")
+    .replace(/,?\s*ticketing_require_headshot\b/g, "")
+    .replace(/,\s*,/g, ", ")
+    .replace(/^,\s*/, "") as T
+}
+
+export function isMissingTicketingColumnError(message?: string): boolean {
+  return /ticketing_mode|ticketing_venue_name|ticketing_doors_time|ticketing_require_headshot/i.test(message ?? "") &&
+    /does not exist/i.test(message ?? "")
 }
 
 /** Home / packages-index rows: skip galleries and integration fields. */

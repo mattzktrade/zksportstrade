@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { prepareOrderCancelRelease } from "@/lib/inventory/prepare-order-cancel-release"
+import { missingTicketingSchema, voidOpenTicketsForCancelledBooking } from "@/lib/tickets/store"
 
 function isUniqueViolation(error: { code?: string; message?: string } | null): boolean {
   return error?.code === "23505" || Boolean(error?.message?.includes("duplicate key"))
@@ -367,4 +368,15 @@ export async function finalizeNativeDealOrderCancel(input: {
     },
   })
   if (activityError) throw new Error(activityError.message)
+
+  try {
+    await voidOpenTicketsForCancelledBooking(admin, {
+      dealId: input.dealId,
+      orderId: input.orderId,
+      reason,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ""
+    if (!missingTicketingSchema(message)) throw error
+  }
 }

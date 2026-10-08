@@ -1,9 +1,20 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
-import { cancellationEligibleDate, daysOverdue } from "../lib/crm/deal-finance"
+import { cancellationEligibleDate, daysOverdue, shouldLoadDealOrderFinance } from "../lib/crm/deal-finance"
 import { DEFAULT_FINANCE_CC, DEFAULT_BOOKINGS_CC, DEFAULT_OPERATIONS_CC, NEVER_CC_ADDRESSES, getInvoiceFinanceCc, getBookingConfirmationCc, getOperationsEmailCc, invoiceEmailCc } from "../lib/email/config"
 import { invoiceDisplayStatus, pickPreferredInvoice } from "../lib/invoices/status"
+
+test("deal lists can attach stored invoices without calling Xero", () => {
+  assert.equal(shouldLoadDealOrderFinance({ summary: true }), false)
+  assert.equal(shouldLoadDealOrderFinance({ summary: true, includeFinance: true }), true)
+  assert.equal(shouldLoadDealOrderFinance({}), true)
+  const page = readFileSync("app/(admin)/admin/deals/page.tsx", "utf8")
+  assert.match(page, /summary: true, includeFinance: true/)
+  const deals = readFileSync("lib/crm/deals.ts", "utf8")
+  assert.match(deals, /loadOrderFinance/)
+  assert.doesNotMatch(deals, /xeroRequest|createXeroInvoiceForOrder/)
+})
 
 test("native invoice cancellation becomes eligible 28 days after due date", () => {
   assert.equal(cancellationEligibleDate("2026-08-01"), "2026-08-29")

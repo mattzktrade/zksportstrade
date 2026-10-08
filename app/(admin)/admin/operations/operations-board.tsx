@@ -23,6 +23,7 @@ import {
 } from "@/app/(admin)/admin/operations/board-actions"
 import { OperationsEmailComposer } from "@/app/(admin)/admin/operations/operations-email-composer"
 import { OperationsGuestEditor, type GuestDraft } from "@/app/(admin)/admin/operations/guest-editor"
+import { OperationsTicketsPanel } from "@/components/admin/operations-tickets-panel"
 import { OperationsSupplierEditor } from "@/app/(admin)/admin/operations/supplier-editor"
 import { deleteOrderGuest, reassignDealPackageStock, reassignOrderPackageStock, saveOrderGuests } from "@/app/(admin)/admin/operations/actions"
 import { bookingStepInput, lastEmailAt } from "@/lib/operations/booking-view"
@@ -581,10 +582,12 @@ export function OperationsBoard({
             </div>
           </section>
 
+          <OperationsTicketsPanel dealId={row.dealId} orderId={orderIdOf(row)} canManage={canManage} />
+
           <section className="rounded-lg border bg-white p-4">
-            <h3 className="text-[12px] font-semibold">6. Fulfil and proof</h3>
+            <h3 className="text-[12px] font-semibold">6b. Proof (if you still need a screenshot)</h3>
             <p className="mt-1 text-[11px] text-slate-500">
-              A note or photo is required to mark this booking fulfilled. That is the same proof finance already uses.
+              Digital ZK tickets mark delivered when they are emailed. Use this only for supplier-handled or one-off proof.
             </p>
             {proofs.length ? (
               <ul className="mt-3 space-y-1 text-[11px] text-slate-600">

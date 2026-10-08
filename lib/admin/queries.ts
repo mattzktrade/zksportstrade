@@ -7,7 +7,9 @@ import {
   ADMIN_PACKAGE_COLUMNS,
   CATALOG_LIST_PACKAGE_COLUMNS,
   INVENTORY_COLUMNS,
+  isMissingTicketingColumnError,
   isMissingZkBrochureUrlColumnError,
+  withoutTicketingColumns,
   withoutZkBrochureUrl,
 } from "@/lib/catalog/columns"
 import { guestGuideFieldsFor, loadGuestGuideFields } from "@/lib/catalog/guest-guide-fields"
@@ -469,10 +471,13 @@ async function adminPackagesSelect<T>(
     return "id" in options ? query.eq("id", options.id).maybeSingle() : query.order("sort_order")
   }
   const first = await run(columns)
-  const result =
-    first.error && isMissingZkBrochureUrlColumnError(first.error.message)
-      ? await run(withoutZkBrochureUrl(columns))
-      : first
+  let result = first
+  if (first.error && isMissingZkBrochureUrlColumnError(first.error.message)) {
+    result = await run(withoutZkBrochureUrl(columns))
+  }
+  if (result.error && isMissingTicketingColumnError(result.error.message)) {
+    result = await run(withoutTicketingColumns(withoutZkBrochureUrl(columns)))
+  }
   return result as unknown as { data: T | null; error: { message: string } | null }
 }
 

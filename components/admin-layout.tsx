@@ -23,6 +23,7 @@ import {
   Settings,
   Megaphone,
   Wrench,
+  QrCode,
   BriefcaseBusiness,
   Building2,
   AlertTriangle,
@@ -95,6 +96,7 @@ const navigation: NavItem[] = [
     ],
   },
   { name: "Operations", href: "/admin/operations", icon: Wrench },
+  { name: "Check-in", href: "/admin/check-in", icon: QrCode },
   { name: "Finance", href: "/admin/finance", icon: CircleDollarSign },
   { name: "Marketing", icon: Megaphone, disabled: true },
   { name: "Help", href: "/admin/help", icon: CircleHelp },
@@ -112,6 +114,7 @@ const JUMP_KEYWORDS: Record<string, string> = {
   "/admin/catalog/events": "races calendar",
   "/admin/orders": "bookings invoices portal",
   "/admin/finance": "invoices payments xero",
+  "/admin/check-in": "check-in scan qr door tickets arrived guest list",
 }
 
 function jumpDestinationsFor(items: NavItem[]): AdminJumpItem[] {
@@ -136,6 +139,7 @@ function adminPageTitle(pathname: string): string {
   if (pathname === "/admin") return "Dashboard"
   if (pathname.startsWith("/admin/finance")) return "Finance"
   if (pathname.startsWith("/admin/operations")) return "Operations"
+  if (pathname.startsWith("/admin/check-in")) return "Check-in"
   if (pathname.startsWith("/admin/enquiries")) return "Enquiries"
   if (pathname.startsWith("/admin/assistant")) return "Sales assistant"
   if (pathname.startsWith("/admin/deals")) return "Deals"

@@ -8,6 +8,7 @@ import {
   enquiryTemperatureFromDeal,
 } from "@/lib/crm/deal-pipeline"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
+import { shouldLoadDealOrderFinance } from "@/lib/crm/deal-finance"
 import { aggregateInvoiceStatus, pickCurrentInvoice, sortInvoicesByInstallment } from "@/lib/invoices/status"
 import { costLayerSupplierPoolKey } from "@/lib/inventory/supplier-pool"
 
@@ -244,14 +245,17 @@ async function loadRowsInChunks<T>(
 export async function getDealListRows(options?: {
   ids?: string[]
   stages?: readonly string[]
-  /** List cards only. Orders, invoices, and activities load for the open deal. */
+  /** List cards only. Activities stay unloaded. */
   summary?: boolean
+  /** Attach stored order and Xero invoice fields. Does not call Xero. */
+  includeFinance?: boolean
 }): Promise<DealListRow[]> {
   noStore()
   const supabase = await createClient()
   const ids = [...new Set((options?.ids ?? []).map((id) => id.trim()).filter(Boolean))]
   const stages = [...new Set((options?.stages ?? []).map((stage) => stage.trim()).filter(Boolean))]
   const summary = options?.summary === true
+  const loadOrderFinance = shouldLoadDealOrderFinance(options)
   const lineSelect = `
       crm_accounts(name),
       crm_contacts!primary_contact_id(full_name, email, phone),
@@ -345,9 +349,8 @@ export async function getDealListRows(options?: {
       : Promise.resolve({
           data: [] as Array<{ id: string; name: string; season: number; event_date: string | null }>,
         }),
-    summary
-      ? Promise.resolve([])
-      : loadRowsInChunks(orderIds, (chunk) =>
+    loadOrderFinance
+      ? loadRowsInChunks(orderIds, (chunk) =>
           supabase
             .from("orders")
             .select(`
@@ -360,7 +363,8 @@ export async function getDealListRows(options?: {
             )
           `)
             .in("id", chunk),
-        ),
+        )
+      : Promise.resolve([]),
     summary
       ? Promise.resolve([])
       : loadRowsInChunks(dealIds, (chunk) =>

@@ -232,8 +232,17 @@ export async function getPackageGuestList(input: {
 
   for (const order of liveOrders) {
     if (coveredOrderIds.has(order.id)) continue
-    if (!packageById.has(order.package_id)) continue
-    const pkg = packageById.get(order.package_id)
+    const orderPackageId = [...packageById.keys()].find((id) =>
+      (order.lines ?? []).some((line) => line.packageId === id),
+    ) ?? (packageById.has(order.package_id) ? order.package_id : null)
+    if (!orderPackageId) continue
+    const pkg = packageById.get(orderPackageId)
+    const orderQuantity =
+      (order.lines ?? [])
+        .filter((line) => packageById.has(line.packageId))
+        .reduce((sum, line) => sum + Math.max(0, Math.floor(Number(line.quantity) || 0)), 0) ||
+      (packageById.has(order.package_id) ? order.guests : 0)
+    if (orderQuantity <= 0) continue
     const daySlots = costDaySlotsForDuration(pkg?.duration ?? order.packages?.duration ?? null, input.eventDate)
     const ops = orderOps.get(order.id) ?? emptyOps()
     const guests = orderGuests.get(order.id) ?? []
@@ -245,7 +254,7 @@ export async function getPackageGuestList(input: {
     }))
     const expanded = assignSuppliersAcrossDays(
       expandBookingGuestSeats({
-        quantity: order.guests,
+        quantity: orderQuantity,
         daySlots,
         guests,
         mode: daySlots.length > 1 ? mode : "same",
@@ -261,7 +270,7 @@ export async function getPackageGuestList(input: {
           guest: seat.guest,
           orderId: order.id,
           dealId: order.deal_id,
-          packageId: order.package_id,
+          packageId: orderPackageId,
           daySlots: seat.daySlots,
           slotIndex: seat.slotIndex,
           clientName: orderPartyPrimary({
@@ -278,7 +287,7 @@ export async function getPackageGuestList(input: {
           supplierDeadline: seat.supplierDeadline,
           ops,
           notesUpdatedBy: staff.get(ops.notesUpdatedById ?? "") ?? null,
-          bookingQuantity: order.guests,
+          bookingQuantity: orderQuantity,
         }),
       )
     }

@@ -1,3 +1,14 @@
+/**
+ * Summary lists skip activities. Stored invoice numbers still load when
+ * `includeFinance` is set — that path never calls Xero.
+ */
+export function shouldLoadDealOrderFinance(options?: {
+  summary?: boolean
+  includeFinance?: boolean
+}): boolean {
+  return options?.summary !== true || options?.includeFinance === true
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export function daysOverdue(dueDate: string, now = new Date()): number {

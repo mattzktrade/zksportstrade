@@ -81,6 +81,7 @@ export function GuestDetailsForm({ initial }: Props) {
     sameGuests,
     perDayGuests,
     days: form.places.map((place) => place.day),
+    requireGuestEmail: form.requireGuestEmail,
   })
 
   function setActivePeople(next: LocalPerson[] | ((current: LocalPerson[]) => LocalPerson[])) {
@@ -361,6 +362,7 @@ export function GuestDetailsForm({ initial }: Props) {
               people={sameGuests}
               token={form.token}
               pending={Boolean(pending)}
+              requireGuestEmail={form.requireGuestEmail}
               onChange={updatePerson}
               onAdd={addPerson}
               onRemove={removePerson}
@@ -404,6 +406,7 @@ export function GuestDetailsForm({ initial }: Props) {
                   people={activePeople}
                   token={form.token}
                   pending={Boolean(pending)}
+                  requireGuestEmail={form.requireGuestEmail}
                   onChange={updatePerson}
                   onAdd={addPerson}
                   onRemove={removePerson}
@@ -493,6 +496,7 @@ function GuestListCard({
   people,
   token,
   pending,
+  requireGuestEmail,
   onChange,
   onAdd,
   onRemove,
@@ -503,6 +507,7 @@ function GuestListCard({
   people: LocalPerson[]
   token: string
   pending: boolean
+  requireGuestEmail: boolean
   onChange: (index: number, patch: Partial<LocalPerson>) => void
   onAdd: () => void
   onRemove: (index: number) => void
@@ -520,6 +525,7 @@ function GuestListCard({
         people={people}
         token={token}
         pending={pending}
+        requireGuestEmail={requireGuestEmail}
         onChange={onChange}
         onAdd={onAdd}
         onRemove={onRemove}
@@ -533,6 +539,7 @@ function GuestListFields({
   people,
   token,
   pending,
+  requireGuestEmail,
   onChange,
   onAdd,
   onRemove,
@@ -541,6 +548,7 @@ function GuestListFields({
   people: LocalPerson[]
   token: string
   pending: boolean
+  requireGuestEmail: boolean
   onChange: (index: number, patch: Partial<LocalPerson>) => void
   onAdd: () => void
   onRemove: (index: number) => void
@@ -556,6 +564,7 @@ function GuestListFields({
           token={token}
           pending={pending}
           canRemove={people.length > 1}
+          requireGuestEmail={requireGuestEmail}
           onChange={onChange}
           onRemove={onRemove}
           onUpload={onUpload}
@@ -580,6 +589,7 @@ function GuestRow({
   token,
   pending,
   canRemove,
+  requireGuestEmail,
   onChange,
   onRemove,
   onUpload,
@@ -589,6 +599,7 @@ function GuestRow({
   token: string
   pending: boolean
   canRemove: boolean
+  requireGuestEmail: boolean
   onChange: (index: number, patch: Partial<LocalPerson>) => void
   onRemove: (index: number) => void
   onUpload: (index: number, file: File) => Promise<void>
@@ -610,7 +621,7 @@ function GuestRow({
   }
 
   return (
-    <div className="grid gap-4 rounded-xl border border-[#eceef1] bg-white px-4 py-3 sm:grid-cols-[5.5rem_minmax(0,1fr)_minmax(0,1fr)_2rem] sm:items-center">
+    <div className="grid gap-4 rounded-xl border border-[#eceef1] bg-white px-4 py-3 sm:grid-cols-[5.5rem_minmax(0,1fr)_minmax(0,1fr)_2rem] sm:items-start">
       <div>
         <p className="text-sm font-semibold">Guest {index + 1}</p>
         <label className="mt-1 flex items-center gap-1.5 text-[11px] text-[#5f636b]">
@@ -631,6 +642,17 @@ function GuestRow({
           value={person.fullName}
           disabled={pending}
           onChange={(event) => onChange(index, { fullName: event.target.value })}
+          className="mt-1 h-10 w-full rounded-lg border border-[#e5e7eb] px-3 text-sm outline-none focus:border-[#202124]"
+        />
+        <span className="mt-2 block text-[11px] font-medium text-[#5f636b]">
+          Email (for their ticket)
+          {requireGuestEmail ? <span className="text-[#F90202]"> *</span> : null}
+        </span>
+        <input
+          type="email"
+          value={person.email ?? ""}
+          disabled={pending}
+          onChange={(event) => onChange(index, { email: event.target.value })}
           className="mt-1 h-10 w-full rounded-lg border border-[#e5e7eb] px-3 text-sm outline-none focus:border-[#202124]"
         />
       </label>

@@ -14,7 +14,11 @@ import {
   loadGuestDetailsBookingContext,
   loadGuestDetailsInviteByToken,
 } from "@/lib/guest-details/invite"
-import { getPublicGuestDetailsForm, type PublicGuestDetailsForm } from "@/lib/guest-details/public"
+import {
+  bookingRequiresGuestEmail,
+  getPublicGuestDetailsForm,
+  type PublicGuestDetailsForm,
+} from "@/lib/guest-details/public"
 import { missingGuestDetailsSchema, guestDetailsMigrationMessage } from "@/lib/guest-details/schema"
 import { headshotBelongsToInvite, normalisedHeadshotPath } from "@/lib/guest-details/storage"
 import { syncDealWorkflowFromOperations } from "@/lib/operations/sync-deal-workflow"
@@ -261,6 +265,7 @@ export async function savePublicGuestDetailsForm(input: {
       sameGuests: input.sameGuests,
       perDayGuests: input.perDayGuests,
       days,
+      requireGuestEmail: await bookingRequiresGuestEmail(admin, booking.dealId, booking.packageIds),
     }
     if (input.submit) {
       const canSubmit = guestDetailsFormCanSubmit(formInput)
@@ -307,6 +312,8 @@ export async function savePublicGuestDetailsForm(input: {
     for (const item of plan.updates) {
       const payload = {
         full_name: item.row.fullName,
+        email: item.row.email ?? null,
+        phone: item.row.phone ?? null,
         is_lead_guest: false,
         details_complete: Boolean(item.row.fullName),
         sort_order: item.row.sortOrder,
@@ -336,6 +343,8 @@ export async function savePublicGuestDetailsForm(input: {
       const rows = plan.inserts.map((row) => ({
         ...parentPatch,
         full_name: row.fullName,
+        email: row.email ?? null,
+        phone: row.phone ?? null,
         is_lead_guest: false,
         details_complete: Boolean(row.fullName),
         sort_order: row.sortOrder,

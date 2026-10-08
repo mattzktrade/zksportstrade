@@ -13,11 +13,21 @@ import type { CostLayerRow } from "@/lib/admin/cost-layers"
 import type { PurchaseOrderRow } from "@/lib/admin/purchase-orders"
 import {
   DEAL_STAGE_LABELS,
+  dealStageHasSignedBookingForm,
   dealStageHoldsPurchasedStock,
   dealStageIsConfirmed,
   dealStageIsOpenPipeline,
   type PackageDealSaleRow,
 } from "@/lib/crm/deal-types"
+import {
+  dealAmountForPackages,
+  dealLinesInScope,
+  dealQuantityForPackages,
+  orderAmountForPackages,
+  orderQuantityForPackages,
+  packageIdSet,
+  signedPackageSaleCount,
+} from "@/lib/admin/package-sale-scope"
 import type { AdminOrderListRow } from "@/lib/orders/queries"
 import { AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { formatMoney } from "@/lib/format/money"
@@ -87,15 +97,59 @@ function saleQtyLabel(quantity: number, productName: string | null | undefined):
   return `${quantity}x ${name}`
 }
 
-function dealProductLabel(deal: PackageDealSaleRow): string {
-  const names = [
+function dealProductNames(
+  deal: PackageDealSaleRow,
+  packageIds: ReadonlySet<string>,
+  currentPackageId?: string | null,
+): string {
+  const preferred = currentPackageId
+    ? dealLinesInScope(deal, new Set([currentPackageId]))
+    : []
+  const lines = preferred.length > 0 ? preferred : dealLinesInScope(deal, packageIds)
+  return [
     ...new Set(
-      deal.lines
+      lines
         .map((line) => line.packageName?.trim())
         .filter((name): name is string => Boolean(name)),
     ),
-  ]
-  return saleQtyLabel(deal.quantity, names.join(" · ") || deal.lineSummary)
+  ].join(" · ")
+}
+
+function dealProductLabel(
+  deal: PackageDealSaleRow,
+  packageIds: ReadonlySet<string>,
+  currentPackageId?: string | null,
+): string {
+  return saleQtyLabel(
+    dealQuantityForPackages(deal, packageIds, currentPackageId),
+    dealProductNames(deal, packageIds, currentPackageId) || deal.lineSummary,
+  )
+}
+
+function orderGuestCount(
+  order: AdminOrderListRow,
+  deal: PackageDealSaleRow | null,
+  packageIds: ReadonlySet<string>,
+  currentPackageId?: string | null,
+): number {
+  if (deal) {
+    const quantity = dealQuantityForPackages(deal, packageIds, currentPackageId)
+    if (quantity > 0) return quantity
+  }
+  return orderQuantityForPackages(order, packageIds, currentPackageId)
+}
+
+function orderSaleAmount(
+  order: AdminOrderListRow,
+  deal: PackageDealSaleRow | null,
+  packageIds: ReadonlySet<string>,
+  currentPackageId?: string | null,
+): number {
+  if (deal) {
+    const amount = dealAmountForPackages(deal, packageIds, currentPackageId)
+    if (amount > 0) return amount
+  }
+  return orderAmountForPackages(order, packageIds, currentPackageId)
 }
 
 function orderPaymentLabel(order: AdminOrderListRow, deal: PackageDealSaleRow | null): string {
@@ -145,6 +199,21 @@ function dealStockLineIds(deal: PackageDealSaleRow): string[] {
   return deal.lines.filter(dealLineCanTakePurchasedSupplier).map((line) => line.id)
 }
 
+function dealCogsLineIds(
+  deal: PackageDealSaleRow,
+  packageIds: ReadonlySet<string>,
+  currentPackageId?: string | null,
+): string[] {
+  const eligible = (lines: PackageDealSaleRow["lines"]) =>
+    lines.filter(dealLineCanTakePurchasedSupplier).map((line) => line.id)
+  if (currentPackageId) {
+    const own = eligible(dealLinesInScope(deal, new Set([currentPackageId])))
+    if (own.length > 0) return own
+  }
+  const scoped = eligible(dealLinesInScope(deal, packageIds))
+  return scoped.length > 0 ? scoped : eligible(deal.lines)
+}
+
 function emptyLineAssignment(): SupplierLineAssignment {
   return {
     id: "",
@@ -153,6 +222,7 @@ function emptyLineAssignment(): SupplierLineAssignment {
     unassigned: 0,
     needStock: false,
     singleKey: null,
+    slots: [],
   }
 }
 
@@ -586,6 +656,7 @@ export function PackageOrdersTable({
   costLayers,
   purchaseOrders = [],
   linkedPackages = [],
+  currentPackageId = null,
   currentPackageDuration = null,
   eventDate = null,
 }: {
@@ -594,10 +665,18 @@ export function PackageOrdersTable({
   costLayers: CostLayerRow[]
   purchaseOrders?: PurchaseOrderRow[]
   linkedPackages?: LinkedInventoryPackage[]
+  currentPackageId?: string | null
   currentPackageDuration?: string | null
   eventDate?: string | null
 }) {
   const router = useRouter()
+  const inventoryPackageIds = useMemo(() => {
+    const ids = [
+      currentPackageId,
+      ...linkedPackages.map((pkg) => pkg.id),
+    ].filter((id): id is string => Boolean(id))
+    return packageIdSet(ids)
+  }, [currentPackageId, linkedPackages])
   const usesLinkedDaySlots = linkedPackages.length > 1
   const targetSlots = useMemo(
     () =>
@@ -762,14 +841,14 @@ export function PackageOrdersTable({
           .filter((deal) => dealProjectsSupplierConsumption(deal))
           .map((deal) => ({
             id: deal.id,
-            lineIds: dealStockLineIds(deal),
+            lineIds: dealCogsLineIds(deal, inventoryPackageIds, currentPackageId),
             createdAt: deal.createdAt,
             reference: deal.reference,
           })),
         layers: costLayers,
         purchases: purchaseOrders,
       }),
-    [supplierPlan, deals, costLayers, purchaseOrders],
+    [supplierPlan, deals, costLayers, purchaseOrders, inventoryPackageIds, currentPackageId],
   )
 
   const changedSupplierAssignments = deals.flatMap((deal) => {
@@ -865,14 +944,16 @@ export function PackageOrdersTable({
   let pricedCount = 0
   for (const o of sorted) {
     if (o.status === "cancelled") continue
-    totalRevenue += Number(o.total_amount)
     const linkedDeal = linkedDealForOrder(o)
-    const finance = financeFromPlannedCogs(linkedDeal, Number(o.total_amount), plannedCogsByDealId, {
+    if (linkedDeal && !dealStageHasSignedBookingForm(linkedDeal.stage)) continue
+    const revenue = orderSaleAmount(o, linkedDeal, inventoryPackageIds, currentPackageId)
+    totalRevenue += revenue
+    const finance = financeFromPlannedCogs(linkedDeal, revenue, plannedCogsByDealId, {
       cogs: o.profit.cost_known ? o.profit.cogs : (linkedDeal?.cogs ?? null),
       profit: o.profit.cost_known
         ? o.profit.gross_profit
         : linkedDeal?.grossProfit ??
-          (linkedDeal?.cogs != null ? Number(o.total_amount) - linkedDeal.cogs : null),
+          (linkedDeal?.cogs != null ? revenue - linkedDeal.cogs : null),
       margin: o.profit.cost_known ? o.profit.margin : (linkedDeal?.margin ?? null),
     })
     if (finance.cogs != null && finance.profit != null) {
@@ -882,10 +963,12 @@ export function PackageOrdersTable({
     }
   }
   for (const deal of sortedDeals) {
-    totalRevenue += deal.totalAmount
-    const finance = financeFromPlannedCogs(deal, deal.totalAmount, plannedCogsByDealId, {
+    if (!dealStageHasSignedBookingForm(deal.stage)) continue
+    const revenue = dealAmountForPackages(deal, inventoryPackageIds, currentPackageId)
+    totalRevenue += revenue
+    const finance = financeFromPlannedCogs(deal, revenue, plannedCogsByDealId, {
       cogs: deal.cogs,
-      profit: deal.cogs == null ? deal.grossProfit : deal.totalAmount - deal.cogs,
+      profit: deal.cogs == null ? deal.grossProfit : revenue - deal.cogs,
       margin: deal.margin,
     })
     if (finance.cogs != null && finance.profit != null) {
@@ -895,11 +978,16 @@ export function PackageOrdersTable({
     }
   }
   const cur = (sorted[0]?.currency || sortedDeals[0]?.currency || "USD").trim() || "USD"
-  const liveOrderCount = sorted.filter((order) => order.status !== "cancelled").length
-  const saleCount = liveOrderCount + sortedDeals.length
-  const portalDealCount = sortedDeals.filter((deal) => isPortalDealSource(deal.source)).length
-  const offlineDealCount = sortedDeals.length - portalDealCount
-  const portalCount = liveOrderCount + portalDealCount
+  const saleCount = signedPackageSaleCount({ orders: sorted, deals })
+  const signedOfflineDeals = sortedDeals.filter((deal) => dealStageHasSignedBookingForm(deal.stage))
+  const portalDealCount = signedOfflineDeals.filter((deal) => isPortalDealSource(deal.source)).length
+  const offlineDealCount = signedOfflineDeals.length - portalDealCount
+  const signedOrders = sorted.filter((order) => {
+    if (order.status === "cancelled") return false
+    const linkedDeal = linkedDealForOrder(order)
+    return !linkedDeal || dealStageHasSignedBookingForm(linkedDeal.stage)
+  })
+  const portalCount = signedOrders.length + portalDealCount
   const saleSummaryParts: string[] = []
   if (portalCount > 0) {
     saleSummaryParts.push(`${portalCount} portal/website order${portalCount === 1 ? "" : "s"}`)
@@ -1103,9 +1191,11 @@ export function PackageOrdersTable({
                   supplierPools={supplierPools}
                   supplierPlan={supplierPlan}
                   supplierPending={supplierPending}
+                  packageIds={inventoryPackageIds}
+                  currentPackageId={currentPackageId}
                   finance={financeFromPlannedCogs(
                     linkedDeal,
-                    Number(o.total_amount),
+                    orderSaleAmount(o, linkedDeal, inventoryPackageIds, currentPackageId),
                     plannedCogsByDealId,
                     {
                       cogs: o.profit.cost_known ? o.profit.cogs : (linkedDeal?.cogs ?? null),
@@ -1113,7 +1203,7 @@ export function PackageOrdersTable({
                         ? o.profit.gross_profit
                         : linkedDeal?.grossProfit ??
                           (linkedDeal?.cogs != null
-                            ? Number(o.total_amount) - linkedDeal.cogs
+                            ? orderSaleAmount(o, linkedDeal, inventoryPackageIds, currentPackageId) - linkedDeal.cogs
                             : null),
                       margin: o.profit.cost_known ? o.profit.margin : (linkedDeal?.margin ?? null),
                     },
@@ -1126,14 +1216,24 @@ export function PackageOrdersTable({
               <DealSaleRows
                 key={deal.id}
                 deal={deal}
+                packageIds={inventoryPackageIds}
+                currentPackageId={currentPackageId}
                 supplierPools={supplierPools}
                 supplierPlan={supplierPlan}
                 supplierPending={supplierPending}
-                finance={financeFromPlannedCogs(deal, deal.totalAmount, plannedCogsByDealId, {
-                  cogs: deal.cogs,
-                  profit: deal.cogs == null ? deal.grossProfit : deal.totalAmount - deal.cogs,
-                  margin: deal.margin,
-                })}
+                finance={financeFromPlannedCogs(
+                  deal,
+                  dealAmountForPackages(deal, inventoryPackageIds, currentPackageId),
+                  plannedCogsByDealId,
+                  {
+                    cogs: deal.cogs,
+                    profit:
+                      deal.cogs == null
+                        ? deal.grossProfit
+                        : dealAmountForPackages(deal, inventoryPackageIds, currentPackageId) - deal.cogs,
+                    margin: deal.margin,
+                  },
+                )}
                 onSupplierChange={pinDealSuppliers}
               />
             ))}
@@ -1148,6 +1248,11 @@ export function PackageOrdersTable({
             const party = salePartyPrimary(o, linkedDeal)
             const incomplete = saleIsIncomplete(linkedDeal, o)
             const assignment = dealAssignmentFromPlan(supplierPlan, linkedDeal)
+            const guests = orderGuestCount(o, linkedDeal, inventoryPackageIds, currentPackageId)
+            const amount = orderSaleAmount(o, linkedDeal, inventoryPackageIds, currentPackageId)
+            const productName = linkedDeal
+              ? dealProductNames(linkedDeal, inventoryPackageIds, currentPackageId) || o.packages?.name
+              : o.packages?.name
             const uncovered = Boolean(
               linkedDeal && dealProjectsSupplierConsumption(linkedDeal) && assignment.needStock,
             )
@@ -1162,7 +1267,7 @@ export function PackageOrdersTable({
                     {party !== "—" ? ` · ${party}` : ""}
                   </p>
                   <p className="mt-0.5 text-[8px] text-slate-400">
-                    {saleQtyLabel(o.guests, o.packages?.name)}
+                    {saleQtyLabel(guests, productName)}
                   </p>
                   {incomplete ? (
                     <p className="mt-1 text-[10px] font-semibold text-amber-800">Not complete — do not fulfil</p>
@@ -1171,7 +1276,7 @@ export function PackageOrdersTable({
                   ) : null}
                 </div>
                 <div className="shrink-0 text-right">
-                  <p className="font-semibold">{formatMoney(o.currency, Number(o.total_amount))}</p>
+                  <p className="font-semibold">{formatMoney(o.currency, amount)}</p>
                   <div className="mt-1">
                     <StatusPill tone={paymentTone(linkedDeal, o)}>{orderPaymentLabel(o, linkedDeal)}</StatusPill>
                   </div>
@@ -1223,7 +1328,9 @@ export function PackageOrdersTable({
                   {dealChannelLabel(deal)}
                   {deal.accountName ? ` · ${deal.accountName}` : ""}
                 </p>
-                <p className="mt-0.5 text-[8px] text-slate-400">{dealProductLabel(deal)}</p>
+                <p className="mt-0.5 text-[8px] text-slate-400">
+                  {dealProductLabel(deal, inventoryPackageIds, currentPackageId)}
+                </p>
                 {incomplete ? (
                   <p className="mt-1 text-[10px] font-semibold text-amber-800">Not complete — do not fulfil</p>
                 ) : uncovered ? (
@@ -1231,7 +1338,12 @@ export function PackageOrdersTable({
                 ) : null}
               </div>
               <div className="shrink-0 text-right">
-                <p className="font-semibold">{formatMoney(deal.currency, deal.totalAmount)}</p>
+                <p className="font-semibold">
+                  {formatMoney(
+                    deal.currency,
+                    dealAmountForPackages(deal, inventoryPackageIds, currentPackageId),
+                  )}
+                </p>
                 <div className="mt-1">
                   <StatusPill tone={paymentTone(deal)}>{DEAL_STAGE_LABELS[deal.stage] ?? deal.stage}</StatusPill>
                 </div>
@@ -1270,6 +1382,8 @@ function MoneyCell({
 function OrderSaleRows({
   order,
   deal,
+  packageIds,
+  currentPackageId,
   expanded,
   onToggle,
   costLayers,
@@ -1281,6 +1395,8 @@ function OrderSaleRows({
 }: {
   order: AdminOrderListRow
   deal: PackageDealSaleRow | null
+  packageIds: ReadonlySet<string>
+  currentPackageId?: string | null
   expanded: boolean
   onToggle: () => void
   costLayers: CostLayerRow[]
@@ -1295,6 +1411,11 @@ function OrderSaleRows({
   const assignment = dealAssignmentFromPlan(supplierPlan, deal)
   const canAssignDealSupplier = Boolean(deal && dealProjectsSupplierConsumption(deal))
   const uncovered = canAssignDealSupplier && assignment.needStock
+  const guests = orderGuestCount(order, deal, packageIds, currentPackageId)
+  const amount = orderSaleAmount(order, deal, packageIds, currentPackageId)
+  const productName = deal
+    ? dealProductNames(deal, packageIds, currentPackageId) || order.packages?.name
+    : order.packages?.name
   const { cogs, profit, margin } = finance
   const portalCheckout = isPortalCheckoutChannel(order.channel) && (!deal || isPortalDealSource(deal.source))
   return (
@@ -1319,16 +1440,16 @@ function OrderSaleRows({
         </td>
         <td className="px-3 py-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
           <span>{saleChannelLabel(order, deal)}</span>
-          {order.packages?.name ? (
+          {productName ? (
             <span className="mt-0.5 block max-w-[180px] normal-case leading-snug tracking-normal text-foreground">
-              {order.packages.name}
+              {productName}
             </span>
           ) : null}
         </td>
         <SalePartyCell order={order} deal={deal} />
-        <td className="px-3 py-3 text-right tabular-nums">{order.guests}</td>
+        <td className="px-3 py-3 text-right tabular-nums">{guests}</td>
         <td className="px-3 py-3 text-right tabular-nums font-medium">
-          {formatMoney(order.currency, Number(order.total_amount))}
+          {formatMoney(order.currency, amount)}
         </td>
         <MoneyCell value={cogs} currency={order.profit.currency || order.currency} />
         <MoneyCell value={profit} currency={order.profit.currency || order.currency} emphasize />
@@ -1372,7 +1493,7 @@ function OrderSaleRows({
                 <dt className="text-muted-foreground">Phone</dt>
                 <dd>{order.client_phone || "—"}</dd>
                 <dt className="text-muted-foreground">Guests</dt>
-                <dd>{order.guests}</dd>
+                <dd>{guests}</dd>
                 <dt className="text-muted-foreground">Special requests</dt>
                 <dd>{order.special_requests || "—"}</dd>
                 <dt className="text-muted-foreground">Dietary</dt>
@@ -1393,6 +1514,8 @@ function OrderSaleRows({
 
 function DealSaleRows({
   deal,
+  packageIds,
+  currentPackageId,
   supplierPools,
   supplierPlan,
   supplierPending,
@@ -1400,6 +1523,8 @@ function DealSaleRows({
   onSupplierChange,
 }: {
   deal: PackageDealSaleRow
+  packageIds: ReadonlySet<string>
+  currentPackageId?: string | null
   supplierPools: SupplierPoolOption[]
   supplierPlan: SupplierAssignmentPlan
   supplierPending: boolean
@@ -1411,6 +1536,9 @@ function DealSaleRows({
   const canAssignDealSupplier = dealStageHoldsPurchasedStock(deal.stage)
   const assignment = dealAssignmentFromPlan(supplierPlan, deal)
   const uncovered = canAssignDealSupplier && assignment.needStock
+  const guests = dealQuantityForPackages(deal, packageIds, currentPackageId)
+  const amount = dealAmountForPackages(deal, packageIds, currentPackageId)
+  const productName = dealProductNames(deal, packageIds, currentPackageId)
   return (
       <tr
         className={cn(
@@ -1426,19 +1554,13 @@ function DealSaleRows({
         <td className="px-3 py-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
           <span>{dealChannelLabel(deal)}</span>
           <span className="mt-0.5 block max-w-[180px] normal-case leading-snug tracking-normal text-foreground">
-            {[
-              ...new Set(
-                deal.lines
-                  .map((line) => line.packageName?.trim())
-                  .filter((name): name is string => !!name),
-              ),
-            ].join(" · ")}
+            {productName}
           </span>
         </td>
         <SalePartyCell deal={deal} />
-        <td className="px-3 py-3 text-right tabular-nums">{deal.quantity}</td>
+        <td className="px-3 py-3 text-right tabular-nums">{guests}</td>
         <td className="px-3 py-3 text-right tabular-nums font-medium">
-          {formatMoney(deal.currency, deal.totalAmount)}
+          {formatMoney(deal.currency, amount)}
         </td>
         <MoneyCell value={cogs} currency={deal.currency} />
         <MoneyCell value={profit} currency={deal.currency} emphasize />

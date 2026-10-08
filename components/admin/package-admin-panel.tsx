@@ -33,11 +33,14 @@ import type { PurchaseOrderRow } from "@/lib/admin/purchase-orders"
 import {
   commitmentSellable,
   linkedPoolClosedWonRemaining,
+  linkedPoolOwnedShortage,
   linkedPoolSellableForPackage,
   type LinkedSellableMember,
 } from "@/lib/admin/package-sales-breakdown"
 import { PACKAGE_DURATION_OPTIONS, packageDurationLabel } from "@/lib/catalog/package-duration"
 import { packageEventDefaultsFromRace } from "@/lib/catalog/race-circuit"
+import { TICKETING_MODES } from "@/lib/tickets/types"
+import { parseTicketingMode, ticketingModeLabel } from "@/lib/tickets/model"
 
 function linesToList(s: string): string[] {
   return s
@@ -234,6 +237,12 @@ export function PackageAdminPanel({
     typeof initial.guest_guide_url === "string" ? initial.guest_guide_url : "",
   )
   const [trackMap, setTrackMap] = useState(typeof initial.track_map === "string" ? initial.track_map : "")
+  const [ticketingMode, setTicketingMode] = useState(
+    parseTicketingMode(initial.ticketing_mode) ?? "supplier_direct",
+  )
+  const [ticketingVenue, setTicketingVenue] = useState(initial.ticketing_venue_name ?? "")
+  const [ticketingDoors, setTicketingDoors] = useState(initial.ticketing_doors_time ?? "")
+  const [ticketingHeadshot, setTicketingHeadshot] = useState(initial.ticketing_require_headshot !== false)
   const [faqs, setFaqs] = useState(() => packageFaqsFromRow(initial))
   const [holdQty, setHoldQty] = useState("1")
   const [holdNote, setHoldNote] = useState("")
@@ -262,6 +271,10 @@ export function PackageAdminPanel({
     setZkBrochureUrl(typeof initial.zk_brochure_url === "string" ? initial.zk_brochure_url : "")
     setGuestGuideUrl(typeof initial.guest_guide_url === "string" ? initial.guest_guide_url : "")
     setTrackMap(typeof initial.track_map === "string" ? initial.track_map : "")
+    setTicketingMode(parseTicketingMode(initial.ticketing_mode) ?? "supplier_direct")
+    setTicketingVenue(initial.ticketing_venue_name ?? "")
+    setTicketingDoors(initial.ticketing_doors_time ?? "")
+    setTicketingHeadshot(initial.ticketing_require_headshot !== false)
     setFaqs(packageFaqsFromRow(initial))
   }, [initial])
 
@@ -308,6 +321,10 @@ export function PackageAdminPanel({
         brochure_url: brochureUrl.trim() || null,
         track_map: trackMap.trim() || null,
         faqs,
+        ticketing_mode: ticketingMode,
+        ticketing_venue_name: ticketingVenue.trim() || null,
+        ticketing_doors_time: ticketingDoors.trim() || null,
+        ticketing_require_headshot: ticketingHeadshot,
       })
       if (!res.ok) {
         toast.error(res.message)
@@ -461,9 +478,17 @@ export function PackageAdminPanel({
       ? (linkedSoldRemaining ?? stockDisplay - soldDisplay)
       : initial.effective_net ?? calculatedSellable,
   )
-  const ownedShortage = initial.canonical_availability
-    ? Math.max(initial.canonical_availability.historicalShortage, -netStock, 0)
-    : Math.max(soldDisplay - stockDisplay, 0)
+  const ownedShortage =
+    linkedMembers.length > 0
+      ? linkedPoolOwnedShortage({
+          stock: stockDisplay,
+          targetId: initial.id,
+          targetDuration: initial.duration ?? null,
+          members: linkedMembers,
+        })
+      : initial.canonical_availability
+        ? Math.max(initial.canonical_availability.historicalShortage, -netStock, 0)
+        : Math.max(soldDisplay - stockDisplay, 0)
   const pipelineOversubscription = Math.max(0, -calculatedSellable - ownedShortage)
   const openPipelineHolds =
     linkedMembers.length > 0
@@ -537,6 +562,52 @@ export function PackageAdminPanel({
               {currencyHint((initial.currency || "USD").trim() || "USD")}
             </span>
           </label>
+          <label className="block text-xs text-muted-foreground sm:col-span-2">
+            Ticketing
+            <select
+              value={ticketingMode}
+              onChange={(e) => setTicketingMode(parseTicketingMode(e.target.value) ?? "supplier_direct")}
+              className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+            >
+              {TICKETING_MODES.map((mode) => (
+                <option key={mode} value={mode}>
+                  {ticketingModeLabel(mode)}
+                </option>
+              ))}
+            </select>
+            <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground/90">
+              ZK digital is only for venues we scan at the door. Leave supplier-handled for official F1 tickets.
+            </span>
+          </label>
+          {ticketingMode !== "supplier_direct" ? (
+            <>
+              <label className="block text-xs text-muted-foreground">
+                Door / venue name
+                <input
+                  value={ticketingVenue}
+                  onChange={(e) => setTicketingVenue(e.target.value)}
+                  className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                />
+              </label>
+              <label className="block text-xs text-muted-foreground">
+                Doors time
+                <input
+                  value={ticketingDoors}
+                  onChange={(e) => setTicketingDoors(e.target.value)}
+                  placeholder="17:00"
+                  className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={ticketingHeadshot}
+                  onChange={(e) => setTicketingHeadshot(e.target.checked)}
+                />
+                Show headshot at check-in
+              </label>
+            </>
+          ) : null}
           <div className="flex flex-col gap-2 sm:col-span-2 sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">
             <label className="flex items-center gap-2 text-sm">
               <input

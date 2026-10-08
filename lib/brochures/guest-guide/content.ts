@@ -43,8 +43,38 @@ export function emptyGuestGuidePage(key: GuestGuidePageKey): GuestGuidePage {
   }
 }
 
+/** Generic ZK-issued pass copy. Do not use for official Singapore Velocity Terrace 2026 (TicketBud). */
+export function defaultZkDigitalTicketPage(): GuestGuidePage {
+  return {
+    key: "digitalTicket",
+    title: "Your digital ticket",
+    kicker: GUEST_GUIDE_KICKER,
+    paragraphs: [
+      "All guests need their own ZK digital ticket to check in at our welcome point.",
+      "Open the link we email you, check the name and day, and have the QR ready when you arrive.",
+      "If your booking was made through a company or agent, tickets may be sent to them to forward.",
+    ],
+    bullets: [
+      "Save the ticket on your phone or download the PDF.",
+      "Check the ticket is in your name and for the correct day.",
+      "Have the QR open at the door. If it will not scan, we will check your name and photo.",
+    ],
+    notes: [
+      "Do not share your QR with another guest. Each code is unique and is marked used when scanned.",
+    ],
+  }
+}
+
 export function emptyGuestGuideContent(): GuestGuideContent {
   return { pages: GUEST_GUIDE_PAGE_KEYS.map((key) => emptyGuestGuidePage(key)) }
+}
+
+export function starterGuestGuideContent(): GuestGuideContent {
+  return {
+    pages: GUEST_GUIDE_PAGE_KEYS.map((key) =>
+      key === "digitalTicket" ? defaultZkDigitalTicketPage() : emptyGuestGuidePage(key),
+    ),
+  }
 }
 
 export function matchesOfficialGuestGuide(input: {

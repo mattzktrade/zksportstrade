@@ -23,6 +23,8 @@ export type CostLayerRow = {
     units_per_package: number
     quantity_total: number
     quantity_remaining: number
+    cost_weight?: number
+    unit_cost_component?: number | null
   }>
 }
 
@@ -73,7 +75,7 @@ export type OrderCostSummary = {
 }
 
 const COST_LAYER_COLUMNS =
-  "id, package_id, quantity, quantity_remaining, unit_cost, currency, note, source, received_at, created_at, updated_at, purchase_order_id, fulfilment_block_id, supplier_id, day_components:package_cost_layer_day_components(day_slot,units_per_package,quantity_total,quantity_remaining)" as const
+  "id, package_id, quantity, quantity_remaining, unit_cost, currency, note, source, received_at, created_at, updated_at, purchase_order_id, fulfilment_block_id, supplier_id, day_components:package_cost_layer_day_components(day_slot,units_per_package,quantity_total,quantity_remaining,cost_weight,unit_cost_component)" as const
 
 const CONSUMPTION_COLUMNS =
   "id, order_id, cost_layer_id, package_id, quantity, unit_cost, currency, supplier_source_snapshot, fulfilment_block_snapshot, created_at" as const
@@ -87,6 +89,19 @@ function nNullable(value: number | string | null | undefined): number | null {
   if (value == null) return null
   const x = typeof value === "number" ? value : Number(value)
   return Number.isFinite(x) ? x : null
+}
+
+function mapDayComponents(
+  components: CostLayerRow["day_components"] | null | undefined,
+): NonNullable<CostLayerRow["day_components"]> {
+  return (components ?? []).map((component) => ({
+    day_slot: component.day_slot,
+    units_per_package: Math.max(1, Math.floor(n(component.units_per_package))),
+    quantity_total: Math.floor(n(component.quantity_total)),
+    quantity_remaining: Math.floor(n(component.quantity_remaining)),
+    cost_weight: n(component.cost_weight),
+    unit_cost_component: nNullable(component.unit_cost_component),
+  }))
 }
 
 export async function getCostLayersForPackage(packageId: string): Promise<CostLayerRow[]> {
@@ -103,12 +118,7 @@ export async function getCostLayersForPackage(packageId: string): Promise<CostLa
     quantity: Math.floor(n((row as CostLayerRow).quantity)),
     quantity_remaining: Math.floor(n((row as CostLayerRow).quantity_remaining)),
     unit_cost: n((row as CostLayerRow).unit_cost),
-    day_components: ((row as CostLayerRow).day_components ?? []).map((component) => ({
-      day_slot: component.day_slot,
-      units_per_package: Math.max(1, Math.floor(n(component.units_per_package))),
-      quantity_total: Math.floor(n(component.quantity_total)),
-      quantity_remaining: Math.floor(n(component.quantity_remaining)),
-    })),
+    day_components: mapDayComponents((row as CostLayerRow).day_components),
   }))
 }
 
@@ -172,12 +182,7 @@ export async function getCostLayersByPackage(
       quantity: Math.floor(n(row.quantity)),
       quantity_remaining: Math.floor(n(row.quantity_remaining)),
       unit_cost: n(row.unit_cost),
-      day_components: (row.day_components ?? []).map((component) => ({
-        day_slot: component.day_slot,
-        units_per_package: Math.max(1, Math.floor(n(component.units_per_package))),
-        quantity_total: Math.floor(n(component.quantity_total)),
-        quantity_remaining: Math.floor(n(component.quantity_remaining)),
-      })),
+      day_components: mapDayComponents(row.day_components),
     })
     out.set(row.package_id, list)
   }

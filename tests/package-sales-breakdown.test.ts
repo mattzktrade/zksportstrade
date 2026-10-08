@@ -396,4 +396,5 @@ test("package sales list projects COGS from the live supplier assignment", () =>
   const table = readFileSync("components/admin/package-orders-table.tsx", "utf8")
   assert.match(table, /planSupplierAssignmentCogs/)
   assert.match(table, /financeFromPlannedCogs/)
+  assert.match(table, /dealCogsLineIds\(deal, inventoryPackageIds, currentPackageId\)/)
 })

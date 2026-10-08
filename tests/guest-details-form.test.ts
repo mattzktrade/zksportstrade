@@ -55,6 +55,30 @@ test("mixed single-day quantities cannot use the same-guest list", () => {
   assert.equal(places.length, 2)
 })
 
+test("zk digital bookings require a guest email before submit", () => {
+  const lead = person({
+    fullName: "James Carter",
+    isLeadGuest: true,
+    headshotPath: "guest-headshots/a/b.jpg",
+  })
+  const missing = guestDetailsFormCanSubmit({
+    mode: "same",
+    sameGuests: [lead],
+    perDayGuests: {},
+    days: ["saturday_only"],
+    requireGuestEmail: true,
+  })
+  assert.equal(missing.ok, false)
+  const ok = guestDetailsFormCanSubmit({
+    mode: "same",
+    sameGuests: [{ ...lead, email: "james@example.com" }],
+    perDayGuests: {},
+    days: ["saturday_only"],
+    requireGuestEmail: true,
+  })
+  assert.equal(ok.ok, true)
+})
+
 test("submit is allowed with only the lead guest once they have a name and headshot", () => {
   const lead = person({
     fullName: "James Carter",

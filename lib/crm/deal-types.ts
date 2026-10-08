@@ -94,6 +94,11 @@ export function dealStageCountsAsSold(stage: DealStage | string): boolean {
   return (DEAL_SOLD_STAGES as readonly string[]).includes(stage)
 }
 
+/** Client has signed the booking form. ZK countersignature may still be outstanding. */
+export function dealStageHasSignedBookingForm(stage: DealStage | string): boolean {
+  return dealStageCountsAsSold(stage) || stage === "awaiting_zk_signature"
+}
+
 export function dealStageHoldsPurchasedStock(stage: DealStage | string): boolean {
   return dealStageCountsAsSold(stage)
 }

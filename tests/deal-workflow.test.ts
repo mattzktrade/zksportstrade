@@ -14,6 +14,7 @@ import {
   DEAL_STAGES,
   dealConfirmedOffPlatform,
   dealStageCountsAsSold,
+  dealStageHasSignedBookingForm,
   dealStageHoldsPurchasedStock,
   dealStageIsConfirmed,
   dealStageIsOpenPipeline,
@@ -86,6 +87,10 @@ test("unsigned deals do not reserve sellable stock", () => {
   assert.equal(dealStageReservesSellable("awaiting_invoice"), false)
   assert.equal(dealStageReservesSellable("awaiting_payment"), false)
   assert.equal(dealStageCountsAsSold("proposal"), false)
+  assert.equal(dealStageHasSignedBookingForm("proposal"), false)
+  assert.equal(dealStageHasSignedBookingForm("awaiting_client_signature"), false)
+  assert.equal(dealStageHasSignedBookingForm("awaiting_zk_signature"), true)
+  assert.equal(dealStageHasSignedBookingForm("signed"), true)
   assert.equal(dealStageCountsAsSold("signed"), true)
   assert.equal(dealStageCountsAsSold("awaiting_invoice"), true)
   assert.equal(dealStageCountsAsSold("awaiting_payment"), true)

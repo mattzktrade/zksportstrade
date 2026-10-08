@@ -61,7 +61,7 @@ async function DealsPageBody({
   const selectedId = initialSelectedId?.trim() || null
   const [initialDeals, selectedRows, packagePicker, accountOptions, staffOptions, bookingForms, suppliers, awaitingZkDealIdsRaw] =
     await Promise.all([
-      getDealListRows({ stages: DEAL_BOARD_STAGES, summary: true }),
+      getDealListRows({ stages: DEAL_BOARD_STAGES, summary: true, includeFinance: true }),
       selectedId ? getDealListRows({ ids: [selectedId] }) : Promise.resolve([] as DealListRow[]),
       getDealPackagePicker(),
       getCrmAccountOptions(),
@@ -77,7 +77,7 @@ async function DealsPageBody({
   if (opened) deals = [opened, ...deals.filter((deal) => deal.id !== opened.id)]
   const extraIds = awaitingZkDealIds.filter((id) => !deals.some((deal) => deal.id === id))
   if (extraIds.length > 0) {
-    const extra = await getDealListRows({ ids: extraIds, summary: true })
+    const extra = await getDealListRows({ ids: extraIds, summary: true, includeFinance: true })
     if (extra.length > 0) deals = [...extra, ...deals]
   }
 

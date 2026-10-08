@@ -8,6 +8,7 @@ import {
 } from "@/lib/guest-details/model"
 import { loadGuestDetailsBookingContext, loadGuestDetailsInviteByToken } from "@/lib/guest-details/invite"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { parseTicketingMode } from "@/lib/tickets/model"
 
 export type PublicGuestDetailsForm = {
   token: string
@@ -24,6 +25,7 @@ export type PublicGuestDetailsForm = {
   showModePicker: boolean
   submitted: boolean
   expiresAt: string
+  requireGuestEmail: boolean
 }
 
 function blank(value: string | null | undefined): string | null {
@@ -34,6 +36,8 @@ function blank(value: string | null | undefined): string | null {
 type GuestRow = {
   id: string
   full_name: string | null
+  email?: string | null
+  phone?: string | null
   is_lead_guest: boolean | null
   headshot_path: string | null
   attendance_day: string | null
@@ -46,7 +50,7 @@ async function loadGuestRows(
   parent: "order_id" | "deal_id",
   parentId: string,
 ): Promise<GuestRow[]> {
-  const full = "id, full_name, is_lead_guest, headshot_path, attendance_day, sort_order"
+  const full = "id, full_name, email, phone, is_lead_guest, headshot_path, attendance_day, sort_order"
   const min = "id, full_name, is_lead_guest, sort_order"
   const withCols = await admin.from(table).select(full).eq(parent, parentId).order("sort_order")
   if (!withCols.error && withCols.data) return withCols.data as GuestRow[]
@@ -65,6 +69,31 @@ async function loadGuests(
   }
   if (dealId) return loadGuestRows(admin, "deal_guests", "deal_id", dealId)
   return []
+}
+
+export async function bookingRequiresGuestEmail(
+  admin: NonNullable<ReturnType<typeof createAdminClient>>,
+  dealId: string,
+  packageIds: string[],
+): Promise<boolean> {
+  const { data: dealOps, error: opsError } = await admin
+    .from("deal_operations")
+    .select("ticketing_mode")
+    .eq("deal_id", dealId)
+    .maybeSingle()
+  if (opsError) return false
+  const bookingMode = parseTicketingMode((dealOps as { ticketing_mode?: string } | null)?.ticketing_mode)
+  if (bookingMode === "zk_digital" || bookingMode === "hybrid") return true
+  if (bookingMode === "physical" || bookingMode === "external_digital" || bookingMode === "supplier_direct") {
+    return false
+  }
+  if (!packageIds.length) return false
+  const { data, error } = await admin.from("packages").select("ticketing_mode").in("id", packageIds)
+  if (error) return false
+  return (data ?? []).some((row) => {
+    const mode = parseTicketingMode((row as { ticketing_mode?: string }).ticketing_mode)
+    return mode === "zk_digital" || mode === "hybrid"
+  })
 }
 
 export async function getPublicGuestDetailsForm(token: string): Promise<{
@@ -99,11 +128,15 @@ export async function getPublicGuestDetailsForm(token: string): Promise<{
     (dealOps as { guest_attendance_mode?: string } | null)?.guest_attendance_mode ??
     invite.attendanceMode
 
+  const requireGuestEmail = await bookingRequiresGuestEmail(admin, invite.dealId, booking.packageIds)
+
   const seeded = seedGuestDetailsForm({
     guests: guests.map((row) => ({
       id: String(row.id),
-      fullName: blank(row.full_name),
-      isLeadGuest: Boolean(row.is_lead_guest),
+        fullName: blank(row.full_name),
+        email: blank(row.email),
+        phone: blank(row.phone),
+        isLeadGuest: Boolean(row.is_lead_guest),
       headshotPath: blank(row.headshot_path),
       attendanceDay: blank(row.attendance_day),
       sortOrder: Math.max(0, Math.floor(Number(row.sort_order) || 0)),
@@ -124,6 +157,7 @@ export async function getPublicGuestDetailsForm(token: string): Promise<{
       ...seeded,
       submitted: invite.status === "submitted",
       expiresAt: invite.expiresAt,
+      requireGuestEmail,
     },
     unavailableReason: null,
   }

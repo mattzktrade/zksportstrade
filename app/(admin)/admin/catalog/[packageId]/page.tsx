@@ -90,11 +90,10 @@ async function PackageDetailBody({ params, searchParams }: Props) {
     if (lp.id === pkg.id) lp.sales_breakdown = pkg.sales_breakdown
   }
 
-  const guestListPackages = guestListPackageMeta(pkg, linkedPackages, linkedDayOverview.siblings)
   const guestList = await getPackageGuestList({
     deals,
     orders,
-    packages: guestListPackages,
+    packages: [{ id: pkg.id, name: pkg.name, duration: pkg.duration ?? null }],
     eventDate: linkedDayOverview.raceEventDate ?? pkg.event_date ?? null,
     purchaseOrders,
     costLayers: uniqueCostLayers(pkg, linkedPackages),
@@ -118,24 +117,6 @@ async function PackageDetailBody({ params, searchParams }: Props) {
       />
     </div>
   )
-}
-
-function guestListPackageMeta(
-  pkg: AdminPackageRow,
-  linkedPackages: LinkedInventoryPackage[],
-  siblings: Array<{ id: string; name: string; duration: string | null }>,
-): Array<{ id: string; name: string; duration: string | null }> {
-  const map = new Map<string, { id: string; name: string; duration: string | null }>()
-  map.set(pkg.id, { id: pkg.id, name: pkg.name, duration: pkg.duration ?? null })
-  for (const linked of linkedPackages) {
-    map.set(linked.id, { id: linked.id, name: linked.name, duration: linked.duration })
-  }
-  if (linkedPackages.length === 0) {
-    for (const sibling of siblings) {
-      map.set(sibling.id, { id: sibling.id, name: sibling.name, duration: sibling.duration })
-    }
-  }
-  return [...map.values()]
 }
 
 function uniqueCostLayers(pkg: AdminPackageRow, linkedPackages: LinkedInventoryPackage[]): CostLayerRow[] {

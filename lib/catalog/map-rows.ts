@@ -61,6 +61,10 @@ type DbPackage = {
   integration_sync_status?: string
   integration_synced_at?: string | null
   integration_sync_error?: string | null
+  ticketing_mode?: string | null
+  ticketing_venue_name?: string | null
+  ticketing_doors_time?: string | null
+  ticketing_require_headshot?: boolean | null
 }
 
 function parseGalleryImages(raw: unknown): string[] {

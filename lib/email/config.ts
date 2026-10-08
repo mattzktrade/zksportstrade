@@ -16,6 +16,8 @@ export const DEFAULT_BOOKINGS_CC = "bookings@zk-sports.com"
 export const DEFAULT_CHELLEY_CC = "chelley@zk-sports.com"
 export const DEFAULT_OPERATIONS_CC = "jenny@zk-sports.com"
 export const OPERATIONS_EMAIL_SENDER_NAME = "Jenny Kent"
+/** Connected Resend mailbox while zk-sports.com is not verified. */
+export const DEFAULT_TICKET_EMAIL_FROM = "Jenny Kent <contact@zk-sport.trade>"
 
 /** Never CC these, even if a leftover Vercel env var still lists them. */
 export const NEVER_CC_ADDRESSES = new Set(["matt@zk-sports.com"])
@@ -71,4 +73,12 @@ export function getResendFromAddress(): string | null {
 
 export function getResendApiKey(): string | null {
   return process.env.RESEND_API_KEY?.trim() || null
+}
+
+/** Ticket delivery mail. Uses the connected Resend domain until Jenny's mailbox is verified. */
+export function getTicketEmailFromAddress(): string | null {
+  const explicit = stripSurroundingQuotes(process.env.TICKET_EMAIL_FROM?.trim() ?? "")
+  if (explicit) return explicit
+  if (getResendApiKey()) return DEFAULT_TICKET_EMAIL_FROM
+  return getResendFromAddress()
 }

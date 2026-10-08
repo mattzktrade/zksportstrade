@@ -719,6 +719,10 @@ export async function updatePackageFields(input: {
   track_map?: string | null
   faqs?: { id: string; question: string; answer: string }[]
   skipFaqs?: boolean
+  ticketing_mode?: string | null
+  ticketing_venue_name?: string | null
+  ticketing_doors_time?: string | null
+  ticketing_require_headshot?: boolean
 }): Promise<ActionResult> {
   const gate = await requireAdminAction()
   if (!gate.ok) return gate
@@ -788,10 +792,61 @@ export async function updatePackageFields(input: {
       brochure_url: brochure,
       track_map: trackMap,
       ...(input.skipFaqs ? {} : { faqs: parsePackageFaqs(input.faqs ?? []) }),
+      ...(input.ticketing_mode
+        ? {
+            ticketing_mode: input.ticketing_mode,
+            ticketing_venue_name: input.ticketing_venue_name?.trim() || null,
+            ticketing_doors_time: input.ticketing_doors_time?.trim() || null,
+            ticketing_require_headshot: input.ticketing_require_headshot !== false,
+          }
+        : {}),
     })
     .eq("id", id)
 
-  if (error) {
+  if (error && /ticketing_mode|ticketing_venue_name|ticketing_doors_time|ticketing_require_headshot/i.test(error.message)) {
+    const retry = await supabase
+      .from("packages")
+      .update({
+        race_id: raceId,
+        name: input.name.trim(),
+        circuit: input.circuit.trim(),
+        location: input.location.trim(),
+        country: input.country.trim(),
+        country_code: cc,
+        event_date: input.event_date.trim(),
+        date_range: input.date_range.trim(),
+        description: desc,
+        image,
+        gallery_images: gallery,
+        currency: (input.currency.trim() || "USD").slice(0, 8),
+        total_capacity: cap,
+        duration: duration || null,
+        inventory_group_id: inventoryGroupId,
+        inventory_is_standalone: inventoryIsStandalone,
+        requires_booking_approval: requiresBookingApproval,
+        includes: input.includes,
+        trade_price: input.trade_price,
+        is_enquiry: input.is_enquiry,
+        is_hidden: input.is_hidden,
+        ...(input.is_hidden ? { sell_on_trade_portal: false, sell_on_wix: false } : {}),
+        featured: input.featured,
+        sort_order: Math.floor(Number(input.sort_order)) || 0,
+        brochure_url: brochure,
+        track_map: trackMap,
+        ...(input.skipFaqs ? {} : { faqs: parsePackageFaqs(input.faqs ?? []) }),
+      })
+      .eq("id", id)
+    if (retry.error) {
+      if (retry.error.message.toLowerCase().includes("package_inventory_in_use")) {
+        return {
+          ok: false,
+          message:
+            "This package still has allocated stock, active holds, orders, or sales without a recorded shortage and cannot be detached safely.",
+        }
+      }
+      return { ok: false, message: retry.error.message }
+    }
+  } else if (error) {
     if (error.message.toLowerCase().includes("package_inventory_in_use")) {
       return {
         ok: false,

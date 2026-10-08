@@ -302,6 +302,32 @@ test("unknown pin keys are ignored and the deal is still filled from real pools"
   assert.equal(plan.byLine.get("a")?.singleKey, "id:f1")
 })
 
+test("saturday and sunday sales from a two-day buy count as peak day assigned", () => {
+  const plan = planSupplierAssignments({
+    pools: [pool("id:bam", "BAM Motorsport", 2, { saturday: 2, sunday: 2 })],
+    demands: [
+      demand({
+        id: "sat",
+        quantity: 2,
+        slots: ["saturday"],
+        dealReference: "DL1401",
+        createdAt: "2026-10-05T00:00:00Z",
+      }),
+      demand({
+        id: "sun",
+        quantity: 2,
+        slots: ["sunday"],
+        dealReference: "DL1441",
+        createdAt: "2026-10-06T00:00:00Z",
+      }),
+    ],
+  })
+  assert.equal(plan.byLine.get("sat")?.assigned, 2)
+  assert.equal(plan.byLine.get("sun")?.assigned, 2)
+  assert.equal(plan.assignedByPool["id:bam"], 2)
+  assert.equal(plan.remainingByPool["id:bam"], 0)
+})
+
 test("held portal stock is reserved before signed deals are filled", () => {
   const plan = planSupplierAssignments({
     pools: [pool("id:f1", "F1", 4)],

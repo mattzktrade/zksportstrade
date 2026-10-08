@@ -160,6 +160,15 @@ export function linkedPoolAttributedSold(input: LinkedPoolInput): number {
 }
 
 /**
+ * Places on this SKU that the shared weekend purchase cannot cover.
+ * Saturday-only and Sunday-only both draw from the same 2-day buy, so do not
+ * add their sold totals against stock.
+ */
+export function linkedPoolOwnedShortage(input: LinkedPoolInput): number {
+  return Math.max(0, -linkedPoolClosedWonRemaining(input))
+}
+
+/**
  * Signed pipeline that actually reduces this package's Sellable after Sold.
  * Friday-only pipeline does not hold 3-day remaining.
  */

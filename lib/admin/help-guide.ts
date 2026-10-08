@@ -287,6 +287,11 @@ export const HELP_TOPICS: HelpTopic[] = [
             href: "/admin/operations",
           },
           {
+            title: "Check-in",
+            body: "On the door: scan the ZK QR or search the guest name. The headshot is the check. Undo a scan within 10 minutes if you tap the wrong person.",
+            href: "/admin/check-in",
+          },
+          {
             title: "Finance",
             body: "Invoices and payment. Overdue sits here so it is hard to miss. Ready to send is booking forms waiting for an admin to email the client.",
             href: "/admin/finance",
@@ -680,7 +685,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     nav: "After the sale",
     title: "After the sale",
     summary: "Guests, suppliers, delivery, invoices, and payment.",
-    keywords: ["operations", "finance", "invoice", "xero", "payment", "overdue", "guests", "delivery", "tickets", "calendar", "thank-you"],
+    keywords: ["operations", "finance", "invoice", "xero", "payment", "overdue", "guests", "delivery", "tickets", "check-in", "qr", "calendar", "thank-you"],
     blocks: [
       {
         type: "p",
@@ -700,8 +705,12 @@ export const HELP_TOPICS: HelpTopic[] = [
             body: "Send the guest details form from the booking board. Names and headshots land here and on the product Guest list.",
           },
           {
+            title: "Tickets",
+            body: "On the booking board, issue ZK passes, email them from contact@zk-sport.trade, or receive and assign physical serials. A successful digital send marks delivered. Set the product ticketing mode first — supplier-handled for official F1, ZK digital only where we scan.",
+          },
+          {
             title: "Proof of delivery",
-            body: "A photo, screenshot, or note is required before a booking is marked fulfilled.",
+            body: "Digital ZK tickets no longer need a screenshot. Use proof only for supplier-handled or one-off cases.",
           },
           {
             title: "Calendar",
@@ -784,6 +793,10 @@ export const HELP_TOPICS: HelpTopic[] = [
           {
             q: "How do I make a guest guide for a product?",
             a: "Open the product page and use Guest guide, next to the sales brochure. Fill the pages, then Create guest guide. It needs at least 3 unique photos and copy on at least three pages, including Welcome. Singapore Velocity Terrace can load the official stored copy. Only the ZK team can generate it. Guest guides are not shown on the agent portal.",
+          },
+          {
+            q: "How do we check guests in?",
+            a: "Operations → Check-in on your phone. Pick the event, scan the QR or search the name, and match the headshot. If someone lost their phone, check them in from the name list. Void and reissue from the booking if the ticket itself is wrong.",
           },
           {
             q: "Available stock looks too low / too high.",
