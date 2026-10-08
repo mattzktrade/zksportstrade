@@ -21,7 +21,8 @@ function money(value: number): number {
 }
 
 export function packageIdSet(packageIds: readonly string[] | ReadonlySet<string>): ReadonlySet<string> {
-  return packageIds instanceof Set ? packageIds : new Set(packageIds.filter(Boolean))
+  const ids = Array.isArray(packageIds) ? packageIds : [...packageIds]
+  return new Set(ids.filter(Boolean))
 }
 
 function lineInScope(packageId: string, packageIds: ReadonlySet<string>): boolean {

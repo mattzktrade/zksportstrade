@@ -295,10 +295,15 @@ export async function loadBookingTicketContext(
       "quantity, sort_order, package_id, packages(id, name, duration, event_date, race_id, circuit, ticketing_mode, ticketing_venue_name, ticketing_doors_time, ticketing_require_headshot, races(name, season, event_date))"
     const basicSelect =
       "quantity, sort_order, package_id, packages(id, name, duration, event_date, race_id, circuit, races(name, season, event_date))"
-    let linesResult = await db.from("deal_line_items").select(ticketingSelect).eq("deal_id", resolvedDealId).order("sort_order")
-    if (linesResult.error && /ticketing_/i.test(linesResult.error.message)) {
-      linesResult = await db.from("deal_line_items").select(basicSelect).eq("deal_id", resolvedDealId).order("sort_order")
-    }
+    const ticketingAttempt = await db
+      .from("deal_line_items")
+      .select(ticketingSelect)
+      .eq("deal_id", resolvedDealId)
+      .order("sort_order")
+    const linesResult =
+      ticketingAttempt.error && /ticketing_/i.test(ticketingAttempt.error.message)
+        ? await db.from("deal_line_items").select(basicSelect).eq("deal_id", resolvedDealId).order("sort_order")
+        : ticketingAttempt
     const { data: lines } = linesResult
     const list = (lines ?? []) as Array<Record<string, unknown>>
     quantity = Math.max(1, list.reduce((sum, line) => sum + Math.max(0, Math.floor(Number(line.quantity) || 0)), 0) || 1)

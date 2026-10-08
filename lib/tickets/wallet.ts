@@ -4,7 +4,9 @@ export type WalletIssuerKind = "apple" | "google"
 
 export type WalletPassStatus = "ready" | "not_configured"
 
-export function appleWalletConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+type EnvMap = { [key: string]: string | undefined }
+
+export function appleWalletConfigured(env: EnvMap = process.env): boolean {
   return Boolean(
     env.APPLE_PASS_TYPE_ID?.trim() &&
       env.APPLE_TEAM_ID?.trim() &&
@@ -14,11 +16,11 @@ export function appleWalletConfigured(env: NodeJS.ProcessEnv = process.env): boo
   )
 }
 
-export function googleWalletConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+export function googleWalletConfigured(env: EnvMap = process.env): boolean {
   return Boolean(env.GOOGLE_WALLET_ISSUER_ID?.trim() && env.GOOGLE_WALLET_SA_JSON?.trim())
 }
 
-export function walletPassStatus(env: NodeJS.ProcessEnv = process.env): Record<WalletIssuerKind, WalletPassStatus> {
+export function walletPassStatus(env: EnvMap = process.env): Record<WalletIssuerKind, WalletPassStatus> {
   return {
     apple: appleWalletConfigured(env) ? "ready" : "not_configured",
     google: googleWalletConfigured(env) ? "ready" : "not_configured",

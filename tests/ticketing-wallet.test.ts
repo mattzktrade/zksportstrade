@@ -3,7 +3,7 @@ import test from "node:test"
 import { appleWalletConfigured, googleWalletConfigured, walletPassStatus } from "../lib/tickets/wallet"
 
 test("wallet buttons stay stubbed until issuer certificates exist", () => {
-  const empty = {} as NodeJS.ProcessEnv
+  const empty = {}
   assert.equal(appleWalletConfigured(empty), false)
   assert.equal(googleWalletConfigured(empty), false)
   assert.deepEqual(walletPassStatus(empty), { apple: "not_configured", google: "not_configured" })
@@ -16,6 +16,6 @@ test("wallet buttons stay stubbed until issuer certificates exist", () => {
     APPLE_WWDR_CERT: "WWDR",
     GOOGLE_WALLET_ISSUER_ID: "3388",
     GOOGLE_WALLET_SA_JSON: "{}",
-  } as NodeJS.ProcessEnv
+  }
   assert.deepEqual(walletPassStatus(ready), { apple: "ready", google: "ready" })
 })

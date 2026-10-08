@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib"
+import { PDFDocument, degrees, rgb, StandardFonts } from "pdf-lib"
 import { BRAND_BLACK, BRAND_RED } from "@/lib/branding"
 import { validDayLabels } from "@/lib/tickets/model"
 import { ticketQrPngBytes } from "@/lib/tickets/qr"
@@ -103,7 +103,7 @@ export async function buildTicketPdf(input: TicketPdfInput): Promise<Uint8Array>
       size: 72,
       font: bold,
       color: rgb(0.9, 0.1, 0.1),
-      rotate: { type: "degrees", angle: -24 },
+      rotate: degrees(-24),
       opacity: 0.55,
     })
   }
