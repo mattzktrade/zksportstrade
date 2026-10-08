@@ -192,6 +192,15 @@ test("proposal-stage pipeline is not stored as reserving demand", () => {
   assert.doesNotMatch(queries, /"proposal"/)
 })
 
+test("catalog sales counts page past the 1000-row cap", () => {
+  const queries = readFileSync("lib/admin/package-sales-breakdown-queries.ts", "utf8")
+  assert.match(queries, /fetchAllRows/)
+  assert.match(queries, /\.order\("id"\)/)
+  assert.match(queries, /\.range\(from, to\)/)
+  const costLayers = readFileSync("lib/admin/cost-layers.ts", "utf8")
+  assert.match(costLayers, /fetchAllRows/)
+})
+
 test("places sold pipeline column shows unsigned open deals", () => {
   const costLayers = readFileSync("components/admin/package-cost-layers.tsx", "utf8")
   assert.match(costLayers, /unsignedPipelinePlaces/)

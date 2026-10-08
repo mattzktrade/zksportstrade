@@ -2,6 +2,7 @@ import { unstable_noStore as noStore } from "next/cache"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
+import { fetchAllRows, mapChunks, POSTGREST_IN_FILTER_SIZE } from "@/lib/supabase/fetch-all-rows"
 
 export type CostLayerRow = {
   id: string
@@ -136,27 +137,28 @@ export async function getCostLayerQuantityTotalsByPackage(
   // list still needs purchased quantities, so prefer the service role when the
   // caller did not pass a client. Full layer rows (buy prices) stay user-scoped.
   const supabase = supabaseClient ?? createAdminClient() ?? (await createClient())
-  const batches: string[][] = []
-  for (let i = 0; i < ids.length; i += IN_FILTER_BATCH) {
-    batches.push(ids.slice(i, i + IN_FILTER_BATCH))
-  }
-  const results = await Promise.all(
-    batches.map((batch) =>
+  const pages = await mapChunks(ids, POSTGREST_IN_FILTER_SIZE, async (batch) => {
+    const { data, error } = await fetchAllRows<{
+      package_id: string
+      quantity: number
+      quantity_remaining: number
+    }>((from, to) =>
       supabase
-      .from("package_cost_layers")
-      .select("package_id, quantity, quantity_remaining")
-        .in("package_id", batch),
-    ),
-  )
-  for (const { data, error } of results) {
-    if (error || !data) continue
-    for (const raw of data) {
-      const row = raw as { package_id: string; quantity: number; quantity_remaining: number }
-      const prev = out.get(row.package_id) ?? { quantity_purchased: 0, quantity_remaining: 0 }
-      prev.quantity_purchased += Math.floor(n(row.quantity))
-      prev.quantity_remaining += Math.floor(n(row.quantity_remaining))
-      out.set(row.package_id, prev)
-    }
+        .from("package_cost_layers")
+        .select("package_id, quantity, quantity_remaining")
+        .in("package_id", batch)
+        .order("id")
+        .range(from, to),
+    )
+    if (error || !data) return []
+    return data
+  })
+  for (const raw of pages.flat()) {
+    const row = raw as { package_id: string; quantity: number; quantity_remaining: number }
+    const prev = out.get(row.package_id) ?? { quantity_purchased: 0, quantity_remaining: 0 }
+    prev.quantity_purchased += Math.floor(n(row.quantity))
+    prev.quantity_remaining += Math.floor(n(row.quantity_remaining))
+    out.set(row.package_id, prev)
   }
   return out
 }
