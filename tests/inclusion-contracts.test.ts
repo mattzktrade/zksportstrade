@@ -12,6 +12,7 @@ import {
 } from "../lib/contracts/content"
 import { contractContentHash } from "../lib/contracts/hash"
 import { generateInclusionContractPdf } from "../lib/contracts/pdf"
+import { billToPartyNames } from "../lib/format/bill-to-party"
 
 const sampleContent = {
   ...blankContractContent(),
@@ -104,6 +105,9 @@ describe("inclusion contracts", () => {
     assert.match(pdf, /BILL TO:/)
     assert.match(pdf, /Contract No/)
     assert.match(pdf, /BOOKING_SELLER/)
+    assert.match(pdf, /billToPartyNames/)
+    assert.deepEqual(billToPartyNames("Example Ltd", "Example Ltd"), ["Example Ltd"])
+    assert.deepEqual(billToPartyNames("Example Ltd", "Alex"), ["Example Ltd", "Alex"])
   })
 
   it("keeps the SY Holdings starting template", async () => {

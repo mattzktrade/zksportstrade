@@ -7,6 +7,7 @@ import type { PublicBookingForm } from "@/lib/booking-forms/public"
 import { BOOKING_SIGNATURE_CONSENT } from "@/lib/booking-forms/template"
 import { SignatureCapture, type SignatureCaptureHandle } from "@/components/signature-capture"
 import { BRAND_RED, LOGO_MAIN } from "@/lib/branding"
+import { billToPartyNames } from "@/lib/format/bill-to-party"
 
 function money(value: number, currency: string): string {
   return new Intl.NumberFormat("en-US", {
@@ -152,8 +153,11 @@ export function SigningClient({
                 BILL TO:
               </div>
               <div className="mt-2 space-y-0.5 text-sm leading-6">
-                <div className="font-semibold">{snapshot.billTo.accountName}</div>
-                <div className="font-semibold">{snapshot.billTo.contactName}</div>
+                {billToPartyNames(snapshot.billTo.accountName, snapshot.billTo.contactName).map((name) => (
+                  <div key={name} className="font-semibold">
+                    {name}
+                  </div>
+                ))}
                 <div className="break-all">{snapshot.billTo.contactEmail}</div>
                 {snapshot.billTo.addressLines.map((line) => (
                   <div key={line}>{line}</div>

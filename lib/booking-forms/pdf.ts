@@ -5,6 +5,7 @@ import type {
   BookingFormSignatureEvidence,
   BookingFormSnapshot,
 } from "@/lib/booking-forms/types"
+import { billToPartyNames } from "@/lib/format/bill-to-party"
 
 const A4: [number, number] = [595.28, 841.89]
 const MARGIN = 48
@@ -274,8 +275,13 @@ function drawDateAndBillTo(writer: Writer, snapshot: BookingFormSnapshot, quoteY
   const billMaxWidth = Math.max(140, A4[0] - MARGIN * 2 - quoteWidth - 24)
   const billEntries: Array<{ text: string; font: PDFFont; size: number; color: ReturnType<typeof rgb>; lineHeight: number }> = [
     { text: "BILL TO:", font: writer.bold, size: 10, color: RED, lineHeight: 16 },
-    { text: snapshot.billTo.accountName, font: writer.bold, size: 9, color: BLACK, lineHeight: 13 },
-    { text: snapshot.billTo.contactName, font: writer.bold, size: 9, color: BLACK, lineHeight: 13 },
+    ...billToPartyNames(snapshot.billTo.accountName, snapshot.billTo.contactName).map((text) => ({
+      text,
+      font: writer.bold,
+      size: 9,
+      color: BLACK,
+      lineHeight: 13,
+    })),
     { text: snapshot.billTo.contactEmail, font: writer.regular, size: 9, color: BLACK, lineHeight: 13 },
     ...snapshot.billTo.addressLines.map((line) => ({
       text: line,

@@ -8,6 +8,7 @@ import type { PublicInclusionContract } from "@/lib/contracts/public"
 import { SignatureCapture, type SignatureCaptureHandle } from "@/components/signature-capture"
 import { BRAND_RED, LOGO_MAIN } from "@/lib/branding"
 import { BOOKING_SELLER } from "@/lib/booking-forms/template"
+import { billToPartyNames } from "@/lib/format/bill-to-party"
 
 function isoDate(value: string): string {
   return value.slice(0, 10)
@@ -124,8 +125,11 @@ export function ContractSigningClient({
                 BILL TO:
               </div>
               <div className="mt-2 space-y-0.5 text-sm leading-6">
-                {form.companyName ? <div className="font-semibold">{form.companyName}</div> : null}
-                {form.clientName ? <div className="font-semibold">{form.clientName}</div> : null}
+                {billToPartyNames(form.companyName, form.clientName).map((name) => (
+                  <div key={name} className="font-semibold">
+                    {name}
+                  </div>
+                ))}
                 {form.clientEmail ? <div>{form.clientEmail}</div> : null}
               </div>
             </div>

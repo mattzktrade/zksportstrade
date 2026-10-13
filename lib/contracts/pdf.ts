@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { PDFDocument, PDFFont, PDFImage, PDFPage, StandardFonts, rgb } from "pdf-lib"
 import { BOOKING_SELLER } from "@/lib/booking-forms/template"
 import { pdfSafe, type ContractDraft } from "@/lib/contracts/content"
+import { billToPartyNames } from "@/lib/format/bill-to-party"
 
 const A4: [number, number] = [595.28, 841.89]
 const MARGIN = 48
@@ -233,8 +234,13 @@ function drawDateAndBillTo(
   const billMaxWidth = Math.max(140, A4[0] - MARGIN * 2 - quoteWidth - 24)
   const billEntries: Array<{ text: string; font: PDFFont; size: number; color: ReturnType<typeof rgb>; lineHeight: number }> = [
     { text: "BILL TO:", font: writer.bold, size: 10, color: RED, lineHeight: 16 },
-    { text: draft.companyName, font: writer.bold, size: 9, color: BLACK, lineHeight: 13 },
-    { text: draft.clientName, font: writer.bold, size: 9, color: BLACK, lineHeight: 13 },
+    ...billToPartyNames(draft.companyName, draft.clientName).map((text) => ({
+      text,
+      font: writer.bold,
+      size: 9,
+      color: BLACK,
+      lineHeight: 13,
+    })),
     { text: draft.clientEmail, font: writer.regular, size: 9, color: BLACK, lineHeight: 13 },
   ]
 

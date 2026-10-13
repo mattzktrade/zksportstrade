@@ -147,6 +147,41 @@ test("bill to is right-aligned with the seller address", async () => {
   assert.ok(Math.abs(addressRight - billRight) < 0.6)
 })
 
+test("matching account and contact names print once on the booking form", async () => {
+  const same = await generateBookingFormPdf(
+    testSnapshot({
+      billTo: {
+        accountId: "account-1",
+        accountName: "Fabiana Fernandez",
+        contactId: "contact-1",
+        contactName: "Fabiana Fernandez",
+        contactEmail: "valeriaff@gmail.com",
+        addressLines: ["Argentina"],
+      },
+    }),
+  )
+  const samePlacements = firstPageTextPlacements(await PDFDocument.load(same)).filter(
+    (item) => item.text === "Fabiana Fernandez",
+  )
+  assert.equal(samePlacements.length, 1)
+
+  const different = await generateBookingFormPdf(
+    testSnapshot({
+      billTo: {
+        accountId: "account-1",
+        accountName: "Sportfive UK Ltd",
+        contactId: "contact-1",
+        contactName: "Roisin McCarthy",
+        contactEmail: "roisin.mccarthy@sportfive.com",
+        addressLines: ["London"],
+      },
+    }),
+  )
+  const differentPlacements = firstPageTextPlacements(await PDFDocument.load(different))
+  assert.equal(differentPlacements.filter((item) => item.text === "Sportfive UK Ltd").length, 1)
+  assert.equal(differentPlacements.filter((item) => item.text === "Roisin McCarthy").length, 1)
+})
+
 test("booking form edits can rename parties, products and terms without changing locked ids", () => {
   const snapshot: BookingFormSnapshot = {
     schemaVersion: 1,
