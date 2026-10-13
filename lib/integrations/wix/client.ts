@@ -1,4 +1,4 @@
-import { getWixConfig } from "@/lib/integrations/wix/config"
+import { getWixConfig, isWixIntegrationDisconnected } from "@/lib/integrations/wix/config"
 
 export class WixApiError extends Error {
   constructor(
@@ -16,6 +16,10 @@ export async function wixRequest<T = unknown>(
   path: string,
   options?: { body?: unknown },
 ): Promise<T> {
+  if (isWixIntegrationDisconnected()) {
+    throw new Error("Wix integration is disconnected. No Wix API request was sent.")
+  }
+
   const config = getWixConfig()
   if (!config) throw new Error("Wix API is not configured (WIX_API_KEY, WIX_SITE_ID).")
 

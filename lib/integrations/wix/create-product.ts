@@ -3,7 +3,7 @@ import { WIX_DEFAULT_VARIANT_ID } from "@/lib/integrations/wix/constants"
 import { syncPackageCatalogToWix } from "@/lib/integrations/wix/catalog-sync"
 import { buildWixProductDescription, buildWixProductTitle } from "@/lib/integrations/wix/product-content"
 import { wixRequest, WixApiError } from "@/lib/integrations/wix/client"
-import { isWixConfigured } from "@/lib/integrations/wix/config"
+import { isWixConfigured, isWixIntegrationDisconnected } from "@/lib/integrations/wix/config"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 export type CreateWixProductResult = {
@@ -24,6 +24,9 @@ type WixCreateProductResponse = {
  * Create a new Wix Stores (Catalog V1) product from portal listing data, then push full sync.
  */
 export async function createWixProductForPackage(packageId: string): Promise<CreateWixProductResult> {
+  if (isWixIntegrationDisconnected()) {
+    throw new Error("Wix integration is disconnected. No Wix product was created.")
+  }
   if (!isWixConfigured()) {
     throw new Error("Wix API is not configured (WIX_API_KEY, WIX_SITE_ID).")
   }

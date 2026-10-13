@@ -39,8 +39,10 @@ export default async function SettingsPage({
     {
       href: "/admin/integrations/wix",
       title: "Wix",
-      description: "Website stock, retail prices, and paid consumer orders on zk-sports.com.",
-      status: wix ? "API keys configured" : "Not configured",
+      description: wix
+        ? "Website stock, retail prices, and paid consumer orders on zk-sports.com."
+        : "Website stock and paid consumer orders. Disconnected while the website is replaced.",
+      status: wix ? "API keys configured" : "Disconnected",
       connected: wix,
     },
   ]

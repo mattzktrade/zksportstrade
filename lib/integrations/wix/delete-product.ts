@@ -1,5 +1,5 @@
 import { wixRequest, WixApiError } from "@/lib/integrations/wix/client"
-import { isWixConfigured } from "@/lib/integrations/wix/config"
+import { isWixConfigured, isWixIntegrationDisconnected } from "@/lib/integrations/wix/config"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 export type WixProductDeleteResult = {
@@ -10,7 +10,7 @@ export type WixProductDeleteResult = {
 
 /** Delete mapped Wix Stores products for a portal package (Catalog V1). */
 export async function deleteWixProductsForPackage(packageId: string): Promise<WixProductDeleteResult> {
-  if (!isWixConfigured()) {
+  if (isWixIntegrationDisconnected() || !isWixConfigured()) {
     return { deleted: [], errors: [], skipped: true }
   }
 

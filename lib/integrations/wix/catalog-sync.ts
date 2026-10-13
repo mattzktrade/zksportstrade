@@ -1,6 +1,6 @@
 import { buildCatalogListingPayload } from "@/lib/catalog/listing-payload"
 import { wixRequest, WixApiError } from "@/lib/integrations/wix/client"
-import { isWixConfigured } from "@/lib/integrations/wix/config"
+import { isWixConfigured, isWixIntegrationDisconnected } from "@/lib/integrations/wix/config"
 import { WIX_DEFAULT_VARIANT_ID } from "@/lib/integrations/wix/constants"
 import { syncWixProductContent } from "@/lib/integrations/wix/product-content"
 import { createAdminClient } from "@/lib/supabase/admin"
@@ -109,6 +109,15 @@ export async function syncPackageCatalogToWix(packageId: string): Promise<WixCat
   const skipped: string[] = []
   const errors: string[] = []
   let updated = 0
+
+  if (isWixIntegrationDisconnected()) {
+    return {
+      ok: true,
+      updated: 0,
+      skipped: ["Wix integration is disconnected."],
+      errors: [],
+    }
+  }
 
   if (!isWixConfigured()) {
     return { ok: false, updated: 0, skipped: ["Wix API not configured (WIX_API_KEY, WIX_SITE_ID)"], errors: [] }

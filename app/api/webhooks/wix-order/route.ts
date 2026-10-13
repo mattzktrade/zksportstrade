@@ -1,7 +1,7 @@
 import { createHmac } from "crypto"
 import { NextResponse } from "next/server"
 import { drainOutboxNow } from "@/lib/integrations/schedule-drain"
-import { getWixConfig } from "@/lib/integrations/wix/config"
+import { getWixConfig, isWixIntegrationDisconnected } from "@/lib/integrations/wix/config"
 import { placeWixOrderFromWebhook } from "@/lib/integrations/wix/orders"
 import { parseWixOrderWebhookBody } from "@/lib/integrations/wix/parse-webhook"
 import { safeEqualStrings } from "@/lib/crypto/timing-safe"
@@ -20,6 +20,10 @@ function verifyWebhookSecret(request: Request, rawBody: string, secret: string):
 }
 
 export async function POST(request: Request) {
+  if (isWixIntegrationDisconnected()) {
+    return NextResponse.json({ ok: true, ignored: true })
+  }
+
   const config = getWixConfig()
   const rawBody = await request.text()
 
