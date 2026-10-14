@@ -631,6 +631,19 @@ export async function resendXeroInvoiceForOrder(orderId: string): Promise<void> 
     .eq("id", invoice.id)
 }
 
+function cancelledCrmSale(input: {
+  invoiceStatus?: string | null
+  orderStatus?: string | null
+  dealStage?: string | null
+}): boolean {
+  return (
+    input.invoiceStatus === "cancelled" ||
+    input.orderStatus === "cancelled" ||
+    input.dealStage === "cancelled" ||
+    input.dealStage === "closed_lost"
+  )
+}
+
 export async function reconcileXeroInvoiceForOrder(
   orderId: string,
   actorProfileId?: string | null,
@@ -649,6 +662,31 @@ export async function reconcileXeroInvoiceForOrder(
     `/api.xro/2.0/Invoices/${encodeURIComponent(invoice.xero_invoice_id)}`,
   )
   const status = (remote.Invoices?.[0]?.Status ?? "").toUpperCase()
+  const { data: order, error: orderError } = await admin
+    .from("orders")
+    .select("deal_id, status")
+    .eq("id", orderId)
+    .maybeSingle()
+  if (orderError) throw new Error(orderError.message)
+  let dealStage: string | null = null
+  if (order?.deal_id) {
+    const { data: deal, error: dealError } = await admin
+      .from("deals")
+      .select("stage")
+      .eq("id", order.deal_id)
+      .maybeSingle()
+    if (dealError) throw new Error(dealError.message)
+    dealStage = deal?.stage ?? null
+  }
+  if (
+    cancelledCrmSale({
+      invoiceStatus: invoice.status,
+      orderStatus: order?.status,
+      dealStage,
+    })
+  ) {
+    return status || "UNKNOWN"
+  }
   if (status === "PAID") {
     await markPortalInvoicePaidFromXero(invoice.xero_invoice_id)
     if (actorProfileId) {
@@ -672,11 +710,6 @@ export async function reconcileXeroInvoiceForOrder(
       })
       .eq("id", invoice.id)
     if (status === "AUTHORISED") {
-      const { data: order } = await admin
-        .from("orders")
-        .select("deal_id")
-        .eq("id", orderId)
-        .maybeSingle()
       if (order?.deal_id && !allOrderInvoicesPaid(await loadOrderInvoices(admin, orderId))) {
         await admin
           .from("deals")
@@ -701,7 +734,7 @@ export async function reconcileXeroInvoiceForOrder(
   return status || "UNKNOWN"
 }
 
-/** Void the current Xero invoice (if any) and clear local Xero IDs so a replacement can be created. */
+/** Void the current Xero invoice so a replacement can be created. Deal cancellation does not use this. */
 export async function prepareXeroInvoiceReplacement(orderId: string): Promise<string> {
   const admin = createAdminClient()
   if (!admin) throw new Error("Supabase service role is not configured.")
@@ -729,6 +762,7 @@ export async function prepareXeroInvoiceReplacement(orderId: string): Promise<st
   return `${Date.now()}`
 }
 
+/** Voids the Xero invoice. Used only when replacing an invoice, not when a deal or order is cancelled. */
 export async function voidXeroInvoiceForOrder(orderId: string): Promise<void> {
   const admin = createAdminClient()
   if (!admin) throw new Error("Supabase service role is not configured.")
@@ -790,13 +824,30 @@ export async function markPortalInvoicePaidFromXero(xeroInvoiceId: string): Prom
 
   const { data: inv, error } = await admin
     .from("invoices")
-    .select("id, status, order_id, orders(deal_id)")
+    .select("id, status, order_id, orders(status, deal_id)")
     .eq("xero_invoice_id", xeroInvoiceId)
     .maybeSingle()
   if (error) throw new Error(error.message)
   if (!inv) return
 
-  if (inv.status === "paid" || inv.status === "delivered") return
+  if (inv.status === "paid" || inv.status === "delivered" || inv.status === "cancelled") return
+
+  const orderRelation = inv.orders as
+    | { deal_id?: string | null; status?: string | null }
+    | { deal_id?: string | null; status?: string | null }[]
+    | null
+  const orderStatus = Array.isArray(orderRelation) ? orderRelation[0]?.status : orderRelation?.status
+  const dealId = Array.isArray(orderRelation) ? orderRelation[0]?.deal_id : orderRelation?.deal_id
+  if (orderStatus === "cancelled") return
+  if (dealId) {
+    const { data: deal, error: dealError } = await admin
+      .from("deals")
+      .select("stage")
+      .eq("id", dealId)
+      .maybeSingle()
+    if (dealError) throw new Error(dealError.message)
+    if (deal?.stage === "cancelled" || deal?.stage === "closed_lost") return
+  }
 
   const { error: upErr } = await admin
     .from("invoices")
@@ -816,10 +867,6 @@ export async function markPortalInvoicePaidFromXero(xeroInvoiceId: string): Prom
     const invoices = await loadOrderInvoices(admin, String(inv.order_id))
     const fullyPaid = allOrderInvoicesPaid(invoices)
     await admin.from("orders").update({ status: "confirmed" }).eq("id", inv.order_id)
-    const orderRelation = inv.orders as { deal_id?: string | null } | { deal_id?: string | null }[] | null
-    const dealId = Array.isArray(orderRelation)
-      ? orderRelation[0]?.deal_id
-      : orderRelation?.deal_id
     if (dealId && fullyPaid) {
       const paidAt = new Date().toISOString()
       await admin

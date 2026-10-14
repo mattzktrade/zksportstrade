@@ -406,7 +406,7 @@ export function OrdersAdminClient({
   function cancelOrder(o: AdminOrderListRow) {
     if (
       !window.confirm(
-        `Cancel order ${o.reference}? This restores portal stock and keeps the row for records.`,
+        `Cancel order ${o.reference}? This restores stock and keeps the row for records. Any Xero invoice stays open for finance to update.`,
       )
     ) {
       return

@@ -125,7 +125,7 @@ export const HELP_TOPICS: HelpTopic[] = [
               "Invoices are created in Xero after both signatures (or after a portal/website booking).",
               "You can prepare and countersign booking forms; an admin must send them to the client.",
               "Settings, team logins, and integrations stay with an admin.",
-              "Do not void invoices unless you intend to cancel the order and return the stock.",
+              "Cancelling an order here does not void the Xero invoice. Finance updates that invoice in Xero.",
             ],
           },
           {
@@ -339,7 +339,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         dont: [
           "Do not use Place order for a client who is not an approved portal agent.",
           "Do not delete a product that has already been sold. Hide it instead.",
-          "Do not cancel a signed deal or void a Xero invoice unless finance agrees.",
+          "Do not cancel a signed deal unless finance agrees. Cancelling in the CRM leaves the Xero invoice for finance to update.",
           "Do not run CRM Imports “to see what happens”.",
           "Do not create a second deal for the same booking if one already exists.",
         ],
@@ -747,7 +747,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         type: "callout",
         tone: "warn",
         title: "Cancelling after an invoice exists",
-        text: "This voids the Xero invoice and puts stock back. Only finance or an admin should do it, and only with a reason. If the event is close, ask before you touch it.",
+        text: "This cancels the order and puts stock back. The Xero invoice is left as it is so finance can update it in Xero. Only finance or an admin should cancel, and only with a reason. If the event is close, ask before you touch it.",
       },
       {
         type: "qa",

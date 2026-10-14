@@ -362,7 +362,8 @@ export async function finalizeNativeDealOrderCancel(input: {
     summary: reason,
     metadata: {
       order_id: input.orderId,
-      xero_void_confirmed: true,
+      xero_void_confirmed: false,
+      xero_invoice_left_for_finance: true,
       day_component_release: true,
       restated_cogs_left_in_place: true,
     },

@@ -61,6 +61,35 @@ test("booking confirmations CC bookings and operations emails CC Jenny", () => {
   assert.deepEqual(getOperationsEmailCc(DEFAULT_OPERATIONS_CC), [])
 })
 
+test("cancelling a deal leaves the Xero invoice for finance", () => {
+  const actions = readFileSync("app/(admin)/admin/deals/deal-finance-actions.ts", "utf8")
+  const cancelStart = actions.indexOf("export async function cancelNativeDealOrder")
+  const cancelEnd = actions.indexOf("export async function markFinanceRowPaid")
+  const cancel = actions.slice(cancelStart, cancelEnd)
+  assert.equal(cancel.includes("voidXeroInvoiceForOrder"), false)
+  assert.match(cancel, /p_xero_void_confirmed: false/)
+  assert.match(cancel, /The Xero invoice was left for finance/)
+
+  const migration = readFileSync(
+    "supabase/migrations/20261014100000_cancel_leaves_xero_invoice.sql",
+    "utf8",
+  )
+  assert.match(migration, /drop trigger if exists native_order_xero_void_confirmation_trg/)
+  assert.doesNotMatch(migration, /xero_invoice_must_be_voided_first/)
+  assert.match(migration, /paid_or_delivered_order_cannot_be_cancelled/)
+  assert.match(migration, /xero_invoice_left_for_finance/)
+  assert.match(migration, /status not in \('paid', 'delivered', 'cancelled'\)/)
+
+  const xero = readFileSync("lib/integrations/xero/invoices.ts", "utf8")
+  assert.match(xero, /function cancelledCrmSale/)
+  assert.match(xero, /Deal cancellation does not use this/)
+  const paidStart = xero.indexOf("export async function markPortalInvoicePaidFromXero")
+  const paid = xero.slice(paidStart)
+  assert.match(paid, /inv\.status === "cancelled"/)
+  assert.match(paid, /orderStatus === "cancelled"/)
+  assert.match(paid, /deal\?\.stage === "cancelled"/)
+})
+
 test("agent My Bookings prefers a delivered invoice over a paid one", () => {
   const chosen = pickPreferredInvoice([
     { status: "paid" },

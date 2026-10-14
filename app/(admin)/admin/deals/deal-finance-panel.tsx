@@ -47,10 +47,10 @@ export function DealFinancePanel({
   function cancelOrder() {
     if (!deal.order_id) return
     const reason = window.prompt(
-      "Cancellation reason. The Xero invoice will be voided and committed stock restored:",
+      "Cancellation reason. The order will be cancelled and committed stock restored. The Xero invoice stays open for finance to update in Xero:",
     )
     if (!reason?.trim()) return
-    if (!window.confirm("Cancel this order and restore all stock?")) return
+    if (!window.confirm("Cancel this order and restore all stock? The Xero invoice will not be voided.")) return
     run(() =>
       cancelNativeDealOrder({
         dealId: deal.id,

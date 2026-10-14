@@ -599,6 +599,16 @@ export async function cancelAdminOrder(orderId: string): Promise<ActionResult> {
         message: "Stock cannot be restored because supplier fulfilment has already started.",
       }
     }
+    if (
+      msg.includes("xero_invoice_must_be_voided_first") ||
+      msg.includes("verified_xero_void_confirmation_required")
+    ) {
+      return {
+        ok: false,
+        message:
+          "This order still has a Xero invoice attached. Apply the latest database update so cancellation can leave that invoice for finance.",
+      }
+    }
     if (shouldUseRestatementSafeOrderCancel(msg)) {
       try {
         const admin = createAdminClient()
@@ -618,6 +628,16 @@ export async function cancelAdminOrder(orderId: string): Promise<ActionResult> {
         }
         const { error: statusError } = await admin.from("orders").update({ status: "cancelled" }).eq("id", id)
         if (statusError) return { ok: false, message: statusError.message }
+        const { error: invoiceError } = await admin
+          .from("invoices")
+          .update({
+            status: "cancelled",
+            cancelled_at: new Date().toISOString(),
+            reconciliation_note: "Order cancelled. Xero invoice left for finance.",
+          })
+          .eq("order_id", id)
+          .in("status", ["awaiting_invoice", "awaiting_payment"])
+        if (invoiceError) return { ok: false, message: invoiceError.message }
         if (orderBefore?.id) {
           await enqueueOpportunityOutcomeServer(String(orderBefore.id), "lost")
         }

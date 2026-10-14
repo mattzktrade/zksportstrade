@@ -9,7 +9,6 @@ import {
   prepareXeroInvoiceReplacement,
   reconcileXeroInvoiceForOrder,
   resendXeroInvoiceForOrder,
-  voidXeroInvoiceForOrder,
 } from "@/lib/integrations/xero/invoices"
 import { enqueueInvoiceCreateServer, enqueueInvoiceReplaceServer } from "@/lib/integrations/enqueue-server"
 import { scheduleOutboxDrain } from "@/lib/integrations/schedule-drain"
@@ -45,6 +44,12 @@ function cancelOrderErrorMessage(detail: string): string {
   }
   if (detail.includes("allocation_fulfilment_locked")) {
     return "Stock cannot be restored because supplier fulfilment has already started."
+  }
+  if (
+    detail.includes("xero_invoice_must_be_voided_first") ||
+    detail.includes("verified_xero_void_confirmation_required")
+  ) {
+    return "This order still has a Xero invoice attached. Apply the latest database update so cancellation can leave that invoice for finance."
   }
   return detail
 }
@@ -113,7 +118,6 @@ export async function cancelNativeDealOrder(input: {
   if (!gate) return { ok: false, message: "Finance permission is required." }
   if (!input.reason.trim()) return { ok: false, message: "A cancellation reason is required." }
   try {
-    await voidXeroInvoiceForOrder(input.orderId)
     const cancellable = await assertOrderCanBeCancelled(input.orderId)
     if (cancellable.alreadyCancelled) {
       revalidatePath("/admin/deals")
@@ -126,7 +130,7 @@ export async function cancelNativeDealOrder(input: {
       const { error } = await gate.supabase.rpc("admin_cancel_native_deal_order", {
         p_order_id: input.orderId,
         p_reason: input.reason.trim(),
-        p_xero_void_confirmed: true,
+        p_xero_void_confirmed: false,
       })
       if (error) {
         if (!shouldUseRestatementSafeOrderCancel(postgresErrorText(error))) {
@@ -136,7 +140,10 @@ export async function cancelNativeDealOrder(input: {
         await syncBookingFormDealInventory(input.dealId, "native_deal_order_cancelled")
         revalidatePath("/admin/deals")
         revalidatePath("/admin/orders")
-        return { ok: true, message: "Xero invoice voided, order cancelled, and stock restored." }
+        return {
+          ok: true,
+          message: "Order cancelled and stock restored. The Xero invoice was left for finance.",
+        }
       }
     }
     await releaseOrderStockSkippingRestatedCogs(
@@ -151,7 +158,10 @@ export async function cancelNativeDealOrder(input: {
     await syncBookingFormDealInventory(input.dealId, "native_deal_order_cancelled")
     revalidatePath("/admin/deals")
     revalidatePath("/admin/orders")
-    return { ok: true, message: "Xero invoice voided, order cancelled, and stock restored." }
+    return {
+      ok: true,
+      message: "Order cancelled and stock restored. The Xero invoice was left for finance.",
+    }
   } catch (error) {
     return { ok: false, message: cancelOrderErrorMessage(message(error)) }
   }
