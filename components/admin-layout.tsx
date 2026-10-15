@@ -33,7 +33,7 @@ import {
   Inbox,
   CircleHelp,
   Mail,
-  Bot,
+  MessagesSquare,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useEffect, useState } from "react"
@@ -86,7 +86,7 @@ const navigation: NavItem[] = [
     children: [
       { name: "Accounts", href: "/admin/leads", icon: Users },
       { name: "Enquiries", href: "/admin/enquiries", icon: Inbox },
-      { name: "Assistant", href: "/admin/assistant", icon: Bot },
+      { name: "Inbox", href: "/admin/assistant", icon: MessagesSquare },
       { name: "Deals", href: "/admin/deals", icon: BriefcaseBusiness },
       { name: "Contracts", href: "/admin/contracts", icon: FilePenLine },
       { name: "Sales tracker", href: "/admin/sales-tracker", icon: TrendingUp },
@@ -106,7 +106,7 @@ const navigation: NavItem[] = [
 const JUMP_KEYWORDS: Record<string, string> = {
   "/admin/leads": "leads clients companies contacts people prospects funnel",
   "/admin/enquiries": "enquiry enquiries sourcing inbound quote pipeline crm",
-  "/admin/assistant": "assistant whatsapp email inbox ai reply knowledge faq",
+  "/admin/assistant": "assistant whatsapp email inbox messages reply knowledge faq",
   "/admin/deals": "pipeline crm sales booking form",
   "/admin/contracts": "contracts inclusion booking form signature sign agreement client",
   "/admin/sales-tracker": "sales tracker revenue demand conversion event product stock planning",

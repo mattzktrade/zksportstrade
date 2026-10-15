@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { phonesMatch } from "@/lib/assistant/phone"
 import type {
   AssistantChannel,
   AssistantConversation,
@@ -61,14 +62,23 @@ export function mapAssistantConversation(row: ConversationRow): AssistantConvers
 }
 
 export async function findConversationByPhone(admin: Admin, digits: string): Promise<AssistantConversation | null> {
-  if (digits.length < 8) return null
+  const needle = digits.replace(/\D/g, "")
+  if (needle.length < 8) return null
+  const exact = await admin
+    .from("assistant_conversations")
+    .select("*")
+    .eq("channel", "whatsapp")
+    .eq("phone_digits", needle)
+    .maybeSingle()
+  if (exact.data) return mapConversation(exact.data as ConversationRow)
   const { data } = await admin
     .from("assistant_conversations")
     .select("*")
     .eq("channel", "whatsapp")
-    .eq("phone_digits", digits)
-    .maybeSingle()
-  return data ? mapConversation(data as ConversationRow) : null
+    .not("phone_digits", "is", null)
+    .limit(200)
+  const match = ((data ?? []) as ConversationRow[]).find((row) => phonesMatch(row.phone_digits, needle))
+  return match ? mapConversation(match) : null
 }
 
 export async function findConversationByEmail(admin: Admin, email: string): Promise<AssistantConversation | null> {
@@ -325,6 +335,32 @@ export async function countNeedsReview(admin: Admin): Promise<number> {
     .select("id", { count: "exact", head: true })
     .eq("status", "needs_review")
   return count ?? 0
+}
+
+export async function latestMessagePreviews(
+  admin: Admin,
+  conversationIds: string[],
+): Promise<Record<string, { body: string; direction: "inbound" | "outbound"; createdAt: string }>> {
+  const ids = [...new Set(conversationIds.filter(Boolean))]
+  const out: Record<string, { body: string; direction: "inbound" | "outbound"; createdAt: string }> = {}
+  if (ids.length === 0) return out
+  const { data, error } = await admin
+    .from("assistant_messages")
+    .select("conversation_id, body, direction, created_at")
+    .in("conversation_id", ids)
+    .order("created_at", { ascending: false })
+    .limit(800)
+  if (error) return out
+  for (const row of data ?? []) {
+    const id = String(row.conversation_id)
+    if (out[id]) continue
+    out[id] = {
+      body: String(row.body ?? ""),
+      direction: row.direction === "inbound" ? "inbound" : "outbound",
+      createdAt: String(row.created_at),
+    }
+  }
+  return out
 }
 
 export async function listInbox(

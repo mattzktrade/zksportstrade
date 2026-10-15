@@ -8,6 +8,7 @@ import {
 } from "@/lib/integrations/marketing-leads/outreach-labels"
 import { stopMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-stop"
 import {
+  listOutreachPlaceholders,
   outreachVarsFromSnapshot,
   outreachWhatsAppParameters,
   renderOutreachTemplate,
@@ -20,6 +21,7 @@ import {
   type MarketingOutreachStep,
 } from "@/lib/integrations/marketing-leads/outreach-types"
 import { sendWhatsAppTemplate } from "@/lib/integrations/whatsapp/send-template"
+import { recordOutreachOutbound } from "@/lib/assistant/record-outreach"
 
 type AdminClient = NonNullable<ReturnType<typeof createAdminClient>>
 
@@ -159,6 +161,18 @@ async function sendEmailChannel(
       subject,
       body,
     })
+    try {
+      await recordOutreachOutbound(admin, {
+        enrollment,
+        channel: "email",
+        body,
+        subject,
+        providerMessageId: result.id,
+        stage,
+      })
+    } catch (error) {
+      console.error("[marketing-outreach] inbox email record failed", error)
+    }
     return { status: "sent" }
   }
   if (result.skipped) {
@@ -217,7 +231,10 @@ async function sendWhatsAppChannel(
     toPhoneDigits: enrollment.phone_digits || enrollment.phone || "",
     templateName: step.whatsapp_template_name,
     language: step.whatsapp_template_language || "en",
-    bodyParameters: outreachWhatsAppParameters(step.whatsapp_body, vars),
+    bodyParameters: outreachWhatsAppParameters(step.whatsapp_body, vars).map((text, index) => ({
+      name: listOutreachPlaceholders(step.whatsapp_body)[index] ?? "",
+      text,
+    })),
   })
   if (result.ok) {
     await recordSend(admin, {
@@ -229,6 +246,17 @@ async function sendWhatsAppChannel(
       providerMessageId: result.id,
       body,
     })
+    try {
+      await recordOutreachOutbound(admin, {
+        enrollment,
+        channel: "whatsapp",
+        body,
+        providerMessageId: result.id,
+        stage,
+      })
+    } catch (error) {
+      console.error("[marketing-outreach] inbox WhatsApp record failed", error)
+    }
     return { status: "sent" }
   }
   if (result.skipped) {

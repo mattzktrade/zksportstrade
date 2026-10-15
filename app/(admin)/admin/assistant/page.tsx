@@ -1,45 +1,88 @@
 import Link from "next/link"
 import { requireAdmin } from "@/lib/admin/require-admin"
 import { hasCmsPermission } from "@/lib/auth/permissions"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
-import { Inbox, MessagesSquare, PauseCircle } from "lucide-react"
+import { Inbox, MessagesSquare, Reply } from "lucide-react"
 import { AdminPageHeader, AdminStatCard, AdminStats } from "@/components/admin/admin-page-kit"
+import { inboxWaitState, previewText } from "@/lib/assistant/inbox"
 import { mapAssistantSettings } from "@/lib/assistant/settings"
-import { ASSISTANT_KNOWLEDGE_HREF, ASSISTANT_READINESS_HREF, type AssistantStatus } from "@/lib/assistant/types"
+import { latestMessagePreviews } from "@/lib/assistant/store"
+import { ASSISTANT_KNOWLEDGE_HREF, ASSISTANT_READINESS_HREF } from "@/lib/assistant/types"
 import { AssistantInboxClient } from "./inbox-client"
 import { AssistantSettingsForm } from "./settings-form"
 
 export const dynamic = "force-dynamic"
 
-const STATUSES: Array<AssistantStatus | "all"> = ["all", "needs_review", "ai_active", "human_takeover", "closed"]
+const VIEWS = ["all", "waiting", "replied", "closed"] as const
+type InboxView = (typeof VIEWS)[number]
 
 export default async function AssistantInboxPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>
+  searchParams: Promise<{ view?: string; status?: string }>
 }) {
   const profile = await requireAdmin()
-  const { status: statusParam } = await searchParams
-  const status = STATUSES.includes(statusParam as AssistantStatus) ? (statusParam as AssistantStatus | "all") : "all"
+  const { view: viewParam, status: statusParam } = await searchParams
+  const view: InboxView = VIEWS.includes((viewParam || statusParam) as InboxView)
+    ? ((viewParam || statusParam) as InboxView)
+    : "all"
   const supabase = await createClient()
-  let query = supabase
-    .from("assistant_conversations")
-    .select("id, channel, status, identity_status, display_name, phone_digits, email, updated_at, last_client_message_at")
-    .order("updated_at", { ascending: false })
-    .limit(200)
-  if (status !== "all") query = query.eq("status", status)
-  const [{ data: rows }, { data: settingsRow }, { count: reviewCount }] = await Promise.all([
-    query,
+  const admin = createAdminClient()
+  const [{ data: rows }, { data: settingsRow }] = await Promise.all([
+    supabase
+      .from("assistant_conversations")
+      .select(
+        "id, channel, status, identity_status, display_name, phone_digits, email, updated_at, last_client_message_at, last_outbound_at",
+      )
+      .order("updated_at", { ascending: false })
+      .limit(200),
     supabase.from("assistant_settings").select("*").eq("id", "default").maybeSingle(),
-    supabase.from("assistant_conversations").select("id", { count: "exact", head: true }).eq("status", "needs_review"),
   ])
   const settings = mapAssistantSettings(settingsRow)
+  const conversations = rows ?? []
+  const previews = admin
+    ? await latestMessagePreviews(
+        admin,
+        conversations.map((row) => String(row.id)),
+      )
+    : {}
+
+  const mapped = conversations.map((row) => {
+    const wait = inboxWaitState({
+      lastClientMessageAt: row.last_client_message_at ? String(row.last_client_message_at) : null,
+      lastOutboundAt: row.last_outbound_at ? String(row.last_outbound_at) : null,
+    })
+    const preview = previews[String(row.id)]
+    return {
+      id: String(row.id),
+      channel: String(row.channel),
+      status: String(row.status),
+      wait,
+      name: String(row.display_name || row.email || row.phone_digits || "Client"),
+      preview: preview
+        ? `${preview.direction === "outbound" ? "You: " : ""}${previewText(preview.body)}`
+        : "No messages yet",
+      updatedAt: String(row.updated_at),
+    }
+  })
+
+  const filtered = mapped.filter((row) => {
+    if (view === "all") return true
+    if (view === "closed") return row.status === "closed"
+    if (view === "waiting") return row.status !== "closed" && row.wait === "waiting"
+    if (view === "replied") return row.status !== "closed" && row.wait === "replied"
+    return true
+  })
+
+  const waitingCount = mapped.filter((row) => row.status !== "closed" && row.wait === "waiting").length
+  const openReplied = mapped.filter((row) => row.status !== "closed" && row.wait === "replied").length
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-3 sm:p-4 lg:p-5">
       <AdminPageHeader
-        title="Sales assistant"
-        description="WhatsApp and email replies drafted from live stock, product copy, and the CRM. Auto-send only when it is sure."
+        title="Inbox"
+        description="WhatsApp and email in one place. Sent follow-ups show here, and you reply from the thread."
         action={
           <div className="flex flex-wrap gap-2">
             <Link
@@ -58,40 +101,30 @@ export default async function AssistantInboxPage({
         }
       />
       <AdminStats className="grid-cols-3">
+        <AdminStatCard icon={Reply} label="Waiting for a reply" value={String(waitingCount)} tone="blue" href="/admin/assistant?view=waiting" />
         <AdminStatCard
           icon={Inbox}
-          label="Needs review"
-          value={String(reviewCount ?? 0)}
+          label="They replied"
+          value={String(openReplied)}
           tone="amber"
-          href="/admin/assistant?status=needs_review"
+          href="/admin/assistant?view=replied"
         />
-        <AdminStatCard
-          icon={PauseCircle}
-          label="Auto-send"
-          value={settings.killSwitch ? "Paused" : settings.autoSendEnabled ? "On" : "Draft only"}
-          tone={settings.autoSendEnabled && !settings.killSwitch ? "green" : "blue"}
-        />
-        <AdminStatCard icon={MessagesSquare} label="Open threads" value={String((rows ?? []).length)} tone="red" />
+        <AdminStatCard icon={MessagesSquare} label="Open threads" value={String(mapped.filter((row) => row.status !== "closed").length)} tone="red" />
       </AdminStats>
-      <AssistantInboxClient
-        status={status}
-        rows={(rows ?? []).map((row) => ({
-          id: String(row.id),
-          channel: String(row.channel),
-          status: String(row.status),
-          identity: String(row.identity_status),
-          name: String(row.display_name || row.email || row.phone_digits || "Client"),
-          updatedAt: String(row.updated_at),
-        }))}
-      />
+      <AssistantInboxClient filter={view} rows={filtered} />
       {hasCmsPermission(profile, "settings.manage") ? (
-        <AssistantSettingsForm
-          autoSendEnabled={settings.autoSendEnabled}
-          killSwitch={settings.killSwitch}
-          allowPublishedTradePrices={settings.allowPublishedTradePrices}
-          notifyEmails={settings.notifyEmails.join(", ")}
-          debounceSeconds={settings.debounceSeconds}
-        />
+        <details className="rounded-xl border border-border bg-card p-4">
+          <summary className="cursor-pointer text-sm font-semibold text-foreground">Assistant settings</summary>
+          <div className="mt-3">
+            <AssistantSettingsForm
+              autoSendEnabled={settings.autoSendEnabled}
+              killSwitch={settings.killSwitch}
+              allowPublishedTradePrices={settings.allowPublishedTradePrices}
+              notifyEmails={settings.notifyEmails.join(", ")}
+              debounceSeconds={settings.debounceSeconds}
+            />
+          </div>
+        </details>
       ) : null}
     </div>
   )

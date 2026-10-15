@@ -1173,7 +1173,7 @@ export function EnquiriesClient({
                       href={`/admin/assistant/compose?deal=${selected.id}`}
                       className="mt-3 inline-flex min-h-11 items-center text-[11px] font-medium text-primary hover:underline sm:mt-2 sm:min-h-0"
                     >
-                      Draft with assistant
+                      Open messages
                     </Link>
                   </div>
                   <Link

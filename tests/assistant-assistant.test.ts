@@ -4,6 +4,7 @@ import { parseWhatsAppAssistantEvents } from "../lib/assistant/whatsapp-parse"
 import { parseAssistantEmailEvent } from "../lib/assistant/email-parse"
 import { classifyClientMessage } from "../lib/assistant/classify"
 import { pickIdentityMatch } from "../lib/assistant/identity"
+import { canSendWhatsAppReply, inboxWaitState, previewText } from "../lib/assistant/inbox"
 import { parseAssistantJson, buildAssistantSystemPrompt } from "../lib/assistant/llm"
 import { shouldPromoteQa, styleExampleFromEdit } from "../lib/assistant/learning"
 import { bookingFormPrepareCheck, detectAgreement } from "../lib/assistant/booking-form"
@@ -128,6 +129,20 @@ test("sensitive and booking classifications", () => {
   assert.equal(classifyClientMessage("Can we get a refund?").sensitive, true)
   assert.equal(classifyClientMessage("How much for 6?").wantsPrice, true)
   assert.equal(classifyClientMessage("please send the booking form").wantsBooking, true)
+})
+
+test("inbox shows waiting after we send and replied after they write back", () => {
+  assert.equal(inboxWaitState({ lastClientMessageAt: null, lastOutboundAt: "2026-10-15T10:00:00.000Z" }), "waiting")
+  assert.equal(
+    inboxWaitState({
+      lastClientMessageAt: "2026-10-15T11:00:00.000Z",
+      lastOutboundAt: "2026-10-15T10:00:00.000Z",
+    }),
+    "replied",
+  )
+  assert.equal(canSendWhatsAppReply(null), false)
+  assert.equal(canSendWhatsAppReply(new Date().toISOString()), true)
+  assert.equal(previewText("Hi Matt, thanks for your enquiry about 3 Day Paddock Club."), "Hi Matt, thanks for your enquiry about 3 Day Paddock Club.")
 })
 
 test("migration creates assistant tables and seeds the sales policy", () => {

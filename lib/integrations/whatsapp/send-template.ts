@@ -13,7 +13,7 @@ export async function sendWhatsAppTemplate(input: {
   toPhoneDigits: string
   templateName: string
   language: string
-  bodyParameters: string[]
+  bodyParameters: Array<string | { name: string; text: string }>
 }): Promise<WhatsAppTemplateSendResult> {
   const config = getWhatsAppCloudConfig()
   if (!config) return { ok: false, skipped: "whatsapp_not_configured" }
@@ -28,7 +28,12 @@ export async function sendWhatsAppTemplate(input: {
       ? [
           {
             type: "body",
-            parameters: input.bodyParameters.map((text) => ({ type: "text", text })),
+            parameters: input.bodyParameters.map((item) => {
+              const text = typeof item === "string" ? item : item.text
+              const name = typeof item === "string" ? "" : item.name.trim()
+              if (!name || /^\d+$/.test(name)) return { type: "text", text }
+              return { type: "text", parameter_name: name, text }
+            }),
           },
         ]
       : undefined

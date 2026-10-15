@@ -250,8 +250,8 @@ export const HELP_TOPICS: HelpTopic[] = [
             href: "/admin/enquiries",
           },
           {
-            title: "Assistant",
-            body: "WhatsApp and email inbox. The assistant drafts replies from live stock and product copy. High-confidence answers can auto-send. Unsure replies, prices, and agreed deals wait for you. Booking forms are prepared here, then an admin sends them as usual.",
+            title: "Inbox",
+            body: "WhatsApp and email inbox. Sent marketing follow-ups and customer replies land here. You can type a reply in the thread. The assistant can also draft from live stock and product copy if you ask it to.",
             href: "/admin/assistant",
           },
           {
@@ -499,9 +499,9 @@ export const HELP_TOPICS: HelpTopic[] = [
   },
   {
     id: "assistant",
-    nav: "Assistant",
-    title: "Sales assistant",
-    summary: "Automatic WhatsApp and email replies from the CRM, with a human always able to take over.",
+    nav: "Inbox",
+    title: "Inbox",
+    summary: "WhatsApp and email in one place, with optional assistant drafts from the CRM.",
     keywords: [
       "assistant",
       "whatsapp",
@@ -516,7 +516,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     blocks: [
       {
         type: "p",
-        text: "Sales → Assistant is the inbox for client WhatsApp and business email. The assistant looks up live stock, product copy, FAQs, and the client’s CRM history. It sends only when it is sure. If it is not sure, it drafts a reply and emails the team.",
+        text: "Sales → Inbox is the inbox for client WhatsApp and business email. Sent marketing follow-ups show in the thread. The assistant can look up live stock, product copy, FAQs, and the client’s CRM history. It sends only when it is sure. If it is not sure, it drafts a reply and emails the team.",
       },
       {
         type: "steps",
@@ -546,7 +546,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           {
             q: "Where do WhatsApp messages go?",
-            a: "Sales → Assistant. The public ZK number needs WhatsApp Cloud API with the Business App still on the phone (coexistence). If someone types on the phone, that conversation is taken over until you resume the assistant.",
+            a: "Sales → Inbox. That is the assistant inbox. Sent follow-ups and customer replies show in the same WhatsApp thread. You reply from there. WhatsApp only allows a typed reply after the customer messages back.",
           },
           {
             q: "Can it send a booking form?",
@@ -554,7 +554,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             q: "How do I draft a reply on an existing enquiry?",
-            a: "Open the enquiry and use Draft with assistant, or Sales → Assistant → compose with the enquiry id. That creates a thread even if there is no inbound WhatsApp yet.",
+            a: "Open the enquiry and use Open messages, or Sales → Inbox. That opens the thread even if they have not replied yet.",
           },
         ],
       },
