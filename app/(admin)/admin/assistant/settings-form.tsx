@@ -50,7 +50,7 @@ export function AssistantSettingsForm(props: {
         Allow quoting published trade prices
       </label>
       <label className="block text-[12px] text-muted-foreground">
-        Notify
+        Notify when someone replies on WhatsApp (and later when the assistant needs help)
         <input
           className="mt-1 w-full rounded-md border border-border px-2 py-1.5 text-[13px] text-foreground"
           value={emails}

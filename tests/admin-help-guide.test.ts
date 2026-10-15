@@ -57,6 +57,9 @@ describe("admin help guide", () => {
     assert.ok(assistant.topics.some((topic) => topic.id === "assistant"))
     assert.ok(assistant.questions.some((item) => /whatsapp/i.test(item.q) || /whatsapp/i.test(item.a)))
 
+    const waNotify = searchHelp("replies on WhatsApp")
+    assert.ok(waNotify.questions.some((item) => /email when someone replies on WhatsApp/i.test(item.q)))
+
     const emailReplies = searchHelp("email replies")
     assert.ok(emailReplies.topics.some((topic) => topic.id === "assistant"))
     assert.ok(emailReplies.questions.some((item) => /email replies/i.test(item.q)))

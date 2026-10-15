@@ -1,10 +1,17 @@
 import { suggestedEnquiryAction } from "@/lib/crm/deal-pipeline"
 import { markEnquiryClientReplied } from "@/lib/crm/enquiry-replied"
+import { sendAssistantStaffAlert } from "@/lib/assistant/notifications"
+import {
+  assistantWillAutoReplyFromSettings,
+  inWhatsAppReplyNotifyBurst,
+  whatsAppReplyNoticeDue,
+  whatsAppReplyPreview,
+} from "@/lib/assistant/reply-needed"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { classifyClientMessage, isLowContentMessage } from "@/lib/assistant/classify"
 import { displayNameForUnknownWhatsApp } from "@/lib/assistant/phone"
 import { resolveAssistantIdentity } from "@/lib/assistant/identity"
-import { loadAssistantSettings } from "@/lib/assistant/settings"
+import { effectiveKillSwitch, llmIsConfigured, loadAssistantSettings } from "@/lib/assistant/settings"
 import {
   findConversationByDeal,
   findConversationByEmail,
@@ -104,6 +111,7 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
   let conversation: AssistantConversation | null =
     (event.fromDigits ? await findConversationByPhone(admin, event.fromDigits) : null) ||
     (event.fromEmail ? await findConversationByEmail(admin, event.fromEmail) : null)
+  const previousLastClientAt = conversation?.lastClientMessageAt ?? null
 
   let identity = {
     status: (conversation?.identityStatus ?? "unknown") as "unique" | "new" | "ambiguous" | "unknown",
@@ -155,9 +163,22 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
       lastClientMessageAt: now.toISOString(),
     })
   } else {
+    const willAuto = assistantWillAutoReplyFromSettings(
+      { ...settings, killSwitch: effectiveKillSwitch(settings) },
+      {
+        channel: event.channel,
+        status: conversation.status,
+        llmConfigured: llmIsConfigured(),
+      },
+    )
     const patch: Record<string, unknown> = {
       last_client_message_at: now.toISOString(),
-      run_after_at: conversation.status === "human_takeover" ? null : runAfter,
+      run_after_at:
+        willAuto || event.channel === "whatsapp"
+          ? runAfter
+          : conversation.status === "human_takeover"
+            ? null
+            : runAfter,
       identity_status: identity.status,
       display_name: event.displayName || conversation.displayName,
     }
@@ -206,6 +227,44 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
       .in("enquiry_stage", ["new", "contacted"])
     if (classified.wantsBooking || classified.sensitive) {
       await updateConversation(admin, conversation.id, { status: "needs_review" })
+    }
+  }
+
+  if (event.channel === "whatsapp" && !inserted.duplicate) {
+    const willAuto = assistantWillAutoReplyFromSettings(
+      { ...settings, killSwitch: effectiveKillSwitch(settings) },
+      {
+        channel: conversation.channel,
+        status: conversation.status,
+        llmConfigured: llmIsConfigured(),
+      },
+    )
+    const noticeDue = whatsAppReplyNoticeDue({
+      channel: "whatsapp",
+      willAutoReply: willAuto,
+    })
+    if (noticeDue && !inWhatsAppReplyNotifyBurst(previousLastClientAt, now.getTime())) {
+      let dealReference: string | null = null
+      if (conversation.dealId) {
+        const { data: deal } = await admin.from("deals").select("reference").eq("id", conversation.dealId).maybeSingle()
+        dealReference = deal?.reference ? String(deal.reference) : null
+      }
+      const sent = await sendAssistantStaffAlert({
+        to: settings.notifyEmails,
+        conversationId: conversation.id,
+        clientName: conversation.displayName,
+        reason: "WhatsApp reply needs a staff response.",
+        draft: whatsAppReplyPreview(event.body, event.mediaType),
+        kind: "reply_needed",
+        dealReference,
+      })
+      if (sent.ok) {
+        await updateConversation(admin, conversation.id, { run_after_at: null })
+      } else {
+        console.error("[assistant-whatsapp] reply notify failed", sent.error)
+      }
+    } else if (noticeDue) {
+      await updateConversation(admin, conversation.id, { run_after_at: null })
     }
   }
 

@@ -324,7 +324,7 @@ export async function dueConversations(admin: Admin, limit = 10): Promise<Assist
   const { data, error } = await admin
     .from("assistant_conversations")
     .select("*")
-    .in("status", ["ai_active", "needs_review"])
+    .in("status", ["ai_active", "needs_review", "human_takeover"])
     .not("run_after_at", "is", null)
     .lte("run_after_at", now)
     .order("run_after_at", { ascending: true })

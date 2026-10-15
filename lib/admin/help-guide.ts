@@ -515,6 +515,7 @@ export const HELP_TOPICS: HelpTopic[] = [
       "replies",
       "outlook",
       "power automate",
+      "notify",
     ],
     blocks: [
       {
@@ -559,7 +560,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           {
             q: "Where do WhatsApp messages go?",
-            a: "Sales → Inbox. That is the assistant inbox. Sent follow-ups and customer replies show in the same WhatsApp thread. You reply from there. WhatsApp only allows a typed reply after the customer messages back.",
+            a: "Sales → Inbox. That is the assistant inbox. Sent follow-ups and customer replies show in the same WhatsApp thread. You reply from there. WhatsApp only allows a typed reply after the customer messages back. The notify list also gets an email when they reply and a person needs to answer.",
           },
           {
             q: "Can it send a booking form?",
@@ -568,6 +569,10 @@ export const HELP_TOPICS: HelpTopic[] = [
           {
             q: "How do I draft a reply on an existing enquiry?",
             a: "Open the enquiry and use Open messages, or Sales → Inbox. That opens the thread even if they have not replied yet.",
+          },
+          {
+            q: "Will I get an email when someone replies on WhatsApp?",
+            a: "Yes. The addresses in Inbox → Assistant settings get a short email with their message and a link to reply in Inbox. Replies a few minutes apart on the same thread only send one email. When the sales assistant can answer on its own later, that email will only go out if it needs help.",
           },
           {
             q: "Do email replies come into Inbox?",

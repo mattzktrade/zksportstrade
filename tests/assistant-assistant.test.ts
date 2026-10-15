@@ -14,6 +14,13 @@ import {
   type InboxRow,
 } from "../lib/assistant/inbox"
 import { parseAssistantJson, buildAssistantSystemPrompt } from "../lib/assistant/llm"
+import {
+  assistantWillAutoReply,
+  inWhatsAppReplyNotifyBurst,
+  whatsAppReplyNeededEmail,
+  whatsAppReplyNoticeDue,
+  whatsAppReplyPreview,
+} from "../lib/assistant/reply-needed"
 import { shouldPromoteQa, styleExampleFromEdit } from "../lib/assistant/learning"
 import { bookingFormPrepareCheck, detectAgreement } from "../lib/assistant/booking-form"
 import { readFileSync } from "node:fs"
@@ -167,6 +174,64 @@ test("model JSON parser rejects empty replies", () => {
   const prompt = buildAssistantSystemPrompt({ policy: "Never invent prices.", styleExamples: ["Hi James"], clientName: "James" })
   assert.match(prompt, /Never invent prices/)
   assert.match(prompt, /Hi James/)
+})
+
+test("WhatsApp reply emails fire until the assistant can auto-send", () => {
+  assert.equal(
+    assistantWillAutoReply({
+      channel: "whatsapp",
+      status: "human_takeover",
+      autoSendEnabled: true,
+      llmConfigured: true,
+      killSwitch: false,
+    }),
+    false,
+  )
+  assert.equal(
+    assistantWillAutoReply({
+      channel: "whatsapp",
+      status: "ai_active",
+      autoSendEnabled: false,
+      llmConfigured: false,
+      killSwitch: false,
+    }),
+    false,
+  )
+  assert.equal(
+    assistantWillAutoReply({
+      channel: "whatsapp",
+      status: "ai_active",
+      autoSendEnabled: true,
+      llmConfigured: true,
+      killSwitch: false,
+    }),
+    true,
+  )
+  assert.equal(
+    whatsAppReplyNoticeDue({ channel: "whatsapp", willAutoReply: false }),
+    true,
+  )
+  assert.equal(
+    whatsAppReplyNoticeDue({ channel: "email", willAutoReply: false }),
+    false,
+  )
+  assert.equal(
+    whatsAppReplyNoticeDue({ channel: "whatsapp", willAutoReply: true }),
+    false,
+  )
+  assert.equal(inWhatsAppReplyNotifyBurst(null), false)
+  assert.equal(inWhatsAppReplyNotifyBurst(new Date().toISOString()), true)
+  assert.equal(whatsAppReplyPreview("", "image"), "(photo or file)")
+  const email = whatsAppReplyNeededEmail({
+    clientName: "Kary",
+    preview: "Can you send a price?",
+    href: "https://zk-sports.trade/admin/assistant/abc",
+    dealReference: "DL1511",
+  })
+  assert.match(email.subject, /WhatsApp from Kary/)
+  assert.match(email.text, /Can you send a price/)
+  assert.match(email.text, /DL1511/)
+  assert.match(email.text, /Inbox/)
 })
 
 test("sensitive and booking classifications", () => {

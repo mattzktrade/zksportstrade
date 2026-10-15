@@ -4,6 +4,11 @@ import { classifyClientMessage, isLowContentMessage } from "@/lib/assistant/clas
 import { completeAssistantTurn, buildAssistantSystemPrompt } from "@/lib/assistant/llm"
 import { sendAssistantStaffAlert } from "@/lib/assistant/notifications"
 import { decideAssistantAction, withinCustomerWindow } from "@/lib/assistant/policy"
+import {
+  assistantWillAutoReplyFromSettings,
+  whatsAppReplyNoticeDue,
+  whatsAppReplyPreview,
+} from "@/lib/assistant/reply-needed"
 import { effectiveKillSwitch, llmIsConfigured, loadAssistantSettings } from "@/lib/assistant/settings"
 import {
   getConversation,
@@ -179,6 +184,45 @@ export async function runAssistantConversation(
   if (pending.length === 0 && messages.length === 0) {
     await updateConversation(admin, conversationId, { run_after_at: null })
     return { decision: "skipped", reason: "There is nothing in this thread to draft from." }
+  }
+
+  const willAuto = assistantWillAutoReplyFromSettings(
+    { ...settings, killSwitch: effectiveKillSwitch(settings) },
+    {
+      channel: conversation.channel,
+      status: conversation.status,
+      llmConfigured: llmIsConfigured(),
+    },
+  )
+  if (
+    !options?.forceDraft &&
+    whatsAppReplyNoticeDue({ channel: conversation.channel, willAutoReply: willAuto }) &&
+    pending.length > 0
+  ) {
+    const preview = whatsAppReplyPreview(
+      pending.map((row) => row.body).join("\n"),
+      pending[pending.length - 1]?.mediaType,
+    )
+    let dealReference: string | null = null
+    if (conversation.dealId) {
+      const { data: deal } = await admin.from("deals").select("reference").eq("id", conversation.dealId).maybeSingle()
+      dealReference = deal?.reference ? String(deal.reference) : null
+    }
+    await sendAssistantStaffAlert({
+      to: settings.notifyEmails,
+      conversationId,
+      clientName: conversation.displayName,
+      reason: "WhatsApp reply needs a staff response.",
+      draft: preview,
+      kind: "reply_needed",
+      dealReference,
+    })
+    await markMessagesProcessed(
+      admin,
+      pending.map((row) => row.id),
+    )
+    await updateConversation(admin, conversationId, { run_after_at: null, last_error: null })
+    return { decision: "escalated", reason: "Staff reply needed on WhatsApp." }
   }
 
   const draftContext =
