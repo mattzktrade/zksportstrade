@@ -114,18 +114,34 @@ export async function resumeAssistantConversation(
 
 export async function runAssistantNow(
   conversationId: string,
-): Promise<{ ok: true; reason: string } | { ok: false; message: string }> {
+): Promise<{ ok: true; reason: string; draft: string | null } | { ok: false; message: string }> {
   const profile = await requireAdmin()
   if (!hasCmsPermission(profile, "deals.manage")) return { ok: false, message: "Permission denied." }
   const admin = createAdminClient()
   if (!admin) return { ok: false, message: "Service role is not configured." }
   try {
     const result = await runAssistantConversation(admin, conversationId, { forceDraft: true })
+    const draft = await latestPendingDraft(admin, conversationId)
     revalidateAssistant(conversationId)
-    return { ok: true, reason: result.reason }
+    return { ok: true, reason: result.reason, draft: draft?.body ?? null }
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "Assistant failed." }
   }
+}
+
+export async function closeAssistantConversation(
+  conversationId: string,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const profile = await requireAdmin()
+  if (!hasCmsPermission(profile, "deals.manage")) return { ok: false, message: "Permission denied." }
+  const admin = createAdminClient()
+  if (!admin) return { ok: false, message: "Service role is not configured." }
+  await updateConversation(admin, conversationId, {
+    status: "closed",
+    run_after_at: null,
+  })
+  revalidateAssistant(conversationId)
+  return { ok: true }
 }
 
 export async function saveAssistantKnowledge(input: {

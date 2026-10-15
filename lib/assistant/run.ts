@@ -172,13 +172,26 @@ export async function runAssistantConversation(
   const settings = await loadAssistantSettings(admin)
   const messages = await listMessages(admin, conversationId)
   const pending = lastUnprocessedInbound(messages)
-  if (pending.length === 0) {
+  if (pending.length === 0 && !options?.forceDraft) {
     await updateConversation(admin, conversationId, { run_after_at: null })
     return { decision: "skipped", reason: "No new inbound messages." }
   }
+  if (pending.length === 0 && messages.length === 0) {
+    await updateConversation(admin, conversationId, { run_after_at: null })
+    return { decision: "skipped", reason: "There is nothing in this thread to draft from." }
+  }
 
-  const clientText = combinedClientText(messages)
-  const latest = pending[pending.length - 1]
+  const draftContext =
+    pending.length > 0
+      ? pending
+      : messages.filter((row) => row.direction === "inbound").slice(-4)
+  const clientText =
+    combinedClientText(draftContext.length ? draftContext : messages) ||
+    messages
+      .slice(-6)
+      .map((row) => `${row.direction === "outbound" ? "We said" : "They said"}: ${row.body}`)
+      .join("\n")
+  const latest = draftContext[draftContext.length - 1] ?? messages[messages.length - 1]
   const classified = classifyClientMessage(
     clientText,
     isLowContentMessage(latest.body, latest.mediaType),

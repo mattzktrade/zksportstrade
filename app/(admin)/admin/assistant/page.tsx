@@ -3,37 +3,31 @@ import { requireAdmin } from "@/lib/admin/require-admin"
 import { hasCmsPermission } from "@/lib/auth/permissions"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
-import { Inbox, MessagesSquare, Reply } from "lucide-react"
-import { AdminPageHeader, AdminStatCard, AdminStats } from "@/components/admin/admin-page-kit"
-import { inboxWaitState, previewText } from "@/lib/assistant/inbox"
+import { AdminPageHeader } from "@/components/admin/admin-page-kit"
+import { canSendWhatsAppReply, inboxWaitState, previewText, type InboxRow } from "@/lib/assistant/inbox"
 import { mapAssistantSettings } from "@/lib/assistant/settings"
 import { latestMessagePreviews } from "@/lib/assistant/store"
+import { listMarketingOutreachForDeals } from "@/lib/integrations/marketing-leads/outreach-store"
 import { ASSISTANT_KNOWLEDGE_HREF, ASSISTANT_READINESS_HREF } from "@/lib/assistant/types"
-import { AssistantInboxClient } from "./inbox-client"
+import { InboxWorkspace } from "./inbox-workspace"
 import { AssistantSettingsForm } from "./settings-form"
 
 export const dynamic = "force-dynamic"
 
-const VIEWS = ["all", "waiting", "replied", "closed"] as const
-type InboxView = (typeof VIEWS)[number]
-
 export default async function AssistantInboxPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; status?: string }>
+  searchParams: Promise<{ c?: string }>
 }) {
   const profile = await requireAdmin()
-  const { view: viewParam, status: statusParam } = await searchParams
-  const view: InboxView = VIEWS.includes((viewParam || statusParam) as InboxView)
-    ? ((viewParam || statusParam) as InboxView)
-    : "all"
+  const { c: selectedId } = await searchParams
   const supabase = await createClient()
   const admin = createAdminClient()
   const [{ data: rows }, { data: settingsRow }] = await Promise.all([
     supabase
       .from("assistant_conversations")
       .select(
-        "id, channel, status, identity_status, display_name, phone_digits, email, updated_at, last_client_message_at, last_outbound_at",
+        "id, channel, status, identity_status, display_name, phone_digits, email, deal_id, updated_at, last_client_message_at, last_outbound_at",
       )
       .order("updated_at", { ascending: false })
       .limit(200),
@@ -41,19 +35,23 @@ export default async function AssistantInboxPage({
   ])
   const settings = mapAssistantSettings(settingsRow)
   const conversations = rows ?? []
-  const previews = admin
-    ? await latestMessagePreviews(
-        admin,
-        conversations.map((row) => String(row.id)),
-      )
-    : {}
+  const dealIds = conversations.map((row) => (row.deal_id ? String(row.deal_id) : "")).filter(Boolean)
+  const [previews, outreach, dealsRes] = await Promise.all([
+    admin ? latestMessagePreviews(admin, conversations.map((row) => String(row.id))) : Promise.resolve({}),
+    dealIds.length > 0 ? listMarketingOutreachForDeals(dealIds) : Promise.resolve({}),
+    dealIds.length > 0
+      ? supabase.from("deals").select("id, reference").in("id", dealIds)
+      : Promise.resolve({ data: [] }),
+  ])
+  const dealRef = new Map((dealsRes.data ?? []).map((row) => [String(row.id), String(row.reference ?? "")]))
 
-  const mapped = conversations.map((row) => {
+  const mapped: InboxRow[] = conversations.map((row) => {
     const wait = inboxWaitState({
       lastClientMessageAt: row.last_client_message_at ? String(row.last_client_message_at) : null,
       lastOutboundAt: row.last_outbound_at ? String(row.last_outbound_at) : null,
     })
     const preview = previews[String(row.id)]
+    const dealId = row.deal_id ? String(row.deal_id) : null
     return {
       id: String(row.id),
       channel: String(row.channel),
@@ -64,25 +62,64 @@ export default async function AssistantInboxPage({
         ? `${preview.direction === "outbound" ? "You: " : ""}${previewText(preview.body)}`
         : "No messages yet",
       updatedAt: String(row.updated_at),
+      email: row.email ? String(row.email) : null,
+      phone: row.phone_digits ? String(row.phone_digits) : null,
+      dealId,
+      dealReference: dealId ? dealRef.get(dealId) || null : null,
+      outreachLabel: dealId ? outreach[dealId]?.label ?? null : null,
     }
   })
 
-  const filtered = mapped.filter((row) => {
-    if (view === "all") return true
-    if (view === "closed") return row.status === "closed"
-    if (view === "waiting") return row.status !== "closed" && row.wait === "waiting"
-    if (view === "replied") return row.status !== "closed" && row.wait === "replied"
-    return true
-  })
-
-  const waitingCount = mapped.filter((row) => row.status !== "closed" && row.wait === "waiting").length
-  const openReplied = mapped.filter((row) => row.status !== "closed" && row.wait === "replied").length
+  const selectedRow = selectedId ? conversations.find((row) => String(row.id) === selectedId) : null
+  const selectedMapped = selectedId ? mapped.find((row) => row.id === selectedId) ?? null : null
+  let selected = null
+  if (selectedRow && selectedMapped) {
+    const [{ data: messages }, { data: drafts }] = await Promise.all([
+      supabase
+        .from("assistant_messages")
+        .select("id, direction, sent_by, channel, body, media_type, created_at")
+        .eq("conversation_id", selectedMapped.id)
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("assistant_drafts")
+        .select("id, body, status, intent")
+        .eq("conversation_id", selectedMapped.id)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(1),
+    ])
+    const draft = drafts?.[0] ?? null
+    selected = {
+      conversationId: selectedMapped.id,
+      status: selectedMapped.status,
+      channel: selectedMapped.channel,
+      canSendWhatsApp: canSendWhatsAppReply(
+        selectedRow.last_client_message_at ? String(selectedRow.last_client_message_at) : null,
+      ),
+      displayName: selectedMapped.name,
+      email: selectedMapped.email,
+      phone: selectedMapped.phone,
+      dealId: selectedMapped.dealId,
+      dealReference: selectedMapped.dealReference,
+      outreachLabel: selectedMapped.outreachLabel,
+      messages: (messages ?? []).map((row) => ({
+        id: String(row.id),
+        direction: String(row.direction),
+        sentBy: String(row.sent_by),
+        channel: String(row.channel || selectedMapped.channel),
+        body: String(row.body ?? ""),
+        mediaType: row.media_type ? String(row.media_type) : null,
+        createdAt: String(row.created_at),
+      })),
+      draft: draft ? { id: String(draft.id), body: String(draft.body), intent: String(draft.intent) } : null,
+    }
+  }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5 p-3 sm:p-4 lg:p-5">
+    <div className="mx-auto max-w-[1400px] space-y-3 p-3 sm:p-4">
       <AdminPageHeader
         title="Inbox"
-        description="WhatsApp and email in one place. Sent follow-ups show here, and you reply from the thread."
+        description="Search and reply to WhatsApp and email. Draft with AI, then send when it looks right."
         action={
           <div className="flex flex-wrap gap-2">
             <Link
@@ -100,18 +137,7 @@ export default async function AssistantInboxPage({
           </div>
         }
       />
-      <AdminStats className="grid-cols-3">
-        <AdminStatCard icon={Reply} label="Waiting for a reply" value={String(waitingCount)} tone="blue" href="/admin/assistant?view=waiting" />
-        <AdminStatCard
-          icon={Inbox}
-          label="They replied"
-          value={String(openReplied)}
-          tone="amber"
-          href="/admin/assistant?view=replied"
-        />
-        <AdminStatCard icon={MessagesSquare} label="Open threads" value={String(mapped.filter((row) => row.status !== "closed").length)} tone="red" />
-      </AdminStats>
-      <AssistantInboxClient filter={view} rows={filtered} />
+      <InboxWorkspace rows={mapped} selectedId={selectedId ?? null} selected={selected} />
       {hasCmsPermission(profile, "settings.manage") ? (
         <details className="rounded-xl border border-border bg-card p-4">
           <summary className="cursor-pointer text-sm font-semibold text-foreground">Assistant settings</summary>

@@ -94,6 +94,10 @@ async function uniqueAccountName(admin: AdminClient, baseName: string, suffix: s
   return `${trimmed} (${suffix.slice(0, 8)})`.slice(0, 180)
 }
 
+export function accountSourceForAssistantChannel(channel: "whatsapp" | "email"): "other" {
+  return "other"
+}
+
 export async function createAccountAndContact(
   admin: AdminClient,
   input: { fullName: string; email?: string | null; phone?: string | null; source: "whatsapp" | "email" },
@@ -109,7 +113,7 @@ export async function createAccountAndContact(
       account_types: ["direct_client"],
       email,
       phone,
-      source: input.source,
+      source: accountSourceForAssistantChannel(input.source),
       lifecycle: "lead",
       lead_stage: "new",
       active: true,

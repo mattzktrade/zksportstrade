@@ -37,3 +37,64 @@ export function previewText(body: string, max = 90): string {
   if (!text) return "Empty message"
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
+
+export type InboxRow = {
+  id: string
+  channel: string
+  status: string
+  wait: InboxWaitState
+  name: string
+  preview: string
+  updatedAt: string
+  email: string | null
+  phone: string | null
+  dealId: string | null
+  dealReference: string | null
+  outreachLabel: string | null
+}
+
+export type InboxChannelFilter = "all" | "whatsapp" | "email"
+export type InboxViewFilter = "all" | "waiting" | "replied" | "closed"
+
+export function inboxSearchHaystack(row: InboxRow): string {
+  return [
+    row.name,
+    row.preview,
+    row.email,
+    row.phone,
+    row.dealReference,
+    row.outreachLabel,
+    channelLabel(row.channel),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+}
+
+export function inboxRowVisible(
+  row: InboxRow,
+  input: { query: string; channel: InboxChannelFilter; view: InboxViewFilter },
+): boolean {
+  if (input.channel !== "all" && row.channel !== input.channel) return false
+  if (input.view === "closed") return row.status === "closed"
+  if (row.status === "closed") return input.view === "all"
+  if (input.view === "waiting" && row.wait !== "waiting") return false
+  if (input.view === "replied" && row.wait !== "replied") return false
+  const query = input.query.trim().toLowerCase()
+  if (!query) return true
+  return inboxSearchHaystack(row).includes(query)
+}
+
+export function formatInboxTime(value: string, now = Date.now()): string {
+  const then = Date.parse(value)
+  if (!Number.isFinite(then)) return ""
+  const date = new Date(then)
+  const sameDay = new Date(now).toDateString() === date.toDateString()
+  if (sameDay) {
+    return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+  }
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (yesterday.toDateString() === date.toDateString()) return "Yesterday"
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" })
+}

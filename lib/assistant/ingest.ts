@@ -99,19 +99,32 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
   const settings = await loadAssistantSettings(admin)
   const now = new Date()
   const runAfter = new Date(now.getTime() + settings.debounceSeconds * 1000).toISOString()
-  const identity = await resolveAssistantIdentity(admin, {
-    phone: event.fromDigits,
-    email: event.fromEmail,
-    displayName:
-      event.channel === "whatsapp"
-        ? displayNameForUnknownWhatsApp(event.fromDigits ?? "", event.displayName)
-        : event.displayName || event.fromEmail || "Email client",
-    channel: event.channel === "cms" ? "email" : event.channel,
-  })
 
   let conversation: AssistantConversation | null =
     (event.fromDigits ? await findConversationByPhone(admin, event.fromDigits) : null) ||
     (event.fromEmail ? await findConversationByEmail(admin, event.fromEmail) : null)
+
+  let identity = {
+    status: (conversation?.identityStatus ?? "unknown") as "unique" | "new" | "ambiguous" | "unknown",
+    contacts: [] as Array<{ id: string; accountId: string; fullName: string; email: string | null; phone: string | null }>,
+    accountId: conversation?.accountId ?? null,
+    contactId: conversation?.contactId ?? null,
+  }
+  if (!conversation?.accountId) {
+    try {
+      identity = await resolveAssistantIdentity(admin, {
+        phone: event.fromDigits,
+        email: event.fromEmail,
+        displayName:
+          event.channel === "whatsapp"
+            ? displayNameForUnknownWhatsApp(event.fromDigits ?? "", event.displayName)
+            : event.displayName || event.fromEmail || "Email client",
+        channel: event.channel === "cms" ? "email" : event.channel,
+      })
+    } catch (error) {
+      console.error("[assistant-whatsapp] identity failed", error instanceof Error ? error.message : error)
+    }
+  }
 
   if (!conversation) {
     let dealId: string | null = null

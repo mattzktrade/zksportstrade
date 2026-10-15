@@ -1,10 +1,18 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { accountSourceForAssistantChannel } from "../lib/assistant/identity"
 import { parseWhatsAppAssistantEvents } from "../lib/assistant/whatsapp-parse"
 import { parseAssistantEmailEvent } from "../lib/assistant/email-parse"
 import { classifyClientMessage } from "../lib/assistant/classify"
 import { pickIdentityMatch } from "../lib/assistant/identity"
-import { canSendWhatsAppReply, inboxWaitState, previewText } from "../lib/assistant/inbox"
+import {
+  canSendWhatsAppReply,
+  formatInboxTime,
+  inboxRowVisible,
+  inboxWaitState,
+  previewText,
+  type InboxRow,
+} from "../lib/assistant/inbox"
 import { parseAssistantJson, buildAssistantSystemPrompt } from "../lib/assistant/llm"
 import { shouldPromoteQa, styleExampleFromEdit } from "../lib/assistant/learning"
 import { bookingFormPrepareCheck, detectAgreement } from "../lib/assistant/booking-form"
@@ -43,6 +51,11 @@ const whatsappBody = {
     },
   ],
 }
+
+test("assistant-created accounts use a CRM source the database allows", () => {
+  assert.equal(accountSourceForAssistantChannel("whatsapp"), "other")
+  assert.equal(accountSourceForAssistantChannel("email"), "other")
+})
 
 test("whatsapp parser stores customer text and phone echoes separately", () => {
   const events = parseWhatsAppAssistantEvents(whatsappBody)
@@ -129,6 +142,38 @@ test("sensitive and booking classifications", () => {
   assert.equal(classifyClientMessage("Can we get a refund?").sensitive, true)
   assert.equal(classifyClientMessage("How much for 6?").wantsPrice, true)
   assert.equal(classifyClientMessage("please send the booking form").wantsBooking, true)
+})
+
+test("inbox search can split WhatsApp from email and find a name", () => {
+  const whatsapp: InboxRow = {
+    id: "1",
+    channel: "whatsapp",
+    status: "human_takeover",
+    wait: "waiting",
+    name: "Matt Johnson",
+    preview: "You: Hi Matt, thanks for your enquiry",
+    updatedAt: "2026-10-15T12:00:00.000Z",
+    email: null,
+    phone: "447426610346",
+    dealId: null,
+    dealReference: null,
+    outreachLabel: "Stage 1 · WhatsApp sent",
+  }
+  const email: InboxRow = {
+    ...whatsapp,
+    id: "2",
+    channel: "email",
+    name: "Lesli Delsol",
+    preview: "Thanks for getting in touch",
+    phone: null,
+    email: "lesli@example.com",
+    dealReference: "DL0900",
+  }
+  assert.equal(inboxRowVisible(whatsapp, { query: "matt", channel: "all", view: "all" }), true)
+  assert.equal(inboxRowVisible(whatsapp, { query: "", channel: "email", view: "all" }), false)
+  assert.equal(inboxRowVisible(email, { query: "dl0900", channel: "email", view: "all" }), true)
+  assert.equal(inboxRowVisible(whatsapp, { query: "lesli", channel: "whatsapp", view: "waiting" }), false)
+  assert.match(formatInboxTime("2026-10-15T12:00:00.000Z", Date.parse("2026-10-15T18:00:00.000Z")), /\d{2}:\d{2}/)
 })
 
 test("inbox shows waiting after we send and replied after they write back", () => {

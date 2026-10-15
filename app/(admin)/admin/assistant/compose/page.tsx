@@ -14,5 +14,5 @@ export default async function AssistantComposePage({
   const dealId = deal?.trim() || ""
   if (!dealId) redirect("/admin/assistant")
   const conversation = await openCmsComposer(dealId)
-  redirect(`/admin/assistant/${conversation.id}`)
+  redirect(`/admin/assistant?c=${conversation.id}`)
 }
