@@ -7,6 +7,7 @@ import {
   type OutreachChannelOutcome,
 } from "@/lib/integrations/marketing-leads/outreach-labels"
 import { stopMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-stop"
+import { resolveOutreachInterestForDeal } from "@/lib/integrations/marketing-leads/outreach-interest"
 import {
   listOutreachPlaceholders,
   outreachVarsFromSnapshot,
@@ -118,11 +119,25 @@ async function recordSend(
   if (error && error.code !== "23505") throw new Error(error.message)
 }
 
+function outreachVarsForEnrollment(
+  enrollment: MarketingOutreachEnrollment,
+  interest: { event: string | null; packageName: string | null; quantity: number | null },
+) {
+  return outreachVarsFromSnapshot({
+    firstName: enrollment.first_name,
+    fullName: enrollment.full_name,
+    event: interest.event,
+    packageName: interest.packageName,
+    quantity: interest.quantity ?? enrollment.interest_quantity,
+  })
+}
+
 async function sendEmailChannel(
   admin: AdminClient,
   enrollment: MarketingOutreachEnrollment,
   step: MarketingOutreachStep,
   stage: MarketingOutreachStage,
+  interest: { event: string | null; packageName: string | null; quantity: number | null },
 ): Promise<OutreachChannelOutcome> {
   if (await alreadySent(admin, enrollment.id, stage, "email")) return { status: "sent", unchanged: true }
   if (!step.email_enabled) {
@@ -136,13 +151,7 @@ async function sendEmailChannel(
     })
     return { status: "skipped", skipReason: "email_disabled" }
   }
-  const vars = outreachVarsFromSnapshot({
-    firstName: enrollment.first_name,
-    fullName: enrollment.full_name,
-    event: enrollment.interest_event,
-    packageName: enrollment.interest_package,
-    quantity: enrollment.interest_quantity,
-  })
+  const vars = outreachVarsForEnrollment(enrollment, interest)
   const subject = renderOutreachTemplate(step.email_subject, vars)
   const body = renderOutreachTemplate(step.email_body, vars)
   const result = await sendMarketingOutreachEmail({
@@ -206,6 +215,7 @@ async function sendWhatsAppChannel(
   enrollment: MarketingOutreachEnrollment,
   step: MarketingOutreachStep,
   stage: MarketingOutreachStage,
+  interest: { event: string | null; packageName: string | null; quantity: number | null },
 ): Promise<OutreachChannelOutcome> {
   if (await alreadySent(admin, enrollment.id, stage, "whatsapp")) return { status: "sent", unchanged: true }
   if (!step.whatsapp_enabled) {
@@ -219,13 +229,7 @@ async function sendWhatsAppChannel(
     })
     return { status: "skipped", skipReason: "whatsapp_disabled" }
   }
-  const vars = outreachVarsFromSnapshot({
-    firstName: enrollment.first_name,
-    fullName: enrollment.full_name,
-    event: enrollment.interest_event,
-    packageName: enrollment.interest_package,
-    quantity: enrollment.interest_quantity,
-  })
+  const vars = outreachVarsForEnrollment(enrollment, interest)
   const body = renderOutreachTemplate(step.whatsapp_body, vars)
   const result = await sendWhatsAppTemplate({
     toPhoneDigits: enrollment.phone_digits || enrollment.phone || "",
@@ -325,8 +329,21 @@ async function processEnrollment(
   const step = steps.find((row) => row.stage === nextStage)
   if (!step) return { sent: 0, skipped: 0, failed: 1 }
 
-  const emailStatus = await sendEmailChannel(admin, enrollment, step, nextStage)
-  const whatsappStatus = await sendWhatsAppChannel(admin, enrollment, step, nextStage)
+  const interest = await resolveOutreachInterestForDeal(admin, enrollment.deal_id)
+  if (interest.event !== enrollment.interest_event || interest.packageName !== enrollment.interest_package) {
+    await admin
+      .from("marketing_outreach_enrollments")
+      .update({
+        interest_event: interest.event,
+        interest_package: interest.packageName,
+        interest_quantity: interest.quantity,
+        updated_at: now.toISOString(),
+      })
+      .eq("id", enrollment.id)
+  }
+
+  const emailStatus = await sendEmailChannel(admin, enrollment, step, nextStage, interest)
+  const whatsappStatus = await sendWhatsAppChannel(admin, enrollment, step, nextStage, interest)
   const counts = { sent: 0, skipped: 0, failed: 0 }
   for (const outcome of [emailStatus, whatsappStatus]) {
     if (outcome.unchanged) continue

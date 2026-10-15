@@ -14,6 +14,7 @@ import { AdminModalScrim } from "@/components/admin/admin-list-preview"
 import type { DealBasketSupplier } from "@/components/admin/deal-line-basket"
 import { DEAL_NEXT_ACTION_OPTIONS, DEAL_SOURCE_LABELS, DEAL_SOURCES, DEAL_STAGES, DEAL_STAGE_LABELS, canonicalDealSource, canonicalDealStage, dealConfirmedOffPlatform, dealSourceLabel, dealSourceTone, friendlyDealActivitySummary, type CrmAccountOption, type DealPackageOption, type DealStage } from "@/lib/crm/deal-types"
 import { adminPipelineHome, enquiryStageLabel, enquiryStageTone, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
+import { enquiryHasClientReply } from "@/lib/crm/enquiry-replied"
 import { nextActionForDealStage } from "@/lib/crm/deal-workflow"
 import type { DealAddressDraft, DealDetailPageData, DealFulfilmentClient } from "@/lib/crm/deal-detail"
 import type { StaffOption } from "@/lib/crm/lead-types"
@@ -494,6 +495,9 @@ export function DealDetailClient({
               <StatusPill tone={isEnquiryPipelineStage(deal.stage) ? enquiryStageTone(deal) : stageTone(deal.stage)}>
                 {isEnquiryPipelineStage(deal.stage) ? enquiryStageLabel(deal) : DEAL_STAGE_LABELS[deal.stage]}
               </StatusPill>
+              {isEnquiryPipelineStage(deal.stage) && enquiryHasClientReply(deal) ? (
+                <StatusPill tone="green">Replied</StatusPill>
+              ) : null}
             </div>
           }
         />

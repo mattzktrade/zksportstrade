@@ -82,11 +82,15 @@ export async function findConversationByPhone(admin: Admin, digits: string): Pro
 }
 
 export async function findConversationByEmail(admin: Admin, email: string): Promise<AssistantConversation | null> {
+  const needle = email.trim().toLowerCase()
+  if (!needle) return null
   const { data } = await admin
     .from("assistant_conversations")
     .select("*")
     .eq("channel", "email")
-    .eq("email", email)
+    .ilike("email", needle)
+    .order("updated_at", { ascending: false })
+    .limit(1)
     .maybeSingle()
   return data ? mapConversation(data as ConversationRow) : null
 }

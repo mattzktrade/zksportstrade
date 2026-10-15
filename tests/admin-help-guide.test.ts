@@ -57,6 +57,10 @@ describe("admin help guide", () => {
     assert.ok(assistant.topics.some((topic) => topic.id === "assistant"))
     assert.ok(assistant.questions.some((item) => /whatsapp/i.test(item.q) || /whatsapp/i.test(item.a)))
 
+    const emailReplies = searchHelp("email replies")
+    assert.ok(emailReplies.topics.some((topic) => topic.id === "assistant"))
+    assert.ok(emailReplies.questions.some((item) => /email replies/i.test(item.q)))
+
     const checkIn = searchHelp("check-in")
     assert.ok(checkIn.topics.some((topic) => topic.id === "after-sale" || topic.id === "questions"))
     assert.ok(checkIn.questions.some((item) => /check guests in/i.test(item.q)))

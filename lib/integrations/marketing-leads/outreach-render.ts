@@ -11,6 +11,16 @@ export const MARKETING_OUTREACH_PLACEHOLDERS = [
   "company",
 ] as const
 
+export function eventAndPackageFromEnquiryNotes(notes: string | null | undefined): {
+  event: string | null
+  packageName: string | null
+} {
+  const text = notes ?? ""
+  const event = /^Event:\s*(.+)$/im.exec(text)?.[1]?.trim() || null
+  const packageName = /^Package:\s*(.+)$/im.exec(text)?.[1]?.trim() || null
+  return { event: event || null, packageName: packageName || null }
+}
+
 export function firstNameFromFullName(fullName: string): string {
   const token = fullName.trim().split(/\s+/).find(Boolean) ?? ""
   return token || "there"

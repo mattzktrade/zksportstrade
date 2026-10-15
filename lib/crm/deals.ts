@@ -267,11 +267,13 @@ export async function getDealListRows(options?: {
   const baseSelect = `id, account_id, primary_contact_id, reference, stage, source, currency, total_amount, expected_close_date, next_action,
       next_action_due_at, loss_reason, hold_expires_at, do_not_expire, notes, created_at,
       updated_at, created_by, owner_profile_id, race_id, order_id, ledger_invoice_number, ${lineSelect}`
-  const enquirySelect = `id, account_id, primary_contact_id, reference, stage, source, enquiry_stage, enquiry_temperature, currency, total_amount, expected_close_date, next_action,
+  const enquirySelect = `id, account_id, primary_contact_id, reference, stage, source, enquiry_stage, enquiry_temperature, enquiry_replied_at, currency, total_amount, expected_close_date, next_action,
       next_action_due_at, loss_reason, hold_expires_at, do_not_expire, notes, created_at,
       updated_at, created_by, owner_profile_id, race_id, order_id, ledger_invoice_number, ${lineSelect}`
 
+  const enquiryNoReplied = enquirySelect.replace("enquiry_replied_at, ", "")
   const enquiryNoLedger = enquirySelect.replace("ledger_invoice_number, ", "")
+  const enquiryNoRepliedNoLedger = enquiryNoReplied.replace("ledger_invoice_number, ", "")
   const baseNoLedger = baseSelect.replace("ledger_invoice_number, ", "")
 
   async function load(select: string) {
@@ -289,6 +291,7 @@ export async function getDealListRows(options?: {
         source: string | null
         enquiry_stage?: string | null
         enquiry_temperature?: string | null
+        enquiry_replied_at?: string | null
         currency: string
         total_amount: number | string | null
         expected_close_date: string | null
@@ -315,12 +318,19 @@ export async function getDealListRows(options?: {
 
   let data: Awaited<ReturnType<typeof load>>["data"] = null
   let error: Awaited<ReturnType<typeof load>>["error"] = null
-  for (const select of [enquirySelect, enquiryNoLedger, baseSelect, baseNoLedger]) {
+  for (const select of [
+    enquirySelect,
+    enquiryNoReplied,
+    enquiryNoLedger,
+    enquiryNoRepliedNoLedger,
+    baseSelect,
+    baseNoLedger,
+  ]) {
     const result = await load(select)
     data = result.data
     error = result.error
     if (!error) break
-    if (!/enquiry_stage|enquiry_temperature|ledger_invoice_number|schema cache/i.test(error.message)) {
+    if (!/enquiry_stage|enquiry_temperature|enquiry_replied_at|ledger_invoice_number|schema cache/i.test(error.message)) {
       break
     }
   }
@@ -541,6 +551,7 @@ export async function getDealListRows(options?: {
             ? row.enquiry_temperature
             : null,
       }),
+      enquiry_replied_at: typeof row.enquiry_replied_at === "string" ? row.enquiry_replied_at : null,
       currency: row.currency,
       total_amount: Number(row.total_amount ?? 0),
       expected_close_date: row.expected_close_date,

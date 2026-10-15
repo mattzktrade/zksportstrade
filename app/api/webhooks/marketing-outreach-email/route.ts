@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server"
-import { createAdminClient } from "@/lib/supabase/admin"
-import { suggestedEnquiryAction } from "@/lib/crm/deal-pipeline"
-import { isOutreachStopKeyword } from "@/lib/integrations/marketing-leads/outreach-labels"
-import { findActiveOutreachByEmail } from "@/lib/integrations/marketing-leads/outreach-store"
-import { stopMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-stop"
-import { parseAssistantEmailEvent } from "@/lib/assistant/email-parse"
-import { ingestAssistantEvent } from "@/lib/assistant/ingest"
+import { getInboundEmailWebhookSecret } from "@/lib/assistant/email-inbound-config"
+import { handleInboundSalesEmail } from "@/lib/assistant/email-inbound"
 import { safeEqualStrings } from "@/lib/crypto/timing-safe"
 
 function secretFromRequest(request: Request): string {
@@ -17,7 +12,7 @@ function secretFromRequest(request: Request): string {
 }
 
 export async function POST(request: Request) {
-  const expected = process.env.MARKETING_OUTREACH_EMAIL_WEBHOOK_SECRET?.trim()
+  const expected = getInboundEmailWebhookSecret()
   if (!expected) {
     return NextResponse.json({ error: "Email reply webhook is not configured" }, { status: 503 })
   }
@@ -34,65 +29,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
   }
 
-  const email = extractReplyEmail(body)
-  const text = extractReplyText(body)
-  if (!email) return NextResponse.json({ ok: true, ignored: true })
-
-  const admin = createAdminClient()
-  if (!admin) return NextResponse.json({ ok: true, skipped: true })
-  const enrollment = await findActiveOutreachByEmail(admin, email)
-  if (enrollment) {
-    const reason = isOutreachStopKeyword(text) ? "stop_keyword" : "replied"
-    await stopMarketingOutreach(enrollment.deal_id, reason)
-    if (reason === "replied") {
-      await admin
-        .from("deals")
-        .update({
-          enquiry_stage: "responded",
-          next_action: suggestedEnquiryAction("responded"),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", enrollment.deal_id)
-        .in("enquiry_stage", ["new", "contacted"])
-    }
-  }
-
-  const assistantEvent = parseAssistantEmailEvent(body)
-  if (assistantEvent) {
-    try {
-      await ingestAssistantEvent(assistantEvent)
-    } catch (error) {
-      console.error("[assistant-email]", error instanceof Error ? error.message : "Ingest failed.")
-    }
-  }
-
-  return NextResponse.json({ ok: true, unmatched: !enrollment })
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null
-}
-
-function extractReplyEmail(body: unknown): string | null {
-  const root = asRecord(body)
-  if (!root) return null
-  const data = asRecord(root.data) ?? root
-  const from =
-    (typeof data.from === "string" && data.from) ||
-    (typeof asRecord(data.from)?.email === "string" && String(asRecord(data.from)?.email)) ||
-    (typeof data.sender === "string" && data.sender) ||
-    ""
-  const match = from.toLowerCase().match(/[^\s<>]+@[^\s<>]+/)
-  return match?.[0] ?? null
-}
-
-function extractReplyText(body: unknown): string {
-  const root = asRecord(body)
-  if (!root) return ""
-  const data = asRecord(root.data) ?? root
-  for (const key of ["text", "plain", "stripped_text", "body", "subject"]) {
-    const value = data[key]
-    if (typeof value === "string" && value.trim()) return value
-  }
-  return ""
+  const result = await handleInboundSalesEmail(body)
+  return NextResponse.json(result)
 }

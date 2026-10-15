@@ -9,8 +9,10 @@ import { mapAssistantSettings } from "@/lib/assistant/settings"
 import { latestMessagePreviews } from "@/lib/assistant/store"
 import { listMarketingOutreachForDeals } from "@/lib/integrations/marketing-leads/outreach-store"
 import { ASSISTANT_KNOWLEDGE_HREF, ASSISTANT_READINESS_HREF } from "@/lib/assistant/types"
+import { isInboundEmailWebhookConfigured } from "@/lib/assistant/email-inbound-config"
 import { InboxWorkspace } from "./inbox-workspace"
 import { AssistantSettingsForm } from "./settings-form"
+import { EmailRepliesSetup } from "./email-replies-setup"
 
 export const dynamic = "force-dynamic"
 
@@ -147,6 +149,7 @@ export default async function AssistantInboxPage({
         }
       />
       <InboxWorkspace rows={mapped} selectedId={selectedId ?? null} selected={selected} />
+      <EmailRepliesSetup configured={isInboundEmailWebhookConfigured()} />
       {hasCmsPermission(profile, "settings.manage") ? (
         <details className="rounded-xl border border-border bg-card p-4">
           <summary className="cursor-pointer text-sm font-semibold text-foreground">Assistant settings</summary>

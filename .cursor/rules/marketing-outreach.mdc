@@ -1,0 +1,23 @@
+---
+description: Marketing lead sequence, WhatsApp, and CRM email-reply wiring
+alwaysApply: true
+---
+
+# Marketing outreach
+
+- Sequence is for `source === "marketing"` only (Meta ingest). Do not enroll website or manual enquiries. Do not backfill older imported leads unless Matt asks.
+- Three stages, email + WhatsApp. Copy lives in `marketing_outreach_steps`. WhatsApp Cloud templates are `outreach_stage_1` / `outreach_stage_2` / `outreach_stage_3`, language `en`, named vars `first_name`, `package`, `event`. Never put hidden shell SKUs or yes/no answers in `{{package}}`.
+- WhatsApp number +971 58 534 6740 (Cloud API). Webhook `https://zk-sports.trade/api/webhooks/whatsapp`. Do not become a Meta Tech Provider. Leave `whatsapp_enabled` as staff set it in Sales → Templates; do not flip it off again after go-live unless asked.
+- Do not invent itineraries, prices, or on-ground contacts in sequence copy.
+
+# Email replies into Inbox (not finished)
+
+CRM can ingest sales@ replies at `POST /api/webhooks/assistant-email`. zk-sports.com MX stays on Outlook — do not change DNS.
+
+Still needed before email Inbox is live:
+
+1. Vercel Production env `ASSISTANT_EMAIL_WEBHOOK_SECRET` (same value in `.env.local` if testing locally).
+2. Power Automate on the sales@ mailbox: When a new email arrives (V3) → HTTP POST to `https://zk-sports.trade/api/webhooks/assistant-email` with headers `Content-Type: application/json` and `x-webhook-secret`, body `{ from, subject, text }`.
+3. HTTP in Power Automate is the paid connector. If it is locked, use a Microsoft-login Graph path instead of moving MX.
+
+Until that flow exists, sequence and Inbox email sends still go out from sales@; replies stay in Outlook. WhatsApp inbound already lands in Sales → Inbox.

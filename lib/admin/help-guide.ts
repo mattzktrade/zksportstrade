@@ -512,11 +512,24 @@ export const HELP_TOPICS: HelpTopic[] = [
       "knowledge",
       "faq",
       "brochure",
+      "replies",
+      "outlook",
+      "power automate",
     ],
     blocks: [
       {
         type: "p",
         text: "Sales → Inbox is the inbox for client WhatsApp and business email. Sent marketing follow-ups show in the thread. The assistant can look up live stock, product copy, FAQs, and the client’s CRM history. It sends only when it is sure. If it is not sure, it drafts a reply and emails the team.",
+      },
+      {
+        type: "steps",
+        title: "Get email replies into Inbox",
+        items: [
+          "Add ASSISTANT_EMAIL_WEBHOOK_SECRET in Vercel if it is not there yet.",
+          "In Power Automate, create “When a new email arrives (V3)” on the sales@ inbox.",
+          "Add an HTTP POST to https://zk-sports.trade/api/webhooks/assistant-email with header x-webhook-secret and a JSON body of from, subject, and text (the email body).",
+          "Save the flow. Do not change zk-sports.com DNS. Reply to a sequence email from a personal inbox and check Sales → Inbox.",
+        ],
       },
       {
         type: "steps",
@@ -555,6 +568,10 @@ export const HELP_TOPICS: HelpTopic[] = [
           {
             q: "How do I draft a reply on an existing enquiry?",
             a: "Open the enquiry and use Open messages, or Sales → Inbox. That opens the thread even if they have not replied yet.",
+          },
+          {
+            q: "Do email replies come into Inbox?",
+            a: "Yes, once the one-time Outlook Power Automate flow is on. Replies to sales@ from someone we already emailed, or a unique CRM contact, land in the same email thread. You reply from Inbox. Random sales@ mail stays in Outlook only.",
           },
         ],
       },

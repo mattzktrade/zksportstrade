@@ -7,6 +7,7 @@ import {
   pickMarketingRace,
   looksLikeUselessInterestLabel,
 } from "../lib/integrations/marketing-leads/match"
+import { packageQueriesFromNotes } from "../lib/integrations/marketing-leads/outreach-interest"
 import {
   parseMarketingLeadQuantity,
   parseMarketingLeadWebhookBody,
@@ -107,7 +108,7 @@ describe("marketing catalog matching", () => {
     assert.equal(parsed.ok, true)
     if (!parsed.ok) return
     assert.equal(parsed.payload.interest.quantity, 2)
-    assert.equal(looksLikeUselessInterestLabel(parsed.payload.interest.package ?? ""), true)
+    assert.equal(parsed.payload.interest.package, null)
     assert.ok(
       marketingPackageQueries(parsed.payload).some((query) => /club suite/i.test(query)),
     )
@@ -115,6 +116,17 @@ describe("marketing catalog matching", () => {
     const race = pickMarketingRace(marketingEventQueries(parsed.payload), mexicoRaces, new Date("2026-09-14T09:00:00Z"))
     const pkg = pickMarketingPackage(marketingPackageQueries(parsed.payload), mexicoPackages)
     assert.equal(race?.id, "mexico-2026")
+    assert.equal(pkg?.id, "mexico-2026-3-day-paddock-club-club-suite")
+  })
+
+  it("recovers Club Suite from Instant Form notes if the enquiry was linked to a single-ticket SKU", () => {
+    const notes = [
+      "Marketing lead (Meta)",
+      "Campaign: DF | Prospecting | Mexico",
+      "Form: ZK Sports Lead form - Mexico 2026",
+      "Paddock Club Club Suite 3 Days 8 500 Per Guest: Yes, that works for me",
+    ].join("\n")
+    const pkg = pickMarketingPackage(packageQueriesFromNotes(notes), mexicoPackages)
     assert.equal(pkg?.id, "mexico-2026-3-day-paddock-club-club-suite")
   })
 })

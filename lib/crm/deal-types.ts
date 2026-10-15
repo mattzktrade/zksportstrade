@@ -202,6 +202,7 @@ export type DealListRow = {
   source: string
   enquiry_stage: string | null
   enquiry_temperature: "warm" | "cold" | null
+  enquiry_replied_at: string | null
   currency: string
   total_amount: number
   expected_close_date: string | null

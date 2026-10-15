@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { missingOutreachRelation } from "@/lib/integrations/marketing-leads/outreach-labels"
+import { resolveOutreachInterestForDeal } from "@/lib/integrations/marketing-leads/outreach-interest"
 import { firstNameFromFullName } from "@/lib/integrations/marketing-leads/outreach-render"
 import { MARKETING_OUTREACH_SEQUENCE } from "@/lib/integrations/marketing-leads/outreach-types"
 import { normalizeMarketingPhone } from "@/lib/integrations/marketing-leads/parse"
@@ -19,10 +19,8 @@ export async function enrollMarketingOutreach(dealId: string): Promise<{ ok: boo
     .from("deals")
     .select(
       `
-      id, source, account_id, primary_contact_id, race_id, enquiry_stage,
-      crm_contacts!primary_contact_id ( id, full_name, email, phone ),
-      races ( name, season ),
-      deal_line_items ( quantity, packages ( name, races ( name, season ) ) )
+      id, source, account_id, primary_contact_id, race_id, enquiry_stage, notes,
+      crm_contacts!primary_contact_id ( id, full_name, email, phone )
     `,
     )
     .eq("id", dealId)
@@ -59,29 +57,7 @@ export async function enrollMarketingOutreach(dealId: string): Promise<{ ok: boo
     return { ok: true, enrolled: false, message: "No email or phone." }
   }
 
-  const line = one(
-    deal.deal_line_items as
-      | {
-          quantity: number
-          packages:
-            | { name: string; races: { name: string; season: number } | Array<{ name: string; season: number }> | null }
-            | Array<{ name: string; races: { name: string; season: number } | Array<{ name: string; season: number }> | null }>
-            | null
-        }
-      | Array<{
-          quantity: number
-          packages:
-            | { name: string; races: { name: string; season: number } | Array<{ name: string; season: number }> | null }
-            | Array<{ name: string; races: { name: string; season: number } | Array<{ name: string; season: number }> | null }>
-            | null
-        }>
-      | null,
-  )
-  const pkg = one(line?.packages ?? null)
-  const lineRace = one(pkg?.races ?? null)
-  const dealRace = one(deal.races as { name: string; season: number } | Array<{ name: string; season: number }> | null)
-  const race = lineRace ?? dealRace
-  const eventName = race ? eventSeasonLabel(race.name, race.season) : null
+  const interest = await resolveOutreachInterestForDeal(admin, dealId)
   const fullName = contact?.full_name?.trim() || "there"
 
   const now = new Date().toISOString()
@@ -100,9 +76,9 @@ export async function enrollMarketingOutreach(dealId: string): Promise<{ ok: boo
       email,
       phone,
       phone_digits: phoneDigits || null,
-      interest_event: eventName,
-      interest_package: pkg?.name ?? null,
-      interest_quantity: line?.quantity != null ? Math.floor(Number(line.quantity)) : null,
+      interest_event: interest.event,
+      interest_package: interest.packageName,
+      interest_quantity: interest.quantity,
     })
     .select("id")
     .maybeSingle()

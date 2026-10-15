@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server"
-import { createAdminClient } from "@/lib/supabase/admin"
-import { suggestedEnquiryAction } from "@/lib/crm/deal-pipeline"
-import { isOutreachStopKeyword } from "@/lib/integrations/marketing-leads/outreach-labels"
-import { findActiveOutreachByEmail } from "@/lib/integrations/marketing-leads/outreach-store"
-import { stopMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-stop"
+import { getInboundEmailWebhookSecret } from "@/lib/assistant/email-inbound-config"
+import { handleInboundSalesEmail } from "@/lib/assistant/email-inbound"
 import { safeEqualStrings } from "@/lib/crypto/timing-safe"
-import { parseAssistantEmailEvent } from "@/lib/assistant/email-parse"
-import { ingestAssistantEvent } from "@/lib/assistant/ingest"
 
 function secretFromRequest(request: Request): string {
   return (
@@ -16,16 +11,8 @@ function secretFromRequest(request: Request): string {
   )
 }
 
-function expectedEmailWebhookSecret(): string | null {
-  return (
-    process.env.ASSISTANT_EMAIL_WEBHOOK_SECRET?.trim() ||
-    process.env.MARKETING_OUTREACH_EMAIL_WEBHOOK_SECRET?.trim() ||
-    null
-  )
-}
-
 export async function POST(request: Request) {
-  const expected = expectedEmailWebhookSecret()
+  const expected = getInboundEmailWebhookSecret()
   if (!expected) {
     return NextResponse.json({ error: "Email reply webhook is not configured" }, { status: 503 })
   }
@@ -42,33 +29,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
   }
 
-  const event = parseAssistantEmailEvent(body)
-  const admin = createAdminClient()
-  if (!admin) return NextResponse.json({ ok: true, skipped: true })
-
-  if (event?.fromEmail) {
-    const enrollment = await findActiveOutreachByEmail(admin, event.fromEmail)
-    if (enrollment) {
-      const reason = isOutreachStopKeyword(event.body) ? "stop_keyword" : "replied"
-      await stopMarketingOutreach(enrollment.deal_id, reason)
-      if (reason === "replied") {
-        await admin
-          .from("deals")
-          .update({
-            enquiry_stage: "responded",
-            next_action: suggestedEnquiryAction("responded"),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", enrollment.deal_id)
-          .in("enquiry_stage", ["new", "contacted"])
-      }
-    }
-    try {
-      await ingestAssistantEvent(event)
-    } catch (error) {
-      console.error("[assistant-email]", error instanceof Error ? error.message : "Ingest failed.")
-    }
-  }
-
-  return NextResponse.json({ ok: true })
+  const result = await handleInboundSalesEmail(body)
+  return NextResponse.json(result)
 }

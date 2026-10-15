@@ -11,6 +11,12 @@ export function stripSurroundingQuotes(value: string): string {
 }
 
 export const DEFAULT_MARKETING_OUTREACH_FROM = "ZK Sports <sales@zk-sports.com>"
+
+export function getMarketingOutreachFromAddress(): string {
+  const dedicated = stripSurroundingQuotes(process.env.MARKETING_OUTREACH_FROM?.trim() ?? "")
+  return dedicated || DEFAULT_MARKETING_OUTREACH_FROM
+}
+
 export const DEFAULT_FINANCE_CC = "finance@zk-sports.com"
 export const DEFAULT_BOOKINGS_CC = "bookings@zk-sports.com"
 export const DEFAULT_CHELLEY_CC = "chelley@zk-sports.com"

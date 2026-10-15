@@ -9,6 +9,11 @@ import {
   shouldAdvanceOutreachStage,
 } from "../lib/integrations/marketing-leads/outreach-labels"
 import {
+  isCustomerFacingPackageName,
+  resolveOutreachInterest,
+} from "../lib/integrations/marketing-leads/outreach-interest"
+import {
+  eventAndPackageFromEnquiryNotes,
   outreachTemplateToMetaBody,
   outreachVarsFromSnapshot,
   outreachWhatsAppParameters,
@@ -69,6 +74,56 @@ describe("marketing outreach copy", () => {
       packageName: "Club Suite",
     })
     assert.deepEqual(outreachWhatsAppParameters(template, vars), ["Kary", "Club Suite", "Mexico"])
+  })
+
+  it("reads event and package from the Meta enquiry notes when no product is linked yet", () => {
+    assert.deepEqual(
+      eventAndPackageFromEnquiryNotes(
+        "Marketing lead (Meta)\nPackage: 3 Day Paddock Club\nEvent: 2026 Mexico City Grand Prix\nTickets: 2",
+      ),
+      { event: "2026 Mexico City Grand Prix", packageName: "3 Day Paddock Club" },
+    )
+    assert.deepEqual(eventAndPackageFromEnquiryNotes("No catalogue match"), {
+      event: null,
+      packageName: null,
+    })
+  })
+
+  it("uses the matched race and Club Suite, never a single-ticket SKU or a yes-answer", () => {
+    assert.equal(isCustomerFacingPackageName("3 Day Paddock Club (Club Suite)"), true)
+    assert.equal(isCustomerFacingPackageName("3 Day Paddock Club - House 44 – Saturday Single Ticket"), false)
+    const mexicoNotes = [
+      "Marketing lead (Meta)",
+      "Campaign: DF | Prospecting | Mexico",
+      "Form: ZK Sports Lead form - Mexico 2026",
+      "Package: Yes, that works for me",
+      "Paddock Club Club Suite 3 Days 8 500 Per Guest: Yes, that works for me",
+    ].join("\n")
+    assert.deepEqual(
+      resolveOutreachInterest({
+        raceName: "Mexico City Grand Prix",
+        raceSeason: 2026,
+        catalogPackageNames: ["3 Day Paddock Club - House 44 – Saturday Single Ticket"],
+        rematchedPackageName: "3 Day Paddock Club (Club Suite)",
+        notes: mexicoNotes,
+      }),
+      {
+        event: "2026 Mexico City Grand Prix",
+        packageName: "3 Day Paddock Club (Club Suite)",
+      },
+    )
+    assert.deepEqual(
+      resolveOutreachInterest({
+        raceName: "Mexico City Grand Prix",
+        raceSeason: 2026,
+        catalogPackageNames: [],
+        notes: mexicoNotes,
+      }),
+      {
+        event: "2026 Mexico City Grand Prix",
+        packageName: "Paddock Club Club Suite 3 Days 8 500 Per Guest",
+      },
+    )
   })
 })
 

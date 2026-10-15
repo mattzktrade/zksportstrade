@@ -81,6 +81,37 @@ test("email parser reads Resend-style inbound payloads", () => {
   assert.equal(event?.providerMessageId, "msg-1")
 })
 
+test("email parser reads Outlook and Graph payloads and skips our own mailbox", () => {
+  const outlook = parseAssistantEmailEvent({
+    from: "matt@zk-sports.com",
+    subject: "Re: Mexico",
+    text: "<p>Yes please send 4</p><br>On Monday, ZK Sports wrote:<br>Hello Matt",
+  })
+  assert.equal(outlook?.fromEmail, "matt@zk-sports.com")
+  assert.match(outlook?.body ?? "", /Yes please send 4/)
+  assert.doesNotMatch(outlook?.body ?? "", /Hello Matt/)
+
+  const graph = parseAssistantEmailEvent({
+    from: { emailAddress: { address: "jane@agency.com", name: "Jane Smith" } },
+    subject: "Paddock Club",
+    body: { content: "<p>Can you hold two?</p>", contentType: "html" },
+    internetMessageId: "<graph-1@outlook>",
+  })
+  assert.equal(graph?.fromEmail, "jane@agency.com")
+  assert.equal(graph?.displayName, "Jane Smith")
+  assert.match(graph?.body ?? "", /hold two/)
+  assert.equal(graph?.providerMessageId, "<graph-1@outlook>")
+
+  assert.equal(
+    parseAssistantEmailEvent({
+      from: "ZK Sports <sales@zk-sports.com>",
+      subject: "Stage 1",
+      text: "Our own outbound copy",
+    }),
+    null,
+  )
+})
+
 test("identity match is unique, new, or ambiguous", () => {
   assert.equal(pickIdentityMatch([]).status, "new")
   assert.equal(

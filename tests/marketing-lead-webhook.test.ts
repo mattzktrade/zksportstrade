@@ -96,6 +96,18 @@ describe("marketing lead payload", () => {
     assert.equal(meta.payload.leadId, "1234567890")
     assert.equal(meta.payload.contact.fullName, "Alan Turing")
     assert.equal(meta.payload.interest.event, "British GP")
+
+    const named = parseMarketingLeadWebhookBody({
+      leadId: "lead-named",
+      fullName: "Ada Lovelace",
+      email: "ada@example.com",
+      which_event: "Mexico City Grand Prix",
+      package: "Yes, that works for me",
+    })
+    assert.equal(named.ok, true)
+    if (!named.ok) return
+    assert.equal(named.payload.interest.event, "Mexico City Grand Prix")
+    assert.equal(named.payload.interest.package, null)
   })
 
   it("requires lead id, name, and email or phone", () => {

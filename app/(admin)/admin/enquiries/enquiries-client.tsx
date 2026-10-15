@@ -92,6 +92,7 @@ import {
   type EnquiryStageTabId,
   type EnquiryTemperature,
 } from "@/lib/crm/deal-pipeline"
+import { enquiryHasClientReply } from "@/lib/crm/enquiry-replied"
 import type { StaffOption } from "@/lib/crm/lead-types"
 import { adminAccountPath, adminContactPath } from "@/lib/crm/profile-links"
 import { formatMoneyCompact } from "@/lib/format/money"
@@ -146,6 +147,11 @@ function sourceKind(source: string): { label: string; className: string } {
     default:
       return { label: "Other", className: "bg-slate-100 text-slate-600" }
   }
+}
+
+function EnquiryRepliedBadge({ deal }: { deal: Pick<DealListRow, "enquiry_replied_at"> }) {
+  if (!enquiryHasClientReply(deal)) return null
+  return <StatusPill tone="green">Replied</StatusPill>
 }
 
 function EnquiryOutreachLine({ outreach }: { outreach?: EnquiryOutreachBadge }) {
@@ -1045,7 +1051,10 @@ export function EnquiriesClient({
                         ) : null}
                       </td>
                       <td className="px-3 py-3">
-                        <StatusPill tone={enquiryStageTone(deal)}>{enquiryStageLabel(deal)}</StatusPill>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <StatusPill tone={enquiryStageTone(deal)}>{enquiryStageLabel(deal)}</StatusPill>
+                          <EnquiryRepliedBadge deal={deal} />
+                        </div>
                         <EnquiryOutreachLine outreach={followUpFor(deal)} />
                       </td>
                       <td className="whitespace-nowrap px-3 py-3">
@@ -1136,7 +1145,10 @@ export function EnquiriesClient({
                     ) : null}
                   </div>
                   <div className="shrink-0 text-right">
-                    <StatusPill tone={enquiryStageTone(deal)}>{enquiryStageLabel(deal)}</StatusPill>
+                    <div className="flex flex-wrap items-center justify-end gap-1">
+                      <StatusPill tone={enquiryStageTone(deal)}>{enquiryStageLabel(deal)}</StatusPill>
+                      <EnquiryRepliedBadge deal={deal} />
+                    </div>
                     <EnquiryOutreachLine outreach={followUpFor(deal)} />
                     {enquiryAttentionReason(deal) ? (
                       <p className="mt-1 text-[8px] font-medium text-red-600">{enquiryAttentionReason(deal)}</p>
@@ -1195,6 +1207,7 @@ export function EnquiriesClient({
 
                 <div className="flex flex-wrap gap-1.5">
                   <StatusPill tone={enquiryStageTone(selected)}>{enquiryStageLabel(selected)}</StatusPill>
+                  <EnquiryRepliedBadge deal={selected} />
                   <StatusPill tone={enquiryTemperatureTone(enquiryTemperatureFromDeal(selected))}>
                     {enquiryTemperatureLabel(enquiryTemperatureFromDeal(selected))}
                   </StatusPill>

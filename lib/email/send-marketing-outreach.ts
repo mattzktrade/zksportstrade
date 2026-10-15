@@ -1,7 +1,7 @@
 import { Resend } from "resend"
 import {
-  DEFAULT_MARKETING_OUTREACH_FROM,
   NEVER_CC_ADDRESSES,
+  getMarketingOutreachFromAddress,
   getResendApiKey,
   stripSurroundingQuotes,
 } from "@/lib/email/config"
@@ -11,18 +11,13 @@ export type MarketingOutreachEmailResult =
   | { ok: true; id: string | null }
   | { ok: false; skipped?: string; error?: string }
 
-function marketingFromAddress(): string {
-  const dedicated = stripSurroundingQuotes(process.env.MARKETING_OUTREACH_FROM?.trim() ?? "")
-  return dedicated || DEFAULT_MARKETING_OUTREACH_FROM
-}
-
 export async function sendMarketingOutreachEmail(input: {
   to: string
   subject: string
   text: string
 }): Promise<MarketingOutreachEmailResult> {
   const apiKey = getResendApiKey()
-  const from = marketingFromAddress()
+  const from = getMarketingOutreachFromAddress()
   const to = input.to.trim()
   if (!apiKey || !from) {
     return { ok: false, skipped: "email_not_configured" }

@@ -2,6 +2,7 @@ import { createHmac } from "crypto"
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { suggestedEnquiryAction } from "@/lib/crm/deal-pipeline"
+import { markEnquiryClientReplied } from "@/lib/crm/enquiry-replied"
 import { getWhatsAppAppSecret, getWhatsAppWebhookVerifyToken } from "@/lib/integrations/marketing-leads/outreach-config"
 import { isOutreachStopKeyword } from "@/lib/integrations/marketing-leads/outreach-labels"
 import { findActiveOutreachByPhone } from "@/lib/integrations/marketing-leads/outreach-store"
@@ -57,6 +58,7 @@ export async function POST(request: Request) {
     const reason = isOutreachStopKeyword(text) ? "stop_keyword" : "replied"
     await stopMarketingOutreach(enrollment.deal_id, reason)
     if (reason === "replied") {
+      await markEnquiryClientReplied(admin, enrollment.deal_id)
       await admin
         .from("deals")
         .update({

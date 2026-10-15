@@ -1,4 +1,5 @@
 import { suggestedEnquiryAction } from "@/lib/crm/deal-pipeline"
+import { markEnquiryClientReplied } from "@/lib/crm/enquiry-replied"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { classifyClientMessage, isLowContentMessage } from "@/lib/assistant/classify"
 import { displayNameForUnknownWhatsApp } from "@/lib/assistant/phone"
@@ -193,6 +194,7 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
 
   if (conversation.dealId && !inserted.duplicate) {
     const classified = classifyClientMessage(event.body, isLowContentMessage(event.body, event.mediaType))
+    await markEnquiryClientReplied(admin, conversation.dealId, now)
     await admin
       .from("deals")
       .update({

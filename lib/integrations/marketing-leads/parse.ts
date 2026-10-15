@@ -255,14 +255,24 @@ export function parseMarketingLeadWebhookBody(body: unknown): MarketingLeadParse
     return { ok: false, error: "Email or phone is required." }
   }
 
-  const packageName =
-    pick(interestObj, "package", "product") ||
-    pick(root, "package", "product") ||
+  const rawPackage =
+    pick(interestObj, "package", "product", "product_name", "which_package") ||
+    pick(root, "package", "product", "product_name", "which_package") ||
     fields.package ||
     fields.product ||
+    fields.product_name ||
+    fields.which_package ||
     null
+  const packageName = rawPackage && !isUselessMarketingPackageLabel(rawPackage) ? rawPackage : null
   const eventName =
-    pick(interestObj, "event") || pick(root, "event") || fields.event || null
+    pick(interestObj, "event", "event_name", "which_event", "race", "grand_prix") ||
+    pick(root, "event", "event_name", "which_event", "race", "grand_prix") ||
+    fields.event ||
+    fields.event_name ||
+    fields.which_event ||
+    fields.race ||
+    fields.grand_prix ||
+    null
 
   const explicitAnswers = answersFromUnknown(root.answers)
   const extras = leftoverAnswers(root, fields)
@@ -336,6 +346,13 @@ export function parseMarketingLeadWebhookBody(body: unknown): MarketingLeadParse
       },
     },
   }
+}
+
+export function isUselessMarketingPackageLabel(value: string | null | undefined): boolean {
+  const text = (value ?? "").trim()
+  if (!text) return true
+  if (/^(yes|no|y|n|true|false|ok|okay|sure|none|n\/a|na)(\b|[.!,].*)?$/i.test(text)) return true
+  return /works for me|that works/i.test(text) && !/\b(paddock|suite|terrace|hospitality|club)\b/i.test(text)
 }
 
 export function normalizeMarketingAlias(value: string | null | undefined): string {
