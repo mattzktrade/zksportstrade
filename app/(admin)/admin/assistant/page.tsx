@@ -45,7 +45,9 @@ export default async function AssistantInboxPage({
       : Promise.resolve(
           {} as Awaited<ReturnType<typeof latestMessagePreviews>>,
         ),
-    dealIds.length > 0 ? listMarketingOutreachForDeals(dealIds) : Promise.resolve({}),
+    dealIds.length > 0
+      ? listMarketingOutreachForDeals(dealIds)
+      : Promise.resolve({} as Awaited<ReturnType<typeof listMarketingOutreachForDeals>>),
     dealIds.length > 0
       ? supabase.from("deals").select("id, reference").in("id", dealIds)
       : Promise.resolve({ data: [] }),
