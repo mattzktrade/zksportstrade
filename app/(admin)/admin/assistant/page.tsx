@@ -37,7 +37,14 @@ export default async function AssistantInboxPage({
   const conversations = rows ?? []
   const dealIds = conversations.map((row) => (row.deal_id ? String(row.deal_id) : "")).filter(Boolean)
   const [previews, outreach, dealsRes] = await Promise.all([
-    admin ? latestMessagePreviews(admin, conversations.map((row) => String(row.id))) : Promise.resolve({}),
+    admin
+      ? latestMessagePreviews(
+          admin,
+          conversations.map((row) => String(row.id)),
+        )
+      : Promise.resolve(
+          {} as Awaited<ReturnType<typeof latestMessagePreviews>>,
+        ),
     dealIds.length > 0 ? listMarketingOutreachForDeals(dealIds) : Promise.resolve({}),
     dealIds.length > 0
       ? supabase.from("deals").select("id, reference").in("id", dealIds)
