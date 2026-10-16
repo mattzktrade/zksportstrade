@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { assistantPhoneDigits, normalizeAssistantEmail, phonesMatch } from "@/lib/assistant/phone"
+import { assistantPhoneDigits, normalizeAssistantEmail, phoneSearchSuffix, phonesMatch } from "@/lib/assistant/phone"
 import type { AssistantIdentityStatus } from "@/lib/assistant/types"
 
 type AdminClient = SupabaseClient
@@ -60,15 +60,25 @@ export function pickIdentityMatch(contacts: IdentityContact[]): IdentityMatch {
 export async function matchContactsByPhone(admin: AdminClient, phone: string): Promise<IdentityContact[]> {
   const digits = assistantPhoneDigits(phone)
   if (digits.length < 8) return []
+  const suffix = phoneSearchSuffix(digits)
   const { data } = await admin
     .from("crm_contacts")
     .select("id, account_id, full_name, email, phone")
     .eq("active", true)
     .not("phone", "is", null)
+    .or(`phone.eq.${digits},phone.eq.+${digits},phone.ilike.%${suffix}%`)
     .order("created_at", { ascending: true })
-    .limit(800)
-  const rows = (data ?? []) as ContactRow[]
-  return rows.filter((row) => phonesMatch(row.phone, digits)).map(toContact)
+    .limit(80)
+  const rows = ((data ?? []) as ContactRow[]).filter((row) => phonesMatch(row.phone, digits))
+  if (rows.length > 0) return rows.map(toContact)
+  const { data: fallback } = await admin
+    .from("crm_contacts")
+    .select("id, account_id, full_name, email, phone")
+    .eq("active", true)
+    .not("phone", "is", null)
+    .order("created_at", { ascending: true })
+    .limit(4000)
+  return ((fallback ?? []) as ContactRow[]).filter((row) => phonesMatch(row.phone, digits)).map(toContact)
 }
 
 export async function matchContactsByEmail(admin: AdminClient, email: string): Promise<IdentityContact[]> {

@@ -176,15 +176,7 @@ export function isOutreachStopKeyword(text: string): boolean {
   )
 }
 
-export function phonesMatchForOutreach(left: string | null | undefined, right: string | null | undefined): boolean {
-  const a = (left ?? "").replace(/\D/g, "")
-  const b = (right ?? "").replace(/\D/g, "")
-  if (!a || !b) return false
-  if (a === b) return true
-  const short = a.length < b.length ? a : b
-  const long = a.length < b.length ? b : a
-  return short.length >= 8 && long.endsWith(short)
-}
+export { phonesMatch as phonesMatchForOutreach } from "@/lib/assistant/phone"
 
 export function missingOutreachRelation(error: { message?: string; code?: string } | null | undefined): boolean {
   if (!error) return false

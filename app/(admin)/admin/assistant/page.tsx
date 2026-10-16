@@ -25,18 +25,24 @@ export default async function AssistantInboxPage({
   const { c: selectedId } = await searchParams
   const supabase = await createClient()
   const admin = createAdminClient()
-  const [{ data: rows }, { data: settingsRow }] = await Promise.all([
+  const conversationSelect =
+    "id, channel, status, identity_status, display_name, phone_digits, email, deal_id, updated_at, last_client_message_at, last_outbound_at"
+  const [{ data: recentRows }, { data: repliedRows }, { data: settingsRow }] = await Promise.all([
+    supabase.from("assistant_conversations").select(conversationSelect).order("updated_at", { ascending: false }).limit(500),
     supabase
       .from("assistant_conversations")
-      .select(
-        "id, channel, status, identity_status, display_name, phone_digits, email, deal_id, updated_at, last_client_message_at, last_outbound_at",
-      )
-      .order("updated_at", { ascending: false })
-      .limit(200),
+      .select(conversationSelect)
+      .not("last_client_message_at", "is", null)
+      .order("last_client_message_at", { ascending: false })
+      .limit(300),
     supabase.from("assistant_settings").select("*").eq("id", "default").maybeSingle(),
   ])
   const settings = mapAssistantSettings(settingsRow)
-  const conversations = rows ?? []
+  const conversations = [
+    ...new Map(
+      [...(repliedRows ?? []), ...(recentRows ?? [])].map((row) => [String(row.id), row]),
+    ).values(),
+  ].sort((left, right) => Date.parse(String(right.updated_at)) - Date.parse(String(left.updated_at)))
   const dealIds = conversations.map((row) => (row.deal_id ? String(row.deal_id) : "")).filter(Boolean)
   const [previews, outreach, dealsRes] = await Promise.all([
     admin
@@ -57,8 +63,9 @@ export default async function AssistantInboxPage({
   const dealRef = new Map((dealsRes.data ?? []).map((row) => [String(row.id), String(row.reference ?? "")]))
 
   const mapped: InboxRow[] = conversations.map((row) => {
+    const lastClientMessageAt = row.last_client_message_at ? String(row.last_client_message_at) : null
     const wait = inboxWaitState({
-      lastClientMessageAt: row.last_client_message_at ? String(row.last_client_message_at) : null,
+      lastClientMessageAt,
       lastOutboundAt: row.last_outbound_at ? String(row.last_outbound_at) : null,
     })
     const preview = previews[String(row.id)]
@@ -68,6 +75,7 @@ export default async function AssistantInboxPage({
       channel: String(row.channel),
       status: String(row.status),
       wait,
+      hasClientReply: Boolean(lastClientMessageAt),
       name: String(row.display_name || row.email || row.phone_digits || "Client"),
       preview: preview
         ? `${preview.direction === "outbound" ? "You: " : ""}${previewText(preview.body)}`

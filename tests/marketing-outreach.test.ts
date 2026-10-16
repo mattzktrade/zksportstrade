@@ -170,6 +170,7 @@ describe("marketing outreach labels and stop rules", () => {
   it("matches WhatsApp numbers on the last 8+ digits", () => {
     assert.equal(phonesMatchForOutreach("+44 7700 900123", "7700900123"), true)
     assert.equal(phonesMatchForOutreach("7700900123", "447700900999"), false)
+    assert.equal(phonesMatchForOutreach("5215529218397", "525529218397"), true)
   })
 
   it("stops the sequence when staff move the enquiry off New", () => {

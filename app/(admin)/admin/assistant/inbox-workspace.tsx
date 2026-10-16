@@ -9,7 +9,7 @@ import {
   channelLabel,
   formatInboxTime,
   inboxRowVisible,
-  inboxWaitLabel,
+  inboxStatusLabel,
   type InboxChannelFilter,
   type InboxRow,
   type InboxViewFilter,
@@ -147,7 +147,7 @@ export function InboxWorkspace({
                 </span>
                 <span className="mt-0.5 block truncate text-[12px] text-[#4b5058]">{row.preview}</span>
                 <span className={cn("mt-1 block text-[11px]", needsYou ? "font-medium text-emerald-700" : "text-[#80848d]")}>
-                  {row.status === "closed" ? "Done" : inboxWaitLabel(row.wait)}
+                  {inboxStatusLabel(row)}
                 </span>
               </button>
             )

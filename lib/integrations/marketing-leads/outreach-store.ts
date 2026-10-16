@@ -1,3 +1,4 @@
+import { phoneDigitVariants, phonesMatch } from "@/lib/assistant/phone"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { toMarketingOutreachSummary, missingOutreachRelation } from "@/lib/integrations/marketing-leads/outreach-labels"
 import {
@@ -92,32 +93,44 @@ export async function listMarketingOutreachForDeals(dealIds: string[]): Promise<
   return out
 }
 
+const ENROLLMENT_SELECT =
+  "id, deal_id, account_id, contact_id, sequence_key, status, stop_reason, current_stage, next_stage_due_at, first_name, full_name, email, phone, phone_digits, interest_event, interest_package, interest_quantity, created_at, updated_at, stopped_at, completed_at"
+
+export async function findOutreachEnrollmentByPhone(
+  admin: AdminClient,
+  phoneDigits: string,
+  options?: { activeOnly?: boolean },
+): Promise<MarketingOutreachEnrollment | null> {
+  const variants = phoneDigitVariants(phoneDigits)
+  if (variants.length === 0) return null
+  const activeOnly = options?.activeOnly === true
+  const found: MarketingOutreachEnrollment[] = []
+  for (const variant of variants) {
+    let query = admin
+      .from("marketing_outreach_enrollments")
+      .select(ENROLLMENT_SELECT)
+      .eq("phone_digits", variant)
+      .order("updated_at", { ascending: false })
+      .limit(8)
+    if (activeOnly) query = query.eq("status", "active")
+    const { data, error } = await query
+    if (error) {
+      if (missingOutreachRelation(error)) return null
+      return null
+    }
+    for (const row of (data ?? []) as MarketingOutreachEnrollment[]) {
+      if (!phonesMatch(row.phone_digits, phoneDigits)) continue
+      if (!found.some((existing) => existing.id === row.id)) found.push(row)
+    }
+  }
+  return found.find((row) => row.status === "active") ?? found[0] ?? null
+}
+
 export async function findActiveOutreachByPhone(
   admin: AdminClient,
   phoneDigits: string,
 ): Promise<MarketingOutreachEnrollment | null> {
-  const digits = phoneDigits.replace(/\D/g, "")
-  if (digits.length < 8) return null
-  const { data, error } = await admin
-    .from("marketing_outreach_enrollments")
-    .select(
-      "id, deal_id, account_id, contact_id, sequence_key, status, stop_reason, current_stage, next_stage_due_at, first_name, full_name, email, phone, phone_digits, interest_event, interest_package, interest_quantity, created_at, updated_at, stopped_at, completed_at",
-    )
-    .eq("status", "active")
-    .not("phone_digits", "is", null)
-    .limit(200)
-  if (error || !data) return null
-  const rows = data as MarketingOutreachEnrollment[]
-  return (
-    rows.find((row) => {
-      const stored = (row.phone_digits || "").replace(/\D/g, "")
-      if (!stored) return false
-      if (stored === digits) return true
-      const short = stored.length < digits.length ? stored : digits
-      const long = stored.length < digits.length ? digits : stored
-      return short.length >= 8 && long.endsWith(short)
-    }) ?? null
-  )
+  return findOutreachEnrollmentByPhone(admin, phoneDigits, { activeOnly: true })
 }
 
 export async function findActiveOutreachByEmail(

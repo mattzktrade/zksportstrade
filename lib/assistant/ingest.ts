@@ -1,5 +1,9 @@
-import { suggestedEnquiryAction } from "@/lib/crm/deal-pipeline"
+import { isOpenEnquiry, suggestedEnquiryAction } from "@/lib/crm/deal-pipeline"
 import { markEnquiryClientReplied } from "@/lib/crm/enquiry-replied"
+import {
+  findActiveOutreachByEmail,
+  findOutreachEnrollmentByPhone,
+} from "@/lib/integrations/marketing-leads/outreach-store"
 import { sendAssistantStaffAlert } from "@/lib/assistant/notifications"
 import {
   assistantWillAutoReplyFromSettings,
@@ -29,13 +33,13 @@ const OPEN_STAGES = ["draft", "sourcing", "proposal"]
 async function findOpenEnquiry(admin: NonNullable<ReturnType<typeof createAdminClient>>, accountId: string) {
   const { data } = await admin
     .from("deals")
-    .select("id")
+    .select("id, stage, enquiry_stage")
     .eq("account_id", accountId)
     .in("stage", OPEN_STAGES)
     .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  return data?.id ? String(data.id) : null
+    .limit(10)
+  const open = (data ?? []).find((row) => isOpenEnquiry({ stage: String(row.stage), enquiry_stage: row.enquiry_stage }))
+  return open?.id ? String(open.id) : null
 }
 
 async function createEnquiry(
@@ -108,18 +112,32 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
   const now = new Date()
   const runAfter = new Date(now.getTime() + settings.debounceSeconds * 1000).toISOString()
 
+  const enrollment = event.fromDigits
+    ? await findOutreachEnrollmentByPhone(admin, event.fromDigits)
+    : event.fromEmail
+      ? await findActiveOutreachByEmail(admin, event.fromEmail)
+      : null
+
   let conversation: AssistantConversation | null =
     (event.fromDigits ? await findConversationByPhone(admin, event.fromDigits) : null) ||
-    (event.fromEmail ? await findConversationByEmail(admin, event.fromEmail) : null)
+    (event.fromEmail ? await findConversationByEmail(admin, event.fromEmail) : null) ||
+    (enrollment ? await findConversationByDeal(admin, enrollment.deal_id) : null)
   const previousLastClientAt = conversation?.lastClientMessageAt ?? null
 
   let identity = {
     status: (conversation?.identityStatus ?? "unknown") as "unique" | "new" | "ambiguous" | "unknown",
     contacts: [] as Array<{ id: string; accountId: string; fullName: string; email: string | null; phone: string | null }>,
-    accountId: conversation?.accountId ?? null,
-    contactId: conversation?.contactId ?? null,
+    accountId: enrollment?.account_id ?? conversation?.accountId ?? null,
+    contactId: enrollment?.contact_id ?? conversation?.contactId ?? null,
   }
-  if (!conversation?.accountId) {
+  if (enrollment) {
+    identity = {
+      ...identity,
+      status: "unique",
+      accountId: enrollment.account_id ?? identity.accountId,
+      contactId: enrollment.contact_id ?? identity.contactId,
+    }
+  } else if (!conversation?.accountId) {
     try {
       identity = await resolveAssistantIdentity(admin, {
         phone: event.fromDigits,
@@ -135,11 +153,13 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
     }
   }
 
+  const linkedDealId = enrollment?.deal_id ?? conversation?.dealId ?? null
+
   if (!conversation) {
-    let dealId: string | null = null
-    if (identity.accountId) {
+    let dealId = linkedDealId
+    if (!dealId && identity.accountId) {
       dealId = await findOpenEnquiry(admin, identity.accountId)
-      if (!dealId && identity.contactId) {
+      if (!dealId && identity.contactId && !enrollment) {
         dealId = await createEnquiry(admin, {
           accountId: identity.accountId,
           contactId: identity.contactId,
@@ -154,7 +174,7 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
       identityStatus: identity.status,
       phoneDigits: event.fromDigits,
       email: event.fromEmail,
-      displayName: event.displayName || identity.contacts[0]?.fullName || "",
+      displayName: enrollment?.full_name || event.displayName || identity.contacts[0]?.fullName || "",
       ourNumber: event.ourNumber,
       accountId: identity.accountId,
       contactId: identity.contactId,
@@ -180,14 +200,14 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
             ? null
             : runAfter,
       identity_status: identity.status,
-      display_name: event.displayName || conversation.displayName,
     }
     if (!conversation.accountId && identity.accountId) patch.account_id = identity.accountId
     if (!conversation.contactId && identity.contactId) patch.contact_id = identity.contactId
-    if (!conversation.dealId && identity.accountId) {
+    if (!conversation.dealId) {
       patch.deal_id =
-        (await findOpenEnquiry(admin, identity.accountId)) ||
-        (identity.contactId
+        linkedDealId ||
+        (identity.accountId ? await findOpenEnquiry(admin, identity.accountId) : null) ||
+        (identity.contactId && identity.accountId && !enrollment
           ? await createEnquiry(admin, {
               accountId: identity.accountId,
               contactId: identity.contactId,
@@ -196,9 +216,21 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
             })
           : null)
     }
+    if (event.fromDigits && conversation.phoneDigits !== event.fromDigits) {
+      patch.phone_digits = event.fromDigits
+    }
     if (identity.status === "ambiguous") patch.status = "needs_review"
     else if (conversation.status === "closed") patch.status = "ai_active"
-    await updateConversation(admin, conversation.id, patch)
+    try {
+      await updateConversation(admin, conversation.id, patch)
+    } catch (error) {
+      if (patch.phone_digits) {
+        delete patch.phone_digits
+        await updateConversation(admin, conversation.id, patch)
+      } else {
+        throw error
+      }
+    }
     conversation = (await getConversation(admin, conversation.id)) ?? conversation
   }
 
@@ -242,6 +274,7 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
     const noticeDue = whatsAppReplyNoticeDue({
       channel: "whatsapp",
       willAutoReply: willAuto,
+      mediaType: event.mediaType,
     })
     if (noticeDue && !inWhatsAppReplyNotifyBurst(previousLastClientAt, now.getTime())) {
       let dealReference: string | null = null

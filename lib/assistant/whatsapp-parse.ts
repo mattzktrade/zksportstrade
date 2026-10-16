@@ -18,8 +18,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null
 }
 
-function textFromMessage(message: Record<string, unknown>): { body: string; mediaType: string | null } {
+function reactionText(message: Record<string, unknown>): { body: string; mediaType: string | null } | null {
+  const reaction = asRecord(message.reaction)
+  const emoji = typeof reaction?.emoji === "string" ? reaction.emoji.trim() : ""
+  if (!emoji) return null
+  return { body: `Reacted ${emoji}`, mediaType: "reaction" }
+}
+
+function textFromMessage(message: Record<string, unknown>): { body: string; mediaType: string | null } | null {
   const type = typeof message.type === "string" ? message.type : "text"
+  if (type === "reaction") return reactionText(message)
   if (type === "text") {
     const text = asRecord(message.text)
     return { body: typeof text?.body === "string" ? text.body : "", mediaType: null }
@@ -85,7 +93,9 @@ function eventFromMessage(
   if (message.type === "system") return null
   const from = typeof message.from === "string" ? message.from.replace(/\D/g, "") : ""
   if (from.length < 8) return null
-  const { body, mediaType } = textFromMessage(message)
+  const parsed = textFromMessage(message)
+  if (!parsed) return null
+  const { body, mediaType } = parsed
   const metadata = asRecord(value.metadata)
   const ourNumber =
     (typeof metadata?.display_phone_number === "string" && metadata.display_phone_number.replace(/\D/g, "")) ||

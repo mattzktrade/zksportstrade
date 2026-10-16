@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { phonesMatch } from "@/lib/assistant/phone"
+import { phoneDigitVariants, phonesMatch } from "@/lib/assistant/phone"
 import type {
   AssistantChannel,
   AssistantConversation,
@@ -62,23 +62,39 @@ export function mapAssistantConversation(row: ConversationRow): AssistantConvers
 }
 
 export async function findConversationByPhone(admin: Admin, digits: string): Promise<AssistantConversation | null> {
-  const needle = digits.replace(/\D/g, "")
-  if (needle.length < 8) return null
-  const exact = await admin
-    .from("assistant_conversations")
-    .select("*")
-    .eq("channel", "whatsapp")
-    .eq("phone_digits", needle)
-    .maybeSingle()
-  if (exact.data) return mapConversation(exact.data as ConversationRow)
-  const { data } = await admin
-    .from("assistant_conversations")
-    .select("*")
-    .eq("channel", "whatsapp")
-    .not("phone_digits", "is", null)
-    .limit(200)
-  const match = ((data ?? []) as ConversationRow[]).find((row) => phonesMatch(row.phone_digits, needle))
-  return match ? mapConversation(match) : null
+  const variants = phoneDigitVariants(digits)
+  if (variants.length === 0) return null
+  const found: AssistantConversation[] = []
+  for (const variant of variants) {
+    const exact = await admin
+      .from("assistant_conversations")
+      .select("*")
+      .eq("channel", "whatsapp")
+      .eq("phone_digits", variant)
+      .maybeSingle()
+    if (exact.data) {
+      const mapped = mapConversation(exact.data as ConversationRow)
+      if (!found.some((row) => row.id === mapped.id)) found.push(mapped)
+    }
+  }
+  if (found.length === 0) {
+    const suffix = variants.find((row) => row.length === 10) ?? variants[0]
+    if (suffix.length >= 8) {
+      const { data } = await admin
+        .from("assistant_conversations")
+        .select("*")
+        .eq("channel", "whatsapp")
+        .like("phone_digits", `%${suffix}`)
+        .limit(20)
+      for (const row of (data ?? []) as ConversationRow[]) {
+        if (!phonesMatch(row.phone_digits, digits)) continue
+        const mapped = mapConversation(row)
+        if (!found.some((existing) => existing.id === mapped.id)) found.push(mapped)
+      }
+    }
+  }
+  found.sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))
+  return found[0] ?? null
 }
 
 export async function findConversationByEmail(admin: Admin, email: string): Promise<AssistantConversation | null> {
@@ -348,20 +364,23 @@ export async function latestMessagePreviews(
   const ids = [...new Set(conversationIds.filter(Boolean))]
   const out: Record<string, { body: string; direction: "inbound" | "outbound"; createdAt: string }> = {}
   if (ids.length === 0) return out
-  const { data, error } = await admin
-    .from("assistant_messages")
-    .select("conversation_id, body, direction, created_at")
-    .in("conversation_id", ids)
-    .order("created_at", { ascending: false })
-    .limit(800)
-  if (error) return out
-  for (const row of data ?? []) {
-    const id = String(row.conversation_id)
-    if (out[id]) continue
-    out[id] = {
-      body: String(row.body ?? ""),
-      direction: row.direction === "inbound" ? "inbound" : "outbound",
-      createdAt: String(row.created_at),
+  for (let i = 0; i < ids.length; i += 40) {
+    const chunk = ids.slice(i, i + 40)
+    const { data, error } = await admin
+      .from("assistant_messages")
+      .select("conversation_id, body, direction, created_at")
+      .in("conversation_id", chunk)
+      .order("created_at", { ascending: false })
+      .limit(400)
+    if (error) continue
+    for (const row of data ?? []) {
+      const id = String(row.conversation_id)
+      if (out[id]) continue
+      out[id] = {
+        body: String(row.body ?? ""),
+        direction: row.direction === "inbound" ? "inbound" : "outbound",
+        createdAt: String(row.created_at),
+      }
     }
   }
   return out

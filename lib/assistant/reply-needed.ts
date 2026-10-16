@@ -19,9 +19,11 @@ export function whatsAppReplyNoticeDue(input: {
   channel: AssistantChannel | string
   willAutoReply: boolean
   duplicate?: boolean
+  mediaType?: string | null
 }): boolean {
   if (input.duplicate) return false
   if (input.channel !== "whatsapp") return false
+  if (input.mediaType === "reaction") return false
   return !input.willAutoReply
 }
 
@@ -38,6 +40,7 @@ export function inWhatsAppReplyNotifyBurst(
 export function whatsAppReplyPreview(body: string, mediaType?: string | null): string {
   const text = body.replace(/\r\n/g, "\n").trim()
   if (text) return text.length > 800 ? `${text.slice(0, 797)}...` : text
+  if (mediaType === "reaction") return "Reacted"
   if (mediaType && mediaType !== "text") return "(photo or file)"
   return "(no text)"
 }

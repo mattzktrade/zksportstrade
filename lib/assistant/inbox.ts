@@ -19,6 +19,14 @@ export function inboxWaitLabel(state: InboxWaitState): string {
   return "No messages yet"
 }
 
+export function inboxStatusLabel(row: Pick<InboxRow, "status" | "wait" | "hasClientReply">): string {
+  if (row.status === "closed") return "Done"
+  if (row.wait === "replied") return "They replied"
+  if (row.hasClientReply) return "You replied"
+  if (row.wait === "waiting") return "Waiting for a reply"
+  return "No messages yet"
+}
+
 export function channelLabel(channel: string): string {
   if (channel === "whatsapp") return "WhatsApp"
   if (channel === "email") return "Email"
@@ -43,6 +51,7 @@ export type InboxRow = {
   channel: string
   status: string
   wait: InboxWaitState
+  hasClientReply: boolean
   name: string
   preview: string
   updatedAt: string
@@ -78,8 +87,8 @@ export function inboxRowVisible(
   if (input.channel !== "all" && row.channel !== input.channel) return false
   if (input.view === "closed") return row.status === "closed"
   if (row.status === "closed") return input.view === "all"
-  if (input.view === "waiting" && row.wait !== "waiting") return false
-  if (input.view === "replied" && row.wait !== "replied") return false
+  if (input.view === "waiting" && (row.hasClientReply || row.wait !== "waiting")) return false
+  if (input.view === "replied" && !row.hasClientReply) return false
   const query = input.query.trim().toLowerCase()
   if (!query) return true
   return inboxSearchHaystack(row).includes(query)

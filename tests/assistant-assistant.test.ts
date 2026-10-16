@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { accountSourceForAssistantChannel } from "../lib/assistant/identity"
+import { phonesMatch } from "../lib/assistant/phone"
 import { parseWhatsAppAssistantEvents } from "../lib/assistant/whatsapp-parse"
 import { parseAssistantEmailEvent } from "../lib/assistant/email-parse"
 import { classifyClientMessage } from "../lib/assistant/classify"
@@ -72,6 +73,65 @@ test("whatsapp parser stores customer text and phone echoes separately", () => {
   assert.match(events[0].body, /Paddock Club/)
   assert.equal(events[1].sentBy, "staff")
   assert.match(events[1].body, /I'll check/)
+})
+
+test("whatsapp parser shows reaction emoji and ignores removed reactions", () => {
+  const reacted = parseWhatsAppAssistantEvents({
+    object: "whatsapp_business_account",
+    entry: [
+      {
+        changes: [
+          {
+            value: {
+              metadata: { display_phone_number: "971585346740" },
+              contacts: [{ wa_id: "5215554024338", profile: { name: "Carlos" } }],
+              messages: [
+                {
+                  from: "5215554024338",
+                  id: "wamid.react",
+                  timestamp: "1710000002",
+                  type: "reaction",
+                  reaction: { emoji: "😂", message_id: "wamid.orig" },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  })
+  assert.equal(reacted.length, 1)
+  assert.equal(reacted[0].body, "Reacted 😂")
+  assert.equal(reacted[0].mediaType, "reaction")
+  const removed = parseWhatsAppAssistantEvents({
+    object: "whatsapp_business_account",
+    entry: [
+      {
+        changes: [
+          {
+            value: {
+              messages: [
+                {
+                  from: "5215554024338",
+                  id: "wamid.unreact",
+                  type: "reaction",
+                  reaction: { emoji: "", message_id: "wamid.orig" },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  })
+  assert.equal(removed.length, 0)
+})
+
+test("Mexico WhatsApp 521 numbers match the 52 form number on the original lead", () => {
+  assert.equal(phonesMatch("5215529218397", "525529218397"), true)
+  assert.equal(phonesMatch("525529218397", "5215529218397"), true)
+  assert.equal(phonesMatch("5215554024338", "525554024338"), true)
+  assert.equal(phonesMatch("5215529218397", "5215554024338"), false)
 })
 
 test("email parser reads Resend-style inbound payloads", () => {
@@ -219,6 +279,10 @@ test("WhatsApp reply emails fire until the assistant can auto-send", () => {
     whatsAppReplyNoticeDue({ channel: "whatsapp", willAutoReply: true }),
     false,
   )
+  assert.equal(
+    whatsAppReplyNoticeDue({ channel: "whatsapp", willAutoReply: false, mediaType: "reaction" }),
+    false,
+  )
   assert.equal(inWhatsAppReplyNotifyBurst(null), false)
   assert.equal(inWhatsAppReplyNotifyBurst(new Date().toISOString()), true)
   assert.equal(whatsAppReplyPreview("", "image"), "(photo or file)")
@@ -246,6 +310,7 @@ test("inbox search can split WhatsApp from email and find a name", () => {
     channel: "whatsapp",
     status: "human_takeover",
     wait: "waiting",
+    hasClientReply: false,
     name: "Matt Johnson",
     preview: "You: Hi Matt, thanks for your enquiry",
     updatedAt: "2026-10-15T12:00:00.000Z",
@@ -281,6 +346,24 @@ test("inbox shows waiting after we send and replied after they write back", () =
     }),
     "replied",
   )
+  const answered: InboxRow = {
+    id: "3",
+    channel: "whatsapp",
+    status: "human_takeover",
+    wait: "waiting",
+    hasClientReply: true,
+    name: "Raul",
+    preview: "You: Hi Raul",
+    updatedAt: "2026-10-16T12:17:00.000Z",
+    email: null,
+    phone: "5215529218397",
+    dealId: "deal-1",
+    dealReference: "DL0901",
+    outreachLabel: null,
+  }
+  assert.equal(inboxRowVisible(answered, { query: "", channel: "whatsapp", view: "replied" }), true)
+  assert.equal(inboxRowVisible(answered, { query: "", channel: "whatsapp", view: "waiting" }), false)
+  assert.equal(inboxRowVisible({ ...answered, status: "closed" }, { query: "", channel: "whatsapp", view: "replied" }), false)
   assert.equal(canSendWhatsAppReply(null), false)
   assert.equal(canSendWhatsAppReply(new Date().toISOString()), true)
   assert.equal(previewText("Hi Matt, thanks for your enquiry about 3 Day Paddock Club."), "Hi Matt, thanks for your enquiry about 3 Day Paddock Club.")

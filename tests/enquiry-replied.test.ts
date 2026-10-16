@@ -48,8 +48,7 @@ test("inbound reply paths stamp replied without changing later-stage rules", () 
   const files = [
     "lib/assistant/ingest.ts",
     "app/api/webhooks/whatsapp/route.ts",
-    "app/api/webhooks/assistant-email/route.ts",
-    "app/api/webhooks/marketing-outreach-email/route.ts",
+    "lib/assistant/email-inbound.ts",
   ]
   for (const file of files) {
     const src = readFileSync(file, "utf8")
