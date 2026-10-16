@@ -3,6 +3,7 @@ import { sendMarketingOutreachEmail } from "@/lib/email/send-marketing-outreach"
 import { suggestedEnquiryAction } from "@/lib/crm/deal-pipeline"
 import {
   missingOutreachRelation,
+  RETRYABLE_OUTREACH_SKIP_REASONS,
   shouldAdvanceOutreachStage,
   type OutreachChannelOutcome,
 } from "@/lib/integrations/marketing-leads/outreach-labels"
@@ -75,13 +76,16 @@ async function alreadySent(
 ): Promise<boolean> {
   const { data } = await admin
     .from("marketing_outreach_sends")
-    .select("id")
+    .select("id, status, skip_reason")
     .eq("enrollment_id", enrollmentId)
     .eq("stage", stage)
     .eq("channel", channel)
-    .eq("status", "sent")
+    .in("status", ["sent", "skipped"])
     .maybeSingle()
-  return Boolean(data?.id)
+  if (!data) return false
+  if (data.status === "sent") return true
+  const reason = typeof data.skip_reason === "string" ? data.skip_reason : ""
+  return Boolean(reason) && !(RETRYABLE_OUTREACH_SKIP_REASONS as readonly string[]).includes(reason)
 }
 
 async function recordSend(

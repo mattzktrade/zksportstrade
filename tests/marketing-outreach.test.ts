@@ -244,6 +244,8 @@ describe("marketing outreach wiring", () => {
     const process = readFileSync("lib/integrations/marketing-leads/outreach-process.ts", "utf8")
     assert.match(process, /data\?\.enabled === true/)
     assert.match(process, /recordOutreachOutbound/)
+    assert.match(process, /RETRYABLE_OUTREACH_SKIP_REASONS/)
+    assert.match(process, /mexico_whatsapp_restart|in\("status", \["sent", "skipped"\]\)/)
     const sendTemplate = readFileSync("lib/integrations/whatsapp/send-template.ts", "utf8")
     assert.match(sendTemplate, /parameter_name/)
     const cron = readFileSync("lib/integrations/run-integration-cron.ts", "utf8")
