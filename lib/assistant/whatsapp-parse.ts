@@ -51,8 +51,9 @@ function textFromMessage(message: Record<string, unknown>): { body: string; medi
   for (const key of captionKeys) {
     if (type !== key) continue
     const media = asRecord(message[key])
-    const caption = typeof media?.caption === "string" ? media.caption : ""
-    return { body: caption, mediaType: key }
+    const caption = typeof media?.caption === "string" ? media.caption.trim() : ""
+    const filename = typeof media?.filename === "string" ? media.filename.trim() : ""
+    return { body: caption || filename, mediaType: key }
   }
   return { body: "", mediaType: type === "system" ? "system" : type }
 }

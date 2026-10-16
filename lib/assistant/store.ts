@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { phoneDigitVariants, phonesMatch } from "@/lib/assistant/phone"
+import { isWhatsAppMediaKind, whatsAppMediaLabel } from "@/lib/assistant/whatsapp-media"
 import type {
   AssistantChannel,
   AssistantConversation,
@@ -368,7 +369,7 @@ export async function latestMessagePreviews(
     const chunk = ids.slice(i, i + 40)
     const { data, error } = await admin
       .from("assistant_messages")
-      .select("conversation_id, body, direction, created_at")
+      .select("conversation_id, body, direction, created_at, media_type")
       .in("conversation_id", chunk)
       .order("created_at", { ascending: false })
       .limit(400)
@@ -376,8 +377,10 @@ export async function latestMessagePreviews(
     for (const row of data ?? []) {
       const id = String(row.conversation_id)
       if (out[id]) continue
+      const mediaType = row.media_type == null ? null : String(row.media_type)
+      const body = String(row.body ?? "").trim()
       out[id] = {
-        body: String(row.body ?? ""),
+        body: body || (isWhatsAppMediaKind(mediaType) ? whatsAppMediaLabel(mediaType) : mediaType ? `(${mediaType})` : ""),
         direction: row.direction === "inbound" ? "inbound" : "outbound",
         createdAt: String(row.created_at),
       }

@@ -3,6 +3,12 @@ import test from "node:test"
 import { accountSourceForAssistantChannel } from "../lib/assistant/identity"
 import { phonesMatch } from "../lib/assistant/phone"
 import { parseWhatsAppAssistantEvents } from "../lib/assistant/whatsapp-parse"
+import {
+  inboxMessageMediaHref,
+  isWhatsAppMediaKind,
+  whatsAppMediaFromRaw,
+  whatsAppMediaLabel,
+} from "../lib/assistant/whatsapp-media"
 import { parseAssistantEmailEvent } from "../lib/assistant/email-parse"
 import { classifyClientMessage } from "../lib/assistant/classify"
 import { pickIdentityMatch } from "../lib/assistant/identity"
@@ -10,6 +16,7 @@ import {
   canSendWhatsAppReply,
   formatInboxTime,
   inboxRowVisible,
+  inboxThreadStub,
   inboxWaitState,
   previewText,
   type InboxRow,
@@ -125,6 +132,46 @@ test("whatsapp parser shows reaction emoji and ignores removed reactions", () =>
     ],
   })
   assert.equal(removed.length, 0)
+})
+
+test("whatsapp parser keeps document filenames and media ids for inbox", () => {
+  const events = parseWhatsAppAssistantEvents({
+    object: "whatsapp_business_account",
+    entry: [
+      {
+        changes: [
+          {
+            value: {
+              metadata: { display_phone_number: "971585346740" },
+              contacts: [{ wa_id: "5215550001111", profile: { name: "Paola" } }],
+              messages: [
+                {
+                  from: "5215550001111",
+                  id: "wamid.doc",
+                  timestamp: "1710000003",
+                  type: "document",
+                  document: {
+                    id: "media-doc-1",
+                    mime_type: "application/pdf",
+                    filename: "media-kit.pdf",
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  })
+  assert.equal(events.length, 1)
+  assert.equal(events[0].body, "media-kit.pdf")
+  assert.equal(events[0].mediaType, "document")
+  const media = whatsAppMediaFromRaw(events[0].raw, events[0].mediaType)
+  assert.equal(media?.mediaId, "media-doc-1")
+  assert.equal(media?.filename, "media-kit.pdf")
+  assert.equal(isWhatsAppMediaKind("image"), true)
+  assert.equal(whatsAppMediaLabel("video"), "Video")
+  assert.equal(inboxMessageMediaHref("msg-1"), "/api/admin/assistant/messages/msg-1/media")
 })
 
 test("Mexico WhatsApp 521 numbers match the 52 form number on the original lead", () => {
@@ -311,6 +358,7 @@ test("inbox search can split WhatsApp from email and find a name", () => {
     status: "human_takeover",
     wait: "waiting",
     hasClientReply: false,
+    lastClientMessageAt: null,
     name: "Matt Johnson",
     preview: "You: Hi Matt, thanks for your enquiry",
     updatedAt: "2026-10-15T12:00:00.000Z",
@@ -352,6 +400,7 @@ test("inbox shows waiting after we send and replied after they write back", () =
     status: "human_takeover",
     wait: "waiting",
     hasClientReply: true,
+    lastClientMessageAt: "2026-10-16T12:15:00.000Z",
     name: "Raul",
     preview: "You: Hi Raul",
     updatedAt: "2026-10-16T12:17:00.000Z",
@@ -364,9 +413,40 @@ test("inbox shows waiting after we send and replied after they write back", () =
   assert.equal(inboxRowVisible(answered, { query: "", channel: "whatsapp", view: "replied" }), true)
   assert.equal(inboxRowVisible(answered, { query: "", channel: "whatsapp", view: "waiting" }), false)
   assert.equal(inboxRowVisible({ ...answered, status: "closed" }, { query: "", channel: "whatsapp", view: "replied" }), false)
+  const stub = inboxThreadStub(answered, Date.parse("2026-10-16T12:16:00.000Z"))
+  assert.equal(stub.conversationId, "3")
+  assert.equal(stub.displayName, "Raul")
+  assert.equal(stub.messages.length, 0)
+  assert.equal(stub.canSendWhatsApp, true)
   assert.equal(canSendWhatsAppReply(null), false)
   assert.equal(canSendWhatsAppReply(new Date().toISOString()), true)
   assert.equal(previewText("Hi Matt, thanks for your enquiry about 3 Day Paddock Club."), "Hi Matt, thanks for your enquiry about 3 Day Paddock Club.")
+})
+
+test("inbox opens a conversation without reloading the page", () => {
+  const src = readFileSync("app/(admin)/admin/assistant/inbox-workspace.tsx", "utf8")
+  assert.match(src, /\/api\/admin\/assistant\/conversations\//)
+  assert.doesNotMatch(src, /router\.push/)
+  assert.match(
+    readFileSync("app/api/admin/assistant/conversations/[conversationId]/route.ts", "utf8"),
+    /loadInboxThreadById/,
+  )
+})
+
+test("inbox can open WhatsApp photos, videos and documents", () => {
+  const thread = readFileSync("app/(admin)/admin/assistant/conversation-client.tsx", "utf8")
+  assert.match(thread, /InboxMedia/)
+  assert.match(thread, /message\.mediaHref/)
+  assert.match(readFileSync("lib/assistant/inbox-load.ts", "utf8"), /inboxMessageMediaHref/)
+  assert.match(readFileSync("lib/assistant/ingest.ts", "utf8"), /persistWhatsAppInboundMedia/)
+  assert.match(
+    readFileSync("app/api/admin/assistant/messages/[messageId]/media/route.ts", "utf8"),
+    /readWhatsAppInboxMedia/,
+  )
+  assert.match(
+    readFileSync("supabase/migrations/20261016140000_assistant_whatsapp_media.sql", "utf8"),
+    /assistant-whatsapp-media/,
+  )
 })
 
 test("migration creates assistant tables and seeds the sales policy", () => {

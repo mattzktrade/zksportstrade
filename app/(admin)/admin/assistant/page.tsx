@@ -4,7 +4,8 @@ import { hasCmsPermission } from "@/lib/auth/permissions"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 import { AdminPageHeader } from "@/components/admin/admin-page-kit"
-import { canSendWhatsAppReply, inboxWaitState, previewText, type InboxRow } from "@/lib/assistant/inbox"
+import { inboxWaitState, previewText, type InboxRow } from "@/lib/assistant/inbox"
+import { loadInboxThreadById } from "@/lib/assistant/inbox-load"
 import { mapAssistantSettings } from "@/lib/assistant/settings"
 import { latestMessagePreviews } from "@/lib/assistant/store"
 import { listMarketingOutreachForDeals } from "@/lib/integrations/marketing-leads/outreach-store"
@@ -44,23 +45,29 @@ export default async function AssistantInboxPage({
     ).values(),
   ].sort((left, right) => Date.parse(String(right.updated_at)) - Date.parse(String(left.updated_at)))
   const dealIds = conversations.map((row) => (row.deal_id ? String(row.deal_id) : "")).filter(Boolean)
-  const [previews, outreach, dealsRes] = await Promise.all([
+  const repliedDealIds = conversations
+    .filter((row) => row.last_client_message_at && row.deal_id)
+    .map((row) => String(row.deal_id))
+  const previewIds = [
+    ...conversations.filter((row) => row.last_client_message_at).map((row) => String(row.id)),
+    ...conversations.filter((row) => !row.last_client_message_at).slice(0, 80).map((row) => String(row.id)),
+  ]
+  const dealChunks: string[][] = []
+  for (let i = 0; i < dealIds.length; i += 80) dealChunks.push(dealIds.slice(i, i + 80))
+  const [previews, outreach, dealRows] = await Promise.all([
     admin
-      ? latestMessagePreviews(
-          admin,
-          conversations.map((row) => String(row.id)),
-        )
-      : Promise.resolve(
-          {} as Awaited<ReturnType<typeof latestMessagePreviews>>,
-        ),
-    dealIds.length > 0
-      ? listMarketingOutreachForDeals(dealIds)
+      ? latestMessagePreviews(admin, previewIds)
+      : Promise.resolve({} as Awaited<ReturnType<typeof latestMessagePreviews>>),
+    repliedDealIds.length > 0
+      ? listMarketingOutreachForDeals(repliedDealIds)
       : Promise.resolve({} as Awaited<ReturnType<typeof listMarketingOutreachForDeals>>),
-    dealIds.length > 0
-      ? supabase.from("deals").select("id, reference").in("id", dealIds)
-      : Promise.resolve({ data: [] }),
+    dealChunks.length > 0
+      ? Promise.all(dealChunks.map((chunk) => supabase.from("deals").select("id, reference").in("id", chunk))).then(
+          (results) => results.flatMap((result) => result.data ?? []),
+        )
+      : Promise.resolve([] as Array<{ id: string; reference: string | null }>),
   ])
-  const dealRef = new Map((dealsRes.data ?? []).map((row) => [String(row.id), String(row.reference ?? "")]))
+  const dealRef = new Map(dealRows.map((row) => [String(row.id), String(row.reference ?? "")]))
 
   const mapped: InboxRow[] = conversations.map((row) => {
     const lastClientMessageAt = row.last_client_message_at ? String(row.last_client_message_at) : null
@@ -76,6 +83,7 @@ export default async function AssistantInboxPage({
       status: String(row.status),
       wait,
       hasClientReply: Boolean(lastClientMessageAt),
+      lastClientMessageAt,
       name: String(row.display_name || row.email || row.phone_digits || "Client"),
       preview: preview
         ? `${preview.direction === "outbound" ? "You: " : ""}${previewText(preview.body)}`
@@ -89,50 +97,19 @@ export default async function AssistantInboxPage({
     }
   })
 
-  const selectedRow = selectedId ? conversations.find((row) => String(row.id) === selectedId) : null
   const selectedMapped = selectedId ? mapped.find((row) => row.id === selectedId) ?? null : null
-  let selected = null
-  if (selectedRow && selectedMapped) {
-    const [{ data: messages }, { data: drafts }] = await Promise.all([
-      supabase
-        .from("assistant_messages")
-        .select("id, direction, sent_by, channel, body, media_type, created_at")
-        .eq("conversation_id", selectedMapped.id)
-        .order("created_at", { ascending: true }),
-      supabase
-        .from("assistant_drafts")
-        .select("id, body, status, intent")
-        .eq("conversation_id", selectedMapped.id)
-        .eq("status", "pending")
-        .order("created_at", { ascending: false })
-        .limit(1),
-    ])
-    const draft = drafts?.[0] ?? null
-    selected = {
-      conversationId: selectedMapped.id,
-      status: selectedMapped.status,
-      channel: selectedMapped.channel,
-      canSendWhatsApp: canSendWhatsAppReply(
-        selectedRow.last_client_message_at ? String(selectedRow.last_client_message_at) : null,
-      ),
-      displayName: selectedMapped.name,
-      email: selectedMapped.email,
-      phone: selectedMapped.phone,
-      dealId: selectedMapped.dealId,
-      dealReference: selectedMapped.dealReference,
-      outreachLabel: selectedMapped.outreachLabel,
-      messages: (messages ?? []).map((row) => ({
-        id: String(row.id),
-        direction: String(row.direction),
-        sentBy: String(row.sent_by),
-        channel: String(row.channel || selectedMapped.channel),
-        body: String(row.body ?? ""),
-        mediaType: row.media_type ? String(row.media_type) : null,
-        createdAt: String(row.created_at),
-      })),
-      draft: draft ? { id: String(draft.id), body: String(draft.body), intent: String(draft.intent) } : null,
-    }
-  }
+  const selectedLoaded = selectedId ? await loadInboxThreadById(selectedId) : null
+  const selected = selectedLoaded
+    ? {
+        ...selectedLoaded,
+        displayName: selectedMapped?.name || selectedLoaded.displayName,
+        email: selectedMapped?.email ?? selectedLoaded.email,
+        phone: selectedMapped?.phone ?? selectedLoaded.phone,
+        dealId: selectedMapped?.dealId ?? selectedLoaded.dealId,
+        dealReference: selectedMapped?.dealReference ?? selectedLoaded.dealReference,
+        outreachLabel: selectedMapped?.outreachLabel ?? selectedLoaded.outreachLabel,
+      }
+    : null
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-3 p-3 sm:p-4">

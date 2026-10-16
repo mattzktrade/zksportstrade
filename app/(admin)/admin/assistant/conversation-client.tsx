@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { channelLabel } from "@/lib/assistant/inbox"
+import { channelLabel, type InboxThreadMessage } from "@/lib/assistant/inbox"
 import {
   closeAssistantConversation,
   prepareAssistantBookingForm,
@@ -27,6 +27,8 @@ export function AssistantConversationClient({
   outreachLabel,
   messages,
   draft,
+  loading = false,
+  onChanged,
 }: {
   conversationId: string
   status: string
@@ -38,16 +40,10 @@ export function AssistantConversationClient({
   dealId: string | null
   dealReference: string | null
   outreachLabel: string | null
-  messages: Array<{
-    id: string
-    direction: string
-    sentBy: string
-    channel: string
-    body: string
-    mediaType: string | null
-    createdAt: string
-  }>
+  messages: InboxThreadMessage[]
   draft: { id: string; body: string; intent: string } | null
+  loading?: boolean
+  onChanged?: () => void
 }) {
   const [pending, start] = useTransition()
   const [body, setBody] = useState(draft?.body ?? "")
@@ -70,6 +66,7 @@ export function AssistantConversationClient({
       if (result.ok) {
         toast.success("Sent.")
         setBody("")
+        onChanged?.()
       } else toast.error(result.message)
     })
   }
@@ -103,8 +100,10 @@ export function AssistantConversationClient({
               onClick={() =>
                 start(async () => {
                   const result = await resumeAssistantConversation(conversationId)
-                  if (result.ok) toast.success("Thread reopened.")
-                  else toast.error(result.message)
+                  if (result.ok) {
+                    toast.success("Thread reopened.")
+                    onChanged?.()
+                  } else toast.error(result.message)
                 })
               }
             >
@@ -118,8 +117,10 @@ export function AssistantConversationClient({
               onClick={() =>
                 start(async () => {
                   const result = await closeAssistantConversation(conversationId)
-                  if (result.ok) toast.success("Marked done.")
-                  else toast.error(result.message)
+                  if (result.ok) {
+                    toast.success("Marked done.")
+                    onChanged?.()
+                  } else toast.error(result.message)
                 })
               }
             >
@@ -150,14 +151,25 @@ export function AssistantConversationClient({
                   minute: "2-digit",
                 })}
               </p>
-              <p className="mt-1 whitespace-pre-wrap text-[13px] text-[#1b1c1f]">
-                {message.body || `(${message.mediaType || "empty"})`}
-              </p>
+              {message.hasMedia && message.mediaHref ? (
+                <div className="mt-2">
+                  <InboxMedia message={message} />
+                </div>
+              ) : null}
+              {message.body && message.body !== message.mediaFilename ? (
+                <p className="mt-1 whitespace-pre-wrap text-[13px] text-[#1b1c1f]">{message.body}</p>
+              ) : !message.hasMedia ? (
+                <p className="mt-1 whitespace-pre-wrap text-[13px] text-[#1b1c1f]">
+                  {message.body || `(${message.mediaType || "empty"})`}
+                </p>
+              ) : null}
             </div>
           )
         })}
         {messages.length === 0 ? (
-          <p className="py-10 text-center text-[13px] text-[#9aa0a6]">No messages in this thread yet.</p>
+          <p className="py-10 text-center text-[13px] text-[#9aa0a6]">
+            {loading ? "Loading messages…" : "No messages in this thread yet."}
+          </p>
         ) : null}
       </div>
 
@@ -207,6 +219,7 @@ export function AssistantConversationClient({
                   setBody(result.draft)
                   toast.success("Draft ready to edit.")
                 } else toast.success(result.reason)
+                onChanged?.()
               })
             }
           >
@@ -225,8 +238,10 @@ export function AssistantConversationClient({
                 onClick={() =>
                   start(async () => {
                     const result = await resumeAssistantConversation(conversationId)
-                    if (result.ok) toast.success("Assistant can draft again.")
-                    else toast.error(result.message)
+                    if (result.ok) {
+                      toast.success("Assistant can draft again.")
+                      onChanged?.()
+                    } else toast.error(result.message)
                   })
                 }
               >
@@ -240,8 +255,10 @@ export function AssistantConversationClient({
                 onClick={() =>
                   start(async () => {
                     const result = await takeOverAssistantConversation(conversationId)
-                    if (result.ok) toast.success("You have this conversation.")
-                    else toast.error(result.message)
+                    if (result.ok) {
+                      toast.success("You have this conversation.")
+                      onChanged?.()
+                    } else toast.error(result.message)
                   })
                 }
               >
@@ -293,5 +310,60 @@ export function AssistantConversationClient({
         </details>
       </div>
     </div>
+  )
+}
+
+function InboxMedia({ message }: { message: InboxThreadMessage }) {
+  const href = message.mediaHref
+  if (!href) return null
+  const label = message.mediaFilename || message.mediaType || "file"
+  const kind = message.mediaType
+
+  if (kind === "image" || kind === "sticker") {
+    return (
+      <a href={href} target="_blank" rel="noreferrer" className="block">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={href}
+          alt={label}
+          className="max-h-72 max-w-full rounded-lg border border-[#ece8df] bg-white object-contain"
+        />
+      </a>
+    )
+  }
+
+  if (kind === "video") {
+    return (
+      <video
+        src={href}
+        controls
+        className="max-h-72 max-w-full rounded-lg border border-[#ece8df] bg-black"
+      >
+        <a href={href} target="_blank" rel="noreferrer" className="text-[12px] text-[#b42318] underline">
+          Open {label}
+        </a>
+      </video>
+    )
+  }
+
+  if (kind === "audio") {
+    return (
+      <audio src={href} controls className="w-full max-w-sm">
+        <a href={href} target="_blank" rel="noreferrer" className="text-[12px] text-[#b42318] underline">
+          Open {label}
+        </a>
+      </audio>
+    )
+  }
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center gap-2 rounded-md border border-[#ece8df] bg-white px-3 py-2 text-[12px] font-medium text-[#1b1c1f] hover:bg-[#faf8f4]"
+    >
+      Open {label}
+    </a>
   )
 }

@@ -52,6 +52,7 @@ export type InboxRow = {
   status: string
   wait: InboxWaitState
   hasClientReply: boolean
+  lastClientMessageAt: string | null
   name: string
   preview: string
   updatedAt: string
@@ -60,6 +61,63 @@ export type InboxRow = {
   dealId: string | null
   dealReference: string | null
   outreachLabel: string | null
+}
+
+export type InboxThreadMessage = {
+  id: string
+  direction: string
+  sentBy: string
+  channel: string
+  body: string
+  mediaType: string | null
+  mediaFilename: string | null
+  hasMedia: boolean
+  mediaHref: string | null
+  createdAt: string
+}
+
+export type InboxThread = {
+  conversationId: string
+  status: string
+  channel: string
+  canSendWhatsApp: boolean
+  displayName: string
+  email: string | null
+  phone: string | null
+  dealId: string | null
+  dealReference: string | null
+  outreachLabel: string | null
+  messages: InboxThreadMessage[]
+  draft: { id: string; body: string; intent: string } | null
+}
+
+export function inboxThreadStub(row: InboxRow, now = Date.now()): InboxThread {
+  return {
+    conversationId: row.id,
+    status: row.status,
+    channel: row.channel,
+    canSendWhatsApp: canSendWhatsAppReply(row.lastClientMessageAt, now),
+    displayName: row.name,
+    email: row.email,
+    phone: row.phone,
+    dealId: row.dealId,
+    dealReference: row.dealReference,
+    outreachLabel: row.outreachLabel,
+    messages: [] as InboxThread["messages"],
+    draft: null,
+  }
+}
+
+export function mergeInboxThread(row: InboxRow, thread: InboxThread): InboxThread {
+  return {
+    ...thread,
+    displayName: thread.displayName || row.name,
+    email: thread.email ?? row.email,
+    phone: thread.phone ?? row.phone,
+    dealId: thread.dealId ?? row.dealId,
+    dealReference: thread.dealReference ?? row.dealReference,
+    outreachLabel: thread.outreachLabel ?? row.outreachLabel,
+  }
 }
 
 export type InboxChannelFilter = "all" | "whatsapp" | "email"

@@ -26,7 +26,25 @@ import {
   updateConversation,
 } from "@/lib/assistant/store"
 import type { InboundAssistantEvent } from "@/lib/assistant/whatsapp-parse"
+import { isWhatsAppMediaKind, persistWhatsAppInboundMedia } from "@/lib/assistant/whatsapp-media"
 import type { AssistantChannel, AssistantConversation } from "@/lib/assistant/types"
+
+function storeWhatsAppMedia(
+  conversationId: string,
+  messageId: string,
+  event: InboundAssistantEvent,
+  duplicate: boolean,
+) {
+  if (duplicate || event.channel !== "whatsapp" || !isWhatsAppMediaKind(event.mediaType)) return
+  void persistWhatsAppInboundMedia({
+    conversationId,
+    messageId,
+    raw: event.raw,
+    mediaType: event.mediaType,
+  }).catch((error) => {
+    console.error("[assistant-whatsapp] media persist", error instanceof Error ? error.message : error)
+  })
+}
 
 const OPEN_STAGES = ["draft", "sourcing", "proposal"]
 
@@ -99,6 +117,7 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
       processedAt: new Date().toISOString(),
     })
     if (!inserted.duplicate) {
+      storeWhatsAppMedia(existing.id, inserted.id, event, inserted.duplicate)
       await updateConversation(admin, existing.id, {
         status: "human_takeover",
         last_outbound_at: new Date().toISOString(),
@@ -244,6 +263,7 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
     providerMessageId: event.providerMessageId,
     raw: event.raw,
   })
+  storeWhatsAppMedia(conversation.id, inserted.id, event, inserted.duplicate)
 
   if (conversation.dealId && !inserted.duplicate) {
     const classified = classifyClientMessage(event.body, isLowContentMessage(event.body, event.mediaType))

@@ -20,8 +20,8 @@ import {
 import { canSendWhatsAppReply } from "@/lib/assistant/inbox"
 import { ASSISTANT_INBOX_HREF } from "@/lib/assistant/types"
 
-function revalidateAssistant(conversationId?: string) {
-  revalidatePath(ASSISTANT_INBOX_HREF)
+function revalidateAssistant(conversationId?: string, refreshInbox = false) {
+  if (refreshInbox) revalidatePath(ASSISTANT_INBOX_HREF)
   revalidatePath(`${ASSISTANT_INBOX_HREF}/readiness`)
   revalidatePath(`${ASSISTANT_INBOX_HREF}/knowledge`)
   if (conversationId) revalidatePath(`${ASSISTANT_INBOX_HREF}/${conversationId}`)
@@ -206,7 +206,7 @@ export async function updateAssistantSettingsAction(input: {
     })
     .eq("id", "default")
   if (error) return { ok: false, message: error.message }
-  revalidateAssistant()
+  revalidateAssistant(undefined, true)
   return { ok: true }
 }
 
