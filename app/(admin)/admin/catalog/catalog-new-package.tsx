@@ -127,7 +127,7 @@ export function CatalogNewPackage({
 
   const [eventCategory, setEventCategory] = useState<EventCategory>("formula_1")
   const [templateId, setTemplateId] = useState("")
-  const [raceId, setRaceId] = useState(races[0]?.id ?? "")
+  const [raceId, setRaceId] = useState("")
   const [newEventName, setNewEventName] = useState("")
   const [newEventShortName, setNewEventShortName] = useState("")
   const [newEventSeason, setNewEventSeason] = useState(new Date().getFullYear())
@@ -200,10 +200,9 @@ export function CatalogNewPackage({
   }
 
   function resetForm() {
-    const firstF1 = races.find((race) => raceCategory(race) === "formula_1") ?? races[0]
     setEventCategory("formula_1")
     setTemplateId("")
-    setRaceId(firstF1?.id ?? "")
+    setRaceId("")
     setNewEventName("")
     setNewEventShortName("")
     setNewEventSeason(new Date().getFullYear())
@@ -251,8 +250,7 @@ export function CatalogNewPackage({
     setDuration("")
     setInventoryIsStandalone(false)
     setFieldErrors({})
-    if (firstF1) applyRaceDefaults(firstF1)
-    else clearEventDefaults()
+    clearEventDefaults()
   }
 
   function selectCategory(next: EventCategory) {
@@ -263,12 +261,7 @@ export function CatalogNewPackage({
       setInventoryIsStandalone(false)
     }
     const matching = races.filter((race) => raceCategory(race) === next)
-    if (matching[0]) {
-      setRaceId(matching[0].id)
-      applyRaceDefaults(matching[0])
-      return
-    }
-    if (next === "formula_1") {
+    if (matching.length > 0 || next === "formula_1") {
       setRaceId("")
       clearEventDefaults()
       return
@@ -465,15 +458,16 @@ export function CatalogNewPackage({
       }
 
       if (createdPackageId && savedRaceId) {
+        const nextRaceId = raceId && raceId !== NEW_EVENT_ID ? raceId : savedRaceId
         let updated = await updatePackageFields({
           packageId: createdPackageId,
-          race_id: savedRaceId,
+          race_id: nextRaceId,
           ...packageFields,
         })
         if (!updated.ok && missingFaqsColumn(updated.message)) {
           updated = await updatePackageFields({
             packageId: createdPackageId,
-            race_id: savedRaceId,
+            race_id: nextRaceId,
             ...packageFields,
             skipFaqs: true,
           })
@@ -483,6 +477,7 @@ export function CatalogNewPackage({
           toast.error(updated.message)
           return null
         }
+        setSavedRaceId(nextRaceId)
         return createdPackageId
       }
 
@@ -634,7 +629,7 @@ export function CatalogNewPackage({
         </p>
       ) : null}
 
-      <FormSection step="1" title="Event" hint="Choose the event this product belongs to.">
+      <FormSection step="1" title="Event" hint="Choose the event this product belongs to. The race is not filled in for you — pick it before creating the product.">
       <div className="grid gap-4 sm:grid-cols-2">
         <Field id="event-type" label="Event type" className="sm:col-span-2" hint="Formula 1 uses race templates and shared day-split stock.">
           <select
@@ -678,7 +673,11 @@ export function CatalogNewPackage({
             required
             error={fieldErrors.race}
             className="sm:col-span-2"
-            hint={!isFormula1 ? `Choose an existing ${EVENT_CATEGORY_LABELS[eventCategory].toLowerCase()} event, or create one here.` : undefined}
+            hint={
+              isFormula1
+                ? "Required. Pick the Grand Prix this product is for before you create it."
+                : `Choose an existing ${EVENT_CATEGORY_LABELS[eventCategory].toLowerCase()} event, or create one here.`
+            }
           >
             <select
               value={raceId}
@@ -690,6 +689,9 @@ export function CatalogNewPackage({
               }}
               className={inputClass(Boolean(fieldErrors.race))}
             >
+              <option value="">
+                {isFormula1 ? "Select a race…" : "Select an event…"}
+              </option>
               {eventsForCategory.map((r) => (
                 <option key={r.id} value={r.id}>
                   {adminRaceLabel(r)}
@@ -1110,14 +1112,18 @@ export function CatalogNewPackage({
         disabled={pending || noF1Events}
         onClick={() => {
           if (createdPackageId) {
-            onOpenChange(false)
+            start(async () => {
+              const id = await persistProduct()
+              if (!id) return
+              onOpenChange(false)
+            })
             return
           }
           submit()
         }}
         className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"
       >
-        {createdPackageId ? "Done" : pending ? "Creating…" : "Create product"}
+        {createdPackageId ? (pending ? "Saving…" : "Done") : pending ? "Creating…" : "Create product"}
       </button>
     </div>
   )

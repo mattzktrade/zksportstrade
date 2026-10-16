@@ -37,6 +37,11 @@ import {
   linkedPoolSellableForPackage,
   type LinkedSellableMember,
 } from "@/lib/admin/package-sales-breakdown"
+import {
+  inventoryGroupMatchesRace,
+  inventoryGroupRaceId,
+  resolveInventoryGroupId,
+} from "@/lib/catalog/inventory-group"
 import { PACKAGE_DURATION_OPTIONS, packageDurationLabel } from "@/lib/catalog/package-duration"
 import { packageEventDefaultsFromRace } from "@/lib/catalog/race-circuit"
 import { TICKETING_MODES } from "@/lib/tickets/types"
@@ -219,7 +224,16 @@ export function PackageAdminPanel({
   const [includesText, setIncludesText] = useState(includesToText(initial.includes))
   const [tradePrice, setTradePrice] = useState(initial.trade_price != null ? String(initial.trade_price) : "")
   const [duration, setDuration] = useState(initial.duration ?? "")
-  const [inventoryGroupId, setInventoryGroupId] = useState(initial.inventory_group_id ?? "")
+  const [inventoryGroupId, setInventoryGroupId] = useState(
+    () =>
+      resolveInventoryGroupId({
+        packageId: initial.id,
+        duration: initial.duration ?? "",
+        raceId: initial.race_id,
+        inventoryIsStandalone: initial.inventory_is_standalone ?? false,
+        manualGroupId: initial.inventory_group_id,
+      }) ?? "",
+  )
   const [inventoryIsStandalone, setInventoryIsStandalone] = useState(
     initial.inventory_is_standalone ?? false,
   )
@@ -261,7 +275,15 @@ export function PackageAdminPanel({
     setIncludesText(includesToText(initial.includes))
     setTradePrice(initial.trade_price != null ? String(initial.trade_price) : "")
     setDuration(initial.duration ?? "")
-    setInventoryGroupId(initial.inventory_group_id ?? "")
+    setInventoryGroupId(
+      resolveInventoryGroupId({
+        packageId: initial.id,
+        duration: initial.duration ?? "",
+        raceId: initial.race_id,
+        inventoryIsStandalone: initial.inventory_is_standalone ?? false,
+        manualGroupId: initial.inventory_group_id,
+      }) ?? "",
+    )
     setInventoryIsStandalone(initial.inventory_is_standalone ?? false)
     setIsEnquiry(initial.is_enquiry)
     setRequiresBookingApproval(initial.requires_booking_approval ?? false)
@@ -497,12 +519,24 @@ export function PackageAdminPanel({
 
   const editingEvent = races.find((r) => r.id === raceId)
   const isFormula1Event = (editingEvent?.category ?? "formula_1") === "formula_1"
+  const persistedInventoryGroupId = (initial.inventory_group_id ?? "").trim()
+  const persistedInventoryRace = inventoryGroupRaceId(persistedInventoryGroupId)
+  const inventoryKeyFollowsRace = inventoryGroupMatchesRace(persistedInventoryGroupId, raceId)
+  const inventoryKeyRaceLabel =
+    races.find((race) => race.id === persistedInventoryRace)?.name ?? persistedInventoryRace
 
   return (
     <div className="space-y-6 min-w-0 w-full">
       {showDetails ? (
       <div className="space-y-4 min-w-0">
         <div className="grid gap-4 sm:grid-cols-2">
+          {!inventoryKeyFollowsRace ? (
+            <p className="sm:col-span-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              This product still shares stock with {inventoryKeyRaceLabel}. The linked inventory key
+              has been updated to match this event — click Save package so it stops sharing with the
+              other race.
+            </p>
+          ) : null}
           <label className="block text-xs text-muted-foreground sm:col-span-2">
             {isFormula1Event ? "Race" : "Event"}
             <select
@@ -510,6 +544,15 @@ export function PackageAdminPanel({
               onChange={(e) => {
                 const next = e.target.value
                 setRaceId(next)
+                setInventoryGroupId((current) =>
+                  resolveInventoryGroupId({
+                    packageId: initial.id,
+                    duration,
+                    raceId: next,
+                    inventoryIsStandalone,
+                    manualGroupId: current || initial.inventory_group_id,
+                  }) ?? "",
+                )
                 const race = races.find((r) => r.id === next)
                 if (!race) return
                 const defaults = packageEventDefaultsFromRace(race)
@@ -541,7 +584,19 @@ export function PackageAdminPanel({
             Package type / duration
             <select
               value={duration}
-              onChange={(e) => setDuration(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value
+                setDuration(next)
+                setInventoryGroupId((current) =>
+                  resolveInventoryGroupId({
+                    packageId: initial.id,
+                    duration: next,
+                    raceId,
+                    inventoryIsStandalone,
+                    manualGroupId: current,
+                  }) ?? "",
+                )
+              }}
               className="mt-1.5 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
             >
               {PACKAGE_DURATION_OPTIONS.map((option) => (
@@ -750,6 +805,7 @@ export function PackageAdminPanel({
           <DetailSection
             title="Stock sharing"
             summary={inventoryIsStandalone ? "Separate inventory" : inventoryGroupId.trim() || "Shares stock with linked packages"}
+            defaultOpen={!inventoryKeyFollowsRace}
           >
             <label className="block text-xs text-muted-foreground sm:col-span-2">
               Linked inventory key
@@ -761,7 +817,8 @@ export function PackageAdminPanel({
                 placeholder={inventoryIsStandalone ? "Standalone inventory" : "Auto-generated when blank"}
               />
               <span className="block text-[11px] text-muted-foreground/80 mt-1 leading-relaxed">
-                Packages with the same key share inventory.
+                Packages with the same key share inventory at this event. Changing the race updates
+                the key so this product cannot keep sharing stock with another Grand Prix.
               </span>
             </label>
             <LinkSharedInventoryPanel
@@ -782,7 +839,19 @@ export function PackageAdminPanel({
               <input
                 type="checkbox"
                 checked={inventoryIsStandalone}
-                onChange={(e) => setInventoryIsStandalone(e.target.checked)}
+                onChange={(e) => {
+                  const next = e.target.checked
+                  setInventoryIsStandalone(next)
+                  setInventoryGroupId((current) =>
+                    resolveInventoryGroupId({
+                      packageId: initial.id,
+                      duration,
+                      raceId,
+                      inventoryIsStandalone: next,
+                      manualGroupId: current || initial.inventory_group_id,
+                    }) ?? "",
+                  )
+                }}
                 className="mt-0.5"
               />
               <span>

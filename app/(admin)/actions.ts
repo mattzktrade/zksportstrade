@@ -6,7 +6,12 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 import { sanitizeHttpsUrl, sanitizeHttpsUrlList } from "@/lib/auth/safe-url"
 import { normalizeCatalogImageUrl, normalizeCatalogImageUrlList } from "@/lib/images/display-image-url"
-import { deriveInventoryGroupId, isMultiDayComboDuration, isSplittablePackageDuration } from "@/lib/catalog/inventory-group"
+import {
+  inventoryGroupRaceId,
+  isMultiDayComboDuration,
+  isSplittablePackageDuration,
+  resolveInventoryGroupId,
+} from "@/lib/catalog/inventory-group"
 import { mapLinkSharedInventoryError, resolveLinkSharedInventoryRoles } from "@/lib/inventory/link-shared-inventory"
 import { ensureShellSingleTicketsForParent } from "@/lib/catalog/ensure-shell-single-tickets"
 import { generatePackageIdFromRaceAndName } from "@/lib/catalog/generate-package-id"
@@ -776,9 +781,13 @@ export async function updatePackageFields(input: {
   const raceId = input.race_id.trim()
   const inventoryIsStandalone = input.inventory_is_standalone === true
   const manualInventoryGroupId = input.inventory_group_id?.trim() || null
-  const inventoryGroupId = duration && !inventoryIsStandalone
-    ? manualInventoryGroupId ?? deriveInventoryGroupId(id, duration, raceId)
-    : null
+  const inventoryGroupId = resolveInventoryGroupId({
+    packageId: id,
+    duration,
+    raceId,
+    inventoryIsStandalone,
+    manualGroupId: manualInventoryGroupId,
+  })
   const requiresBookingApproval =
     input.requires_booking_approval ?? isPaddockClubPackageName(input.name.trim())
 
@@ -881,6 +890,27 @@ export async function updatePackageFields(input: {
     typeof existing.inventory_group_id === "string" ? existing.inventory_group_id.trim() || null : null
 
   if (previousInventoryGroupId && previousInventoryGroupId !== inventoryGroupId) {
+    const previousGroupRace = inventoryGroupRaceId(previousInventoryGroupId)
+    if (inventoryGroupId && previousGroupRace && previousGroupRace !== raceId) {
+      const { data: stuckSiblings } = await supabase
+        .from("packages")
+        .select("id")
+        .eq("inventory_group_id", previousInventoryGroupId)
+        .eq("race_id", raceId)
+        .neq("id", id)
+      const siblingIds = (stuckSiblings ?? []).map((row) => String(row.id))
+      if (siblingIds.length > 0) {
+        const { error: siblingErr } = await supabase
+          .from("packages")
+          .update({ inventory_group_id: inventoryGroupId })
+          .in("id", siblingIds)
+        if (siblingErr) return { ok: false, message: siblingErr.message }
+        for (const siblingId of siblingIds) {
+          const enq = await enqueueProductUpsert(supabase, siblingId)
+          if (!enq.ok) return { ok: false, message: enq.message }
+        }
+      }
+    }
     await supabase.rpc("reconcile_linked_multi_day_inventory", { p_group_id: previousInventoryGroupId })
     const { data: previousLinked } = await supabase
       .from("packages")
@@ -1718,9 +1748,13 @@ export async function createPackage(input: {
 
   const inventoryIsStandalone = input.inventory_is_standalone === true
   const manualInventoryGroupId = input.inventory_group_id?.trim() || null
-  const inventoryGroupId = duration && !inventoryIsStandalone
-    ? manualInventoryGroupId ?? deriveInventoryGroupId(id, duration || null, raceId)
-    : null
+  const inventoryGroupId = resolveInventoryGroupId({
+    packageId: id,
+    duration: duration || null,
+    raceId,
+    inventoryIsStandalone,
+    manualGroupId: manualInventoryGroupId,
+  })
   const requiresBookingApproval =
     input.requires_booking_approval ?? isPaddockClubPackageName(input.name.trim())
 
