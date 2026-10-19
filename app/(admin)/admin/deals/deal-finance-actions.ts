@@ -20,7 +20,7 @@ import {
   orderCancelMustSkipCogsDelete,
   postgresErrorText,
   releaseOrderStockSkippingRestatedCogs,
-  shouldUseRestatementSafeOrderCancel,
+  shouldUseAppOrderCancelFallback,
 } from "@/lib/inventory/cancel-order-stock"
 
 type Result = { ok: true; message: string } | { ok: false; message: string }
@@ -133,7 +133,7 @@ export async function cancelNativeDealOrder(input: {
         p_xero_void_confirmed: false,
       })
       if (error) {
-        if (!shouldUseRestatementSafeOrderCancel(postgresErrorText(error))) {
+        if (!shouldUseAppOrderCancelFallback(postgresErrorText(error))) {
           throw new Error(error.message)
         }
       } else {

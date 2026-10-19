@@ -73,6 +73,10 @@ const cancelFulfilmentLockMigration = readFileSync(
   "supabase/migrations/20260827120000_cancel_order_releases_fulfilment_locked_stock.sql",
   "utf8",
 ).toLowerCase()
+const restoreCancelPrepareMigration = readFileSync(
+  "supabase/migrations/20261019100000_restore_inventory_prepare_order_cancel_release.sql",
+  "utf8",
+).toLowerCase()
 const cancelPrepareHelper = readFileSync(
   "lib/inventory/prepare-order-cancel-release.ts",
   "utf8",
@@ -272,6 +276,14 @@ test("unpaid order cancellation unlocks assigned stock but not tickets received"
   )
   assert.match(cancelPrepareHelper, /tickets_or_delivery_block_cancellation/)
   assert.match(cancelPrepareHelper, /lock_state: "mutable"/)
+  assert.match(
+    restoreCancelPrepareMigration,
+    /create or replace function public\.inventory_prepare_order_cancel_release/,
+  )
+  assert.match(restoreCancelPrepareMigration, /tickets_or_delivery_block_cancellation/)
+  assert.match(restoreCancelPrepareMigration, /lock_state = 'mutable'/)
+  assert.match(dealFinanceActions, /shouldUseAppOrderCancelFallback/)
+  assert.match(cancelOrderStockHelper, /isMissingOrderCancelPrepareFunction/)
 })
 
 test("order cancel may detach restatement events from deleted COGS without rewriting costs", () => {

@@ -43,7 +43,7 @@ import {
   orderCancelMustSkipCogsDelete,
   postgresErrorText,
   releaseOrderStockSkippingRestatedCogs,
-  shouldUseRestatementSafeOrderCancel,
+  shouldUseAppOrderCancelFallback,
 } from "@/lib/inventory/cancel-order-stock"
 import { recordPurchaseLedgerForLatestLayer } from "@/lib/inventory/ledger"
 import {
@@ -614,7 +614,7 @@ export async function cancelAdminOrder(orderId: string): Promise<ActionResult> {
           "This order still has a Xero invoice attached. Apply the latest database update so cancellation can leave that invoice for finance.",
       }
     }
-    if (shouldUseRestatementSafeOrderCancel(msg)) {
+    if (shouldUseAppOrderCancelFallback(msg)) {
       try {
         const admin = createAdminClient()
         if (!admin) return { ok: false, message: "Supabase service role is not configured." }

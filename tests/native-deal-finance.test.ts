@@ -2,6 +2,11 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 import { cancellationEligibleDate, daysOverdue, shouldLoadDealOrderFinance } from "../lib/crm/deal-finance"
+import {
+  isMissingOrderCancelPrepareFunction,
+  shouldUseAppOrderCancelFallback,
+  shouldUseRestatementSafeOrderCancel,
+} from "../lib/inventory/cancel-order-stock"
 import { DEFAULT_FINANCE_CC, DEFAULT_BOOKINGS_CC, DEFAULT_OPERATIONS_CC, NEVER_CC_ADDRESSES, getInvoiceFinanceCc, getBookingConfirmationCc, getOperationsEmailCc, invoiceEmailCc } from "../lib/email/config"
 import { invoiceDisplayStatus, pickPreferredInvoice } from "../lib/invoices/status"
 
@@ -79,6 +84,24 @@ test("cancelling a deal leaves the Xero invoice for finance", () => {
   assert.match(migration, /paid_or_delivered_order_cannot_be_cancelled/)
   assert.match(migration, /xero_invoice_left_for_finance/)
   assert.match(migration, /status not in \('paid', 'delivered', 'cancelled'\)/)
+  assert.match(migration, /inventory_prepare_order_cancel_release/)
+
+  const restoreHelper = readFileSync(
+    "supabase/migrations/20261019100000_restore_inventory_prepare_order_cancel_release.sql",
+    "utf8",
+  )
+  assert.match(restoreHelper, /create or replace function public\.inventory_prepare_order_cancel_release/)
+  assert.match(restoreHelper, /tickets_or_delivery_block_cancellation/)
+  assert.match(restoreHelper, /lock_state = 'mutable'/)
+  assert.doesNotMatch(restoreHelper, /xero_invoice_must_be_voided_first/)
+  assert.match(actions, /shouldUseAppOrderCancelFallback/)
+
+  const missingHelper =
+    "function public.inventory_prepare_order_cancel_release(uuid) does not exist"
+  assert.equal(isMissingOrderCancelPrepareFunction(missingHelper), true)
+  assert.equal(shouldUseAppOrderCancelFallback(missingHelper), true)
+  assert.equal(shouldUseRestatementSafeOrderCancel(missingHelper), false)
+  assert.equal(shouldUseAppOrderCancelFallback("paid_or_delivered_order_cannot_be_cancelled"), false)
 
   const xero = readFileSync("lib/integrations/xero/invoices.ts", "utf8")
   assert.match(xero, /function cancelledCrmSale/)

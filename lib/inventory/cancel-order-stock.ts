@@ -26,6 +26,18 @@ export function shouldUseRestatementSafeOrderCancel(detail: string): boolean {
   return detail.includes("inventory_component_audit_rows_are_append_only")
 }
 
+export function isMissingOrderCancelPrepareFunction(detail: string): boolean {
+  return (
+    /inventory_prepare_order_cancel_release/i.test(detail) &&
+    /does not exist/i.test(detail)
+  )
+}
+
+/** Hosted cancel RPCs can fail after the Xero-leave rewrite if the unlock helper is missing. */
+export function shouldUseAppOrderCancelFallback(detail: string): boolean {
+  return shouldUseRestatementSafeOrderCancel(detail) || isMissingOrderCancelPrepareFunction(detail)
+}
+
 export async function assertOrderCanBeCancelled(
   orderId: string,
 ): Promise<{ alreadyCancelled: boolean }> {
