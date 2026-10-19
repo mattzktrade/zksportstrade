@@ -32,9 +32,23 @@ export async function sendWhatsAppText(input: {
     parsed = null
   }
   if (!response.ok) {
-    return { ok: false, error: parsed?.error?.message || raw.slice(0, 300) || `HTTP ${response.status}` }
+    return { ok: false, error: explainWhatsAppSendError(parsed?.error?.message || raw.slice(0, 300) || `HTTP ${response.status}`) }
   }
   return { ok: true, id: parsed?.messages?.[0]?.id ?? null }
+}
+
+export function explainWhatsAppSendError(error: string): string {
+  const text = error.toLowerCase()
+  if (
+    /\b131047\b/.test(text) ||
+    text.includes("24 hour") ||
+    text.includes("24-hour") ||
+    text.includes("re-engagement") ||
+    text.includes("customer service window")
+  ) {
+    return "WhatsApp refused this because they have not written back in the last 24 hours. Try again after they reply, or send it from the phone."
+  }
+  return error
 }
 
 export async function sendWhatsAppDocument(input: {
@@ -65,7 +79,7 @@ export async function sendWhatsAppDocument(input: {
     }),
   })
   const raw = await response.text()
-  if (!response.ok) return { ok: false, error: raw.slice(0, 300) }
+  if (!response.ok) return { ok: false, error: explainWhatsAppSendError(raw.slice(0, 300)) }
   try {
     const parsed = JSON.parse(raw) as { messages?: Array<{ id?: string }> }
     return { ok: true, id: parsed.messages?.[0]?.id ?? null }

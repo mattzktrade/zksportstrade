@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Search } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
@@ -105,10 +105,14 @@ export function InboxWorkspace({
   rows: initialRows,
   selectedId: initialSelectedId,
   selected: initialThread,
+  header,
+  footer,
 }: {
   rows: InboxRow[]
   selectedId: string | null
   selected: InboxThread | null
+  header?: ReactNode
+  footer?: ReactNode
 }) {
   const [query, setQuery] = useState("")
   const [view, setView] = useState<InboxViewFilter>("all")
@@ -229,89 +233,104 @@ export function InboxWorkspace({
   }
 
   return (
-    <div className="grid min-h-[calc(100dvh-7.5rem)] overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
-      <section className={cn("flex min-h-0 flex-col border-border lg:border-r", selectedId ? "hidden lg:flex" : "flex")}>
-        <div className="space-y-2 border-b border-border p-3">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search name, email, phone, message…"
-              className="h-9 w-full rounded-md border pl-9 pr-3 text-[12px] outline-none focus:border-primary/50"
-            />
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {CHANNELS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setChannel(item.id)}
-                className={cn(
-                  "rounded-md px-2 py-1 text-[11px] font-medium",
-                  channel === item.id ? "bg-red-50 text-primary" : "text-muted-foreground hover:bg-slate-50",
-                )}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {VIEWS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setView(item.id)}
-                className={cn(
-                  "rounded-md px-2 py-1 text-[11px] font-medium",
-                  view === item.id ? "bg-slate-900 text-white" : "text-muted-foreground hover:bg-slate-50",
-                )}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="min-h-0 flex-1 divide-y divide-[#f0f1f3] overflow-y-auto">
-          {visible.map((row) => (
-            <InboxListRow
-              key={row.id}
-              row={row}
-              selected={selectedId === row.id}
-              onOpen={openThread}
-              onPrefetch={prefetchThread}
-            />
-          ))}
-          {visible.length === 0 ? (
-            <p className="px-4 py-10 text-center text-[13px] text-[#9aa0a6]">
-              {rows.length === 0
-                ? "No conversations yet. Follow-ups and replies will land here."
-                : "Nothing matches that search or filter."}
-            </p>
-          ) : null}
-        </div>
-      </section>
-
-      <section className={cn("flex min-h-0 flex-col", selectedId ? "flex" : "hidden lg:flex")}>
-        {thread ? (
-          <>
-            <div className="border-b border-border px-3 py-2 lg:hidden">
-              <button type="button" className="text-[12px] font-medium text-primary" onClick={closeList}>
-                Back to inbox
-              </button>
+    <div className="flex h-[calc(100dvh-3.5rem-env(safe-area-inset-top,0px))] flex-col overflow-hidden p-3 sm:h-[calc(100dvh-4rem-env(safe-area-inset-top,0px))] sm:p-4">
+      {header ? <div className={cn("mb-3 shrink-0", selectedId && "hidden lg:block")}>{header}</div> : null}
+      <div className="grid min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-[minmax(240px,320px)_minmax(0,1fr)]">
+        <section
+          className={cn(
+            "min-h-0 min-w-0 flex-col overflow-hidden border-border lg:border-r",
+            selectedId ? "hidden lg:flex" : "flex",
+          )}
+        >
+          <div className="shrink-0 space-y-2 border-b border-border p-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search name, email, phone, message…"
+                className="h-9 w-full rounded-md border pl-9 pr-3 text-[12px] outline-none focus:border-primary/50"
+              />
             </div>
-            <AssistantConversationClient
-              {...thread}
-              loading={loading && thread.messages.length === 0}
-              onChanged={() => void loadThread(thread.conversationId, true)}
-            />
-          </>
-        ) : (
-          <div className="flex flex-1 items-center justify-center px-6 text-center text-[13px] text-[#9aa0a6]">
-            Pick a conversation to read the thread and reply.
+            <div className="flex flex-wrap gap-1">
+              {CHANNELS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setChannel(item.id)}
+                  className={cn(
+                    "rounded-md px-2 py-1 text-[11px] font-medium",
+                    channel === item.id ? "bg-red-50 text-primary" : "text-muted-foreground hover:bg-slate-50",
+                  )}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {VIEWS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setView(item.id)}
+                  className={cn(
+                    "rounded-md px-2 py-1 text-[11px] font-medium",
+                    view === item.id ? "bg-slate-900 text-white" : "text-muted-foreground hover:bg-slate-50",
+                  )}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </div>
-        )}
-      </section>
+          <div className="min-h-0 flex-1 divide-y divide-[#f0f1f3] overflow-y-auto">
+            {visible.map((row) => (
+              <InboxListRow
+                key={row.id}
+                row={row}
+                selected={selectedId === row.id}
+                onOpen={openThread}
+                onPrefetch={prefetchThread}
+              />
+            ))}
+            {visible.length === 0 ? (
+              <p className="px-4 py-10 text-center text-[13px] text-[#9aa0a6]">
+                {rows.length === 0
+                  ? "No conversations yet. Follow-ups and replies will land here."
+                  : "Nothing matches that search or filter."}
+              </p>
+            ) : null}
+          </div>
+          {footer ? (
+            <div className="max-h-[38%] shrink-0 space-y-2 overflow-y-auto overflow-x-hidden border-t border-border p-3">
+              {footer}
+            </div>
+          ) : null}
+        </section>
+
+        <section
+          className={cn("min-h-0 min-w-0 flex-col overflow-hidden", selectedId ? "flex" : "hidden lg:flex")}
+        >
+          {thread ? (
+            <>
+              <div className="shrink-0 border-b border-border px-3 py-2 lg:hidden">
+                <button type="button" className="text-[12px] font-medium text-primary" onClick={closeList}>
+                  Back to inbox
+                </button>
+              </div>
+              <AssistantConversationClient
+                {...thread}
+                loading={loading && thread.messages.length === 0}
+                onChanged={() => void loadThread(thread.conversationId, true)}
+              />
+            </>
+          ) : (
+            <div className="flex flex-1 items-center justify-center px-6 text-center text-[13px] text-[#9aa0a6]">
+              Pick a conversation to read the thread and reply.
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   )
 }

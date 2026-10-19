@@ -49,7 +49,7 @@ export function AssistantConversationClient({
   const [body, setBody] = useState(draft?.body ?? "")
   const [question, setQuestion] = useState("")
   const scroller = useRef<HTMLDivElement | null>(null)
-  const whatsappBlocked = channel === "whatsapp" && !canSendWhatsApp
+  const whatsappWindowClosed = channel === "whatsapp" && !canSendWhatsApp
 
   useEffect(() => {
     setBody(draft?.body ?? "")
@@ -72,8 +72,8 @@ export function AssistantConversationClient({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
         <div className="min-w-0">
           <p className="truncate text-[15px] font-semibold text-[#18191c]">{displayName}</p>
           <p className="mt-0.5 truncate text-[11px] text-[#80848d]">
@@ -173,32 +173,32 @@ export function AssistantConversationClient({
         ) : null}
       </div>
 
-      <div className="border-t border-border px-4 py-3">
-        {whatsappBlocked ? (
+      <div className="shrink-0 border-t border-border px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
+        {whatsappWindowClosed ? (
           <p className="mb-2 rounded-md bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
-            WhatsApp only allows a typed reply after they message back. You can still draft one, then send it when they
-            reply.
+            They have not written back in the last 24 hours, so WhatsApp may refuse this. You can still send — we will
+            tell you if it does not go through.
           </p>
         ) : null}
         {draft?.body && body === draft.body ? (
           <p className="mb-2 text-[11px] font-medium text-emerald-700">Suggested reply — edit it, then send.</p>
         ) : null}
         <textarea
-          className="min-h-[110px] w-full rounded-md border border-border p-2 text-[13px]"
+          className="min-h-[72px] w-full rounded-md border border-border p-2 text-[13px] sm:min-h-[110px]"
           value={body}
           onChange={(event) => setBody(event.target.value)}
-          placeholder={channel === "email" ? "Write an email reply" : "Write a WhatsApp reply"}
+          placeholder={channel === "email" ? "Write an email reply" : "Write a WhatsApp message"}
           onKeyDown={(event) => {
             if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
               event.preventDefault()
-              if (!pending && !whatsappBlocked && body.trim()) send()
+              if (!pending && body.trim()) send()
             }
           }}
         />
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <button
             type="button"
-            disabled={pending || whatsappBlocked || !body.trim()}
+            disabled={pending || !body.trim()}
             className="rounded-md bg-[#18191c] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
             onClick={send}
           >
@@ -225,7 +225,7 @@ export function AssistantConversationClient({
           >
             Draft with AI
           </button>
-          <span className="text-[10px] text-[#9aa0a6]">Ctrl+Enter to send</span>
+          <span className="hidden text-[10px] text-[#9aa0a6] sm:inline">Ctrl+Enter to send</span>
         </div>
         <details className="mt-3 text-[13px]">
           <summary className="cursor-pointer text-[11px] font-medium text-[#80848d]">More</summary>

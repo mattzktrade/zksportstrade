@@ -560,7 +560,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           {
             q: "Where do WhatsApp messages go?",
-            a: "Sales → Inbox. That is the assistant inbox. Sent follow-ups and customer replies show in the same WhatsApp thread. You reply from there. WhatsApp only allows a typed reply after the customer messages back. The notify list also gets an email when they reply and a person needs to answer.",
+            a: "Sales → Inbox. That is the assistant inbox. Sent follow-ups and customer replies show in the same WhatsApp thread. You can send another WhatsApp from there even if they have not replied yet. If they have not written back in 24 hours, WhatsApp may refuse a typed message — send it from the phone or wait until they reply. The notify list also gets an email when they reply and a person needs to answer.",
           },
           {
             q: "Can it send a booking form?",

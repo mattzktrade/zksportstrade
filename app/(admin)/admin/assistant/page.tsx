@@ -112,43 +112,53 @@ export default async function AssistantInboxPage({
     : null
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-3 p-3 sm:p-4">
-      <AdminPageHeader
-        title="Inbox"
-        description="Search and reply to WhatsApp and email. Draft with AI, then send when it looks right."
-        action={
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href={ASSISTANT_READINESS_HREF}
-              className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium"
-            >
-              Knowledge checklist
-            </Link>
-            <Link
-              href={ASSISTANT_KNOWLEDGE_HREF}
-              className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium"
-            >
-              Knowledge base
-            </Link>
-          </div>
-        }
-      />
-      <InboxWorkspace rows={mapped} selectedId={selectedId ?? null} selected={selected} />
-      <EmailRepliesSetup configured={isInboundEmailWebhookConfigured()} />
-      {hasCmsPermission(profile, "settings.manage") ? (
-        <details className="rounded-xl border border-border bg-card p-4">
-          <summary className="cursor-pointer text-sm font-semibold text-foreground">Assistant settings</summary>
-          <div className="mt-3">
-            <AssistantSettingsForm
-              autoSendEnabled={settings.autoSendEnabled}
-              killSwitch={settings.killSwitch}
-              allowPublishedTradePrices={settings.allowPublishedTradePrices}
-              notifyEmails={settings.notifyEmails.join(", ")}
-              debounceSeconds={settings.debounceSeconds}
-            />
-          </div>
-        </details>
-      ) : null}
-    </div>
+    <InboxWorkspace
+      rows={mapped}
+      selectedId={selectedId ?? null}
+      selected={selected}
+      header={
+        <AdminPageHeader
+          title="Inbox"
+          description="Search and reply to WhatsApp and email. Draft with AI, then send when it looks right."
+          action={
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={ASSISTANT_READINESS_HREF}
+                className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium"
+              >
+                Knowledge checklist
+              </Link>
+              <Link
+                href={ASSISTANT_KNOWLEDGE_HREF}
+                className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium"
+              >
+                Knowledge base
+              </Link>
+            </div>
+          }
+        />
+      }
+      footer={
+        <>
+          <EmailRepliesSetup configured={isInboundEmailWebhookConfigured()} />
+          {hasCmsPermission(profile, "settings.manage") ? (
+            <details className="min-w-0 rounded-xl border border-border bg-card p-3">
+              <summary className="cursor-pointer break-words text-sm font-semibold text-foreground">
+                Assistant settings
+              </summary>
+              <div className="mt-3">
+                <AssistantSettingsForm
+                  autoSendEnabled={settings.autoSendEnabled}
+                  killSwitch={settings.killSwitch}
+                  allowPublishedTradePrices={settings.allowPublishedTradePrices}
+                  notifyEmails={settings.notifyEmails.join(", ")}
+                  debounceSeconds={settings.debounceSeconds}
+                />
+              </div>
+            </details>
+          ) : null}
+        </>
+      }
+    />
   )
 }

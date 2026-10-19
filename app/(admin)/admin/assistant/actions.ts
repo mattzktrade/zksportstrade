@@ -17,7 +17,6 @@ import {
   listMessages,
   updateConversation,
 } from "@/lib/assistant/store"
-import { canSendWhatsAppReply } from "@/lib/assistant/inbox"
 import { ASSISTANT_INBOX_HREF } from "@/lib/assistant/types"
 
 function revalidateAssistant(conversationId?: string, refreshInbox = false) {
@@ -42,12 +41,6 @@ export async function sendAssistantDraft(input: {
   const draft = await latestPendingDraft(admin, conversation.id)
   const body = input.body.trim()
   if (!body) return { ok: false, message: "Write a reply first." }
-  if (conversation.channel === "whatsapp" && !canSendWhatsAppReply(conversation.lastClientMessageAt)) {
-    return {
-      ok: false,
-      message: "WhatsApp only allows a typed reply after they message back. Wait for their reply.",
-    }
-  }
   const sent = await sendOutbound(admin, conversation, body, "staff")
   if (!sent.ok) return { ok: false, message: sent.error }
   if (draft) {

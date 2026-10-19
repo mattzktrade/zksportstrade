@@ -2,8 +2,10 @@ import { INBOUND_EMAIL_WEBHOOK_URL } from "@/lib/assistant/email-inbound-config"
 
 export function EmailRepliesSetup({ configured }: { configured: boolean }) {
   return (
-    <details className="rounded-xl border border-border bg-card p-4">
-      <summary className="cursor-pointer text-sm font-semibold text-foreground">Email replies into Inbox</summary>
+    <details className="min-w-0 rounded-xl border border-border bg-card p-3">
+      <summary className="cursor-pointer break-words text-sm font-semibold text-foreground">
+        Email replies into Inbox
+      </summary>
       <div className="mt-3 space-y-3 text-sm text-muted-foreground">
         <p>
           Replies to <span className="text-foreground">sales@zk-sports.com</span> stay in Outlook unless a one-time

@@ -22,6 +22,7 @@ import {
   type InboxRow,
 } from "../lib/assistant/inbox"
 import { parseAssistantJson, buildAssistantSystemPrompt } from "../lib/assistant/llm"
+import { explainWhatsAppSendError } from "../lib/assistant/whatsapp-send"
 import {
   assistantWillAutoReply,
   inWhatsAppReplyNotifyBurst,
@@ -427,10 +428,23 @@ test("inbox opens a conversation without reloading the page", () => {
   const src = readFileSync("app/(admin)/admin/assistant/inbox-workspace.tsx", "utf8")
   assert.match(src, /\/api\/admin\/assistant\/conversations\//)
   assert.doesNotMatch(src, /router\.push/)
+  assert.match(src, /min-h-0 flex-1/)
+  assert.match(src, /h-\[calc\(100dvh/)
   assert.match(
     readFileSync("app/api/admin/assistant/conversations/[conversationId]/route.ts", "utf8"),
     /loadInboxThreadById/,
   )
+})
+
+test("staff can send another WhatsApp before they reply", () => {
+  const thread = readFileSync("app/(admin)/admin/assistant/conversation-client.tsx", "utf8")
+  assert.match(thread, /Write a WhatsApp message/)
+  assert.doesNotMatch(thread, /disabled=\{pending \|\| whatsappBlocked/)
+  assert.doesNotMatch(thread, /WhatsApp only allows a typed reply/)
+  const actions = readFileSync("app/(admin)/admin/assistant/actions.ts", "utf8")
+  assert.doesNotMatch(actions, /canSendWhatsAppReply/)
+  assert.match(explainWhatsAppSendError("(#131047) Re-engagement message"), /24 hours/)
+  assert.equal(explainWhatsAppSendError("Phone number is not valid"), "Phone number is not valid")
 })
 
 test("inbox can open WhatsApp photos, videos and documents", () => {
