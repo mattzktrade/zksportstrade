@@ -37,6 +37,7 @@ export type MarketingOutreachProcessResult = {
 
 const DEFAULT_LIMIT = 15
 const HOLD_RETRY_MS = 10 * 60 * 1000
+const SENDING_LOCK = "sending"
 
 function asStage(value: number): MarketingOutreachStage | null {
   if (value === 1 || value === 2 || value === 3) return value
@@ -74,18 +75,82 @@ async function alreadySent(
   stage: MarketingOutreachStage,
   channel: MarketingOutreachChannel,
 ): Promise<boolean> {
-  const { data } = await admin
+  const { data, error } = await admin
     .from("marketing_outreach_sends")
     .select("id, status, skip_reason")
     .eq("enrollment_id", enrollmentId)
     .eq("stage", stage)
     .eq("channel", channel)
     .in("status", ["sent", "skipped"])
+    .limit(1)
     .maybeSingle()
+  if (error) throw new Error(error.message)
   if (!data) return false
   if (data.status === "sent") return true
   const reason = typeof data.skip_reason === "string" ? data.skip_reason : ""
   return Boolean(reason) && !(RETRYABLE_OUTREACH_SKIP_REASONS as readonly string[]).includes(reason)
+}
+
+/** One worker at a time: park the due time so the minute cron cannot start the same stage. */
+async function claimEnrollment(
+  admin: AdminClient,
+  enrollment: MarketingOutreachEnrollment,
+  now: Date,
+): Promise<boolean> {
+  const { data, error } = await admin
+    .from("marketing_outreach_enrollments")
+    .update({
+      next_stage_due_at: new Date(now.getTime() + HOLD_RETRY_MS).toISOString(),
+      updated_at: now.toISOString(),
+    })
+    .eq("id", enrollment.id)
+    .eq("status", "active")
+    .eq("current_stage", enrollment.current_stage)
+    .lte("next_stage_due_at", now.toISOString())
+    .select("id")
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return Boolean(data?.id)
+}
+
+/** Take the unique send row before calling Meta / email, so a second worker cannot send the same message. */
+async function acquireChannelSlot(
+  admin: AdminClient,
+  input: {
+    enrollmentId: string
+    dealId: string
+    stage: MarketingOutreachStage
+    channel: MarketingOutreachChannel
+  },
+): Promise<boolean> {
+  const { data: existing, error: readError } = await admin
+    .from("marketing_outreach_sends")
+    .select("id, status, skip_reason")
+    .eq("enrollment_id", input.enrollmentId)
+    .eq("stage", input.stage)
+    .eq("channel", input.channel)
+    .limit(1)
+    .maybeSingle()
+  if (readError) throw new Error(readError.message)
+  if (!existing) {
+    const { error } = await admin.from("marketing_outreach_sends").insert({
+      enrollment_id: input.enrollmentId,
+      deal_id: input.dealId,
+      stage: input.stage,
+      channel: input.channel,
+      status: "failed",
+      error: SENDING_LOCK,
+    })
+    if (error?.code === "23505") return false
+    if (error) throw new Error(error.message)
+    return true
+  }
+  if (existing.status === "sent") return false
+  if (existing.status === "skipped") {
+    const reason = typeof existing.skip_reason === "string" ? existing.skip_reason : ""
+    return (RETRYABLE_OUTREACH_SKIP_REASONS as readonly string[]).includes(reason)
+  }
+  return true
 }
 
 async function recordSend(
@@ -144,6 +209,14 @@ async function sendEmailChannel(
   interest: { event: string | null; packageName: string | null; quantity: number | null },
 ): Promise<OutreachChannelOutcome> {
   if (await alreadySent(admin, enrollment.id, stage, "email")) return { status: "sent", unchanged: true }
+  if (!(await acquireChannelSlot(admin, {
+    enrollmentId: enrollment.id,
+    dealId: enrollment.deal_id,
+    stage,
+    channel: "email",
+  }))) {
+    return { status: "sent", unchanged: true }
+  }
   if (!step.email_enabled) {
     await recordSend(admin, {
       enrollmentId: enrollment.id,
@@ -222,6 +295,14 @@ async function sendWhatsAppChannel(
   interest: { event: string | null; packageName: string | null; quantity: number | null },
 ): Promise<OutreachChannelOutcome> {
   if (await alreadySent(admin, enrollment.id, stage, "whatsapp")) return { status: "sent", unchanged: true }
+  if (!(await acquireChannelSlot(admin, {
+    enrollmentId: enrollment.id,
+    dealId: enrollment.deal_id,
+    stage,
+    channel: "whatsapp",
+  }))) {
+    return { status: "sent", unchanged: true }
+  }
   if (!step.whatsapp_enabled) {
     await recordSend(admin, {
       enrollmentId: enrollment.id,
@@ -315,6 +396,10 @@ async function processEnrollment(
   steps: MarketingOutreachStep[],
   now: Date,
 ): Promise<{ sent: number; skipped: number; failed: number }> {
+  if (!(await claimEnrollment(admin, enrollment, now))) {
+    return { sent: 0, skipped: 0, failed: 0 }
+  }
+
   const nextStage = asStage(enrollment.current_stage + 1)
   if (!nextStage) {
     await admin
