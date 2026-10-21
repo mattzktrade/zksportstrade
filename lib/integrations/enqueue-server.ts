@@ -3,6 +3,7 @@ import { packageIdsForInventoryChannelSync } from "@/lib/integrations/inventory-
 import { drainOutboxNow, scheduleOutboxDrain } from "@/lib/integrations/schedule-drain"
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { OrderChannel } from "@/lib/integrations/types"
+import { isPrepaidCheckoutChannel } from "@/lib/orders/channel"
 import { isNativePlatformMode } from "@/lib/platform/runtime-mode"
 import { attachDealForCommittedOrder } from "@/lib/crm/attach-portal-deal"
 import { isInvoiceIssuable, loadOrderInvoices } from "@/lib/invoices/order-invoices"
@@ -347,15 +348,15 @@ export async function enqueueOrderIntegrationsServer(
   options?: { background?: boolean },
 ): Promise<{ ok: true; warnings: string[] } | { ok: false; message: string }> {
   const warnings: string[] = []
-  if (channel !== "wix") {
+  if (!isPrepaidCheckoutChannel(channel)) {
     const attached = await attachDealForCommittedOrder(orderId)
     if (!attached.ok) warnings.push(`Deal link: ${attached.message}`)
   }
   const sf = await enqueueOrderPlacedServer(orderId, channel)
   if (!sf.ok) warnings.push(`Salesforce: ${sf.message}`)
 
-  if (channel === "wix") {
-    // Customer paid on Wix checkout — no unpaid Xero invoice or invoice email to the buyer.
+  if (isPrepaidCheckoutChannel(channel)) {
+    // Customer paid on Wix or the ADGP website — no unpaid Xero invoice or invoice email to the buyer.
     // Closed Won runs at end of syncOrderToSalesforce once the Opportunity exists.
     if (!sf.ok) {
       return { ok: false, message: warnings.join(" ") }

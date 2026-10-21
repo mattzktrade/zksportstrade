@@ -206,8 +206,8 @@ export async function createXeroInvoiceForOrder(
   if (orderErr) throw new Error(orderErr.message)
   if (!order) throw new Error(`Order ${orderId} not found.`)
 
-  if (order.channel === "wix") {
-    throw new Error("Wix orders are prepaid at checkout — Xero invoice creation is skipped.")
+  if (order.channel === "wix" || order.channel === "website") {
+    throw new Error("Prepaid checkout orders skip Xero invoice creation.")
   }
 
   let invoices = await loadOrderInvoices(admin, orderId)

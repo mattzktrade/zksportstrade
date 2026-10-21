@@ -29,6 +29,7 @@ export function isPublicApiPath(path: string): boolean {
   return (
     path.startsWith("/api/webhooks/") ||
     path.startsWith("/api/cron/") ||
+    path.startsWith("/api/adgp/") ||
     path.startsWith("/api/integrations/") ||
     path.startsWith("/api/booking-forms/") ||
     path.startsWith("/api/contracts/") ||
@@ -38,7 +39,11 @@ export function isPublicApiPath(path: string): boolean {
 }
 
 export function isSessionlessApiPath(path: string): boolean {
-  return path.startsWith("/api/cron/") || path.startsWith("/api/webhooks/")
+  return (
+    path.startsWith("/api/cron/") ||
+    path.startsWith("/api/webhooks/") ||
+    path.startsWith("/api/adgp/")
+  )
 }
 
 export function isPublicBookingSignerPath(path: string): boolean {

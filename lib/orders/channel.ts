@@ -7,7 +7,7 @@ export type PackageSalesChannelBucket = "wix" | "offline" | "portal"
  */
 export function classifySalesChannel(channel: string | null | undefined): PackageSalesChannelBucket {
   const normalized = (channel ?? "").trim().toLowerCase()
-  if (normalized === "wix" || normalized === "website") return "wix"
+  if (normalized === "wix" || normalized === "website" || normalized === "adgp") return "wix"
   if (
     normalized === "offline" ||
     normalized === "whatsapp" ||
@@ -33,7 +33,7 @@ export function orderSaleChannelLabel(input: {
 
   if (source === "email") return "Email"
   if (source === "whatsapp" || source === "offline") return "WhatsApp"
-  if (channel === "wix" || source === "website") return "Website"
+  if (channel === "wix" || channel === "website" || source === "website") return "Website"
   if (channel === "partner_api") return "Partner"
   if (source === "portal") return "Portal"
   if (channel === "native_deal" || channel === "admin" || channel === "offline") {
@@ -76,6 +76,12 @@ export function salesOriginLabel(input: {
 export function isPortalCheckoutChannel(channel: string | null | undefined): boolean {
   const normalized = (channel ?? "").trim().toLowerCase()
   return normalized === "trade_portal" || normalized === "partner_api" || normalized === ""
+}
+
+/** Wix and ADGP website checkouts are prepaid — no Xero ACCREC email to the guest. */
+export function isPrepaidCheckoutChannel(channel: string | null | undefined): boolean {
+  const normalized = (channel ?? "").trim().toLowerCase()
+  return normalized === "wix" || normalized === "website"
 }
 
 /**

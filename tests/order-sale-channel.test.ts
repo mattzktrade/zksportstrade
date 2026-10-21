@@ -59,6 +59,7 @@ test("native deal orders are offline sales, not portal checkouts", () => {
   assert.equal(classifySalesChannel("email"), "offline")
   assert.equal(classifySalesChannel("trade_portal"), "portal")
   assert.equal(classifySalesChannel("wix"), "wix")
+  assert.equal(classifySalesChannel("website"), "wix")
   assert.equal(classifySalesChannel("partner_api"), "portal")
 })
 
