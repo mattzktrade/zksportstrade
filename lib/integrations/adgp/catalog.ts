@@ -1,8 +1,17 @@
 import { effectiveSellableByPackageId } from "@/lib/catalog/storefront-availability"
-import { retailPriceFromTrade } from "@/lib/integrations/retail-price"
 import { isContactOnlySlug } from "@/lib/integrations/adgp/config"
 import type { AdgpCatalogItem } from "@/lib/integrations/adgp/types"
+import { retailPriceFromTrade } from "@/lib/integrations/retail-price"
 import { createAdminClient } from "@/lib/supabase/admin"
+
+/** Public website price: same retail figure as admin / Wix (trade × 1.10 unless overridden). */
+export function adgpUnitPrice(
+  tradePrice: number | null | undefined,
+  packageOverride?: number | null,
+  manualRetailPrice?: number | null,
+): number | null {
+  return retailPriceFromTrade(tradePrice, packageOverride, manualRetailPrice)
+}
 
 type MapRow = {
   slug: string
@@ -65,7 +74,7 @@ export async function loadAdgpCatalog(): Promise<
     const pkg = byId.get(map.package_id)
     if (!pkg) continue
     const remaining = Math.max(0, Math.floor(sellable.get(pkg.id) ?? 0))
-    const unitPrice = retailPriceFromTrade(pkg.trade_price, pkg.retail_price_multiplier, pkg.wix_retail_price)
+    const unitPrice = adgpUnitPrice(pkg.trade_price, pkg.retail_price_multiplier, pkg.wix_retail_price)
     const enquiry = Boolean(pkg.is_enquiry)
     const hidden = Boolean(pkg.is_hidden)
     const priced = unitPrice != null && unitPrice > 0

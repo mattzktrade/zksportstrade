@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { describe, it } from "node:test"
-import { catalogItemFor } from "../lib/integrations/adgp/catalog"
+import { adgpUnitPrice, catalogItemFor } from "../lib/integrations/adgp/catalog"
 import { verifyAdgpApiSecret } from "../lib/integrations/adgp/auth"
 import {
   ADGP_API_SECRET_HEADER,
@@ -129,7 +129,12 @@ describe("ADGP channel and session paths", () => {
     const catalog = readFileSync(new URL("../lib/integrations/adgp/catalog.ts", import.meta.url), "utf8")
     assert.match(catalog, /isContactOnlySlug/)
     assert.match(catalog, /effectiveSellableByPackageId/)
+    assert.match(catalog, /adgpUnitPrice/)
     assert.match(catalog, /retailPriceFromTrade/)
+    assert.equal(adgpUnitPrice(495), 544.5)
+    assert.equal(adgpUnitPrice(5000, null, 5500), 5500)
+    assert.equal(adgpUnitPrice(0), 0)
+    assert.equal(adgpUnitPrice(null), null)
     const email = readFileSync(new URL("../lib/email/send-website-order.ts", import.meta.url), "utf8")
     assert.doesNotMatch(email, /getBookingConfirmationCc/)
   })
