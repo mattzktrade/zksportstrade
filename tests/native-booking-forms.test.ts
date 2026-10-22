@@ -35,6 +35,7 @@ import {
 import type { BookingFormSnapshot } from "../lib/booking-forms/types"
 import { paddedInkRect, signatureInkBounds } from "../lib/booking-forms/signature-ink"
 import { bookingFormHandoffStatus } from "../lib/booking-forms/handoff-status"
+import { isTransientStorageError } from "../lib/booking-forms/storage"
 
 test("secure signer tokens are random and only hashes need persistence", () => {
   const first = generateSigningToken()
@@ -481,6 +482,16 @@ test("ready-to-send booking form alerts go to Matt, Michel, and Ollie by default
   const notifySource = readFileSync("lib/email/send-booking-form.ts", "utf8")
   assert.match(notifySource, /BOOKING_FORM_READY_NOTIFY_EMAILS/)
   assert.match(notifySource, /sendBookingFormReadyToSendNotification/)
+})
+
+test("booking form PDF upload retries Supabase storage database timeouts", () => {
+  assert.equal(isTransientStorageError("The connection to the database timed out"), true)
+  assert.equal(isTransientStorageError("The resource already exists"), false)
+  const storage = readFileSync("lib/booking-forms/storage.ts", "utf8")
+  assert.match(storage, /STORAGE_UPLOAD_ATTEMPTS/)
+  assert.match(storage, /upsert: upsert \|\| attempt > 0/)
+  const actions = readFileSync("app/(admin)/admin/deals/booking-form-actions.ts", "utf8")
+  assert.match(actions, /uploadBookingDocument\(unsignedPath, unsignedPdf, "application\/pdf", true\)/)
 })
 
 test("saving a booking form draft is CMS-staff work; sending to the client is admin-only", () => {

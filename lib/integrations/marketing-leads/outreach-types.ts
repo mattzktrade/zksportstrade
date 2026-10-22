@@ -25,6 +25,7 @@ export type MarketingOutreachStep = {
   sequence_key: string
   stage: MarketingOutreachStage
   delay_hours: number
+  delay_minutes: number
   email_enabled: boolean
   email_subject: string
   email_body: string

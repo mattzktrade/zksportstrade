@@ -13,8 +13,8 @@ import type { MarketingOutreachSettings, MarketingOutreachStep } from "@/lib/int
 const SAMPLE = outreachVarsFromSnapshot({
   firstName: "Kary",
   fullName: "Kary Avs Di Angel",
-  event: "2026 Mexico City Grand Prix",
-  packageName: "3 Day Paddock Club (Club Suite)",
+  event: "Abu Dhabi Grand Prix 2026",
+  packageName: "3 Day Skybridge Terrace",
   quantity: 2,
 })
 
@@ -66,6 +66,7 @@ export function SalesTemplatesEditor({
         steps: drafts.map((step) => ({
           id: step.id,
           delayHours: step.delay_hours,
+          delayMinutes: step.delay_minutes ?? 0,
           emailEnabled: step.email_enabled,
           emailSubject: step.email_subject,
           emailBody: step.email_body,
@@ -131,7 +132,7 @@ export function SalesTemplatesEditor({
         <div key={step.id} className="space-y-3 rounded-xl border border-border bg-card p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="font-semibold text-foreground">{stageTitle(step.stage)}</p>
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <label className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               Wait
               <input
                 type="number"
@@ -139,9 +140,18 @@ export function SalesTemplatesEditor({
                 max={720}
                 value={step.delay_hours}
                 onChange={(event) => updateStep(step.id, { delay_hours: Number(event.target.value) || 0 })}
-                className="h-8 w-20 rounded-md border px-2 text-sm"
+                className="h-8 w-16 rounded-md border px-2 text-sm"
               />
-              hours {step.stage === 1 ? "after the lead arrives" : "after the previous stage"}
+              hours
+              <input
+                type="number"
+                min={0}
+                max={59}
+                value={step.delay_minutes ?? 0}
+                onChange={(event) => updateStep(step.id, { delay_minutes: Number(event.target.value) || 0 })}
+                className="h-8 w-16 rounded-md border px-2 text-sm"
+              />
+              minutes {step.stage === 1 ? "after the lead arrives" : "after the previous stage"}
             </label>
           </div>
 

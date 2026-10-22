@@ -117,6 +117,35 @@ describe("marketing lead payload", () => {
     assert.equal(parseMarketingLeadWebhookBody({ leadId: "1", fullName: "A", phone: "07900" }).ok, true)
   })
 
+  it("assigns a website enquiry to the named owner and keeps the day in the notes", () => {
+    const parsed = parseMarketingLeadWebhookBody({
+      leadId: "adgp-1",
+      origin: "website",
+      ownerEmail: "Samantha@zk-sports.com",
+      campaign: { name: "Abu Dhabi GP 2026 website", formName: "Check availability" },
+      contact: { fullName: "Jane Smith", email: "jane@example.com", phone: "+447900000000" },
+      interest: { package: "3 Day Marina Views Brunch", quantity: 4, event: "Abu Dhabi Grand Prix 2026" },
+      answers: [
+        { question: "Days", answer: "3-day weekend" },
+        { question: "Number of guests", answer: "4" },
+      ],
+    })
+    assert.equal(parsed.ok, true)
+    if (!parsed.ok) return
+    assert.equal(parsed.payload.origin, "website")
+    assert.equal(parsed.payload.ownerEmail, "samantha@zk-sports.com")
+    assert.equal(parsed.payload.interest.package, "3 Day Marina Views Brunch")
+    assert.equal(parsed.payload.interest.quantity, 4)
+    assert.equal(parsed.payload.contact.email, "jane@example.com")
+    const notes = formatMarketingLeadNotes(parsed.payload)
+    assert.match(notes, /^Website enquiry/)
+    assert.match(notes, /Package: 3 Day Marina Views Brunch/)
+    assert.match(notes, /Tickets: 4/)
+    assert.match(notes, /Days: 3-day weekend/)
+    assert.doesNotMatch(notes, /Meta lead id/)
+    assert.doesNotMatch(notes, /ownerEmail/i)
+  })
+
   it("writes package, tickets and answers into notes", () => {
     const parsed = parseMarketingLeadWebhookBody(MARKETING_LEAD_EXAMPLE_PAYLOAD)
     assert.equal(parsed.ok, true)

@@ -1,4 +1,5 @@
 import { phoneDigitVariants, phonesMatch } from "@/lib/assistant/phone"
+import { normalizeOutreachDelay } from "@/lib/integrations/marketing-leads/outreach-delay"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { toMarketingOutreachSummary, missingOutreachRelation } from "@/lib/integrations/marketing-leads/outreach-labels"
 import {
@@ -24,7 +25,7 @@ export async function loadMarketingOutreachAdmin(): Promise<{
     admin
       .from("marketing_outreach_steps")
       .select(
-        "id, sequence_key, stage, delay_hours, email_enabled, email_subject, email_body, whatsapp_enabled, whatsapp_body, whatsapp_template_name, whatsapp_template_language, updated_at",
+        "id, sequence_key, stage, delay_hours, delay_minutes, email_enabled, email_subject, email_body, whatsapp_enabled, whatsapp_body, whatsapp_template_name, whatsapp_template_language, updated_at",
       )
       .eq("sequence_key", MARKETING_OUTREACH_SEQUENCE)
       .order("stage"),
@@ -34,7 +35,10 @@ export async function loadMarketingOutreachAdmin(): Promise<{
   }
   return {
     settings: (settingsRes.data as MarketingOutreachSettings | null) ?? null,
-    steps: (stepsRes.data ?? []) as MarketingOutreachStep[],
+    steps: ((stepsRes.data ?? []) as MarketingOutreachStep[]).map((step) => ({
+      ...step,
+      ...normalizeOutreachDelay(step),
+    })),
     missingTables: false,
   }
 }

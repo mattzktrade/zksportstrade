@@ -12,6 +12,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 export type OutreachStepInput = {
   id: string
   delayHours: number
+  delayMinutes: number
   emailEnabled: boolean
   emailSubject: string
   emailBody: string
@@ -51,10 +52,12 @@ export async function saveMarketingOutreachSequence(input: {
   for (const step of input.steps) {
     if (!UUID_RE.test(step.id)) return { ok: false, message: "A stage id is not valid." }
     const delayHours = Math.max(0, Math.min(24 * 30, Math.floor(Number(step.delayHours) || 0)))
+    const delayMinutes = Math.max(0, Math.min(59, Math.floor(Number(step.delayMinutes) || 0)))
     const { error } = await gate.supabase
       .from("marketing_outreach_steps")
       .update({
         delay_hours: delayHours,
+        delay_minutes: delayMinutes,
         email_enabled: Boolean(step.emailEnabled),
         email_subject: step.emailSubject.trim(),
         email_body: step.emailBody.trim(),

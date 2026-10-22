@@ -12,6 +12,7 @@ import {
   isCustomerFacingPackageName,
   resolveOutreachInterest,
 } from "../lib/integrations/marketing-leads/outreach-interest"
+import { outreachDelayMs, outreachDueAt } from "../lib/integrations/marketing-leads/outreach-delay"
 import {
   eventAndPackageFromEnquiryNotes,
   outreachTemplateToMetaBody,
@@ -24,6 +25,10 @@ import type { MarketingOutreachSend } from "../lib/integrations/marketing-leads/
 
 const sql = readFileSync(
   new URL("../supabase/migrations/20260914120000_marketing_outreach.sql", import.meta.url),
+  "utf8",
+)
+const delaySql = readFileSync(
+  new URL("../supabase/migrations/20261020140000_outreach_delay_minutes.sql", import.meta.url),
   "utf8",
 )
 
@@ -41,6 +46,16 @@ const sampleSend = (stage: 1 | 2 | 3, channel: "email" | "whatsapp"): MarketingO
   error: null,
   created_at: "2026-09-14T00:00:00.000Z",
   sent_at: "2026-09-14T00:00:00.000Z",
+})
+
+describe("marketing outreach delay", () => {
+  it("adds hours and minutes so stage 1 can wait five minutes", () => {
+    const now = new Date("2026-10-20T12:00:00.000Z")
+    assert.equal(outreachDelayMs({ delay_hours: 0, delay_minutes: 0 }), 0)
+    assert.equal(outreachDelayMs({ delay_hours: 0, delay_minutes: 5 }), 5 * 60 * 1000)
+    assert.equal(outreachDueAt({ delay_hours: 0, delay_minutes: 5 }, now), "2026-10-20T12:05:00.000Z")
+    assert.equal(outreachDueAt({ delay_hours: 48, delay_minutes: 0 }, now), "2026-10-22T12:00:00.000Z")
+  })
 })
 
 describe("marketing outreach copy", () => {
@@ -232,6 +247,8 @@ describe("marketing outreach wiring", () => {
     assert.match(sql, /create table if not exists public.marketing_outreach_enrollments/)
     assert.match(sql, /create table if not exists public.marketing_outreach_sends/)
     assert.match(sql, /constraint marketing_outreach_steps_stage_check check \(stage in \(1, 2, 3\)\)/)
+    assert.match(delaySql, /add column if not exists delay_minutes/)
+    assert.match(delaySql, /delay_minutes = 5/)
     assert.match(sql, /Thanks for your \{\{event\}\} enquiry/)
     assert.match(sql, /I'll leave this with you so I'm not chasing/)
     assert.match(sql, /values \('marketing_leads', false\)/)
@@ -242,6 +259,8 @@ describe("marketing outreach wiring", () => {
     assert.match(ingest, /enrollMarketingOutreach/)
     const enroll = readFileSync("lib/integrations/marketing-leads/outreach-enroll.ts", "utf8")
     assert.match(enroll, /Marketing follow-up is paused/)
+    assert.match(enroll, /outreachDueAt/)
+    assert.match(enroll, /outreachDelayMs\(stage1Delay\) === 0/)
     const process = readFileSync("lib/integrations/marketing-leads/outreach-process.ts", "utf8")
     assert.match(process, /data\?\.enabled === true/)
     assert.match(process, /recordOutreachOutbound/)
@@ -267,6 +286,8 @@ describe("marketing outreach wiring", () => {
     assert.doesNotMatch(templatesPage, /MARKETING_LEAD_WEBHOOK/)
     const editor = readFileSync("app/(admin)/admin/templates/templates-client.tsx", "utf8")
     assert.match(editor, /Send this sequence automatically/)
+    assert.match(editor, /delay_minutes/)
+    assert.match(templatesPage, /five minutes by default/)
     const oldPage = readFileSync("app/(admin)/admin/integrations/marketing-leads/page.tsx", "utf8")
     assert.match(oldPage, /redirect\("\/admin\/templates"\)/)
     const actions = readFileSync(

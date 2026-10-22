@@ -8,6 +8,7 @@ import {
   type OutreachChannelOutcome,
 } from "@/lib/integrations/marketing-leads/outreach-labels"
 import { stopMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-stop"
+import { outreachDueAt } from "@/lib/integrations/marketing-leads/outreach-delay"
 import { resolveOutreachInterestForDeal } from "@/lib/integrations/marketing-leads/outreach-interest"
 import {
   listOutreachPlaceholders,
@@ -61,7 +62,7 @@ async function loadSteps(admin: AdminClient, sequenceKey: string): Promise<Marke
   const { data, error } = await admin
     .from("marketing_outreach_steps")
     .select(
-      "id, sequence_key, stage, delay_hours, email_enabled, email_subject, email_body, whatsapp_enabled, whatsapp_body, whatsapp_template_name, whatsapp_template_language, updated_at",
+      "id, sequence_key, stage, delay_hours, delay_minutes, email_enabled, email_subject, email_body, whatsapp_enabled, whatsapp_body, whatsapp_template_name, whatsapp_template_language, updated_at",
     )
     .eq("sequence_key", sequenceKey)
     .order("stage")
@@ -385,9 +386,7 @@ async function markEnquiryContacted(admin: AdminClient, dealId: string) {
 }
 
 function delayForNextStep(steps: MarketingOutreachStep[], nextStage: MarketingOutreachStage, now: Date): string {
-  const step = steps.find((row) => row.stage === nextStage)
-  const hours = step?.delay_hours && step.delay_hours > 0 ? step.delay_hours : 0
-  return new Date(now.getTime() + hours * 60 * 60 * 1000).toISOString()
+  return outreachDueAt(steps.find((row) => row.stage === nextStage), now)
 }
 
 async function processEnrollment(

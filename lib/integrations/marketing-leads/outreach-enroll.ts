@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin"
+import { outreachDelayMs, outreachDueAt } from "@/lib/integrations/marketing-leads/outreach-delay"
 import { missingOutreachRelation } from "@/lib/integrations/marketing-leads/outreach-labels"
 import { resolveOutreachInterestForDeal } from "@/lib/integrations/marketing-leads/outreach-interest"
 import { firstNameFromFullName } from "@/lib/integrations/marketing-leads/outreach-render"
@@ -59,8 +60,21 @@ export async function enrollMarketingOutreach(dealId: string): Promise<{ ok: boo
 
   const interest = await resolveOutreachInterestForDeal(admin, dealId)
   const fullName = contact?.full_name?.trim() || "there"
+  const { data: stage1, error: stage1Error } = await admin
+    .from("marketing_outreach_steps")
+    .select("delay_hours, delay_minutes")
+    .eq("sequence_key", MARKETING_OUTREACH_SEQUENCE)
+    .eq("stage", 1)
+    .maybeSingle()
+  const stage1Delay =
+    stage1Error || !stage1
+      ? { delay_hours: 0, delay_minutes: 5 }
+      : {
+          delay_hours: Number(stage1.delay_hours) || 0,
+          delay_minutes: Number(stage1.delay_minutes) || 0,
+        }
 
-  const now = new Date().toISOString()
+  const now = new Date()
   const insert = await admin
     .from("marketing_outreach_enrollments")
     .insert({
@@ -70,7 +84,7 @@ export async function enrollMarketingOutreach(dealId: string): Promise<{ ok: boo
       sequence_key: MARKETING_OUTREACH_SEQUENCE,
       status: "active",
       current_stage: 0,
-      next_stage_due_at: now,
+      next_stage_due_at: outreachDueAt(stage1Delay, now),
       first_name: firstNameFromFullName(fullName),
       full_name: fullName,
       email,
@@ -93,10 +107,12 @@ export async function enrollMarketingOutreach(dealId: string): Promise<{ ok: boo
     return { ok: false, enrolled: false, message: insert.error.message }
   }
 
-  try {
-    await processMarketingOutreach({ dealId, limit: 1 })
-  } catch (error) {
-    console.error("[marketing-outreach] stage 1 send failed", error)
+  if (outreachDelayMs(stage1Delay) === 0) {
+    try {
+      await processMarketingOutreach({ dealId, limit: 1, now })
+    } catch (error) {
+      console.error("[marketing-outreach] stage 1 send failed", error)
+    }
   }
   return { ok: true, enrolled: Boolean(insert.data?.id) }
 }

@@ -27,6 +27,10 @@ export type MarketingLeadPayload = {
     marketingOptIn: boolean | null
     privacyPolicyUrl: string | null
   }
+  /** website = Abu Dhabi GP availability form. Absent means a Meta lead. */
+  origin: "website" | null
+  /** Staff profile email. Website leads are assigned to this owner. */
+  ownerEmail: string | null
 }
 
 export type MarketingLeadParseResult =
@@ -83,6 +87,9 @@ const RESERVED_KEYS = new Set([
   "marketing_opt_in",
   "privacypolicyurl",
   "privacy_policy_url",
+  "origin",
+  "owneremail",
+  "owner_email",
 ])
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -300,6 +307,12 @@ export function parseMarketingLeadWebhookBody(body: unknown): MarketingLeadParse
     }
   }
 
+  const originRaw = pick(root, "origin").toLowerCase()
+  const ownerEmailRaw = (
+    pick(root, "ownerEmail", "owner_email") ||
+    ""
+  ).toLowerCase()
+
   return {
     ok: true,
     payload: {
@@ -344,6 +357,8 @@ export function parseMarketingLeadWebhookBody(body: unknown): MarketingLeadParse
           pick(root, "privacyPolicyUrl", "privacy_policy_url") ||
           null,
       },
+      origin: originRaw === "website" ? "website" : null,
+      ownerEmail: ownerEmailRaw && EMAIL_RE.test(ownerEmailRaw) ? ownerEmailRaw : null,
     },
   }
 }
@@ -364,7 +379,7 @@ export function normalizeMarketingPhone(value: string | null | undefined): strin
 }
 
 export function formatMarketingLeadNotes(payload: MarketingLeadPayload): string {
-  const lines: string[] = ["Marketing lead (Meta)"]
+  const lines: string[] = [payload.origin === "website" ? "Website enquiry" : "Marketing lead (Meta)"]
   const campaignBits = [
     payload.campaign.name ? `Campaign: ${payload.campaign.name}` : "",
     payload.campaign.adsetName ? `Ad set: ${payload.campaign.adsetName}` : "",
@@ -382,7 +397,7 @@ export function formatMarketingLeadNotes(payload: MarketingLeadPayload): string 
     lines.push(`Privacy policy: ${payload.consent.privacyPolicyUrl}`)
   }
   if (payload.createdAt) lines.push(`Submitted: ${payload.createdAt}`)
-  lines.push(`Meta lead id: ${payload.leadId}`)
+  lines.push(`${payload.origin === "website" ? "Lead id" : "Meta lead id"}: ${payload.leadId}`)
   if (payload.answers.length > 0) {
     lines.push("")
     for (const answer of payload.answers) {

@@ -203,7 +203,7 @@ async function persistDraftForm(
   const snapshotHash = sha256(stableJson(snapshot))
   const unsignedPdf = await generateBookingFormPdf(snapshot)
   const unsignedPath = `forms/${documentRef}/unsigned.pdf`
-  await uploadBookingDocument(unsignedPath, unsignedPdf, "application/pdf")
+  await uploadBookingDocument(unsignedPath, unsignedPdf, "application/pdf", true)
 
   if (draftId) {
     const { error: updateError } = await gate.supabase.rpc("admin_update_native_booking_form_draft", {

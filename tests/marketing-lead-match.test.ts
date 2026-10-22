@@ -86,6 +86,53 @@ describe("marketing catalog matching", () => {
     assert.equal(pkg?.id, "mexico-2026-3-day-paddock-club-club-suite")
   })
 
+  it("matches Abu Dhabi website package names to the 2026 catalog row", () => {
+    const races = [
+      {
+        id: "abudhabi-2026",
+        name: "Abu Dhabi Grand Prix",
+        season: 2026,
+        location: "Yas Marina",
+        country: "UAE",
+        short_name: "Abu Dhabi",
+      },
+      {
+        id: "abudhabi-2027",
+        name: "Abu Dhabi Grand Prix",
+        season: 2027,
+        location: "Yas Marina",
+        country: "UAE",
+        short_name: "Abu Dhabi",
+      },
+    ]
+    const packages = [
+      { id: "mv-3", name: "3 Day Marina Views Brunch", race_id: "abudhabi-2026", duration: "3_day" },
+      { id: "sb-3", name: "3 Day Skybridge Terrace", race_id: "abudhabi-2026", duration: "3_day" },
+      { id: "sb-fri", name: "Friday Skybridge Terrace", race_id: "abudhabi-2026", duration: "friday_only" },
+      { id: "sb-sat", name: "Saturday Skybridge Terrace", race_id: "abudhabi-2026", duration: "saturday_only" },
+      { id: "sb-sun", name: "Sunday Skybridge Terrace", race_id: "abudhabi-2026", duration: "sunday_only" },
+      { id: "sb-ss", name: "Saturday & Sunday Skybridge Terrace", race_id: "abudhabi-2026", duration: "2_day" },
+      { id: "sb-partner", name: "Skybridge Terrace - Event Partner", race_id: "abudhabi-2026", duration: "3_day" },
+      { id: "pc-3", name: "3 Day Paddock Club", race_id: "abudhabi-2026", duration: "3_day" },
+      { id: "pc-ferrari", name: "3 Day Paddock Club - Ferrari", race_id: "abudhabi-2026", duration: "3_day" },
+      { id: "gs", name: "3 Day South Grandstand Tickets", race_id: "abudhabi-2026", duration: "3_day" },
+    ]
+    const race = pickMarketingRace(
+      ["Abu Dhabi Grand Prix 2026", "Abu Dhabi GP 2026 website"],
+      races,
+      new Date("2026-10-20T12:00:00Z"),
+    )
+    assert.equal(race?.id, "abudhabi-2026")
+    assert.equal(pickMarketingPackage(["3 Day Marina Views Brunch"], packages)?.id, "mv-3")
+    assert.equal(pickMarketingPackage(["Friday Marina Views Brunch"], packages)?.id, "mv-3")
+    assert.equal(pickMarketingPackage(["Friday Skybridge Terrace"], packages)?.id, "sb-fri")
+    assert.equal(pickMarketingPackage(["Saturday Skybridge Terrace"], packages)?.id, "sb-sat")
+    assert.equal(pickMarketingPackage(["Sunday Skybridge Terrace"], packages)?.id, "sb-sun")
+    assert.equal(pickMarketingPackage(["3 Day Skybridge Terrace"], packages)?.id, "sb-3")
+    assert.equal(pickMarketingPackage(["3 Day Paddock Club"], packages)?.id, "pc-3")
+    assert.equal(pickMarketingPackage(["3 Day South Grandstand Tickets"], packages)?.id, "gs")
+  })
+
   it("does not guess between two paddock clubs when the form is vague", () => {
     const pkg = pickMarketingPackage(["Paddock Club"], mexicoPackages)
     assert.equal(pkg, null)

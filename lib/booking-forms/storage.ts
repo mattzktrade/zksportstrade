@@ -4,6 +4,17 @@ export const BOOKING_DOCUMENT_BUCKET = "booking-form-documents"
 const MAX_SIGNATURE_BYTES = 500 * 1024
 const MAX_SIGNATURE_WIDTH = 2000
 const MAX_SIGNATURE_HEIGHT = 1000
+const STORAGE_UPLOAD_ATTEMPTS = 3
+const TRANSIENT_STORAGE =
+  /connection to the database timed out|database timed out|DatabaseTimeout|fetch failed|ECONNRESET|ETIMEDOUT|UND_ERR|socket hang up/i
+
+export function isTransientStorageError(message: string | null | undefined): boolean {
+  return Boolean(message && TRANSIENT_STORAGE.test(message))
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 export function parseSignaturePng(dataUrl: string): Uint8Array {
   const match = /^data:image\/png;base64,([A-Za-z0-9+/=\r\n]+)$/.exec(dataUrl)
@@ -37,10 +48,23 @@ export async function uploadBookingDocument(
 ): Promise<void> {
   const admin = createAdminClient()
   if (!admin) throw new Error("Supabase service role is not configured.")
-  const { error } = await admin.storage
-    .from(BOOKING_DOCUMENT_BUCKET)
-    .upload(path, bytes, { contentType, upsert })
-  if (error) throw new Error(error.message)
+  let lastError = ""
+  for (let attempt = 0; attempt < STORAGE_UPLOAD_ATTEMPTS; attempt += 1) {
+    const { error } = await admin.storage.from(BOOKING_DOCUMENT_BUCKET).upload(path, bytes, {
+      contentType,
+      // A timed-out first write can still create the object. Later attempts must replace it.
+      upsert: upsert || attempt > 0,
+    })
+    if (!error) return
+    lastError = error.message
+    if (!isTransientStorageError(lastError) || attempt === STORAGE_UPLOAD_ATTEMPTS - 1) break
+    await wait(400 * (attempt + 1))
+  }
+  throw new Error(
+    isTransientStorageError(lastError)
+      ? "The booking-form PDF could not be stored because storage was briefly unavailable. Try saving again."
+      : lastError,
+  )
 }
 
 export async function downloadBookingDocument(path: string): Promise<Uint8Array> {

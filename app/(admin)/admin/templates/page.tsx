@@ -20,10 +20,13 @@ export default async function SalesTemplatesPage() {
         <p className="font-semibold text-foreground">How it works</p>
         <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
           <li>
-            Meta form leads arrive on Sales → Enquiries. If the sequence is on, they get these three messages until
+            Website and Meta leads arrive on Sales → Enquiries. If the sequence is on, they get these three messages until
             they reply or someone on the team takes over.
           </li>
-          <li>Stage 1 can send as soon as the lead arrives. Stages 2 and 3 wait the hours you set, and only if they have not replied.</li>
+          <li>
+            Stage 1 waits the hours and minutes you set — five minutes by default, so it does not feel instant. Stages 2
+            and 3 wait after the previous stage, and only if they have not replied.
+          </li>
           <li>A reply, or moving the enquiry off New, stops the sequence so sales can continue by hand.</li>
           <li>
             Placeholders fill in from the lead:{" "}
