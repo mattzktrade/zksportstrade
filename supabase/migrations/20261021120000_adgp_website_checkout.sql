@@ -627,14 +627,13 @@ begin
       v_phone,
       'website',
       'client',
-      null,
+      'talking',
       true
     )
     returning id into v_account_id;
   else
     update public.crm_accounts
     set lifecycle = 'client',
-        lead_stage = null,
         email = coalesce(email, v_email),
         phone = coalesce(phone, v_phone),
         updated_at = timezone('utc', now())

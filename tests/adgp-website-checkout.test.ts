@@ -11,7 +11,7 @@ import {
   isAdgpDay,
   isContactOnlySlug,
 } from "../lib/integrations/adgp/config"
-import { websiteOrderNotifyRecipients } from "../lib/email/send-website-order"
+import { websiteCustomerEmailSubject, websiteOrderNotifyRecipients } from "../lib/email/send-website-order"
 import {
   classifySalesChannel,
   isAgentPortalBooking,
@@ -23,6 +23,10 @@ import { DEAL_SOURCES } from "../lib/crm/deal-types"
 
 const sql = readFileSync(
   new URL("../supabase/migrations/20261021120000_adgp_website_checkout.sql", import.meta.url),
+  "utf8",
+)
+const fixSql = readFileSync(
+  new URL("../supabase/migrations/20261022103000_fix_website_order_lead_stage.sql", import.meta.url),
   "utf8",
 )
 
@@ -71,6 +75,11 @@ describe("ADGP website order SQL", () => {
     assert.match(sql, /source,\s+stage,/s)
     assert.match(sql, /'website'/)
     assert.match(sql, /'paid_confirmed'/)
+    assert.match(sql, /'talking'/)
+    assert.doesNotMatch(sql, /lead_stage = null/)
+    assert.match(fixSql, /create or replace function public.place_website_order/)
+    assert.match(fixSql, /'talking'/)
+    assert.doesNotMatch(fixSql, /lead_stage = null/)
     assert.match(sql, /p_owner_profile_id/)
     assert.match(sql, /owner_profile_required/)
     assert.match(sql, /linked_inventory_sellable/)
@@ -93,6 +102,7 @@ describe("ADGP auth and notify", () => {
     assert.equal(verifyAdgpApiSecret(request, "secret-b"), false)
     assert.equal(DEFAULT_ADGP_OWNER_EMAIL, "matt@zk-sports.com")
     assert.deepEqual(websiteOrderNotifyRecipients(), ["bookings@zk-sports.com", "matt@zk-sports.com"])
+    assert.equal(websiteCustomerEmailSubject("Skybridge Terrace"), "Your booking is confirmed — Skybridge Terrace")
     assert.ok(ADGP_NOTIFY_EMAILS.includes("matt@zk-sports.com"))
   })
 })
@@ -126,16 +136,22 @@ describe("ADGP channel and session paths", () => {
     assert.match(orders, /enqueuePackageInventoryChannelSyncServer/)
     assert.doesNotMatch(orders, /enqueueOrderIntegrationsServer/)
     assert.match(orders, /sendWebsiteOrderEmail/)
+    assert.match(orders, /sendWebsiteCustomerEmail/)
+    assert.match(orders, /placeWebsiteOrderInApp/)
     const catalog = readFileSync(new URL("../lib/integrations/adgp/catalog.ts", import.meta.url), "utf8")
     assert.match(catalog, /isContactOnlySlug/)
     assert.match(catalog, /effectiveSellableByPackageId/)
     assert.match(catalog, /adgpUnitPrice/)
-    assert.match(catalog, /retailPriceFromTrade/)
-    assert.equal(adgpUnitPrice(495), 544.5)
+    assert.doesNotMatch(catalog, /retailPriceFromTrade/)
+    assert.equal(adgpUnitPrice(495), 495)
+    assert.equal(adgpUnitPrice(3825), 3825)
+    assert.equal(adgpUnitPrice(4455, 1.1, null), 4455)
     assert.equal(adgpUnitPrice(5000, null, 5500), 5500)
     assert.equal(adgpUnitPrice(0), 0)
     assert.equal(adgpUnitPrice(null), null)
     const email = readFileSync(new URL("../lib/email/send-website-order.ts", import.meta.url), "utf8")
     assert.doesNotMatch(email, /getBookingConfirmationCc/)
+    assert.match(email, /sendWebsiteCustomerEmail/)
+    assert.match(email, /Your booking is confirmed/)
   })
 })

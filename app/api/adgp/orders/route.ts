@@ -46,6 +46,11 @@ export async function GET(request: Request) {
   const { data: pkg } = order.package_id
     ? await admin.from("packages").select("name").eq("id", order.package_id).maybeSingle()
     : { data: null }
+  const { data: hold } = await admin
+    .from("website_checkout_holds")
+    .select("day, slug")
+    .eq("stripe_session_id", sessionId)
+    .maybeSingle()
 
   return NextResponse.json({
     ok: true,
@@ -55,6 +60,7 @@ export async function GET(request: Request) {
     dealId: deal?.id ?? order.deal_id,
     dealReference: deal?.reference ?? null,
     packageName: pkg?.name ?? null,
+    day: hold?.day ?? null,
     guests: order.guests,
     totalAmount: order.total_amount,
     currency: order.currency,
@@ -104,7 +110,9 @@ export async function POST(request: Request) {
   })
 
   if (!result.ok) {
-    const retryable = /insufficient_stock|leaves_one_remaining|owner_profile/i.test(result.message)
+    const retryable = /hold_not_found|owner_profile|agent_profile|Service role|not configured/i.test(
+      result.message,
+    )
     return NextResponse.json({ error: result.message, code: result.code }, { status: retryable ? 409 : 400 })
   }
 

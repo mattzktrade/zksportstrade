@@ -1,16 +1,25 @@
 import { effectiveSellableByPackageId } from "@/lib/catalog/storefront-availability"
 import { isContactOnlySlug } from "@/lib/integrations/adgp/config"
 import type { AdgpCatalogItem } from "@/lib/integrations/adgp/types"
-import { retailPriceFromTrade } from "@/lib/integrations/retail-price"
 import { createAdminClient } from "@/lib/supabase/admin"
 
-/** Public website price: same retail figure as admin / Wix (trade × 1.10 unless overridden). */
+/**
+ * ADGP public price is a number staff already set on the CRM package:
+ * `wix_retail_price` when locked, otherwise `trade_price`.
+ * Do not apply the Wix 1.10 markup here — that produced half-dollar figures
+ * that do not match the catalog.
+ */
 export function adgpUnitPrice(
   tradePrice: number | null | undefined,
-  packageOverride?: number | null,
+  _packageOverride?: number | null,
   manualRetailPrice?: number | null,
 ): number | null {
-  return retailPriceFromTrade(tradePrice, packageOverride, manualRetailPrice)
+  if (manualRetailPrice != null && Number.isFinite(manualRetailPrice) && manualRetailPrice > 0) {
+    return Math.round(manualRetailPrice)
+  }
+  if (tradePrice == null || !Number.isFinite(tradePrice)) return null
+  if (tradePrice < 0) return null
+  return Math.round(tradePrice)
 }
 
 type MapRow = {
