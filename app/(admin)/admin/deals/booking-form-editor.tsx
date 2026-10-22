@@ -453,7 +453,7 @@ export function BookingFormEditor({
                         />
                       </label>
                       <label className="block text-xs font-semibold">
-                        Unit price (USD)
+                        Unit price ({edits.currency || "USD"})
                         <input
                           type="number"
                           min={0}
@@ -479,7 +479,7 @@ export function BookingFormEditor({
 
               <Section title="Payment">
                 <BookingFormPaymentScheduleFields
-                  currency="USD"
+                  currency={edits.currency || "USD"}
                   total={edits.lines.reduce(
                     (sum, line) => sum + Math.round((Number(line.quantity) * Number(line.unitPrice) + Number.EPSILON) * 100) / 100,
                     0,

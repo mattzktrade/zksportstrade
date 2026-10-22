@@ -59,6 +59,18 @@ export type BookingFormSnapshot = {
   taxAmountIncluded: number
   taxDescription?: string
   total: number
+  reporting?: {
+    currency: "USD"
+    fxRate: number
+    total: number
+    lines: Array<{
+      dealLineItemId?: string
+      packageId: string
+      quantity: number
+      unitPrice: number
+      lineTotal: number
+    }>
+  }
   paymentTerms: string
   /** Structured schedule used to print payment terms and create matching invoices. */
   paymentSchedule?: {

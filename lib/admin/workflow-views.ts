@@ -15,6 +15,7 @@ import { applyUnlinkedDealSalesToRemaining, stockLayerKey, summarizeMappedSuppli
 import { createClient } from "@/lib/supabase/server"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { pickCurrentInvoice } from "@/lib/invoices/status"
+import { convertInvoiceAmountToUsd } from "@/lib/crm/deal-invoice-currency"
 import {
   delayMs,
   isTransientPostgrestError,
@@ -172,6 +173,8 @@ type DealEmbed = {
   owner_profile_id: string | null
   next_action: string | null
   next_action_due_at: string | null
+  invoice_currency?: string | null
+  invoice_fx_rate?: number | string | null
 }
 
 type InvoiceEmbed = {
@@ -190,6 +193,7 @@ type InvoiceEmbed = {
   xero_amount_due: number | null
   xero_amount_paid: number | null
   paid_at: string | null
+  currency?: string | null
 }
 
 type LineEmbed = {
@@ -330,7 +334,7 @@ const OPERATIONS_DEAL_STAGES = [
 ] as const
 
 const DEAL_WORKFLOW_SELECT = `
-  id, reference, stage, source, currency, total_amount, expected_close_date,
+  id, reference, stage, source, currency, total_amount, invoice_currency, invoice_fx_rate, expected_close_date,
   account_id, primary_contact_id, order_id, salesforce_opportunity_id,
   external_created_at, closed_at, created_at, owner_profile_id,
   next_action, next_action_due_at,
@@ -349,6 +353,8 @@ type DealWorkflowRecord = {
   source: string
   currency: string | null
   total_amount: number | null
+  invoice_currency?: string | null
+  invoice_fx_rate?: number | string | null
   expected_close_date: string | null
   account_id: string | null
   primary_contact_id: string | null
@@ -496,13 +502,26 @@ function mapDealToWorkflowRow(
 async function getUnlinkedDealWorkflowRows(stages: readonly string[]): Promise<WorkflowOrderRow[]> {
   noStore()
   const supabase = await createClient()
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("deals")
     .select(DEAL_WORKFLOW_SELECT)
     .in("stage", [...stages])
     .is("order_id", null)
     .order("created_at", { ascending: false })
     .limit(10000)
+  if (error && /invoice_currency|invoice_fx_rate|schema cache/i.test(error.message)) {
+    const fallback = await supabase
+      .from("deals")
+      .select(
+        DEAL_WORKFLOW_SELECT.replace("invoice_currency, invoice_fx_rate, ", ""),
+      )
+      .in("stage", [...stages])
+      .is("order_id", null)
+      .order("created_at", { ascending: false })
+      .limit(10000)
+    data = fallback.data as typeof data
+    error = fallback.error
+  }
   if (error) {
     console.error("[getUnlinkedDealWorkflowRows]", error.message)
     return []
@@ -693,7 +712,7 @@ export async function getWorkflowOrderRows(options?: { sinceIso?: string }): Pro
           id, order_id, status, created_at, xero_invoice_number, xero_sync_status,
           xero_sync_error, due_date, overdue_since, cancellation_eligible_at,
           payment_reminder_count, last_payment_reminder_at, xero_amount_due,
-          xero_amount_paid, paid_at
+          xero_amount_paid, paid_at, currency
         `,
           )
           .in("order_id", chunk)
@@ -705,7 +724,7 @@ export async function getWorkflowOrderRows(options?: { sinceIso?: string }): Pro
         supabase
           .from("deals")
           .select(
-            "id, order_id, reference, stage, source, account_id, primary_contact_id, owner_profile_id, next_action, next_action_due_at",
+            "id, order_id, reference, stage, source, account_id, primary_contact_id, owner_profile_id, next_action, next_action_due_at, invoice_currency, invoice_fx_rate",
           )
           .in("id", chunk),
       ),
@@ -715,7 +734,7 @@ export async function getWorkflowOrderRows(options?: { sinceIso?: string }): Pro
         supabase
           .from("deals")
           .select(
-            "id, order_id, reference, stage, source, account_id, primary_contact_id, owner_profile_id, next_action, next_action_due_at",
+            "id, order_id, reference, stage, source, account_id, primary_contact_id, owner_profile_id, next_action, next_action_due_at, invoice_currency, invoice_fx_rate",
           )
           .in("order_id", chunk),
       ),
@@ -1005,8 +1024,20 @@ export async function getWorkflowOrderRows(options?: { sinceIso?: string }): Pro
       reminderCount: Number(invoice?.payment_reminder_count ?? 0),
       lastReminderAt: invoice?.last_payment_reminder_at ?? null,
       amountDue:
-        invoice?.xero_amount_due == null ? (paidLike ? 0 : total) : Number(invoice.xero_amount_due),
-      amountPaid: Number(invoice?.xero_amount_paid ?? (paidLike ? total : 0)),
+        invoice?.xero_amount_due == null
+          ? paidLike
+            ? 0
+            : total
+          : convertInvoiceAmountToUsd(
+              Number(invoice.xero_amount_due),
+              invoice.currency ?? deal?.invoice_currency,
+              deal?.invoice_fx_rate == null ? null : Number(deal.invoice_fx_rate),
+            ),
+      amountPaid: convertInvoiceAmountToUsd(
+        Number(invoice?.xero_amount_paid ?? (paidLike ? total : 0)),
+        invoice?.xero_amount_paid == null ? "USD" : invoice.currency ?? deal?.invoice_currency,
+        deal?.invoice_fx_rate == null ? null : Number(deal.invoice_fx_rate),
+      ),
       paidAt: invoice?.paid_at ?? null,
       bookingFormStatus: bookingForm
         ? workflowBookingFormStatus(bookingForm.status, deal?.stage ?? null)

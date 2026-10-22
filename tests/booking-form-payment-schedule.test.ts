@@ -210,6 +210,31 @@ test("deal invoice status stays awaiting payment until every installment is paid
   )
 })
 
+test("AED booking-form totals stay in AED when the payment schedule is split", () => {
+  const aed = snapshot()
+  aed.currency = "AED"
+  aed.lines[0].currency = "AED"
+  aed.lines[0].unitPrice = 55087.5
+  aed.lines[0].lineTotal = 110175
+  aed.subtotal = 110175
+  aed.total = 110175
+  const edits = snapshotToEdits(aed)
+  edits.paymentSchedule = {
+    notes: "",
+    installments: [
+      { percent: 50, dueKind: "days_after_signing", dueDaysAfterSigning: 0, dueOn: "", label: "Deposit" },
+      { percent: 50, dueKind: "on_date", dueDaysAfterSigning: 0, dueOn: "2026-12-01", label: "Balance" },
+    ],
+  }
+  const next = applyBookingFormEdits(aed, edits)
+  assert.equal(next.currency, "AED")
+  assert.match(next.paymentTerms, /AED 110175\.00 payable in 2 payments/)
+  assert.match(next.paymentTerms, /50\.00% \(AED 55087\.50\)/)
+  assert.match(next.paymentTerms, /due on 1 December 2026/)
+  const resolved = resolvePaymentSchedule(next.paymentSchedule!, next.total, "2026-09-22")
+  assert.deepEqual(resolved.map((row) => row.amount), [55087.5, 55087.5])
+})
+
 test("scaled invoice lines keep the installment total", () => {
   const scaled = scaleLineAmountsToTotal(
     [

@@ -29,6 +29,7 @@ import {
 import { ActionCombobox } from "@/components/admin/action-combobox"
 import { CrmPartySelect } from "@/components/admin/crm-party-select"
 import { DealCreateModal } from "@/components/admin/deal-create-modal"
+import { DealInvoiceCurrencyToggle } from "@/components/admin/deal-invoice-currency-toggle"
 import { SearchableSelect } from "@/components/admin/searchable-select"
 import { EventFilter, uniqueEventFilterOptions } from "@/components/admin/event-filter"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
@@ -53,6 +54,15 @@ import {
   type DealPackageOption,
   type DealStage,
 } from "@/lib/crm/deal-types"
+import {
+  catalogPriceInInvoiceCurrency,
+  convertInvoiceSalePrice,
+  dealInvoiceCrmNote,
+  dealInvoiceCurrencyIsLocked,
+  dealLineEditorSalePrice,
+  parseDealInvoiceCurrency,
+  type DealInvoiceCurrency,
+} from "@/lib/crm/deal-invoice-currency"
 import type { StaffOption } from "@/lib/crm/lead-types"
 import { isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
 import { nextActionForDealStage } from "@/lib/crm/deal-workflow"
@@ -321,6 +331,7 @@ export function DealsClient({
   const [editContactId, setEditContactId] = useState("")
   const [editSource, setEditSource] = useState("whatsapp")
   const [editNotes, setEditNotes] = useState("")
+  const [editInvoiceCurrency, setEditInvoiceCurrency] = useState<DealInvoiceCurrency>("USD")
   const [editLines, setEditLines] = useState<EditLineState[]>([])
 
   const awaitingZkDealIdSet = new Set(awaitingZkDealIds)
@@ -507,13 +518,16 @@ export function DealsClient({
     setEditContactId(selected.primary_contact_id ?? "")
     setEditSource(canonicalDealSource(selected.source))
     setEditNotes(selected.notes ?? "")
+    setEditInvoiceCurrency(parseDealInvoiceCurrency(selected.invoice_currency))
     setEditLines(
       selected.lines.length
         ? selected.lines.map((line) => ({
             id: line.id,
             packageId: line.package_id,
             quantity: String(line.quantity),
-            unitPrice: String(line.unit_sale_price),
+            unitPrice: String(
+              dealLineEditorSalePrice(line, parseDealInvoiceCurrency(selected.invoice_currency)),
+            ),
             expectedUnitCost:
               line.expected_unit_cost == null ? "" : String(line.expected_unit_cost),
             sourcingMode: line.sourcing_mode,
@@ -556,6 +570,7 @@ export function DealsClient({
         contactId: editContactId || undefined,
         source: editSource,
         notes: editNotes,
+        invoiceCurrency: editInvoiceCurrency,
         lines,
       })
       if (!result.ok) {
@@ -988,7 +1003,15 @@ export function DealsClient({
                   <dd><StatusPill tone={stageTone(selected.stage, selectedNeedsZk)}>{pipelineStageFor(selected.stage, selectedNeedsZk).label}</StatusPill></dd>
                   <dt className="text-slate-400">Workflow status</dt><dd>{DEAL_STAGE_LABELS[selected.stage]}</dd>
                   <dt className="text-slate-400">Action required</dt><dd className="font-semibold text-primary">{actionRequired(selected, selectedNeedsZk)}</dd>
-                  <dt className="text-slate-400">Deal value</dt><dd className="font-semibold">{money(selected.total_amount, selected.currency)}</dd>
+                  <dt className="text-slate-400">Deal value</dt>
+                  <dd className="font-semibold">
+                    {money(selected.total_amount, selected.currency)}
+                    {dealInvoiceCrmNote(selected) ? (
+                      <p className="mt-1 text-[8px] font-normal leading-4 text-amber-800">
+                        {dealInvoiceCrmNote(selected)}
+                      </p>
+                    ) : null}
+                  </dd>
                   <dt className="text-slate-400">Gross profit / Margin</dt>
                   <dd>{selected.gross_profit == null ? "Not costed" : `${money(selected.gross_profit, selected.currency)} (${((selected.margin ?? 0) * 100).toFixed(1)}%)`}</dd>
                   <dt className="text-slate-400">Expected close date</dt><dd>{shortDate(selected.expected_close_date)}</dd>
@@ -1264,6 +1287,25 @@ export function DealsClient({
               </label>
             </div>
 
+            <div className="mt-4">
+              <DealInvoiceCurrencyToggle
+                value={editInvoiceCurrency}
+                disabled={selected ? dealInvoiceCurrencyIsLocked(selected) : false}
+                onChange={(next) => {
+                  const from = editInvoiceCurrency
+                  setEditInvoiceCurrency(next)
+                  setEditLines((lines) =>
+                    lines.map((line) => ({
+                      ...line,
+                      unitPrice:
+                        line.unitPrice.trim() === ""
+                          ? line.unitPrice
+                          : String(convertInvoiceSalePrice(Number(line.unitPrice), from, next)),
+                    })),
+                  )
+                }}
+              />
+            </div>
             <div className="mt-4 rounded-lg border">
               <div className="flex items-center justify-between border-b px-4 py-3">
                 <div>
@@ -1300,7 +1342,7 @@ export function DealsClient({
                             setEditLines((lines) => lines.map((item, itemIndex) => itemIndex === index ? {
                               ...item,
                               packageId,
-                              unitPrice: item.unitPrice || (nextProduct?.price == null ? "" : String(nextProduct.price)),
+                              unitPrice: item.unitPrice || (nextProduct?.price == null ? "" : String(catalogPriceInInvoiceCurrency(nextProduct.price, editInvoiceCurrency))),
                             } : item))
                           }}
                           options={packageOptions.map((option) => ({ value: option.id, label: option.label }))}
@@ -1310,8 +1352,8 @@ export function DealsClient({
                         {product ? <span className="mt-1 block text-[8px] text-slate-400">{product.stockLeft} currently available</span> : null}
                       </label>
                       <label className="text-[9px] font-medium text-slate-500">Quantity<input type="number" min={1} value={line.quantity} onChange={(event) => setEditLines((lines) => lines.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: event.target.value } : item))} className="mt-1 h-10 w-full rounded-md border px-2 text-[10px]" /></label>
-                      <label className="text-[9px] font-medium text-slate-500">Sale price<input type="number" min={0} step="0.01" value={line.unitPrice} onChange={(event) => setEditLines((lines) => lines.map((item, itemIndex) => itemIndex === index ? { ...item, unitPrice: event.target.value } : item))} className="mt-1 h-10 w-full rounded-md border px-2 text-[10px]" /></label>
-                      <label className="text-[9px] font-medium text-slate-500">Expected cost<input type="number" min={0} step="0.01" value={line.expectedUnitCost} onChange={(event) => setEditLines((lines) => lines.map((item, itemIndex) => itemIndex === index ? { ...item, expectedUnitCost: event.target.value } : item))} className="mt-1 h-10 w-full rounded-md border px-2 text-[10px]" /></label>
+                      <label className="text-[9px] font-medium text-slate-500">Sale price ({editInvoiceCurrency})<input type="number" min={0} step="0.01" value={line.unitPrice} onChange={(event) => setEditLines((lines) => lines.map((item, itemIndex) => itemIndex === index ? { ...item, unitPrice: event.target.value } : item))} className="mt-1 h-10 w-full rounded-md border px-2 text-[10px]" /></label>
+                      <label className="text-[9px] font-medium text-slate-500">Expected cost (USD)<input type="number" min={0} step="0.01" value={line.expectedUnitCost} onChange={(event) => setEditLines((lines) => lines.map((item, itemIndex) => itemIndex === index ? { ...item, expectedUnitCost: event.target.value } : item))} className="mt-1 h-10 w-full rounded-md border px-2 text-[10px]" /></label>
                       <label className="text-[9px] font-medium text-slate-500">
                         Stock source
                         <select value={line.sourcingMode} onChange={(event) => setEditLines((lines) => lines.map((item, itemIndex) => itemIndex === index ? { ...item, sourcingMode: event.target.value as "owned" | "brokered" } : item))} className="mt-1 h-10 w-full rounded-md border bg-white px-2 text-[10px]">

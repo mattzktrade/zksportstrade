@@ -621,7 +621,7 @@ export async function generateBookingFormPdf(
   drawAcknowledgementAndClientSignature(writer, snapshot, signatures.client, clientImage)
 
   writer.newPage()
-  writer.heading("PAYMENT TERMS (ALL AMOUNTS IN USD)", 12)
+  writer.heading(`PAYMENT TERMS (ALL AMOUNTS IN ${(snapshot.currency || "USD").toUpperCase()})`, 12)
   writer.text(snapshot.paymentTerms, { font: bold })
   writer.text(
     "Contracts for which payments are not received within ten (10) business days of contract execution are subject to cancellation. I acknowledge that I have agreed to the payment and terms as represented and will make payment accordingly.",

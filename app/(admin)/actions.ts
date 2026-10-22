@@ -60,6 +60,11 @@ import {
 } from "@/lib/inventory/day-cost-allocation"
 import { getCrmCompanyOptions } from "@/lib/crm/deals"
 import {
+  parseDealInvoiceCurrency,
+  persistDealInvoicePricing,
+  preparePricedInvoiceLine,
+} from "@/lib/crm/deal-invoice-currency"
+import {
   generatePurchaseOrderNumber,
   setPurchaseOrderContractInvoiceReceivedFlag,
   setPurchaseOrderOpsDates,
@@ -5013,6 +5018,7 @@ export async function createNativeDeal(input: {
     expectedUnitCost?: number | null
     supplierQuoteAt?: string | null
   }>
+  invoiceCurrency?: string | null
 }): Promise<ActionResult & { dealId?: string; stage?: string }> {
   const gate = await requireAdminAction("deals.manage")
   if (!gate.ok) return gate
@@ -5038,13 +5044,17 @@ export async function createNativeDeal(input: {
     return { ok: false, message: "Quantity must be at least 1." }
   }
 
+  const invoiceCurrency = parseDealInvoiceCurrency(input.invoiceCurrency)
+  let invoiceUnitSalePrice: number | null = null
   let unitSalePrice: number | null = null
   if (input.unitSalePrice != null && String(input.unitSalePrice) !== "") {
     const price = Number(input.unitSalePrice)
     if (!Number.isFinite(price) || price < 0) {
       return { ok: false, message: "Sale price must be a non-negative number." }
     }
-    unitSalePrice = price
+    const priced = preparePricedInvoiceLine(price, invoiceCurrency)
+    invoiceUnitSalePrice = priced.invoiceUnitPrice
+    unitSalePrice = priced.usdUnitPrice
   }
 
   const requestedStage = input.stage?.trim() || ""
@@ -5059,10 +5069,12 @@ export async function createNativeDeal(input: {
   const normalizedLines = input.lines?.map((line) => {
     const quoteAt = line.supplierQuoteAt?.trim()
     const quoteTime = quoteAt ? Date.parse(quoteAt) : Number.NaN
+    const priced = preparePricedInvoiceLine(Number(line.unitPrice), invoiceCurrency)
     return {
       packageId: line.packageId.trim(),
       quantity: Math.floor(Number(line.quantity)),
-      unitPrice: Number(line.unitPrice),
+      unitPrice: priced.usdUnitPrice,
+      invoiceUnitPrice: priced.invoiceUnitPrice,
       sourcingMode: line.sourcingMode ?? "owned",
       supplierId: line.supplierId?.trim() || null,
       expectedUnitCost:
@@ -5134,7 +5146,15 @@ export async function createNativeDeal(input: {
         p_contact_id: contactId,
         p_source: canonicalDealSource(input.source),
         p_notes: input.notes?.trim() || null,
-        p_lines: normalizedLines,
+        p_lines: normalizedLines.map((line) => ({
+          packageId: line.packageId,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+          sourcingMode: line.sourcingMode,
+          supplierId: line.supplierId,
+          expectedUnitCost: line.expectedUnitCost,
+          supplierQuoteAt: line.supplierQuoteAt,
+        })),
         p_reserve: pipeline.reserve,
         p_hold_days: 7,
       })
@@ -5269,6 +5289,34 @@ export async function createNativeDeal(input: {
     sourcingFailed = sourcingEmail === "failed"
   }
   const emailNote = sourcingEmailWarning(sourcingFailed ? 1 : 0)
+  const invoicePersist = await persistDealInvoicePricing(gate.supabase, dealId, {
+    invoiceCurrency,
+    lines: normalizedLines?.length
+      ? normalizedLines.map((line) => ({
+          packageId: line.packageId,
+          quantity: line.quantity,
+          usdUnitPrice: line.unitPrice,
+          invoiceUnitPrice: line.invoiceUnitPrice,
+        }))
+      : input.packageId?.trim() && unitSalePrice != null && invoiceUnitSalePrice != null
+        ? [
+            {
+              packageId: input.packageId.trim(),
+              quantity,
+              usdUnitPrice: unitSalePrice,
+              invoiceUnitPrice: invoiceUnitSalePrice,
+            },
+          ]
+        : [],
+  })
+  if (!invoicePersist.ok) {
+    return {
+      ok: false,
+      message: invoicePersist.message,
+      dealId,
+      stage: pipeline.dealStage,
+    }
+  }
   revalidatePath("/admin/deals")
   revalidatePath("/admin/enquiries")
   revalidatePath(`/admin/deals/${encodeURIComponent(dealId)}`)

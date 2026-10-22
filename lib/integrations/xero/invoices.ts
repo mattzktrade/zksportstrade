@@ -4,10 +4,12 @@ import { enqueueOpportunityOutcomeServer } from "@/lib/integrations/enqueue-serv
 import { attachInvoicePdfToOpportunity } from "@/lib/integrations/salesforce/invoice-file"
 import { xeroFetchInvoicePdf, xeroRequest, xeroCallsUsedThisProcess, XERO_PROCESS_CALL_BUDGET } from "@/lib/integrations/xero/client"
 import { isXeroRateLimitCooldownActive } from "@/lib/integrations/xero/settings-store"
+import { bookingFormSnapshotInvoiceLines } from "@/lib/crm/deal-invoice-currency"
 import {
   getXeroInvoiceItemCode,
   getXeroInvoiceLineDefaults,
   resolveXeroInvoiceCurrency,
+  resolveXeroInvoiceCurrencyRate,
 } from "@/lib/integrations/xero/invoice-line-defaults"
 import { createAdminClient } from "@/lib/supabase/admin"
 import {
@@ -367,10 +369,35 @@ export async function createXeroInvoiceForOrder(
   const splitInvoice = installmentCount > 1
 
   const { accountCode, taxType } = await getXeroInvoiceLineDefaults()
-  const currencyCode = await resolveXeroInvoiceCurrency(String(order.currency ?? "USD"))
+  const invoiceCurrency = String(inv.currency || order.currency || "USD")
+  let snapshotData: unknown = null
+  let snapshotFxRate: number | null = null
+  if (order.booking_form_id) {
+    const { data: form } = await admin
+      .from("booking_forms")
+      .select("snapshot_data")
+      .eq("id", order.booking_form_id)
+      .maybeSingle()
+    snapshotData = form?.snapshot_data ?? null
+    const reporting =
+      snapshotData && typeof snapshotData === "object" && !Array.isArray(snapshotData)
+        ? (snapshotData as { reporting?: { fxRate?: number } }).reporting
+        : null
+    snapshotFxRate = reporting?.fxRate ?? null
+  }
+  const snapshotLines = bookingFormSnapshotInvoiceLines(snapshotData)
+  const currencyCode = await resolveXeroInvoiceCurrency(invoiceCurrency)
+  const currencyRate = await resolveXeroInvoiceCurrencyRate(invoiceCurrency, snapshotFxRate)
   const itemCode = await getXeroInvoiceItemCode()
   const autoAuthorise = xeroInvoiceAutoAuthorise()
-  const sourceLines = nativeOrderLines?.length
+  const useSnapshotLines = Boolean(
+    snapshotLines &&
+      snapshotLines.length > 0 &&
+      invoiceCurrency.toUpperCase() !== String(order.currency || "USD").toUpperCase(),
+  )
+  const sourceLines = useSnapshotLines && snapshotLines
+    ? snapshotLines
+    : nativeOrderLines?.length
     ? nativeOrderLines
     : [
         {
@@ -454,6 +481,7 @@ export async function createXeroInvoiceForOrder(
               DueDate: dueDate,
               Reference: invoiceReference,
               ...(currencyCode ? { CurrencyCode: currencyCode } : {}),
+              ...(currencyRate ? { CurrencyRate: currencyRate } : {}),
               LineAmountTypes: lineAmountTypes,
               Status: autoAuthorise ? "AUTHORISED" : "DRAFT",
               ...(autoAuthorise ? { SentToContact: true } : {}),
@@ -525,7 +553,7 @@ export async function createXeroInvoiceForOrder(
       clientName: order.client_name,
       guests: invoiceLines.reduce((sum, line) => sum + line.quantity, 0),
       totalAmount: invoiceAmount,
-      currency: order.currency,
+      currency: invoiceCurrency,
       dueDate,
       extraCc,
     })
@@ -617,7 +645,7 @@ export async function resendXeroInvoiceForOrder(orderId: string): Promise<void> 
     clientName: order.client_name,
     guests,
     totalAmount: Number(invoice.amount ?? order.total_amount),
-    currency: order.currency,
+    currency: invoice.currency || order.currency,
     dueDate: invoice.due_date ?? new Date().toISOString().slice(0, 10),
     extraCc,
   })

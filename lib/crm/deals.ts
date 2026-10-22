@@ -9,6 +9,7 @@ import {
 } from "@/lib/crm/deal-pipeline"
 import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { shouldLoadDealOrderFinance } from "@/lib/crm/deal-finance"
+import { invoiceFxRateFor, parseDealInvoiceCurrency } from "@/lib/crm/deal-invoice-currency"
 import { aggregateInvoiceStatus, pickCurrentInvoice, sortInvoicesByInstallment } from "@/lib/invoices/status"
 import { costLayerSupplierPoolKey } from "@/lib/inventory/supplier-pool"
 
@@ -260,16 +261,22 @@ export async function getDealListRows(options?: {
       crm_accounts(name),
       crm_contacts!primary_contact_id(full_name, email, phone),
       deal_line_items(
-        id, package_id, quantity, unit_sale_price, expected_unit_cost,
+        id, package_id, quantity, unit_sale_price, invoice_unit_sale_price, expected_unit_cost,
         sourcing_mode, supplier_id, supplier_quote_at,
         reservation_status, packages(name, race_id, races(name, season))
       )`
-  const baseSelect = `id, account_id, primary_contact_id, reference, stage, source, currency, total_amount, expected_close_date, next_action,
+  const invoiceDealCols = "invoice_currency, invoice_fx_rate, invoice_total_amount, "
+  const baseSelect = `id, account_id, primary_contact_id, reference, stage, source, currency, total_amount, ${invoiceDealCols}expected_close_date, next_action,
       next_action_due_at, loss_reason, hold_expires_at, do_not_expire, notes, created_at,
       updated_at, created_by, owner_profile_id, race_id, order_id, ledger_invoice_number, ${lineSelect}`
-  const enquirySelect = `id, account_id, primary_contact_id, reference, stage, source, enquiry_stage, enquiry_temperature, enquiry_replied_at, currency, total_amount, expected_close_date, next_action,
+  const enquirySelect = `id, account_id, primary_contact_id, reference, stage, source, enquiry_stage, enquiry_temperature, enquiry_replied_at, currency, total_amount, ${invoiceDealCols}expected_close_date, next_action,
       next_action_due_at, loss_reason, hold_expires_at, do_not_expire, notes, created_at,
       updated_at, created_by, owner_profile_id, race_id, order_id, ledger_invoice_number, ${lineSelect}`
+  function stripInvoiceColumns(select: string) {
+    return select
+      .replaceAll("invoice_currency, invoice_fx_rate, invoice_total_amount, ", "")
+      .replaceAll("invoice_unit_sale_price, ", "")
+  }
 
   const enquiryNoReplied = enquirySelect.replace("enquiry_replied_at, ", "")
   const enquiryNoLedger = enquirySelect.replace("ledger_invoice_number, ", "")
@@ -294,6 +301,9 @@ export async function getDealListRows(options?: {
         enquiry_replied_at?: string | null
         currency: string
         total_amount: number | string | null
+        invoice_currency?: string | null
+        invoice_fx_rate?: number | string | null
+        invoice_total_amount?: number | string | null
         expected_close_date: string | null
         next_action: string | null
         next_action_due_at: string | null
@@ -326,7 +336,15 @@ export async function getDealListRows(options?: {
     baseSelect,
     baseNoLedger,
   ]) {
-    const result = await load(select)
+    let result = await load(select)
+    if (
+      result.error &&
+      /invoice_currency|invoice_fx_rate|invoice_total_amount|invoice_unit_sale_price|schema cache/i.test(
+        result.error.message,
+      )
+    ) {
+      result = await load(stripInvoiceColumns(select))
+    }
     data = result.data
     error = result.error
     if (!error) break
@@ -366,10 +384,11 @@ export async function getDealListRows(options?: {
             .select(`
             id, reference,
             invoices(
-              id, status, amount, xero_invoice_id, xero_invoice_number, xero_sync_status,
+              id, status, amount, currency, xero_invoice_id, xero_invoice_number, xero_sync_status,
               xero_sync_error, due_date, invoice_emailed_at, invoice_email_error,
               payment_reminder_count, last_payment_reminder_at,
-              payment_reminder_error, cancellation_eligible_at, created_at
+              payment_reminder_error, cancellation_eligible_at, created_at,
+              installment_index, installment_count, installment_percent, installment_label
             )
           `)
             .in("id", chunk),
@@ -444,6 +463,7 @@ export async function getDealListRows(options?: {
       package_id: string
       quantity: number
       unit_sale_price: number
+      invoice_unit_sale_price?: number | null
       expected_unit_cost: number | null
       sourcing_mode: "owned" | "brokered"
       supplier_id: string | null
@@ -509,6 +529,7 @@ export async function getDealListRows(options?: {
       id: string
       status: string
       amount?: number | null
+      currency?: string | null
       xero_invoice_id: string | null
       xero_invoice_number: string | null
       xero_sync_status: string | null
@@ -531,6 +552,7 @@ export async function getDealListRows(options?: {
     )
     const invoice = pickCurrentInvoice(invoiceRows)
     const invoiceStatus = aggregateInvoiceStatus(invoiceRows) ?? invoice?.status ?? null
+    const invoiceTotal = Number(row.invoice_total_amount ?? row.total_amount ?? 0)
 
     return {
       id: row.id,
@@ -554,6 +576,9 @@ export async function getDealListRows(options?: {
       enquiry_replied_at: typeof row.enquiry_replied_at === "string" ? row.enquiry_replied_at : null,
       currency: row.currency,
       total_amount: Number(row.total_amount ?? 0),
+      invoice_currency: parseDealInvoiceCurrency(row.invoice_currency),
+      invoice_fx_rate: Number(row.invoice_fx_rate ?? invoiceFxRateFor(parseDealInvoiceCurrency(row.invoice_currency))),
+      invoice_total_amount: Number(row.invoice_total_amount ?? row.total_amount ?? 0),
       expected_close_date: row.expected_close_date,
       next_action: row.next_action,
       next_action_due_at: row.next_action_due_at,
@@ -580,6 +605,7 @@ export async function getDealListRows(options?: {
         package_id: line.package_id,
         quantity: Number(line.quantity),
         unit_sale_price: Number(line.unit_sale_price),
+        invoice_unit_sale_price: Number(line.invoice_unit_sale_price ?? line.unit_sale_price),
         expected_unit_cost:
           line.expected_unit_cost == null ? null : Number(line.expected_unit_cost),
         sourcing_mode: line.sourcing_mode ?? "owned",
@@ -618,13 +644,14 @@ export async function getDealListRows(options?: {
         id: invoice.id,
         status: invoice.status,
         amount: invoice.amount == null ? null : Number(invoice.amount),
+        currency: invoice.currency ?? null,
         due_date: invoice.due_date ?? null,
         installment_index: Number(invoice.installment_index ?? index + 1),
         installment_count: Number(invoice.installment_count ?? invoiceRows.length),
         installment_percent: Number(
           invoice.installment_percent ??
-            (Number(invoice.amount) > 0 && Number(row.total_amount) > 0
-              ? Math.round((Number(invoice.amount) / Number(row.total_amount)) * 10000) / 100
+            (Number(invoice.amount) > 0 && invoiceTotal > 0
+              ? Math.round((Number(invoice.amount) / invoiceTotal) * 10000) / 100
               : 100),
         ),
         installment_label: invoice.installment_label ?? null,

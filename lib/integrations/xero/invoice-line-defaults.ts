@@ -1,3 +1,4 @@
+import { AED_PER_USD } from "@/lib/crm/deal-invoice-currency"
 import { xeroRequest } from "@/lib/integrations/xero/client"
 import { getIntegrationSetting, setIntegrationSetting } from "@/lib/integrations/xero/settings-store"
 
@@ -19,6 +20,7 @@ export type XeroOrgDefaultsCache = {
   taxType: string
   itemCode: string | null
   currencies: string[]
+  baseCurrency: string | null
   envFingerprint: string
   fetchedAt: string
 }
@@ -28,6 +30,7 @@ type LoadedOrgDefaults = {
   taxType: string
   itemCode: string | null
   currencies: Set<string>
+  baseCurrency: string | null
 }
 
 let memoryCache: XeroOrgDefaultsCache | null = null
@@ -54,7 +57,10 @@ export function parseXeroOrgDefaultsCache(
     const fetched = Date.parse(parsed.fetchedAt)
     if (!Number.isFinite(fetched) || now - fetched > XERO_ORG_DEFAULTS_TTL_MS) return null
     if (!Array.isArray(parsed.currencies)) return null
-    return parsed
+    return {
+      ...parsed,
+      baseCurrency: typeof parsed.baseCurrency === "string" ? parsed.baseCurrency : null,
+    }
   } catch {
     return null
   }
@@ -68,6 +74,7 @@ function cacheToLoaded(cache: XeroOrgDefaultsCache): LoadedOrgDefaults {
     currencies: new Set(
       cache.currencies.map((code) => code.trim().toUpperCase()).filter(Boolean),
     ),
+    baseCurrency: cache.baseCurrency?.trim().toUpperCase() || null,
   }
 }
 
@@ -140,12 +147,23 @@ async function fetchInvoiceItemCode(): Promise<string | null> {
 }
 
 async function fetchCurrencyCodes(): Promise<string[]> {
-  const override = process.env.XERO_INVOICE_CURRENCY?.trim().toUpperCase()
-  if (override) return [override]
   const res = await xeroRequest<{ Currencies?: Array<{ Code?: string }> }>("GET", "/api.xro/2.0/Currencies")
   return (res.Currencies ?? [])
     .map((c) => c.Code?.trim().toUpperCase())
     .filter((code): code is string => Boolean(code))
+}
+
+async function fetchOrgBaseCurrency(): Promise<string | null> {
+  try {
+    const res = await xeroRequest<{ Organisations?: Array<{ BaseCurrency?: string }> }>(
+      "GET",
+      "/api.xro/2.0/Organisation",
+    )
+    return res.Organisations?.[0]?.BaseCurrency?.trim().toUpperCase() || null
+  } catch (e) {
+    console.warn("[xero] Organisation base currency lookup skipped:", e instanceof Error ? e.message : e)
+    return null
+  }
 }
 
 async function loadXeroOrgDefaults(): Promise<LoadedOrgDefaults> {
@@ -153,12 +171,17 @@ async function loadXeroOrgDefaults(): Promise<LoadedOrgDefaults> {
   if (cached) return cacheToLoaded(cached)
 
   const { accountCode, taxType } = await fetchTaxDefaults()
-  const [itemCode, currencies] = await Promise.all([fetchInvoiceItemCode(), fetchCurrencyCodes()])
+  const [itemCode, currencies, baseCurrency] = await Promise.all([
+    fetchInvoiceItemCode(),
+    fetchCurrencyCodes(),
+    fetchOrgBaseCurrency(),
+  ])
   const record: XeroOrgDefaultsCache = {
     accountCode,
     taxType,
     itemCode,
     currencies,
+    baseCurrency,
     envFingerprint: xeroOrgEnvFingerprint(),
     fetchedAt: new Date().toISOString(),
   }
@@ -180,12 +203,60 @@ export async function getXeroInvoiceItemCode(): Promise<string | undefined> {
   return loaded.itemCode ?? undefined
 }
 
-/** Use order currency when the Xero org supports it; otherwise omit (org base currency). */
-export async function resolveXeroInvoiceCurrency(orderCurrency: string): Promise<string | undefined> {
-  const override = process.env.XERO_INVOICE_CURRENCY?.trim().toUpperCase()
-  if (override) return override
+export function selectXeroInvoiceCurrency(input: {
+  invoiceCurrency: string
+  orgCurrencies: Iterable<string>
+  override?: string | null
+}): string | undefined {
+  const requested = input.invoiceCurrency.trim().toUpperCase() || "USD"
+  const currencies = new Set(
+    [...input.orgCurrencies].map((code) => code.trim().toUpperCase()).filter(Boolean),
+  )
+  if (requested === "AED") {
+    if (!currencies.has("AED")) {
+      throw new Error(
+        "This Xero organisation does not have AED enabled. Enable AED in Xero before invoicing this deal.",
+      )
+    }
+    return "AED"
+  }
+  const override = input.override?.trim().toUpperCase()
+  if (override && override !== "AED") return override
+  return currencies.has(requested) ? requested : undefined
+}
 
-  const order = orderCurrency.trim().toUpperCase() || "USD"
+/** Xero CurrencyRate converts invoice currency into the org base currency. */
+export function selectXeroInvoiceCurrencyRate(input: {
+  invoiceCurrency: string
+  orgBaseCurrency?: string | null
+  fxRate?: number | null
+}): number | undefined {
+  const requested = input.invoiceCurrency.trim().toUpperCase()
+  if (requested !== "AED") return undefined
+  const base = (input.orgBaseCurrency || "USD").trim().toUpperCase()
+  if (base !== "USD") return undefined
+  const aedPerUsd = input.fxRate && input.fxRate > 0 ? input.fxRate : AED_PER_USD
+  return Math.round((1 / aedPerUsd + Number.EPSILON) * 1_000_000) / 1_000_000
+}
+
+/** Use invoice currency when the Xero org supports it; otherwise omit (org base currency). */
+export async function resolveXeroInvoiceCurrency(invoiceCurrency: string): Promise<string | undefined> {
   const loaded = await loadXeroOrgDefaults()
-  return loaded.currencies.has(order) ? order : undefined
+  return selectXeroInvoiceCurrency({
+    invoiceCurrency,
+    orgCurrencies: loaded.currencies,
+    override: process.env.XERO_INVOICE_CURRENCY,
+  })
+}
+
+export async function resolveXeroInvoiceCurrencyRate(
+  invoiceCurrency: string,
+  fxRate?: number | null,
+): Promise<number | undefined> {
+  const loaded = await loadXeroOrgDefaults()
+  return selectXeroInvoiceCurrencyRate({
+    invoiceCurrency,
+    orgBaseCurrency: loaded.baseCurrency,
+    fxRate,
+  })
 }

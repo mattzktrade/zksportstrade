@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { CircleDollarSign, Download, RefreshCcw, Send, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
 import { dealConfirmedOffPlatform, type DealListRow } from "@/lib/crm/deal-types"
+import { dealInvoiceCrmNote, parseDealInvoiceCurrency } from "@/lib/crm/deal-invoice-currency"
 import {
   cancelNativeDealOrder,
   reconcileNativeDealInvoice,
@@ -65,6 +66,8 @@ export function DealFinancePanel({
     eligibleAt != null && eligibleAt.slice(0, 10) <= new Date().toISOString().slice(0, 10)
   const canCreateOrder = ["signed", "awaiting_invoice"].includes(deal.stage)
   const activeInvoice = deal.invoice_status && deal.invoice_status !== "cancelled"
+  const invoiceCurrency = parseDealInvoiceCurrency(deal.invoice_currency || deal.currency)
+  const invoiceNote = dealInvoiceCrmNote(deal)
 
   return (
     <div className="rounded-lg border border-slate-200 p-3">
@@ -72,6 +75,9 @@ export function DealFinancePanel({
         <CircleDollarSign className="h-4 w-4 text-blue-600" />
         <h3 className="text-[9px] font-semibold">Order &amp; Xero invoice</h3>
       </div>
+      {invoiceNote ? (
+        <p className="mt-2 text-[8px] leading-4 text-amber-800">{invoiceNote}</p>
+      ) : null}
 
       {!deal.order_id ? (
         <div className="mt-3">
@@ -123,7 +129,7 @@ export function DealFinancePanel({
                       {invoice.installment_label?.trim() || `Payment ${invoice.installment_index} of ${invoice.installment_count}`}
                     </span>
                     {` · ${Number(invoice.installment_percent).toFixed(0)}%`}
-                    {invoice.amount != null ? ` · ${deal.currency} ${Number(invoice.amount).toFixed(2)}` : ""}
+                    {invoice.amount != null ? ` · ${invoice.currency || invoiceCurrency} ${Number(invoice.amount).toFixed(2)}` : ""}
                     {` · due ${date(invoice.due_date)} · ${invoice.status.replaceAll("_", " ")}`}
                     {invoice.xero_invoice_number ? ` · ${invoice.xero_invoice_number}` : ""}
                   </li>

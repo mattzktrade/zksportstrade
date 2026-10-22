@@ -9,6 +9,7 @@ import { updateNativeDealWorkflow } from "@/app/(admin)/actions"
 import { ActionCombobox } from "@/components/admin/action-combobox"
 import { CrmPartySelect } from "@/components/admin/crm-party-select"
 import { SearchableSelect } from "@/components/admin/searchable-select"
+import { DealInvoiceCurrencyToggle } from "@/components/admin/deal-invoice-currency-toggle"
 import { AdminPageHeader, AdminPanel, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { AdminModalScrim } from "@/components/admin/admin-list-preview"
 import type { DealBasketSupplier } from "@/components/admin/deal-line-basket"
@@ -18,6 +19,15 @@ import { enquiryHasClientReply } from "@/lib/crm/enquiry-replied"
 import { nextActionForDealStage } from "@/lib/crm/deal-workflow"
 import type { DealAddressDraft, DealDetailPageData, DealFulfilmentClient } from "@/lib/crm/deal-detail"
 import type { StaffOption } from "@/lib/crm/lead-types"
+import {
+  catalogPriceInInvoiceCurrency,
+  convertInvoiceSalePrice,
+  dealInvoiceCrmNote,
+  dealInvoiceCurrencyIsLocked,
+  dealLineEditorSalePrice,
+  parseDealInvoiceCurrency,
+  type DealInvoiceCurrency,
+} from "@/lib/crm/deal-invoice-currency"
 import { formatMoney } from "@/lib/format/money"
 import { adminPackagePath } from "@/lib/admin/package-link"
 import { adminAccountPath, adminContactPath, adminSupplierPath } from "@/lib/crm/profile-links"
@@ -281,7 +291,12 @@ export function DealDetailClient({
   const editAccount = clientAccounts.find((account) => account.id === editAccountId) ?? null
   const [editSource, setEditSource] = useState(canonicalDealSource(deal.source))
   const [editNotes, setEditNotes] = useState(deal.notes ?? "")
+  const [editInvoiceCurrency, setEditInvoiceCurrency] = useState<DealInvoiceCurrency>(
+    parseDealInvoiceCurrency(deal.invoice_currency),
+  )
   const [editLines, setEditLines] = useState<EditLineState[]>([])
+  const invoiceCurrencyLocked = dealInvoiceCurrencyIsLocked(deal)
+  const invoiceNote = dealInvoiceCrmNote(deal)
 
   const commercialEditLocked =
     Boolean(deal.order_id) ||
@@ -359,13 +374,16 @@ export function DealDetailClient({
     setEditContactId(deal.primary_contact_id ?? "")
     setEditSource(canonicalDealSource(deal.source))
     setEditNotes(deal.notes ?? "")
+    setEditInvoiceCurrency(parseDealInvoiceCurrency(deal.invoice_currency))
     setEditLines(
       deal.lines.length
         ? deal.lines.map((line) => ({
             id: line.id,
             packageId: line.package_id,
             quantity: String(line.quantity),
-            unitPrice: String(line.unit_sale_price),
+            unitPrice: String(
+              dealLineEditorSalePrice(line, parseDealInvoiceCurrency(deal.invoice_currency)),
+            ),
             expectedUnitCost: line.expected_unit_cost == null ? "" : String(line.expected_unit_cost),
             sourcingMode: line.sourcing_mode,
             supplierId: line.supplier_id ?? "",
@@ -416,6 +434,7 @@ export function DealDetailClient({
           contactId: editContactId || undefined,
           source: editSource,
           notes: editNotes,
+          invoiceCurrency: editInvoiceCurrency,
           lines: editLines.map((line) => ({
             id: line.id,
             packageId: line.packageId,
@@ -910,6 +929,11 @@ export function DealDetailClient({
                       <td className="px-4 py-2.5 text-right tabular-nums">{line.quantity}</td>
                       <td className="px-4 py-2.5 text-right tabular-nums">
                         {money(line.unit_sale_price, deal.currency)}
+                        {parseDealInvoiceCurrency(deal.invoice_currency) === "AED" ? (
+                          <p className="text-[8px] font-normal text-slate-400">
+                            Invoice {money(line.invoice_unit_sale_price, deal.invoice_currency)}
+                          </p>
+                        ) : null}
                       </td>
                       <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">
                         {line.expected_unit_cost == null
@@ -962,7 +986,14 @@ export function DealDetailClient({
                     <Link href={adminPackagePath(line.package_id, "orders")} className="min-w-0 font-medium text-primary">
                       {line.packageName || line.package_id}
                     </Link>
-                    <p className="shrink-0 font-semibold">{money(line.unit_sale_price, deal.currency)}</p>
+                    <p className="shrink-0 text-right font-semibold">
+                      {money(line.unit_sale_price, deal.currency)}
+                      {parseDealInvoiceCurrency(deal.invoice_currency) === "AED" ? (
+                        <span className="block text-[8px] font-normal text-slate-400">
+                          Invoice {money(line.invoice_unit_sale_price, deal.invoice_currency)}
+                        </span>
+                      ) : null}
+                    </p>
                   </div>
                   <p className="text-[8px] text-slate-400">{line.quantity} units</p>
                   {canManageDeals ? (
@@ -1172,7 +1203,12 @@ export function DealDetailClient({
                 <dt className="text-slate-400">Event</dt>
                 <dd>{deal.race_name || "—"}</dd>
                 <dt className="text-slate-400">Value</dt>
-                <dd className="font-semibold">{money(deal.total_amount, deal.currency)}</dd>
+                <dd className="font-semibold">
+                  {money(deal.total_amount, deal.currency)}
+                  {invoiceNote ? (
+                    <p className="mt-1 text-[8px] font-normal leading-4 text-amber-800">{invoiceNote}</p>
+                  ) : null}
+                </dd>
                 <dt className="text-slate-400">Gross profit</dt>
                 <dd>
                   {deal.gross_profit == null
@@ -1402,6 +1438,25 @@ export function DealDetailClient({
               </label>
             </div>
 
+            <div className="mt-4">
+              <DealInvoiceCurrencyToggle
+                value={editInvoiceCurrency}
+                disabled={invoiceCurrencyLocked}
+                onChange={(next) => {
+                  const from = editInvoiceCurrency
+                  setEditInvoiceCurrency(next)
+                  setEditLines((current) =>
+                    current.map((line) => ({
+                      ...line,
+                      unitPrice:
+                        line.unitPrice.trim() === ""
+                          ? line.unitPrice
+                          : String(convertInvoiceSalePrice(Number(line.unitPrice), from, next)),
+                    })),
+                  )
+                }}
+              />
+            </div>
             <div className="mt-4 rounded-lg border">
               <div className="flex items-center justify-between border-b px-4 py-3">
                 <div>
@@ -1440,7 +1495,14 @@ export function DealDetailClient({
                                       packageId,
                                       unitPrice:
                                         item.unitPrice ||
-                                        (nextProduct?.price == null ? "" : String(nextProduct.price)),
+                                        (nextProduct?.price == null
+                                          ? ""
+                                          : String(
+                                              catalogPriceInInvoiceCurrency(
+                                                nextProduct.price,
+                                                editInvoiceCurrency,
+                                              ),
+                                            )),
                                     }
                                   : item,
                               ),
@@ -1473,7 +1535,7 @@ export function DealDetailClient({
                         />
                       </label>
                       <label className="text-[9px] font-medium text-slate-500">
-                        Sale price
+                        Sale price ({editInvoiceCurrency})
                         <input
                           type="number"
                           min={0}
@@ -1490,7 +1552,7 @@ export function DealDetailClient({
                         />
                       </label>
                       <label className="text-[9px] font-medium text-slate-500">
-                        Expected cost
+                        Expected cost (USD)
                         <input
                           type="number"
                           min={0}

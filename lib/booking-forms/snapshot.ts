@@ -16,6 +16,12 @@ import {
   defaultPaymentSchedule,
   formatPaymentTermsText,
 } from "@/lib/booking-forms/payment-schedule"
+import {
+  assertBookingFormInvoiceCurrency,
+  bookingBankDetailsForInvoiceCurrency,
+  buildDealInvoiceReporting,
+  invoiceFxRateFor,
+} from "@/lib/crm/deal-invoice-currency"
 
 export { bookingLineTax }
 
@@ -26,6 +32,8 @@ type DealRow = {
   primary_contact_id: string | null
   race_id: string | null
   currency: string
+  invoice_currency?: string | null
+  invoice_fx_rate?: number | string | null
 }
 
 function canonicalize(value: unknown): unknown {
@@ -64,19 +72,26 @@ export async function buildBookingFormSnapshot(
   documentRef: string,
   createdAt = new Date(),
 ): Promise<{ snapshot: BookingFormSnapshot; snapshotHash: string }> {
-  const { data: dealData, error: dealError } = await supabase
+  let dealResult = await supabase
     .from("deals")
-    .select("id, reference, account_id, primary_contact_id, race_id, currency")
+    .select("id, reference, account_id, primary_contact_id, race_id, currency, invoice_currency, invoice_fx_rate")
     .eq("id", dealId)
     .maybeSingle()
-  if (dealError) throw new Error(dealError.message)
-  if (!dealData) throw new Error("Deal not found.")
-  const deal = dealData as DealRow
+  if (dealResult.error && /invoice_currency|invoice_fx_rate|schema cache/i.test(dealResult.error.message)) {
+    dealResult = await supabase
+      .from("deals")
+      .select("id, reference, account_id, primary_contact_id, race_id, currency")
+      .eq("id", dealId)
+      .maybeSingle()
+  }
+  if (dealResult.error) throw new Error(dealResult.error.message)
+  if (!dealResult.data) throw new Error("Deal not found.")
+  const deal = dealResult.data as DealRow
   if (!deal.account_id || !deal.primary_contact_id) {
     throw new Error("The deal needs an account and primary contact before creating a booking form.")
   }
 
-  const [{ data: account, error: accountError }, { data: contact, error: contactError }, linesResult] =
+  const [{ data: account, error: accountError }, { data: contact, error: contactError }, initialLines] =
     await Promise.all([
       supabase
         .from("crm_accounts")
@@ -92,12 +107,31 @@ export async function buildBookingFormSnapshot(
         .maybeSingle(),
       supabase
         .from("deal_line_items")
-        .select("id, package_id, quantity, unit_sale_price, currency, sort_order")
+        .select("id, package_id, quantity, unit_sale_price, invoice_unit_sale_price, currency, sort_order")
         .eq("deal_id", deal.id)
         .order("sort_order"),
     ])
   if (accountError) throw new Error(accountError.message)
   if (contactError) throw new Error(contactError.message)
+  let linesResult: {
+    data: Array<{
+      id: string
+      package_id: string
+      quantity: number
+      unit_sale_price: number
+      invoice_unit_sale_price?: number | null
+      currency: string | null
+      sort_order: number
+    }> | null
+    error: { message: string } | null
+  } = initialLines
+  if (linesResult.error && /invoice_unit_sale_price|schema cache/i.test(linesResult.error.message)) {
+    linesResult = await supabase
+      .from("deal_line_items")
+      .select("id, package_id, quantity, unit_sale_price, currency, sort_order")
+      .eq("deal_id", deal.id)
+      .order("sort_order")
+  }
   if (linesResult.error) throw new Error(linesResult.error.message)
   if (!account || !contact) throw new Error("The deal account or contact no longer exists.")
   if (contact.account_id !== account.id) throw new Error("The primary contact is not linked to the deal account.")
@@ -133,15 +167,18 @@ export async function buildBookingFormSnapshot(
 
   const currencies = new Set(linesResult.data.map((line) => String(line.currency || deal.currency || "USD")))
   if (currencies.size !== 1) throw new Error("All booking-form products must use the same currency.")
-  const currency = [...currencies][0]
-  if (currency.toUpperCase() !== "USD") {
-    throw new Error("ZK booking forms must be issued in USD.")
-  }
+  const invoiceCurrency = assertBookingFormInvoiceCurrency(deal.invoice_currency || "USD")
+  const currency = invoiceCurrency
+  const fxRate =
+    Number(deal.invoice_fx_rate) > 0 ? Number(deal.invoice_fx_rate) : invoiceFxRateFor(invoiceCurrency)
   const lines = linesResult.data.map((line) => {
     const pkg = packageMap.get(String(line.package_id))!
     const eventName = raceMap.get(String(pkg.race_id)) ?? "Event"
     const quantity = Number(line.quantity)
-    const unitPrice = Number(line.unit_sale_price)
+    const unitPrice = Number(
+      (line as { invoice_unit_sale_price?: number | null }).invoice_unit_sale_price ??
+        line.unit_sale_price,
+    )
     const lineTotal = quantity * unitPrice
     const { taxRate, taxAmountIncluded } = bookingLineTax(eventName, lineTotal)
     return {
@@ -213,10 +250,20 @@ export async function buildBookingFormSnapshot(
           ? "VAT included (5%)"
           : "VAT included (5% on Abu Dhabi products only)",
     total: subtotal,
+    reporting: buildDealInvoiceReporting({
+      invoiceCurrency,
+      fxRate,
+      lines: lines.map((line) => ({
+        dealLineItemId: line.dealLineItemId,
+        packageId: line.packageId,
+        quantity: line.quantity,
+        invoiceUnitPrice: line.unitPrice,
+      })),
+    }),
     paymentSchedule: defaultPaymentSchedule(),
     paymentTerms: formatPaymentTermsText(defaultPaymentSchedule(), subtotal, currency),
     paymentMethod: "Wire Transfer",
-    bankDetails: BOOKING_BANK_DETAILS,
+    bankDetails: bookingBankDetailsForInvoiceCurrency(currency, BOOKING_BANK_DETAILS),
     acknowledgement: BOOKING_ACKNOWLEDGEMENT,
     terms: BOOKING_TERMS,
   }

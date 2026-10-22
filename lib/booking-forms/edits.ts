@@ -8,6 +8,10 @@ import {
 } from "@/lib/booking-forms/payment-schedule"
 import { BOOKING_TERMS } from "@/lib/booking-forms/template"
 import type { BookingFormSnapshot } from "@/lib/booking-forms/types"
+import {
+  buildDealInvoiceReporting,
+  parseDealInvoiceCurrency,
+} from "@/lib/crm/deal-invoice-currency"
 
 export type BookingFormLineEdit = {
   eventName: string
@@ -31,6 +35,7 @@ export type BookingFormTermEdit = {
 }
 
 export type BookingFormEdits = {
+  currency: string
   dealTitle: string
   billToAccountName: string
   billToContactName: string
@@ -94,6 +99,7 @@ function paragraphsFromBody(body: string): string[] {
 
 export function snapshotToEdits(snapshot: BookingFormSnapshot): BookingFormEdits {
   return {
+    currency: snapshot.currency,
     dealTitle: snapshot.deal.title,
     billToAccountName: snapshot.billTo.accountName,
     billToContactName: snapshot.billTo.contactName,
@@ -215,7 +221,7 @@ export function applyBookingFormEdits(
     paymentTerms: formatPaymentTermsText(
       edits.paymentSchedule ?? scheduleFromSnapshot(base),
       subtotal,
-      base.currency,
+      edits.currency || base.currency,
     ),
     paymentMethod: clean(edits.paymentMethod, 120, "Payment method"),
     bankDetails: edits.bankDetails.map((bank) => ({
@@ -233,5 +239,16 @@ export function applyBookingFormEdits(
   }
   if (ccEmails.length) next.ccEmails = ccEmails
   else delete next.ccEmails
+  const invoiceCurrency = parseDealInvoiceCurrency(base.currency)
+  next.reporting = buildDealInvoiceReporting({
+    invoiceCurrency,
+    fxRate: base.reporting?.fxRate,
+    lines: next.lines.map((line) => ({
+      dealLineItemId: line.dealLineItemId,
+      packageId: line.packageId,
+      quantity: line.quantity,
+      invoiceUnitPrice: line.unitPrice,
+    })),
+  })
   return next
 }

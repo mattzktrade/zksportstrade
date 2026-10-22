@@ -51,6 +51,11 @@ import {
   type DealBasketLine,
   type DealBasketSupplier,
 } from "@/components/admin/deal-line-basket"
+import { DealInvoiceCurrencyToggle } from "@/components/admin/deal-invoice-currency-toggle"
+import {
+  convertInvoiceSalePrice,
+  type DealInvoiceCurrency,
+} from "@/lib/crm/deal-invoice-currency"
 import { CatalogImage } from "@/components/catalog-image"
 import { PackageBrochureActions } from "@/components/admin/package-brochure-actions"
 import { PackageGuestGuideActions } from "@/components/admin/package-guest-guide-actions"
@@ -250,6 +255,7 @@ export function InventoryWorkspace({
   const [dealContactEmail, setDealContactEmail] = useState("")
   const [dealContactPhone, setDealContactPhone] = useState("")
   const [dealLines, setDealLines] = useState<DealBasketLine[]>([])
+  const [dealInvoiceCurrency, setDealInvoiceCurrency] = useState<DealInvoiceCurrency>("USD")
   const [dealReserve, setDealReserve] = useState(true)
   const [dealSource, setDealSource] = useState("whatsapp")
 
@@ -509,6 +515,7 @@ export function InventoryWorkspace({
       const result = await createNativeDeal({
         accountId: party.accountId,
         contactId: party.contactId,
+        invoiceCurrency: dealInvoiceCurrency,
         lines: dealLines.map((line) => ({
           packageId: line.packageId,
           quantity: numericDealField(line.quantity),
@@ -537,6 +544,7 @@ export function InventoryWorkspace({
       setDealContactEmail("")
       setDealContactPhone("")
       setDealLines([])
+      setDealInvoiceCurrency("USD")
       setDealSource("whatsapp")
       if (dealMode === "deal") router.push("/admin/enquiries")
       router.refresh()
@@ -549,7 +557,8 @@ export function InventoryWorkspace({
     if (!product) return
     setDealMode(mode)
     setDealReserve(mode === "hold")
-    setDealLines([createDealBasketLine(product)])
+    setDealInvoiceCurrency("USD")
+    setDealLines([createDealBasketLine(product, "USD")])
     setDealOpen(true)
   }
 
@@ -1228,12 +1237,30 @@ export function InventoryWorkspace({
                             ))}
                           </select>
                         </label>
+                        <DealInvoiceCurrencyToggle
+                          compact
+                          value={dealInvoiceCurrency}
+                          onChange={(next) => {
+                            const from = dealInvoiceCurrency
+                            setDealInvoiceCurrency(next)
+                            setDealLines((lines) =>
+                              lines.map((line) => ({
+                                ...line,
+                                unitPrice:
+                                  typeof line.unitPrice === "number"
+                                    ? convertInvoiceSalePrice(line.unitPrice, from, next)
+                                    : line.unitPrice,
+                              })),
+                            )
+                          }}
+                        />
                         <DealLineBasket
                           products={dealProducts}
                           suppliers={supplierOptions}
                           lines={dealLines}
                           onChange={setDealLines}
                           compact
+                          invoiceCurrency={dealInvoiceCurrency}
                         />
                         <div className="grid grid-cols-1 gap-2">
                           {dealMode === "hold" ? (

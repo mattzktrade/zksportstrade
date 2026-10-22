@@ -7,6 +7,7 @@ import { eventSeasonLabel } from "@/lib/catalog/event-label"
 import { chunkList, fetchAllRows } from "@/lib/supabase/fetch-all-rows"
 import { createClient } from "@/lib/supabase/server"
 import { pickCurrentInvoice } from "@/lib/invoices/status"
+import { convertInvoiceAmountToUsd } from "@/lib/crm/deal-invoice-currency"
 
 export type DashboardSaleSource = DashboardSaleRow & {
   grossProfit?: number | null
@@ -56,6 +57,7 @@ type InvoiceLite = {
   overdue_since: string | null
   paid_at: string | null
   xero_amount_due: number | string | null
+  currency?: string | null
   created_at: string | null
 }
 
@@ -68,6 +70,8 @@ type DealLite = {
   order_id: string | null
   currency: string | null
   total_amount: number | string | null
+  invoice_currency?: string | null
+  invoice_fx_rate?: number | string | null
   created_at: string
   closed_at: string | null
 }
@@ -153,7 +157,7 @@ export const getDashboardSaleRows = cache(async (sinceIso: string): Promise<Dash
 async function loadDashboardSaleRows(sinceIso: string): Promise<DashboardSaleSource[]> {
   const supabase = await createClient()
   const dealColumns =
-    "id, reference, stage, account_id, owner_profile_id, order_id, currency, total_amount, created_at, closed_at"
+    "id, reference, stage, account_id, owner_profile_id, order_id, currency, total_amount, invoice_currency, invoice_fx_rate, created_at, closed_at"
 
   const [recentOrders, openInvoices, paidInvoices, openDeals, wonByCreated, wonByClosed, cancelledOps] =
     await Promise.all([
@@ -163,7 +167,7 @@ async function loadDashboardSaleRows(sinceIso: string): Promise<DashboardSaleSou
       fetchAllRows<InvoiceLite>((from, to) =>
         supabase
           .from("invoices")
-          .select("id, order_id, status, overdue_since, paid_at, xero_amount_due, created_at")
+          .select("id, order_id, status, overdue_since, paid_at, xero_amount_due, currency, created_at")
           .in("status", [...OPEN_INVOICE_STATUSES])
           .order("id")
           .range(from, to),
@@ -171,7 +175,7 @@ async function loadDashboardSaleRows(sinceIso: string): Promise<DashboardSaleSou
       fetchAllRows<InvoiceLite>((from, to) =>
         supabase
           .from("invoices")
-          .select("id, order_id, status, overdue_since, paid_at, xero_amount_due, created_at")
+          .select("id, order_id, status, overdue_since, paid_at, xero_amount_due, currency, created_at")
           .gte("paid_at", sinceIso)
           .order("id")
           .range(from, to),
@@ -302,7 +306,16 @@ async function loadDashboardSaleRows(sinceIso: string): Promise<DashboardSaleSou
       dealStage: deal?.stage ?? null,
       fulfilmentStatus: cancelled.has(orderId) ? "cancelled" : paidLike ? "confirmed" : "awaiting_payment",
       overdueSince: invoice?.overdue_since ?? null,
-      amountDue: invoice?.xero_amount_due == null ? (paidLike ? 0 : total) : Number(invoice.xero_amount_due),
+      amountDue:
+        invoice?.xero_amount_due == null
+          ? paidLike
+            ? 0
+            : total
+          : convertInvoiceAmountToUsd(
+              Number(invoice.xero_amount_due),
+              invoice.currency ?? deal?.invoice_currency,
+              deal?.invoice_fx_rate == null ? null : Number(deal.invoice_fx_rate),
+            ),
       grossProfit: profit.gross_profit,
       ownerId: deal?.owner_profile_id ?? row.agent_profile_id ?? null,
     })

@@ -3,6 +3,13 @@
 import { useMemo, useState } from "react"
 import { Plus, Trash2 } from "lucide-react"
 import { searchAdminProductOptions } from "@/lib/admin/option-search"
+import {
+  catalogPriceInInvoiceCurrency,
+  parseDealInvoiceCurrency,
+  usdFromInvoiceAmount,
+  type DealInvoiceCurrency,
+} from "@/lib/crm/deal-invoice-currency"
+import { formatMoney } from "@/lib/format/money"
 import { cn } from "@/lib/utils"
 
 export type DealBasketProduct = {
@@ -60,12 +67,15 @@ function localDateTimeValue(date = new Date()): string {
   return shifted.toISOString().slice(0, 16)
 }
 
-export function createDealBasketLine(product: DealBasketProduct): DealBasketLine {
+export function createDealBasketLine(
+  product: DealBasketProduct,
+  invoiceCurrency: DealInvoiceCurrency = "USD",
+): DealBasketLine {
   return {
     key: globalThis.crypto?.randomUUID?.() ?? `${product.id}-${Date.now()}`,
     packageId: product.id,
     quantity: 1,
-    unitPrice: Number(product.price ?? 0),
+    unitPrice: catalogPriceInInvoiceCurrency(product.price, invoiceCurrency),
     sourcingMode: "owned",
     supplierId: "",
     expectedUnitCost: null,
@@ -79,12 +89,14 @@ export function DealLineBasket({
   lines,
   onChange,
   compact = false,
+  invoiceCurrency = "USD",
 }: {
   products: DealBasketProduct[]
   suppliers: DealBasketSupplier[]
   lines: DealBasketLine[]
   onChange: (lines: DealBasketLine[]) => void
   compact?: boolean
+  invoiceCurrency?: DealInvoiceCurrency
 }) {
   const [search, setSearch] = useState("")
   const results = useMemo(
@@ -97,7 +109,7 @@ export function DealLineBasket({
   }
 
   function addProduct(product: DealBasketProduct) {
-    onChange([...lines, createDealBasketLine(product)])
+    onChange([...lines, createDealBasketLine(product, parseDealInvoiceCurrency(invoiceCurrency))])
     setSearch("")
   }
 
@@ -109,10 +121,11 @@ export function DealLineBasket({
           if (!product) return null
           const quantity = numericDealField(line.quantity)
           const unitPrice = numericDealField(line.unitPrice)
+          const saleUsd = usdFromInvoiceAmount(unitPrice, parseDealInvoiceCurrency(invoiceCurrency))
           const expectedProfit =
             line.expectedUnitCost == null
               ? null
-              : (unitPrice - Number(line.expectedUnitCost)) * quantity
+              : (saleUsd - Number(line.expectedUnitCost)) * quantity
           return (
             <div key={line.key} className="rounded-lg border border-slate-200 bg-white p-3">
               <div className="flex items-start justify-between gap-3">
@@ -140,7 +153,9 @@ export function DealLineBasket({
                   />
                 </label>
                 <label className={compact ? "text-[8px]" : "text-xs"}>
-                  <span className="mb-1 block text-slate-500">Sale price per person</span>
+                  <span className="mb-1 block text-slate-500">
+                    Sale price per person ({invoiceCurrency})
+                  </span>
                   <input
                     type="number"
                     min={0}
@@ -150,6 +165,11 @@ export function DealLineBasket({
                     onChange={(event) => updateLine(line.key, { unitPrice: parseDealNumericField(event.target.value) })}
                     className="h-9 w-full rounded-md border px-2"
                   />
+                  {invoiceCurrency === "AED" ? (
+                    <span className="mt-1 block text-[10px] text-slate-400">
+                      {formatMoney("USD", saleUsd)} in the CRM
+                    </span>
+                  ) : null}
                 </label>
                 <label className={compact ? "text-[8px]" : "text-xs"}>
                   <span className="mb-1 block text-slate-500">Stock source</span>
@@ -193,7 +213,7 @@ export function DealLineBasket({
                     </select>
                   </label>
                   <label className={compact ? "text-[8px]" : "text-xs"}>
-                    <span className="mb-1 block text-amber-800">Quoted buy price</span>
+                    <span className="mb-1 block text-amber-800">Quoted buy price (USD)</span>
                     <input type="number" min={0} step="0.01" value={line.expectedUnitCost ?? ""} onChange={(event) => updateLine(line.key, { expectedUnitCost: event.target.value === "" ? null : Number(event.target.value) })} className="h-9 w-full rounded-md border bg-white px-2" />
                   </label>
                   <label className={compact ? "text-[8px]" : "text-xs"}>
@@ -202,7 +222,7 @@ export function DealLineBasket({
                   </label>
                   {expectedProfit != null ? (
                     <p className={cn("self-end pb-2 font-medium text-amber-800", compact ? "text-[8px]" : "text-xs")}>
-                      Expected line profit: {product.currency} {expectedProfit.toLocaleString()}
+                      Expected line profit: {formatMoney("USD", expectedProfit)}
                     </p>
                   ) : null}
                 </div>

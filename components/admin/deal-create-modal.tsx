@@ -10,6 +10,7 @@ import { AccountKindPills } from "@/components/admin/account-kind-pills"
 import { AdminModalScrim } from "@/components/admin/admin-list-preview"
 import { CrmPartySelect } from "@/components/admin/crm-party-select"
 import { SearchableSelect } from "@/components/admin/searchable-select"
+import { DealInvoiceCurrencyToggle } from "@/components/admin/deal-invoice-currency-toggle"
 import {
   DealLineBasket,
   isPricedDealBasketLine,
@@ -30,7 +31,13 @@ import {
   type EnquirySelectableStage,
   type EnquiryTemperature,
 } from "@/lib/crm/deal-pipeline"
-import { formatMoneyCompact } from "@/lib/format/money"
+import {
+  convertInvoiceSalePrice,
+  parseDealInvoiceCurrency,
+  type DealInvoiceCurrency,
+  usdFromInvoiceAmount,
+} from "@/lib/crm/deal-invoice-currency"
+import { formatMoney, formatMoneyCompact } from "@/lib/format/money"
 import { cn } from "@/lib/utils"
 
 export function DealCreateModal({
@@ -74,6 +81,7 @@ export function DealCreateModal({
   const [interest, setInterest] = useState<"event" | "package">("package")
   const [eventId, setEventId] = useState("")
   const [createLines, setCreateLines] = useState<DealBasketLine[]>([])
+  const [invoiceCurrency, setInvoiceCurrency] = useState<DealInvoiceCurrency>("USD")
   const [notes, setNotes] = useState("")
   const [createSource, setCreateSource] = useState("whatsapp")
   const [enquiryTemperature, setEnquiryTemperature] = useState<EnquiryTemperature>("warm")
@@ -140,6 +148,10 @@ export function DealCreateModal({
       }
       if (!newContactEmail.trim() && !newContactPhone.trim()) {
         toast.error("Add an email or a phone number.")
+        return
+      }
+      if (!(newBillingLine1.trim() && newBillingCity.trim() && newBillingCountry.trim())) {
+        toast.error("Add the billing street, city and country.")
         return
       }
     } else {
@@ -254,6 +266,7 @@ export function DealCreateModal({
         accountId: resolvedAccountId,
         contactId: resolvedContactId,
         raceId: eventOnly ? eventId : null,
+        invoiceCurrency,
         lines: eventOnly
           ? []
           : createLines.map((line) => ({
@@ -549,6 +562,24 @@ export function DealCreateModal({
               Choose a package when you already know it. Choose the event when they only know the race, such as 2026 Abu Dhabi.
             </p>
           </div>
+          <div className="mt-3">
+            <DealInvoiceCurrencyToggle
+              value={invoiceCurrency}
+              onChange={(next) => {
+                const from = invoiceCurrency
+                setInvoiceCurrency(next)
+                setCreateLines((lines) =>
+                  lines.map((line) => ({
+                    ...line,
+                    unitPrice:
+                      typeof line.unitPrice === "number"
+                        ? convertInvoiceSalePrice(line.unitPrice, from, next)
+                        : line.unitPrice,
+                  })),
+                )
+              }}
+            />
+          </div>
           {events.length > 0 ? (
             <div className="mt-3 flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-sm font-medium">
               <button
@@ -605,6 +636,7 @@ export function DealCreateModal({
                   suppliers={suppliers}
                   lines={createLines}
                   onChange={setCreateLines}
+                  invoiceCurrency={invoiceCurrency}
                 />
               </div>
               <div className="mt-4 flex items-center justify-between gap-4 border-t pt-3">
@@ -632,10 +664,26 @@ export function DealCreateModal({
                   <p className="text-[10px] uppercase text-slate-400">Total</p>
                   <p className="text-lg font-semibold">
                     {formatMoneyCompact(
-                      "USD",
+                      invoiceCurrency,
                       createLines.reduce((sum, line) => sum + numericDealField(line.quantity) * numericDealField(line.unitPrice), 0),
                     )}
                   </p>
+                  {invoiceCurrency === "AED" ? (
+                    <p className="text-[10px] text-slate-400">
+                      {formatMoney(
+                        "USD",
+                        usdFromInvoiceAmount(
+                          createLines.reduce(
+                            (sum, line) =>
+                              sum + numericDealField(line.quantity) * numericDealField(line.unitPrice),
+                            0,
+                          ),
+                          parseDealInvoiceCurrency(invoiceCurrency),
+                        ),
+                      )}{" "}
+                      in the CRM
+                    </p>
+                  ) : null}
                 </div>
               </div>
             </>

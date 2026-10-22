@@ -63,6 +63,42 @@ test("mixed-event booking VAT applies only to Abu Dhabi lines", () => {
   assert.equal(abuDhabi.taxAmountIncluded + singapore.taxAmountIncluded, 500)
 })
 
+test("booking form snapshots accept AED as well as USD", () => {
+  const snapshot = readFileSync("lib/booking-forms/snapshot.ts", "utf8")
+  assert.match(snapshot, /assertBookingFormInvoiceCurrency/)
+  assert.match(snapshot, /buildDealInvoiceReporting/)
+  assert.doesNotMatch(snapshot, /ZK booking forms must be issued in USD\./)
+  const helper = readFileSync("lib/crm/deal-invoice-currency.ts", "utf8")
+  assert.match(helper, /must be issued in USD or AED/)
+})
+
+test("payment terms heading follows the snapshot currency", async () => {
+  const usd = await generateBookingFormPdf(testSnapshot({ currency: "USD" }))
+  const aed = await generateBookingFormPdf(
+    testSnapshot({
+      currency: "AED",
+      lines: [
+        {
+          dealLineItemId: "line-1",
+          packageId: "package-1",
+          eventName: "Singapore F1 GP 2026",
+          packageName: "Sky Suite",
+          description: "Sky Suite",
+          quantity: 4,
+          unitPrice: 11500,
+          lineTotal: 46000,
+          currency: "AED",
+        },
+      ],
+    }),
+  )
+  const usdText = allPageText(await PDFDocument.load(usd))
+  const aedText = allPageText(await PDFDocument.load(aed))
+  assert.match(usdText, /PAYMENT TERMS \(ALL AMOUNTS IN USD\)/)
+  assert.match(aedText, /PAYMENT TERMS \(ALL AMOUNTS IN AED\)/)
+  assert.doesNotMatch(aedText, /PAYMENT TERMS \(ALL AMOUNTS IN USD\)/)
+})
+
 test("native booking form renderer creates a multi-page PDF", async () => {
   const snapshot: BookingFormSnapshot = {
     schemaVersion: 1,
@@ -291,8 +327,11 @@ test("new accounts can omit postcode and booking forms still render the rest of 
   assert.match(xero, /PostalCode: postcode/)
 })
 
-function firstPageTextPlacements(pdf: PDFDocument): Array<{ x: number; y: number; text: string }> {
-  const contents = pdf.getPages()[0].node.Contents()
+function pageTextPlacements(
+  pdf: PDFDocument,
+  pageIndex: number,
+): Array<{ x: number; y: number; text: string }> {
+  const contents = pdf.getPages()[pageIndex].node.Contents()
   const refs =
     contents && typeof contents === "object" && "array" in contents
       ? (contents as unknown as { array: unknown[] }).array
@@ -310,6 +349,17 @@ function firstPageTextPlacements(pdf: PDFDocument): Array<{ x: number; y: number
     y: Number(match[2]),
     text: Buffer.from(match[3], "hex").toString("latin1"),
   }))
+}
+
+function allPageText(pdf: PDFDocument): string {
+  return pdf
+    .getPages()
+    .flatMap((_, index) => pageTextPlacements(pdf, index).map((item) => item.text))
+    .join("\n")
+}
+
+function firstPageTextPlacements(pdf: PDFDocument): Array<{ x: number; y: number; text: string }> {
+  return pageTextPlacements(pdf, 0)
 }
 
 function testSnapshot(overrides: Partial<BookingFormSnapshot> = {}): BookingFormSnapshot {

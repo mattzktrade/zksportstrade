@@ -3,6 +3,12 @@
 import { revalidatePath } from "next/cache"
 import { hasCmsPermission } from "@/lib/auth/permissions"
 import { canonicalDealSource, dealStageHoldsPurchasedStock } from "@/lib/crm/deal-types"
+import {
+  dealInvoiceCurrencyIsLocked,
+  parseDealInvoiceCurrency,
+  persistDealInvoicePricing,
+  preparePricedInvoiceLine,
+} from "@/lib/crm/deal-invoice-currency"
 import { toPurchasedSupplierPoolKey } from "@/lib/inventory/supplier-pool"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { createClient } from "@/lib/supabase/server"
@@ -15,6 +21,7 @@ export async function updateDealCommercials(input: {
   contactId?: string
   source: string
   notes?: string
+  invoiceCurrency?: string | null
   lines: Array<{
     id?: string
     packageId: string
@@ -33,6 +40,44 @@ export async function updateDealCommercials(input: {
   if (!input.accountId || input.lines.length === 0) {
     return { ok: false, message: "Select an account and at least one product." }
   }
+  const invoiceCurrency = parseDealInvoiceCurrency(input.invoiceCurrency)
+  let existingDealQuery = await supabase
+    .from("deals")
+    .select("id, stage, order_id, invoice_currency")
+    .eq("id", input.dealId)
+    .maybeSingle()
+  if (existingDealQuery.error && /invoice_currency|schema cache/i.test(existingDealQuery.error.message)) {
+    existingDealQuery = await supabase
+      .from("deals")
+      .select("id, stage, order_id")
+      .eq("id", input.dealId)
+      .maybeSingle()
+  }
+  const existingDeal = existingDealQuery.data as {
+    id: string
+    stage: string
+    order_id: string | null
+    invoice_currency?: string | null
+  } | null
+  if (existingDealQuery.error || !existingDeal) return { ok: false, message: "Deal was not found." }
+  const storedInvoiceCurrency = parseDealInvoiceCurrency(existingDeal.invoice_currency)
+  if (
+    dealInvoiceCurrencyIsLocked({
+      order_id: existingDeal.order_id,
+      stage: existingDeal.stage,
+    }) &&
+    invoiceCurrency !== storedInvoiceCurrency
+  ) {
+    return { ok: false, message: "Invoice currency cannot be changed after a booking form has been sent." }
+  }
+  const pricedLines = input.lines.map((line) => {
+    const priced = preparePricedInvoiceLine(line.unitPrice, invoiceCurrency)
+    return {
+      ...line,
+      usdUnitPrice: priced.usdUnitPrice,
+      invoiceUnitPrice: priced.invoiceUnitPrice,
+    }
+  })
   for (const line of input.lines) {
     if (
       !line.packageId ||
@@ -52,11 +97,11 @@ export async function updateDealCommercials(input: {
     p_contact_id: input.contactId || null,
     p_source: canonicalDealSource(input.source),
     p_notes: input.notes?.trim() || null,
-    p_lines: input.lines.map((line) => ({
+    p_lines: pricedLines.map((line) => ({
       id: line.id || null,
       packageId: line.packageId,
       quantity: line.quantity,
-      unitPrice: line.unitPrice,
+      unitPrice: line.usdUnitPrice,
       expectedUnitCost: line.expectedUnitCost ?? null,
       sourcingMode: line.sourcingMode ?? "owned",
       supplierId: line.supplierId || null,
@@ -101,6 +146,16 @@ export async function updateDealCommercials(input: {
     }
     return { ok: false, message: error.message }
   }
+  const invoicePersist = await persistDealInvoicePricing(supabase, input.dealId, {
+    invoiceCurrency,
+    lines: pricedLines.map((line) => ({
+      packageId: line.packageId,
+      quantity: line.quantity,
+      usdUnitPrice: line.usdUnitPrice,
+      invoiceUnitPrice: line.invoiceUnitPrice,
+    })),
+  })
+  if (!invoicePersist.ok) return invoicePersist
   revalidatePath("/admin/deals", "layout")
   revalidatePath("/admin/enquiries", "layout")
   revalidatePath("/admin/sales-tracker")

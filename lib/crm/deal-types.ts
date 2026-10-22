@@ -182,6 +182,7 @@ export type DealInvoiceRow = {
   id: string
   status: string
   amount: number | null
+  currency?: string | null
   due_date: string | null
   installment_index: number
   installment_count: number
@@ -205,6 +206,9 @@ export type DealListRow = {
   enquiry_replied_at: string | null
   currency: string
   total_amount: number
+  invoice_currency: string
+  invoice_fx_rate: number
+  invoice_total_amount: number
   expected_close_date: string | null
   next_action: string | null
   next_action_due_at: string | null
@@ -308,6 +312,7 @@ export type DealLineEditorRow = {
   package_id: string
   quantity: number
   unit_sale_price: number
+  invoice_unit_sale_price: number
   expected_unit_cost: number | null
   sourcing_mode: "owned" | "brokered"
   supplier_id: string | null
