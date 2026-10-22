@@ -11,7 +11,11 @@ import {
   isAdgpDay,
   isContactOnlySlug,
 } from "../lib/integrations/adgp/config"
-import { websiteCustomerEmailSubject, websiteOrderNotifyRecipients } from "../lib/email/send-website-order"
+import {
+  websiteCustomerEmailHtml,
+  websiteCustomerEmailSubject,
+  websiteOrderNotifyRecipients,
+} from "../lib/email/send-website-order"
 import {
   classifySalesChannel,
   isAgentPortalBooking,
@@ -72,7 +76,7 @@ describe("ADGP website order SQL", () => {
     assert.match(sql, /channel in \('trade_portal', 'wix', 'partner_api', 'admin', 'native_deal', 'website'\)/)
     assert.match(sql, /create or replace function public.place_website_order/)
     assert.match(sql, /create or replace function public.place_website_checkout_hold/)
-    assert.match(sql, /source,\s+stage,/s)
+    assert.match(sql, /source,\s+stage,/)
     assert.match(sql, /'website'/)
     assert.match(sql, /'paid_confirmed'/)
     assert.match(sql, /'talking'/)
@@ -103,6 +107,21 @@ describe("ADGP auth and notify", () => {
     assert.equal(DEFAULT_ADGP_OWNER_EMAIL, "matt@zk-sports.com")
     assert.deepEqual(websiteOrderNotifyRecipients(), ["bookings@zk-sports.com", "matt@zk-sports.com"])
     assert.equal(websiteCustomerEmailSubject("Skybridge Terrace"), "Your booking is confirmed — Skybridge Terrace")
+    const customerHtml = websiteCustomerEmailHtml({
+      orderReference: "ADGP-1001",
+      dealReference: "D-1001",
+      packageName: "Skybridge Terrace",
+      day: "Friday",
+      guests: 2,
+      totalAmount: 990,
+      currency: "USD",
+      clientName: "Alex Guest",
+      clientEmail: "alex@example.com",
+      clientPhone: "+971501234567",
+    })
+    assert.match(customerHtml, /clientservices@zk-sports\.com/)
+    assert.match(customerHtml, /\+971 50 912 0374/)
+    assert.doesNotMatch(customerHtml, /info@zk-sports\.com/)
     assert.ok(ADGP_NOTIFY_EMAILS.includes("matt@zk-sports.com"))
   })
 })
@@ -152,6 +171,8 @@ describe("ADGP channel and session paths", () => {
     const email = readFileSync(new URL("../lib/email/send-website-order.ts", import.meta.url), "utf8")
     assert.doesNotMatch(email, /getBookingConfirmationCc/)
     assert.match(email, /sendWebsiteCustomerEmail/)
+    assert.match(email, /getResendFromAddress/)
+    assert.match(email, /replyTo: "clientservices@zk-sports.com"/)
     assert.match(email, /Your booking is confirmed/)
   })
 })

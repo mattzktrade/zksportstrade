@@ -54,7 +54,7 @@ export function websiteCustomerEmailHtml(p: WebsiteOrderEmailPayload): string {
     `<strong>Guests:</strong> ${p.guests}<br/>`,
     `<strong>Total paid:</strong> ${escapeHtml(formatMoney(p.totalAmount, p.currency))}</p>`,
     `<p>Tickets are issued digitally by the promoter closer to race week. We will follow up with guest details then.</p>`,
-    `<p>Questions: <a href="mailto:info@zk-sports.com">info@zk-sports.com</a> or WhatsApp +971 55 608 9074.</p>`,
+    `<p>Questions: <a href="mailto:clientservices@zk-sports.com">clientservices@zk-sports.com</a> or WhatsApp +971 50 912 0374.</p>`,
     `<p>ZK Sports &amp; Entertainment</p>`,
   ].join("")
 }
@@ -111,7 +111,7 @@ export async function sendWebsiteCustomerEmail(
   const { error } = await resend.emails.send({
     from,
     to,
-    replyTo: "info@zk-sports.com",
+    replyTo: "clientservices@zk-sports.com",
     subject: websiteCustomerEmailSubject(p.packageName),
     html: websiteCustomerEmailHtml(p),
   })
