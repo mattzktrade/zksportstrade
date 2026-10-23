@@ -5,6 +5,7 @@ import { Plus, Trash2 } from "lucide-react"
 import { searchAdminProductOptions } from "@/lib/admin/option-search"
 import {
   catalogPriceInInvoiceCurrency,
+  isNonUsdInvoiceCurrency,
   parseDealInvoiceCurrency,
   usdFromInvoiceAmount,
   type DealInvoiceCurrency,
@@ -70,12 +71,13 @@ function localDateTimeValue(date = new Date()): string {
 export function createDealBasketLine(
   product: DealBasketProduct,
   invoiceCurrency: DealInvoiceCurrency = "USD",
+  fxRate?: number | null,
 ): DealBasketLine {
   return {
     key: globalThis.crypto?.randomUUID?.() ?? `${product.id}-${Date.now()}`,
     packageId: product.id,
     quantity: 1,
-    unitPrice: catalogPriceInInvoiceCurrency(product.price, invoiceCurrency),
+    unitPrice: catalogPriceInInvoiceCurrency(product.price, invoiceCurrency, fxRate),
     sourcingMode: "owned",
     supplierId: "",
     expectedUnitCost: null,
@@ -90,6 +92,7 @@ export function DealLineBasket({
   onChange,
   compact = false,
   invoiceCurrency = "USD",
+  fxRate,
 }: {
   products: DealBasketProduct[]
   suppliers: DealBasketSupplier[]
@@ -97,6 +100,7 @@ export function DealLineBasket({
   onChange: (lines: DealBasketLine[]) => void
   compact?: boolean
   invoiceCurrency?: DealInvoiceCurrency
+  fxRate?: number | null
 }) {
   const [search, setSearch] = useState("")
   const results = useMemo(
@@ -109,7 +113,10 @@ export function DealLineBasket({
   }
 
   function addProduct(product: DealBasketProduct) {
-    onChange([...lines, createDealBasketLine(product, parseDealInvoiceCurrency(invoiceCurrency))])
+    onChange([
+      ...lines,
+      createDealBasketLine(product, parseDealInvoiceCurrency(invoiceCurrency), fxRate),
+    ])
     setSearch("")
   }
 
@@ -121,7 +128,11 @@ export function DealLineBasket({
           if (!product) return null
           const quantity = numericDealField(line.quantity)
           const unitPrice = numericDealField(line.unitPrice)
-          const saleUsd = usdFromInvoiceAmount(unitPrice, parseDealInvoiceCurrency(invoiceCurrency))
+          const saleUsd = usdFromInvoiceAmount(
+            unitPrice,
+            parseDealInvoiceCurrency(invoiceCurrency),
+            fxRate,
+          )
           const expectedProfit =
             line.expectedUnitCost == null
               ? null
@@ -165,7 +176,7 @@ export function DealLineBasket({
                     onChange={(event) => updateLine(line.key, { unitPrice: parseDealNumericField(event.target.value) })}
                     className="h-9 w-full rounded-md border px-2"
                   />
-                  {invoiceCurrency === "AED" ? (
+                  {isNonUsdInvoiceCurrency(invoiceCurrency) ? (
                     <span className="mt-1 block text-[10px] text-slate-400">
                       {formatMoney("USD", saleUsd)} in the CRM
                     </span>

@@ -5,15 +5,25 @@ import { hasCmsPermission } from "@/lib/auth/permissions"
 import { canonicalDealSource, dealStageHoldsPurchasedStock } from "@/lib/crm/deal-types"
 import {
   dealInvoiceCurrencyIsLocked,
+  FALLBACK_INVOICE_FX_RATES,
+  loadDealInvoiceFxRates,
   parseDealInvoiceCurrency,
   persistDealInvoicePricing,
   preparePricedInvoiceLine,
+  resolveDealInvoiceFxRate,
+  type DealInvoiceFxRates,
 } from "@/lib/crm/deal-invoice-currency"
 import { toPurchasedSupplierPoolKey } from "@/lib/inventory/supplier-pool"
 import { getPortalProfile } from "@/lib/supabase/profile"
 import { createClient } from "@/lib/supabase/server"
 
 type Result = { ok: true; message: string } | { ok: false; message: string }
+
+export async function getDealInvoiceFxRates(): Promise<DealInvoiceFxRates> {
+  const profile = await getPortalProfile()
+  if (!profile) return FALLBACK_INVOICE_FX_RATES
+  return loadDealInvoiceFxRates()
+}
 
 export async function updateDealCommercials(input: {
   dealId: string
@@ -43,10 +53,10 @@ export async function updateDealCommercials(input: {
   const invoiceCurrency = parseDealInvoiceCurrency(input.invoiceCurrency)
   let existingDealQuery = await supabase
     .from("deals")
-    .select("id, stage, order_id, invoice_currency")
+    .select("id, stage, order_id, invoice_currency, invoice_fx_rate")
     .eq("id", input.dealId)
     .maybeSingle()
-  if (existingDealQuery.error && /invoice_currency|schema cache/i.test(existingDealQuery.error.message)) {
+  if (existingDealQuery.error && /invoice_currency|invoice_fx_rate|schema cache/i.test(existingDealQuery.error.message)) {
     existingDealQuery = await supabase
       .from("deals")
       .select("id, stage, order_id")
@@ -58,6 +68,7 @@ export async function updateDealCommercials(input: {
     stage: string
     order_id: string | null
     invoice_currency?: string | null
+    invoice_fx_rate?: number | string | null
   } | null
   if (existingDealQuery.error || !existingDeal) return { ok: false, message: "Deal was not found." }
   const storedInvoiceCurrency = parseDealInvoiceCurrency(existingDeal.invoice_currency)
@@ -70,8 +81,13 @@ export async function updateDealCommercials(input: {
   ) {
     return { ok: false, message: "Invoice currency cannot be changed after a booking form has been sent." }
   }
+  const invoiceFxRate = await resolveDealInvoiceFxRate({
+    invoiceCurrency,
+    storedCurrency: storedInvoiceCurrency,
+    storedFxRate: existingDeal.invoice_fx_rate == null ? null : Number(existingDeal.invoice_fx_rate),
+  })
   const pricedLines = input.lines.map((line) => {
-    const priced = preparePricedInvoiceLine(line.unitPrice, invoiceCurrency)
+    const priced = preparePricedInvoiceLine(line.unitPrice, invoiceCurrency, invoiceFxRate)
     return {
       ...line,
       usdUnitPrice: priced.usdUnitPrice,
@@ -148,6 +164,7 @@ export async function updateDealCommercials(input: {
   }
   const invoicePersist = await persistDealInvoicePricing(supabase, input.dealId, {
     invoiceCurrency,
+    fxRate: invoiceFxRate,
     lines: pricedLines.map((line) => ({
       packageId: line.packageId,
       quantity: line.quantity,

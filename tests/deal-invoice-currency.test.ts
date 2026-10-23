@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 import {
   AED_PER_USD,
+  FALLBACK_EUR_PER_USD,
+  FALLBACK_GBP_PER_USD,
   assertBookingFormInvoiceCurrency,
   bookingBankDetailsForInvoiceCurrency,
   bookingFormSnapshotInvoiceLines,
@@ -50,11 +52,26 @@ test("USD invoice amounts stay unchanged", () => {
   assert.equal(priced.usdUnitPrice, 12500.25)
   assert.equal(parseDealInvoiceCurrency("usd"), "USD")
   assert.equal(parseDealInvoiceCurrency("AED"), "AED")
-  assert.equal(assertBookingFormInvoiceCurrency("AED"), "AED")
-  assert.throws(() => assertBookingFormInvoiceCurrency("GBP"), /USD or AED/)
+  assert.equal(parseDealInvoiceCurrency("gbp"), "GBP")
+  assert.equal(parseDealInvoiceCurrency("EUR"), "EUR")
+  assert.equal(assertBookingFormInvoiceCurrency("GBP"), "GBP")
+  assert.equal(assertBookingFormInvoiceCurrency("EUR"), "EUR")
+  assert.throws(() => assertBookingFormInvoiceCurrency("SAR"), /USD, AED, GBP, or EUR/)
 })
 
-test("CRM note is only shown for AED invoices", () => {
+test("GBP and EUR convert at a locked invoice-per-USD rate", () => {
+  const gbp = preparePricedInvoiceLine(7600, "GBP", FALLBACK_GBP_PER_USD)
+  assert.equal(gbp.invoiceUnitPrice, 7600)
+  assert.equal(gbp.usdUnitPrice, 10000)
+  assert.equal(gbp.fxRate, FALLBACK_GBP_PER_USD)
+  const eur = preparePricedInvoiceLine(8600, "EUR", FALLBACK_EUR_PER_USD)
+  assert.equal(eur.usdUnitPrice, 10000)
+  assert.equal(catalogPriceInInvoiceCurrency(10000, "GBP", 0.8), 8000)
+  assert.equal(convertInvoiceSalePrice(8000, "GBP", "USD", { GBP: 0.8 }), 10000)
+  assert.equal(convertInvoiceSalePrice(10000, "USD", "EUR", { EUR: 0.86 }), 8600)
+})
+
+test("CRM note is only shown for non-USD invoices", () => {
   assert.equal(
     dealInvoiceCrmNote({
       invoice_currency: "USD",
@@ -74,6 +91,14 @@ test("CRM note is only shown for AED invoices", () => {
   assert.match(note ?? "", /AED/)
   assert.match(note ?? "", /15,000/)
   assert.match(note ?? "", /was not a USD invoice/)
+  const gbpNote = dealInvoiceCrmNote({
+    invoice_currency: "GBP",
+    invoice_total_amount: 7600,
+    invoice_fx_rate: FALLBACK_GBP_PER_USD,
+    total_amount: 10000,
+  })
+  assert.match(gbpNote ?? "", /£7,600/)
+  assert.match(gbpNote ?? "", /10,000/)
 })
 
 test("editor sale price uses stored AED invoice amount", () => {
@@ -82,6 +107,10 @@ test("editor sale price uses stored AED invoice amount", () => {
     55087.5,
   )
   assert.equal(dealLineEditorSalePrice({ unit_sale_price: 15000, invoice_unit_sale_price: 15000 }, "USD"), 15000)
+  assert.equal(
+    dealLineEditorSalePrice({ unit_sale_price: 10000, invoice_unit_sale_price: 7600 }, "GBP"),
+    7600,
+  )
 })
 
 test("invoice currency locks after a booking form is sent", () => {
@@ -95,6 +124,8 @@ test("AED bank details are listed first on AED documents", () => {
   const ordered = bookingBankDetailsForInvoiceCurrency("AED", BOOKING_BANK_DETAILS)
   assert.equal(ordered[0]?.currency, "AED")
   assert.ok(ordered.some((bank) => bank.currency === "USD"))
+  assert.equal(bookingBankDetailsForInvoiceCurrency("GBP", BOOKING_BANK_DETAILS)[0]?.currency, "GBP")
+  assert.equal(bookingBankDetailsForInvoiceCurrency("EUR", BOOKING_BANK_DETAILS)[0]?.currency, "EUR")
 })
 
 test("booking form edits recompute USD reporting from AED unit prices", () => {
@@ -176,6 +207,23 @@ test("Xero keeps AED invoices in AED and fails if the org lacks AED", () => {
   )
   assert.equal(
     selectXeroInvoiceCurrency({
+      invoiceCurrency: "GBP",
+      orgCurrencies: ["USD", "GBP", "EUR"],
+      override: "USD",
+    }),
+    "GBP",
+  )
+  assert.throws(
+    () =>
+      selectXeroInvoiceCurrency({
+        invoiceCurrency: "EUR",
+        orgCurrencies: ["USD", "GBP"],
+        override: "USD",
+      }),
+    /does not have EUR enabled/,
+  )
+  assert.equal(
+    selectXeroInvoiceCurrency({
       invoiceCurrency: "USD",
       orgCurrencies: ["USD"],
       override: "USD",
@@ -198,10 +246,20 @@ test("Xero keeps AED invoices in AED and fails if the org lacks AED", () => {
     }),
     undefined,
   )
+  assert.equal(
+    selectXeroInvoiceCurrencyRate({
+      invoiceCurrency: "GBP",
+      orgBaseCurrency: "USD",
+      fxRate: 0.8,
+    }),
+    1.25,
+  )
 })
 
 test("Xero paid or due amounts in AED convert to USD for CRM stats", () => {
   assert.equal(convertInvoiceAmountToUsd(3672.5, "AED", AED_PER_USD), 1000)
+  assert.equal(convertInvoiceAmountToUsd(800, "GBP", 0.8), 1000)
+  assert.equal(convertInvoiceAmountToUsd(860, "EUR", 0.86), 1000)
   assert.equal(convertInvoiceAmountToUsd(1000, "USD", 1), 1000)
 })
 
@@ -211,6 +269,12 @@ test("signed AED booking forms write USD orders and AED invoices", () => {
   assert.match(sql, /native_deal_orders_must_be_usd/)
   assert.match(sql, /reporting,total/)
   assert.match(sql, /v_invoice_total, v_invoice_currency/)
+})
+
+test("signed GBP and EUR booking forms are allowed on later order creation", () => {
+  const sql = readFileSync("supabase/migrations/20261023100000_deal_invoice_gbp_eur.sql", "utf8")
+  assert.match(sql, /v_invoice_currency not in \('USD', 'AED', 'GBP', 'EUR'\)/)
+  assert.match(sql, /invoice_currency in \('USD', 'AED', 'GBP', 'EUR'\)/)
 })
 
 test("booking form snapshot lines keep invoice currency for Xero", () => {

@@ -51,7 +51,10 @@ import {
   type DealBasketLine,
   type DealBasketSupplier,
 } from "@/components/admin/deal-line-basket"
-import { DealInvoiceCurrencyToggle } from "@/components/admin/deal-invoice-currency-toggle"
+import {
+  DealInvoiceCurrencyToggle,
+  useDealInvoiceFxRates,
+} from "@/components/admin/deal-invoice-currency-toggle"
 import {
   convertInvoiceSalePrice,
   type DealInvoiceCurrency,
@@ -256,6 +259,7 @@ export function InventoryWorkspace({
   const [dealContactPhone, setDealContactPhone] = useState("")
   const [dealLines, setDealLines] = useState<DealBasketLine[]>([])
   const [dealInvoiceCurrency, setDealInvoiceCurrency] = useState<DealInvoiceCurrency>("USD")
+  const invoiceFxRates = useDealInvoiceFxRates()
   const [dealReserve, setDealReserve] = useState(true)
   const [dealSource, setDealSource] = useState("whatsapp")
 
@@ -1240,6 +1244,7 @@ export function InventoryWorkspace({
                         <DealInvoiceCurrencyToggle
                           compact
                           value={dealInvoiceCurrency}
+                          fxRate={invoiceFxRates[dealInvoiceCurrency]}
                           onChange={(next) => {
                             const from = dealInvoiceCurrency
                             setDealInvoiceCurrency(next)
@@ -1248,7 +1253,7 @@ export function InventoryWorkspace({
                                 ...line,
                                 unitPrice:
                                   typeof line.unitPrice === "number"
-                                    ? convertInvoiceSalePrice(line.unitPrice, from, next)
+                                    ? convertInvoiceSalePrice(line.unitPrice, from, next, invoiceFxRates)
                                     : line.unitPrice,
                               })),
                             )
@@ -1261,6 +1266,7 @@ export function InventoryWorkspace({
                           onChange={setDealLines}
                           compact
                           invoiceCurrency={dealInvoiceCurrency}
+                          fxRate={invoiceFxRates[dealInvoiceCurrency]}
                         />
                         <div className="grid grid-cols-1 gap-2">
                           {dealMode === "hold" ? (

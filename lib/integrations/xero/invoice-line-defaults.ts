@@ -1,4 +1,8 @@
-import { AED_PER_USD } from "@/lib/crm/deal-invoice-currency"
+import {
+  invoiceFxRateFor,
+  isNonUsdInvoiceCurrency,
+  parseDealInvoiceCurrency,
+} from "@/lib/crm/deal-invoice-currency"
 import { xeroRequest } from "@/lib/integrations/xero/client"
 import { getIntegrationSetting, setIntegrationSetting } from "@/lib/integrations/xero/settings-store"
 
@@ -212,16 +216,16 @@ export function selectXeroInvoiceCurrency(input: {
   const currencies = new Set(
     [...input.orgCurrencies].map((code) => code.trim().toUpperCase()).filter(Boolean),
   )
-  if (requested === "AED") {
-    if (!currencies.has("AED")) {
+  if (isNonUsdInvoiceCurrency(requested)) {
+    if (!currencies.has(requested)) {
       throw new Error(
-        "This Xero organisation does not have AED enabled. Enable AED in Xero before invoicing this deal.",
+        `This Xero organisation does not have ${requested} enabled. Enable ${requested} in Xero before invoicing this deal.`,
       )
     }
-    return "AED"
+    return requested
   }
   const override = input.override?.trim().toUpperCase()
-  if (override && override !== "AED") return override
+  if (override && !isNonUsdInvoiceCurrency(override)) return override
   return currencies.has(requested) ? requested : undefined
 }
 
@@ -231,12 +235,13 @@ export function selectXeroInvoiceCurrencyRate(input: {
   orgBaseCurrency?: string | null
   fxRate?: number | null
 }): number | undefined {
-  const requested = input.invoiceCurrency.trim().toUpperCase()
-  if (requested !== "AED") return undefined
+  const requested = parseDealInvoiceCurrency(input.invoiceCurrency)
+  if (!isNonUsdInvoiceCurrency(requested)) return undefined
   const base = (input.orgBaseCurrency || "USD").trim().toUpperCase()
   if (base !== "USD") return undefined
-  const aedPerUsd = input.fxRate && input.fxRate > 0 ? input.fxRate : AED_PER_USD
-  return Math.round((1 / aedPerUsd + Number.EPSILON) * 1_000_000) / 1_000_000
+  const invoicePerUsd =
+    input.fxRate && input.fxRate > 0 ? input.fxRate : invoiceFxRateFor(requested)
+  return Math.round((1 / invoicePerUsd + Number.EPSILON) * 1_000_000) / 1_000_000
 }
 
 /** Use invoice currency when the Xero org supports it; otherwise omit (org base currency). */

@@ -69,7 +69,7 @@ test("booking form snapshots accept AED as well as USD", () => {
   assert.match(snapshot, /buildDealInvoiceReporting/)
   assert.doesNotMatch(snapshot, /ZK booking forms must be issued in USD\./)
   const helper = readFileSync("lib/crm/deal-invoice-currency.ts", "utf8")
-  assert.match(helper, /must be issued in USD or AED/)
+  assert.match(helper, /must be issued in USD, AED, GBP, or EUR/)
 })
 
 test("payment terms heading follows the snapshot currency", async () => {
@@ -92,10 +92,13 @@ test("payment terms heading follows the snapshot currency", async () => {
       ],
     }),
   )
+  const gbp = await generateBookingFormPdf(testSnapshot({ currency: "GBP" }))
   const usdText = allPageText(await PDFDocument.load(usd))
   const aedText = allPageText(await PDFDocument.load(aed))
+  const gbpText = allPageText(await PDFDocument.load(gbp))
   assert.match(usdText, /PAYMENT TERMS \(ALL AMOUNTS IN USD\)/)
   assert.match(aedText, /PAYMENT TERMS \(ALL AMOUNTS IN AED\)/)
+  assert.match(gbpText, /PAYMENT TERMS \(ALL AMOUNTS IN GBP\)/)
   assert.doesNotMatch(aedText, /PAYMENT TERMS \(ALL AMOUNTS IN USD\)/)
 })
 

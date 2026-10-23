@@ -846,7 +846,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             q: "What currency are we in?",
-            a: "CRM stats stay in USD. A deal can be invoiced in AED; the booking form and Xero invoice then show AED, and the CRM stores the official 3.6725 conversion for revenue. Abu Dhabi uses the existing 5% tax-inclusive setup; other events are 0% VAT.",
+            a: "CRM stats stay in USD. A deal can be invoiced in AED, GBP, or EUR; the booking form and Xero invoice then show that currency, and the CRM stores the locked USD conversion for revenue. AED uses the official 3.6725 peg; GBP and EUR use the ECB rate locked on the deal. Abu Dhabi uses the existing 5% tax-inclusive setup; other events are 0% VAT.",
           },
           {
             q: "Something in Settings or Integrations looks disconnected.",

@@ -3,8 +3,27 @@ import { formatMoney } from "@/lib/format/money"
 /** Official UAE Central Bank peg. Locked on each AED deal. */
 export const AED_PER_USD = 3.6725
 
-export const DEAL_INVOICE_CURRENCIES = ["USD", "AED"] as const
+export const DEAL_INVOICE_CURRENCIES = ["USD", "AED", "GBP", "EUR"] as const
 export type DealInvoiceCurrency = (typeof DEAL_INVOICE_CURRENCIES)[number]
+export type DealInvoiceFxRates = Record<DealInvoiceCurrency, number>
+
+/**
+ * Fallback GBP/EUR rates (invoice units per 1 USD) used when the ECB feed is
+ * unavailable. Live rates replace these on save and are then locked on the deal.
+ */
+export const FALLBACK_GBP_PER_USD = 0.76
+export const FALLBACK_EUR_PER_USD = 0.86
+
+export const FALLBACK_INVOICE_FX_RATES: DealInvoiceFxRates = {
+  USD: 1,
+  AED: AED_PER_USD,
+  GBP: FALLBACK_GBP_PER_USD,
+  EUR: FALLBACK_EUR_PER_USD,
+}
+
+const FX_CACHE_TTL_MS = 6 * 60 * 60 * 1000
+const FX_RETRY_TTL_MS = 15 * 60 * 1000
+let fxCache: { rates: DealInvoiceFxRates; fetchedAt: number; live: boolean } | null = null
 
 export type DealInvoiceReportingLine = {
   dealLineItemId?: string
@@ -23,21 +42,103 @@ export type DealInvoiceReporting = {
 
 export function isDealInvoiceCurrency(value: string | null | undefined): value is DealInvoiceCurrency {
   const code = (value ?? "").trim().toUpperCase()
-  return code === "USD" || code === "AED"
+  return (DEAL_INVOICE_CURRENCIES as readonly string[]).includes(code)
 }
 
 export function parseDealInvoiceCurrency(value: string | null | undefined): DealInvoiceCurrency {
-  return (value ?? "USD").trim().toUpperCase() === "AED" ? "AED" : "USD"
+  const code = (value ?? "USD").trim().toUpperCase()
+  return isDealInvoiceCurrency(code) ? code : "USD"
+}
+
+export function isNonUsdInvoiceCurrency(
+  value: string | null | undefined,
+): value is Exclude<DealInvoiceCurrency, "USD"> {
+  const code = parseDealInvoiceCurrency(value)
+  return code !== "USD"
 }
 
 export function assertBookingFormInvoiceCurrency(value: string | null | undefined): DealInvoiceCurrency {
   const code = (value ?? "USD").trim().toUpperCase()
-  if (code === "USD" || code === "AED") return code
-  throw new Error("ZK booking forms must be issued in USD or AED.")
+  if (isDealInvoiceCurrency(code)) return code
+  throw new Error("ZK booking forms must be issued in USD, AED, GBP, or EUR.")
 }
 
-export function invoiceFxRateFor(currency: DealInvoiceCurrency): number {
-  return currency === "AED" ? AED_PER_USD : 1
+export function invoiceFxRateFor(
+  currency: DealInvoiceCurrency,
+  rates?: Partial<DealInvoiceFxRates> | null,
+): number {
+  const explicit = rates?.[currency]
+  if (explicit && explicit > 0) return explicit
+  if (currency === "AED") return AED_PER_USD
+  if (fxCache?.rates[currency] && fxCache.rates[currency] > 0) return fxCache.rates[currency]
+  return FALLBACK_INVOICE_FX_RATES[currency]
+}
+
+function roundFxRate(value: number): number {
+  return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000
+}
+
+export async function loadDealInvoiceFxRates(): Promise<DealInvoiceFxRates> {
+  const now = Date.now()
+  if (fxCache && now - fxCache.fetchedAt < (fxCache.live ? FX_CACHE_TTL_MS : FX_RETRY_TTL_MS)) {
+    return fxCache.rates
+  }
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 2500)
+    const response = await fetch("https://api.frankfurter.app/latest?from=USD&to=GBP,EUR", {
+      signal: controller.signal,
+      cache: "no-store",
+    })
+    clearTimeout(timer)
+    if (!response.ok) throw new Error(`FX feed ${response.status}`)
+    const body = (await response.json()) as { rates?: { GBP?: number; EUR?: number } }
+    const gbp = Number(body.rates?.GBP)
+    const eur = Number(body.rates?.EUR)
+    if (!(gbp > 0) || !(eur > 0)) throw new Error("FX feed returned invalid GBP/EUR rates.")
+    const rates: DealInvoiceFxRates = {
+      USD: 1,
+      AED: AED_PER_USD,
+      GBP: roundFxRate(gbp),
+      EUR: roundFxRate(eur),
+    }
+    fxCache = { rates, fetchedAt: now, live: true }
+    return rates
+  } catch {
+    const rates = { ...FALLBACK_INVOICE_FX_RATES }
+    fxCache = { rates, fetchedAt: now, live: false }
+    return rates
+  }
+}
+
+export async function resolveDealInvoiceFxRate(input: {
+  invoiceCurrency: DealInvoiceCurrency
+  storedCurrency?: DealInvoiceCurrency | null
+  storedFxRate?: number | null
+}): Promise<number> {
+  if (input.invoiceCurrency === "USD") return 1
+  if (input.invoiceCurrency === "AED") return AED_PER_USD
+  if (
+    input.storedCurrency === input.invoiceCurrency &&
+    input.storedFxRate != null &&
+    Number(input.storedFxRate) > 0
+  ) {
+    return Number(input.storedFxRate)
+  }
+  const rates = await loadDealInvoiceFxRates()
+  return rates[input.invoiceCurrency]
+}
+
+export function invoiceCurrencyHelpText(
+  currency: DealInvoiceCurrency,
+  fxRate?: number | null,
+): string | null {
+  if (currency === "USD") return null
+  const rate = fxRate && fxRate > 0 ? fxRate : invoiceFxRateFor(currency)
+  if (currency === "AED") {
+    return `Sale prices are in AED. The CRM stores the official USD conversion at ${rate} for stats.`
+  }
+  return `Sale prices are in ${currency}. The CRM stores the USD conversion at ${rate} ${currency} per 1 USD for stats.`
 }
 
 export function roundDealMoney(value: number): number {
@@ -47,49 +148,66 @@ export function roundDealMoney(value: number): number {
 export function usdFromInvoiceAmount(
   amount: number,
   currency: DealInvoiceCurrency,
-  fxRate = invoiceFxRateFor(currency),
+  fxRate?: number | null,
 ): number {
   const safe = Number.isFinite(amount) ? amount : 0
-  if (currency === "USD" || !fxRate || fxRate <= 0) return roundDealMoney(safe)
-  return roundDealMoney(safe / fxRate)
+  const rate = fxRate && fxRate > 0 ? fxRate : invoiceFxRateFor(currency)
+  if (currency === "USD" || !rate) return roundDealMoney(safe)
+  return roundDealMoney(safe / rate)
 }
 
 export function invoiceFromUsdAmount(
   usdAmount: number,
   currency: DealInvoiceCurrency,
-  fxRate = invoiceFxRateFor(currency),
+  fxRate?: number | null,
 ): number {
   const safe = Number.isFinite(usdAmount) ? usdAmount : 0
-  if (currency === "USD" || !fxRate || fxRate <= 0) return roundDealMoney(safe)
-  return roundDealMoney(safe * fxRate)
+  const rate = fxRate && fxRate > 0 ? fxRate : invoiceFxRateFor(currency)
+  if (currency === "USD" || !rate) return roundDealMoney(safe)
+  return roundDealMoney(safe * rate)
 }
 
 export function convertInvoiceSalePrice(
   amount: number,
   from: DealInvoiceCurrency,
   to: DealInvoiceCurrency,
+  rates?: Partial<DealInvoiceFxRates> | null,
 ): number {
   if (from === to) return roundDealMoney(amount)
-  return invoiceFromUsdAmount(usdFromInvoiceAmount(amount, from), to)
+  return invoiceFromUsdAmount(
+    usdFromInvoiceAmount(amount, from, invoiceFxRateFor(from, rates)),
+    to,
+    invoiceFxRateFor(to, rates),
+  )
 }
 
 export function catalogPriceInInvoiceCurrency(
   usdPrice: number | null | undefined,
   currency: DealInvoiceCurrency,
+  fxRate?: number | null,
 ): number {
-  return invoiceFromUsdAmount(Number(usdPrice ?? 0), currency)
+  return invoiceFromUsdAmount(
+    Number(usdPrice ?? 0),
+    currency,
+    fxRate && fxRate > 0 ? fxRate : invoiceFxRateFor(currency),
+  )
 }
 
 export function dealLineEditorSalePrice(
   line: { unit_sale_price: number; invoice_unit_sale_price?: number | null },
   currency: DealInvoiceCurrency,
+  fxRate?: number | null,
 ): number {
-  if (currency === "AED") {
+  if (isNonUsdInvoiceCurrency(currency)) {
     const invoicePrice = line.invoice_unit_sale_price
     if (invoicePrice != null && Number.isFinite(Number(invoicePrice))) {
       return Number(invoicePrice)
     }
-    return invoiceFromUsdAmount(Number(line.unit_sale_price), "AED")
+    return invoiceFromUsdAmount(
+      Number(line.unit_sale_price),
+      currency,
+      fxRate && fxRate > 0 ? fxRate : invoiceFxRateFor(currency),
+    )
   }
   return Number(line.unit_sale_price)
 }
@@ -138,11 +256,12 @@ export function dealInvoiceCrmNote(deal: {
   total_amount: number
   currency?: string | null
 }): string | null {
-  if (parseDealInvoiceCurrency(deal.invoice_currency) !== "AED") return null
+  const currency = parseDealInvoiceCurrency(deal.invoice_currency)
+  if (!isNonUsdInvoiceCurrency(currency)) return null
   const invoiceTotal = Number(deal.invoice_total_amount ?? 0)
   const usdTotal = Number(deal.total_amount ?? 0)
-  const rate = Number(deal.invoice_fx_rate ?? AED_PER_USD)
-  return `Invoiced in ${formatMoney("AED", invoiceTotal)}. CRM value is ${formatMoney("USD", usdTotal)} at ${rate}. This was not a USD invoice.`
+  const rate = Number(deal.invoice_fx_rate ?? invoiceFxRateFor(currency))
+  return `Invoiced in ${formatMoney(currency, invoiceTotal)}. CRM value is ${formatMoney("USD", usdTotal)} at ${rate}. This was not a USD invoice.`
 }
 
 export function convertInvoiceAmountToUsd(
@@ -220,11 +339,14 @@ export function dealInvoiceCurrencyIsLocked(deal: {
 export function preparePricedInvoiceLine(
   invoiceUnitPrice: number,
   invoiceCurrency: DealInvoiceCurrency,
-): { invoiceUnitPrice: number; usdUnitPrice: number } {
+  fxRate?: number | null,
+): { invoiceUnitPrice: number; usdUnitPrice: number; fxRate: number } {
   const invoicePrice = roundDealMoney(invoiceUnitPrice)
+  const rate = fxRate && fxRate > 0 ? fxRate : invoiceFxRateFor(invoiceCurrency)
   return {
     invoiceUnitPrice: invoicePrice,
-    usdUnitPrice: usdFromInvoiceAmount(invoicePrice, invoiceCurrency),
+    usdUnitPrice: usdFromInvoiceAmount(invoicePrice, invoiceCurrency, rate),
+    fxRate: rate,
   }
 }
 
@@ -246,6 +368,7 @@ export async function persistDealInvoicePricing(
   dealId: string,
   input: {
     invoiceCurrency: DealInvoiceCurrency
+    fxRate?: number | null
     lines: Array<{
       packageId: string
       quantity: number
@@ -256,11 +379,12 @@ export async function persistDealInvoicePricing(
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const now = new Date().toISOString()
   const invoiceTotal = invoiceTotalFromLines(input.lines)
+  const fxRate = input.fxRate && input.fxRate > 0 ? input.fxRate : invoiceFxRateFor(input.invoiceCurrency)
   const { error: dealError } = await supabase
     .from("deals")
     .update({
       invoice_currency: input.invoiceCurrency,
-      invoice_fx_rate: invoiceFxRateFor(input.invoiceCurrency),
+      invoice_fx_rate: fxRate,
       invoice_total_amount: invoiceTotal,
       updated_at: now,
     })

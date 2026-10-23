@@ -10,7 +10,10 @@ import { AccountKindPills } from "@/components/admin/account-kind-pills"
 import { AdminModalScrim } from "@/components/admin/admin-list-preview"
 import { CrmPartySelect } from "@/components/admin/crm-party-select"
 import { SearchableSelect } from "@/components/admin/searchable-select"
-import { DealInvoiceCurrencyToggle } from "@/components/admin/deal-invoice-currency-toggle"
+import {
+  DealInvoiceCurrencyToggle,
+  useDealInvoiceFxRates,
+} from "@/components/admin/deal-invoice-currency-toggle"
 import {
   DealLineBasket,
   isPricedDealBasketLine,
@@ -33,6 +36,7 @@ import {
 } from "@/lib/crm/deal-pipeline"
 import {
   convertInvoiceSalePrice,
+  isNonUsdInvoiceCurrency,
   parseDealInvoiceCurrency,
   type DealInvoiceCurrency,
   usdFromInvoiceAmount,
@@ -82,6 +86,7 @@ export function DealCreateModal({
   const [eventId, setEventId] = useState("")
   const [createLines, setCreateLines] = useState<DealBasketLine[]>([])
   const [invoiceCurrency, setInvoiceCurrency] = useState<DealInvoiceCurrency>("USD")
+  const invoiceFxRates = useDealInvoiceFxRates()
   const [notes, setNotes] = useState("")
   const [createSource, setCreateSource] = useState("whatsapp")
   const [enquiryTemperature, setEnquiryTemperature] = useState<EnquiryTemperature>("warm")
@@ -565,6 +570,7 @@ export function DealCreateModal({
           <div className="mt-3">
             <DealInvoiceCurrencyToggle
               value={invoiceCurrency}
+              fxRate={invoiceFxRates[invoiceCurrency]}
               onChange={(next) => {
                 const from = invoiceCurrency
                 setInvoiceCurrency(next)
@@ -573,7 +579,7 @@ export function DealCreateModal({
                     ...line,
                     unitPrice:
                       typeof line.unitPrice === "number"
-                        ? convertInvoiceSalePrice(line.unitPrice, from, next)
+                        ? convertInvoiceSalePrice(line.unitPrice, from, next, invoiceFxRates)
                         : line.unitPrice,
                   })),
                 )
@@ -637,6 +643,7 @@ export function DealCreateModal({
                   lines={createLines}
                   onChange={setCreateLines}
                   invoiceCurrency={invoiceCurrency}
+                  fxRate={invoiceFxRates[invoiceCurrency]}
                 />
               </div>
               <div className="mt-4 flex items-center justify-between gap-4 border-t pt-3">
@@ -668,7 +675,7 @@ export function DealCreateModal({
                       createLines.reduce((sum, line) => sum + numericDealField(line.quantity) * numericDealField(line.unitPrice), 0),
                     )}
                   </p>
-                  {invoiceCurrency === "AED" ? (
+                  {isNonUsdInvoiceCurrency(invoiceCurrency) ? (
                     <p className="text-[10px] text-slate-400">
                       {formatMoney(
                         "USD",
@@ -679,6 +686,7 @@ export function DealCreateModal({
                             0,
                           ),
                           parseDealInvoiceCurrency(invoiceCurrency),
+                          invoiceFxRates[invoiceCurrency],
                         ),
                       )}{" "}
                       in the CRM

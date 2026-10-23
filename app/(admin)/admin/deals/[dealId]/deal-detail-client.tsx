@@ -9,7 +9,10 @@ import { updateNativeDealWorkflow } from "@/app/(admin)/actions"
 import { ActionCombobox } from "@/components/admin/action-combobox"
 import { CrmPartySelect } from "@/components/admin/crm-party-select"
 import { SearchableSelect } from "@/components/admin/searchable-select"
-import { DealInvoiceCurrencyToggle } from "@/components/admin/deal-invoice-currency-toggle"
+import {
+  DealInvoiceCurrencyToggle,
+  useDealInvoiceFxRates,
+} from "@/components/admin/deal-invoice-currency-toggle"
 import { AdminPageHeader, AdminPanel, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { AdminModalScrim } from "@/components/admin/admin-list-preview"
 import type { DealBasketSupplier } from "@/components/admin/deal-line-basket"
@@ -25,6 +28,7 @@ import {
   dealInvoiceCrmNote,
   dealInvoiceCurrencyIsLocked,
   dealLineEditorSalePrice,
+  isNonUsdInvoiceCurrency,
   parseDealInvoiceCurrency,
   type DealInvoiceCurrency,
 } from "@/lib/crm/deal-invoice-currency"
@@ -294,9 +298,14 @@ export function DealDetailClient({
   const [editInvoiceCurrency, setEditInvoiceCurrency] = useState<DealInvoiceCurrency>(
     parseDealInvoiceCurrency(deal.invoice_currency),
   )
+  const invoiceFxRates = useDealInvoiceFxRates()
   const [editLines, setEditLines] = useState<EditLineState[]>([])
   const invoiceCurrencyLocked = dealInvoiceCurrencyIsLocked(deal)
   const invoiceNote = dealInvoiceCrmNote(deal)
+  const editFxRate =
+    editInvoiceCurrency === parseDealInvoiceCurrency(deal.invoice_currency) && Number(deal.invoice_fx_rate) > 0
+      ? Number(deal.invoice_fx_rate)
+      : invoiceFxRates[editInvoiceCurrency]
 
   const commercialEditLocked =
     Boolean(deal.order_id) ||
@@ -929,7 +938,7 @@ export function DealDetailClient({
                       <td className="px-4 py-2.5 text-right tabular-nums">{line.quantity}</td>
                       <td className="px-4 py-2.5 text-right tabular-nums">
                         {money(line.unit_sale_price, deal.currency)}
-                        {parseDealInvoiceCurrency(deal.invoice_currency) === "AED" ? (
+                        {isNonUsdInvoiceCurrency(deal.invoice_currency) ? (
                           <p className="text-[8px] font-normal text-slate-400">
                             Invoice {money(line.invoice_unit_sale_price, deal.invoice_currency)}
                           </p>
@@ -988,7 +997,7 @@ export function DealDetailClient({
                     </Link>
                     <p className="shrink-0 text-right font-semibold">
                       {money(line.unit_sale_price, deal.currency)}
-                      {parseDealInvoiceCurrency(deal.invoice_currency) === "AED" ? (
+                      {isNonUsdInvoiceCurrency(deal.invoice_currency) ? (
                         <span className="block text-[8px] font-normal text-slate-400">
                           Invoice {money(line.invoice_unit_sale_price, deal.invoice_currency)}
                         </span>
@@ -1442,16 +1451,22 @@ export function DealDetailClient({
               <DealInvoiceCurrencyToggle
                 value={editInvoiceCurrency}
                 disabled={invoiceCurrencyLocked}
+                fxRate={editFxRate}
                 onChange={(next) => {
                   const from = editInvoiceCurrency
                   setEditInvoiceCurrency(next)
+                  const rates = {
+                    ...invoiceFxRates,
+                    [editInvoiceCurrency]: editFxRate,
+                    [next]: invoiceFxRates[next],
+                  }
                   setEditLines((current) =>
                     current.map((line) => ({
                       ...line,
                       unitPrice:
                         line.unitPrice.trim() === ""
                           ? line.unitPrice
-                          : String(convertInvoiceSalePrice(Number(line.unitPrice), from, next)),
+                          : String(convertInvoiceSalePrice(Number(line.unitPrice), from, next, rates)),
                     })),
                   )
                 }}
@@ -1501,6 +1516,7 @@ export function DealDetailClient({
                                               catalogPriceInInvoiceCurrency(
                                                 nextProduct.price,
                                                 editInvoiceCurrency,
+                                                editFxRate,
                                               ),
                                             )),
                                     }

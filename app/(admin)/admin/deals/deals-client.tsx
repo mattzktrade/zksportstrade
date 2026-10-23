@@ -29,7 +29,10 @@ import {
 import { ActionCombobox } from "@/components/admin/action-combobox"
 import { CrmPartySelect } from "@/components/admin/crm-party-select"
 import { DealCreateModal } from "@/components/admin/deal-create-modal"
-import { DealInvoiceCurrencyToggle } from "@/components/admin/deal-invoice-currency-toggle"
+import {
+  DealInvoiceCurrencyToggle,
+  useDealInvoiceFxRates,
+} from "@/components/admin/deal-invoice-currency-toggle"
 import { SearchableSelect } from "@/components/admin/searchable-select"
 import { EventFilter, uniqueEventFilterOptions } from "@/components/admin/event-filter"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
@@ -332,6 +335,7 @@ export function DealsClient({
   const [editSource, setEditSource] = useState("whatsapp")
   const [editNotes, setEditNotes] = useState("")
   const [editInvoiceCurrency, setEditInvoiceCurrency] = useState<DealInvoiceCurrency>("USD")
+  const invoiceFxRates = useDealInvoiceFxRates()
   const [editLines, setEditLines] = useState<EditLineState[]>([])
 
   const awaitingZkDealIdSet = new Set(awaitingZkDealIds)
@@ -406,6 +410,12 @@ export function DealsClient({
 
   const selected = selectedId ? deals.find((deal) => deal.id === selectedId) ?? null : null
   const selectedNeedsZk = selected ? dealNeedsZkApproval(selected.id, selected.stage) : false
+  const editFxRate =
+    selected &&
+    editInvoiceCurrency === parseDealInvoiceCurrency(selected.invoice_currency) &&
+    Number(selected.invoice_fx_rate) > 0
+      ? Number(selected.invoice_fx_rate)
+      : invoiceFxRates[editInvoiceCurrency]
 
   useEffect(() => {
     if (!initialSelectedId) return
@@ -1291,16 +1301,22 @@ export function DealsClient({
               <DealInvoiceCurrencyToggle
                 value={editInvoiceCurrency}
                 disabled={selected ? dealInvoiceCurrencyIsLocked(selected) : false}
+                fxRate={editFxRate}
                 onChange={(next) => {
                   const from = editInvoiceCurrency
                   setEditInvoiceCurrency(next)
+                  const rates = {
+                    ...invoiceFxRates,
+                    [editInvoiceCurrency]: editFxRate,
+                    [next]: invoiceFxRates[next],
+                  }
                   setEditLines((lines) =>
                     lines.map((line) => ({
                       ...line,
                       unitPrice:
                         line.unitPrice.trim() === ""
                           ? line.unitPrice
-                          : String(convertInvoiceSalePrice(Number(line.unitPrice), from, next)),
+                          : String(convertInvoiceSalePrice(Number(line.unitPrice), from, next, rates)),
                     })),
                   )
                 }}
@@ -1342,7 +1358,7 @@ export function DealsClient({
                             setEditLines((lines) => lines.map((item, itemIndex) => itemIndex === index ? {
                               ...item,
                               packageId,
-                              unitPrice: item.unitPrice || (nextProduct?.price == null ? "" : String(catalogPriceInInvoiceCurrency(nextProduct.price, editInvoiceCurrency))),
+                              unitPrice: item.unitPrice || (nextProduct?.price == null ? "" : String(catalogPriceInInvoiceCurrency(nextProduct.price, editInvoiceCurrency, editFxRate))),
                             } : item))
                           }}
                           options={packageOptions.map((option) => ({ value: option.id, label: option.label }))}

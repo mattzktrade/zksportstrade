@@ -63,6 +63,7 @@ import {
   parseDealInvoiceCurrency,
   persistDealInvoicePricing,
   preparePricedInvoiceLine,
+  resolveDealInvoiceFxRate,
 } from "@/lib/crm/deal-invoice-currency"
 import {
   generatePurchaseOrderNumber,
@@ -5045,6 +5046,7 @@ export async function createNativeDeal(input: {
   }
 
   const invoiceCurrency = parseDealInvoiceCurrency(input.invoiceCurrency)
+  const invoiceFxRate = await resolveDealInvoiceFxRate({ invoiceCurrency })
   let invoiceUnitSalePrice: number | null = null
   let unitSalePrice: number | null = null
   if (input.unitSalePrice != null && String(input.unitSalePrice) !== "") {
@@ -5052,7 +5054,7 @@ export async function createNativeDeal(input: {
     if (!Number.isFinite(price) || price < 0) {
       return { ok: false, message: "Sale price must be a non-negative number." }
     }
-    const priced = preparePricedInvoiceLine(price, invoiceCurrency)
+    const priced = preparePricedInvoiceLine(price, invoiceCurrency, invoiceFxRate)
     invoiceUnitSalePrice = priced.invoiceUnitPrice
     unitSalePrice = priced.usdUnitPrice
   }
@@ -5069,7 +5071,7 @@ export async function createNativeDeal(input: {
   const normalizedLines = input.lines?.map((line) => {
     const quoteAt = line.supplierQuoteAt?.trim()
     const quoteTime = quoteAt ? Date.parse(quoteAt) : Number.NaN
-    const priced = preparePricedInvoiceLine(Number(line.unitPrice), invoiceCurrency)
+    const priced = preparePricedInvoiceLine(Number(line.unitPrice), invoiceCurrency, invoiceFxRate)
     return {
       packageId: line.packageId.trim(),
       quantity: Math.floor(Number(line.quantity)),
@@ -5291,6 +5293,7 @@ export async function createNativeDeal(input: {
   const emailNote = sourcingEmailWarning(sourcingFailed ? 1 : 0)
   const invoicePersist = await persistDealInvoicePricing(gate.supabase, dealId, {
     invoiceCurrency,
+    fxRate: invoiceFxRate,
     lines: normalizedLines?.length
       ? normalizedLines.map((line) => ({
           packageId: line.packageId,
