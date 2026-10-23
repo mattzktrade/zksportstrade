@@ -72,14 +72,25 @@ export async function updateDealCommercials(input: {
   } | null
   if (existingDealQuery.error || !existingDeal) return { ok: false, message: "Deal was not found." }
   const storedInvoiceCurrency = parseDealInvoiceCurrency(existingDeal.invoice_currency)
+  const { data: latestBookingForm } = await supabase
+    .from("booking_forms")
+    .select("status")
+    .eq("deal_id", input.dealId)
+    .order("revision", { ascending: false })
+    .limit(1)
+    .maybeSingle()
   if (
     dealInvoiceCurrencyIsLocked({
       order_id: existingDeal.order_id,
       stage: existingDeal.stage,
+      bookingFormStatus: latestBookingForm?.status,
     }) &&
     invoiceCurrency !== storedInvoiceCurrency
   ) {
-    return { ok: false, message: "Invoice currency cannot be changed after a booking form has been sent." }
+    return {
+      ok: false,
+      message: "Invoice currency cannot be changed while a booking form is active or after an order exists.",
+    }
   }
   const invoiceFxRate = await resolveDealInvoiceFxRate({
     invoiceCurrency,

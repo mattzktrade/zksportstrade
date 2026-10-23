@@ -70,7 +70,12 @@ export function DealInvoiceCurrencyToggle({
           </button>
         ))}
       </div>
-      {help ? (
+      {disabled ? (
+        <p className={cn("mt-1 text-slate-500", compact ? "text-[8px]" : "text-xs")}>
+          Locked while a booking form is active or after an order exists. An expired form can be
+          changed before you send a new one.
+        </p>
+      ) : help ? (
         <p className={cn("mt-1 text-slate-500", compact ? "text-[8px]" : "text-xs")}>{help}</p>
       ) : null}
     </div>

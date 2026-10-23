@@ -120,6 +120,34 @@ test("invoice currency locks after a booking form is sent", () => {
   assert.equal(dealInvoiceCurrencyIsLocked({ order_id: "order-1", stage: "proposal" }), true)
 })
 
+test("invoice currency can change after the booking form expires", () => {
+  assert.equal(dealInvoiceCurrencyIsLocked({ order_id: null, stage: "form_expired" }), false)
+  assert.equal(
+    dealInvoiceCurrencyIsLocked({
+      order_id: null,
+      stage: "awaiting_client_signature",
+      bookingFormStatus: "expired",
+    }),
+    false,
+  )
+  assert.equal(
+    dealInvoiceCurrencyIsLocked({
+      order_id: null,
+      stage: "form_expired",
+      bookingFormStatus: "voided",
+    }),
+    false,
+  )
+  assert.equal(
+    dealInvoiceCurrencyIsLocked({
+      order_id: null,
+      stage: "form_expired",
+      bookingFormStatus: "sent",
+    }),
+    true,
+  )
+})
+
 test("AED bank details are listed first on AED documents", () => {
   const ordered = bookingBankDetailsForInvoiceCurrency("AED", BOOKING_BANK_DETAILS)
   assert.equal(ordered[0]?.currency, "AED")

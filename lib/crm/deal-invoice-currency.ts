@@ -316,24 +316,44 @@ export function bookingFormSnapshotInvoiceLines(snapshot: unknown): Array<{
   })
 }
 
+const INVOICE_CURRENCY_LOCK_FORM_STATUSES = [
+  "sent",
+  "viewed",
+  "awaiting_zk_signature",
+  "zk_signed",
+  "completed",
+] as const
+
+const INVOICE_CURRENCY_LOCK_STAGES = [
+  "signed",
+  "awaiting_invoice",
+  "awaiting_payment",
+  "paid_confirmed",
+  "in_fulfilment",
+  "fulfilled",
+] as const
+
+const ACTIVE_UNSIGNED_FORM_STAGES = [
+  "booking_form_sent",
+  "awaiting_client_signature",
+  "awaiting_zk_signature",
+] as const
+
 export function dealInvoiceCurrencyIsLocked(deal: {
   order_id?: string | null
   stage?: string | null
+  bookingFormStatus?: string | null
 }): boolean {
   if (deal.order_id) return true
   const stage = String(deal.stage ?? "")
-  return (
-    stage === "booking_form_sent" ||
-    stage === "awaiting_client_signature" ||
-    stage === "awaiting_zk_signature" ||
-    stage === "form_expired" ||
-    stage === "signed" ||
-    stage === "awaiting_invoice" ||
-    stage === "awaiting_payment" ||
-    stage === "paid_confirmed" ||
-    stage === "in_fulfilment" ||
-    stage === "fulfilled"
-  )
+  if ((INVOICE_CURRENCY_LOCK_STAGES as readonly string[]).includes(stage)) return true
+
+  const formStatus = String(deal.bookingFormStatus ?? "").trim().toLowerCase()
+  if (formStatus) {
+    return (INVOICE_CURRENCY_LOCK_FORM_STATUSES as readonly string[]).includes(formStatus)
+  }
+
+  return (ACTIVE_UNSIGNED_FORM_STAGES as readonly string[]).includes(stage)
 }
 
 export function preparePricedInvoiceLine(

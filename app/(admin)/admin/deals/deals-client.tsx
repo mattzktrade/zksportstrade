@@ -1300,7 +1300,15 @@ export function DealsClient({
             <div className="mt-4">
               <DealInvoiceCurrencyToggle
                 value={editInvoiceCurrency}
-                disabled={selected ? dealInvoiceCurrencyIsLocked(selected) : false}
+                disabled={
+                  selected
+                    ? dealInvoiceCurrencyIsLocked({
+                        order_id: selected.order_id,
+                        stage: selected.stage,
+                        bookingFormStatus: selectedBookingForm?.status,
+                      })
+                    : false
+                }
                 fxRate={editFxRate}
                 onChange={(next) => {
                   const from = editInvoiceCurrency

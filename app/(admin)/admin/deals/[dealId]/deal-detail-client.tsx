@@ -300,7 +300,11 @@ export function DealDetailClient({
   )
   const invoiceFxRates = useDealInvoiceFxRates()
   const [editLines, setEditLines] = useState<EditLineState[]>([])
-  const invoiceCurrencyLocked = dealInvoiceCurrencyIsLocked(deal)
+  const invoiceCurrencyLocked = dealInvoiceCurrencyIsLocked({
+    order_id: deal.order_id,
+    stage: deal.stage,
+    bookingFormStatus: bookingForm?.status,
+  })
   const invoiceNote = dealInvoiceCrmNote(deal)
   const editFxRate =
     editInvoiceCurrency === parseDealInvoiceCurrency(deal.invoice_currency) && Number(deal.invoice_fx_rate) > 0
