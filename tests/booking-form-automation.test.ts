@@ -145,6 +145,11 @@ test("booking form automation cron still expires first, then sends both new emai
   assert.match(processor, /reminder_count: 2/)
   assert.match(processor, /sendNativeBookingFormFinalReminder/)
   assert.match(processor, /sendNativeBookingFormHoldReleased/)
+  assert.match(processor, /healStuckSignedBookingForms/)
+  assert.match(processor, /completeZkSignedBookingForm/)
+  assert.match(processor, /completionsHealed/)
+  const healAt = processFn.indexOf("healStuckSignedBookingForms")
+  assert.ok(healAt > remindersAt)
   const twelveHourFn = processor.slice(
     processor.indexOf("async function sendTwelveHourReminder"),
     processor.indexOf("async function sendFinalReminder"),

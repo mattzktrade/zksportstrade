@@ -147,8 +147,10 @@ function AdminSignatureModal({
       {pending ? (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-white/95 px-6 text-center">
           <Loader2 className="h-8 w-8 animate-spin text-slate-800" />
-          <p className="text-base font-semibold">Recording ZK signature…</p>
-          <p className="text-sm text-slate-500">The agreement will show as signed as soon as this finishes.</p>
+          <p className="text-base font-semibold">Signing and creating the invoice…</p>
+          <p className="text-sm text-slate-500">
+            The deal will move to Signed and the invoice will be sent once this finishes.
+          </p>
         </div>
       ) : null}
       {done ? (
@@ -156,7 +158,7 @@ function AdminSignatureModal({
           <CheckCircle2 className="h-12 w-12 text-emerald-600" />
           <h2 className="mt-4 text-xl font-bold">Agreement signed</h2>
           <p className="mt-2 max-w-sm text-sm leading-6 text-slate-600">
-            The ZK countersignature is recorded. The final PDF, order, and invoice are being finished in the background.
+            Both signatures are recorded. The deal is signed and the invoice has been queued.
           </p>
           <button
             type="button"
@@ -179,8 +181,8 @@ function AdminSignatureModal({
           </div>
           <div className="px-5 pb-2 sm:px-6">
             <div className="mt-5 rounded-lg bg-amber-50 p-4 text-sm leading-6 text-amber-950">
-              Review the PDF before signing. Completing this step locks the final agreement and advances
-              the deal to Signed.
+              Review the PDF before signing. Completing this step locks the final agreement, moves the
+              deal to Signed, and sends the invoice.
             </div>
             <label className="mt-5 block text-sm font-semibold">
               Admin full name
@@ -512,6 +514,16 @@ export function BookingFormPanel({
                 className="h-9 rounded-md bg-[#010101] text-[9px] font-semibold text-white disabled:opacity-50"
               >
                 Finish generating document
+              </button>
+            ) : null}
+            {form.status === "completed" && !orderAlreadyConfirmed && !confirmedOffPlatform && currentCanSign ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => run(() => completeNativeBookingForm(form.id))}
+                className="h-9 rounded-md bg-[#010101] text-[9px] font-semibold text-white disabled:opacity-50"
+              >
+                Create order &amp; send invoice
               </button>
             ) : null}
             {active && form.status !== "zk_signed" && currentCanManageDeals ? (

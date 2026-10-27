@@ -14,7 +14,6 @@ import {
 import { getServerSiteOrigin } from "@/lib/auth/site-origin"
 import { generateBookingFormPdf } from "@/lib/booking-forms/pdf"
 import { completeZkSignedBookingForm } from "@/lib/booking-forms/complete"
-import { scheduleAfterResponse } from "@/lib/booking-forms/schedule"
 import { syncBookingFormDealInventory } from "@/lib/booking-forms/inventory-sync"
 import { getRequestEvidence } from "@/lib/booking-forms/request-evidence"
 import {
@@ -668,13 +667,11 @@ export async function signNativeBookingFormAsAdmin(input: {
     const adminEmail = signerEmail
     const formId = String(form.id)
     const actorProfileId = gate.profile.id
-    scheduleAfterResponse(() =>
-      completeZkSignedBookingForm({ bookingFormId: formId, adminEmail, actorProfileId }),
-    )
+    await completeZkSignedBookingForm({ bookingFormId: formId, adminEmail, actorProfileId })
     revalidateNativeBookingFormPages(String(form.deal_id))
     return {
       ok: true,
-      message: "ZK signature recorded. Completing the agreement now.",
+      message: "Agreement signed. The deal is signed and the invoice is being sent.",
     }
   } catch (error) {
     return { ok: false, message: errorMessage(error) }

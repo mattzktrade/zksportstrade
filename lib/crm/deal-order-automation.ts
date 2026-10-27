@@ -1,3 +1,4 @@
+import { markDealSignedAfterZkCountersign } from "@/lib/booking-forms/advance-deal"
 import { syncBookingFormDealInventory } from "@/lib/booking-forms/inventory-sync"
 import { enqueueInvoiceCreateServer } from "@/lib/integrations/enqueue-server"
 import { scheduleOutboxDrain } from "@/lib/integrations/schedule-drain"
@@ -17,6 +18,7 @@ export async function ensureNativeDealOrderAndInvoice(
 ): Promise<NativeDealOrderResult> {
   const admin = createAdminClient()
   if (!admin) throw new Error("Supabase service role is not configured.")
+  await markDealSignedAfterZkCountersign(admin, dealId)
   const { data, error } = await admin.rpc("admin_create_order_from_signed_deal", {
     p_deal_id: dealId,
   })

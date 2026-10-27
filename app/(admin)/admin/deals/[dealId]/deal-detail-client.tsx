@@ -19,6 +19,7 @@ import type { DealBasketSupplier } from "@/components/admin/deal-line-basket"
 import { DEAL_NEXT_ACTION_OPTIONS, DEAL_SOURCE_LABELS, DEAL_SOURCES, DEAL_STAGES, DEAL_STAGE_LABELS, canonicalDealSource, canonicalDealStage, dealConfirmedOffPlatform, dealSourceLabel, dealSourceTone, friendlyDealActivitySummary, type CrmAccountOption, type DealPackageOption, type DealStage } from "@/lib/crm/deal-types"
 import { adminPipelineHome, enquiryStageLabel, enquiryStageTone, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
 import { enquiryHasClientReply } from "@/lib/crm/enquiry-replied"
+import { effectiveDealStageAfterCountersign } from "@/lib/booking-forms/advance-deal"
 import { nextActionForDealStage } from "@/lib/crm/deal-workflow"
 import type { DealAddressDraft, DealDetailPageData, DealFulfilmentClient } from "@/lib/crm/deal-detail"
 import type { StaffOption } from "@/lib/crm/lead-types"
@@ -318,6 +319,13 @@ export function DealDetailClient({
         ["sent", "viewed", "awaiting_zk_signature", "zk_signed", "completed"].includes(bookingForm.status),
     )
   const confirmedOffPlatform = dealConfirmedOffPlatform(deal)
+  const displayStage = canonicalDealStage(
+    effectiveDealStageAfterCountersign(deal.stage, bookingForm?.status),
+  )
+  const displayNextAction =
+    displayStage !== canonicalDealStage(deal.stage)
+      ? nextActionForDealStage(displayStage)
+      : deal.next_action || "—"
   const guestQty = deal.lines.reduce((sum, line) => sum + line.quantity, 0)
 
   function run(
@@ -524,8 +532,8 @@ export function DealDetailClient({
                   <Trash2 className="h-3 w-3" /> Delete
                 </button>
               ) : null}
-              <StatusPill tone={isEnquiryPipelineStage(deal.stage) ? enquiryStageTone(deal) : stageTone(deal.stage)}>
-                {isEnquiryPipelineStage(deal.stage) ? enquiryStageLabel(deal) : DEAL_STAGE_LABELS[deal.stage]}
+              <StatusPill tone={isEnquiryPipelineStage(displayStage) ? enquiryStageTone(deal) : stageTone(displayStage)}>
+                {isEnquiryPipelineStage(displayStage) ? enquiryStageLabel(deal) : DEAL_STAGE_LABELS[displayStage]}
               </StatusPill>
               {isEnquiryPipelineStage(deal.stage) && enquiryHasClientReply(deal) ? (
                 <StatusPill tone="green">Replied</StatusPill>
@@ -1235,7 +1243,7 @@ export function DealDetailClient({
                 <dt className="text-slate-400">Invoice #</dt>
                 <dd>{deal.xero_invoice_number || deal.ledger_invoice_number || "—"}</dd>
                 <dt className="text-slate-400">Next action</dt>
-                <dd>{deal.next_action || "—"}</dd>
+                <dd>{displayNextAction}</dd>
                 <dt className="text-slate-400">Stock hold</dt>
                 <dd>
                   {deal.reserved_qty > 0
@@ -1363,7 +1371,11 @@ export function DealDetailClient({
             currentCanManageDeals={canManageDeals}
             currentProfileName={currentProfileName}
           />
-          <DealFinancePanel deal={deal} canManageFinance={currentCanManageFinance} />
+          <DealFinancePanel
+            deal={deal}
+            canManageFinance={currentCanManageFinance}
+            bookingFormStatus={bookingForm?.status ?? null}
+          />
         </div>
       </section>
 

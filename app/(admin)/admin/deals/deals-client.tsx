@@ -72,6 +72,10 @@ import { nextActionForDealStage } from "@/lib/crm/deal-workflow"
 import type { BookingFormAdminRow, BookingFormEventRow } from "@/lib/booking-forms/types"
 import { cn } from "@/lib/utils"
 import { usePersistedAdminFilters } from "@/lib/admin/use-persisted-admin-filters"
+import {
+  bookingFormHasZkCountersign,
+  effectiveDealStageAfterCountersign,
+} from "@/lib/booking-forms/advance-deal"
 import { adminDealPath, isAwaitingZkApprovalDeal } from "@/lib/admin/deal-link"
 import { isModifiedClick, openInNewTab, pageSearchProps } from "@/lib/browser/laptop-qol"
 import { adminAccountPath, adminContactPath } from "@/lib/crm/profile-links"
@@ -251,8 +255,13 @@ function pipelineStageFor(stage: DealStage, awaitingZkApproval = false) {
   return PIPELINE_COLUMNS.find((column) => column.stages.includes(stage)) ?? PIPELINE_COLUMNS[0]
 }
 
-function actionRequired(deal: DealListRow, awaitingZkApproval: boolean): string {
+function actionRequired(
+  deal: DealListRow,
+  awaitingZkApproval: boolean,
+  displayStage: DealStage = deal.stage,
+): string {
   if (awaitingZkApproval) return nextActionForDealStage("awaiting_zk_signature")
+  if (displayStage !== deal.stage) return nextActionForDealStage(displayStage)
   if (deal.next_action?.trim()) return deal.next_action
   return nextActionForDealStage(deal.stage)
 }
@@ -339,8 +348,23 @@ export function DealsClient({
   const [editLines, setEditLines] = useState<EditLineState[]>([])
 
   const awaitingZkDealIdSet = new Set(awaitingZkDealIds)
+  const latestBookingByDeal = useMemo(() => {
+    const map = new Map<string, BookingFormAdminRow>()
+    for (const form of bookingForms) {
+      const current = map.get(form.deal_id)
+      if (!current || form.revision > current.revision) map.set(form.deal_id, form)
+    }
+    return map
+  }, [bookingForms])
   function dealNeedsZkApproval(dealId: string, stage: DealStage) {
+    if (bookingFormHasZkCountersign(latestBookingByDeal.get(dealId)?.status)) return false
     return isAwaitingZkApprovalDeal(dealId, awaitingZkDealIdSet) || stage === "awaiting_zk_signature"
+  }
+  function displayedDealStage(dealId: string, stage: DealStage): DealStage {
+    return effectiveDealStageAfterCountersign(
+      stage,
+      latestBookingByDeal.get(dealId)?.status,
+    ) as DealStage
   }
 
   const scoped = useMemo(() => {
@@ -371,7 +395,7 @@ export function DealsClient({
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q))
     })
-  }, [awaitingZkDealIds, currentProfileId, deals, eventFilter, query, sourceFilter, view])
+  }, [awaitingZkDealIds, bookingForms, currentProfileId, deals, eventFilter, query, sourceFilter, view])
 
   const filtered = useMemo(() => {
     const activePipeline = String(pipelineFilter)
@@ -379,8 +403,14 @@ export function DealsClient({
     if (pipelineFilter === "awaiting_approval") {
       return scoped.filter((deal) => dealNeedsZkApproval(deal.id, deal.stage))
     }
-    return scoped.filter((deal) => pipelineStageFor(deal.stage).id === pipelineFilter)
-  }, [awaitingZkDealIds, pipelineFilter, scoped])
+    return scoped.filter(
+      (deal) =>
+        pipelineStageFor(
+          displayedDealStage(deal.id, deal.stage),
+          dealNeedsZkApproval(deal.id, deal.stage),
+        ).id === pipelineFilter,
+    )
+  }, [awaitingZkDealIds, bookingForms, pipelineFilter, scoped])
 
   const sorted = useMemo(() => {
     const rows = [...filtered]
@@ -410,6 +440,7 @@ export function DealsClient({
 
   const selected = selectedId ? deals.find((deal) => deal.id === selectedId) ?? null : null
   const selectedNeedsZk = selected ? dealNeedsZkApproval(selected.id, selected.stage) : false
+  const selectedDisplayStage = selected ? displayedDealStage(selected.id, selected.stage) : null
   const editFxRate =
     selected &&
     editInvoiceCurrency === parseDealInvoiceCurrency(selected.invoice_currency) &&
@@ -426,14 +457,6 @@ export function DealsClient({
   useEffect(() => {
     previewRef.current?.scrollTo({ top: 0 })
   }, [selectedId])
-  const latestBookingByDeal = useMemo(() => {
-    const map = new Map<string, BookingFormAdminRow>()
-    for (const form of bookingForms) {
-      const current = map.get(form.deal_id)
-      if (!current || form.revision > current.revision) map.set(form.deal_id, form)
-    }
-    return map
-  }, [bookingForms])
   const bookingEventsByForm = useMemo(() => {
     const map = new Map<string, BookingFormEventRow[]>()
     for (const event of bookingFormEvents) {
@@ -827,9 +850,10 @@ export function DealsClient({
               </thead>
               <tbody className="divide-y divide-[#f0f1f3] text-[9px]">
                 {sorted.map((deal) => {
+                  const displayStage = displayedDealStage(deal.id, deal.stage)
                   const awaitingZk = dealNeedsZkApproval(deal.id, deal.stage)
-                  const approval = approvalLabel(deal.stage, awaitingZk)
-                  const pipelineStage = pipelineStageFor(deal.stage, awaitingZk)
+                  const approval = approvalLabel(displayStage, awaitingZk)
+                  const pipelineStage = pipelineStageFor(displayStage, awaitingZk)
                   return (
                     <tr
                       id={`deal-${deal.id}`}
@@ -884,10 +908,10 @@ export function DealsClient({
                       <td className="whitespace-nowrap px-3 py-3"><StatusPill tone={dealSourceTone(deal.source)}>{dealSourceLabel(deal.source)}</StatusPill></td>
                       <td className="whitespace-nowrap px-3 py-3">{deal.owner_name || "—"}</td>
                       <td className="whitespace-nowrap px-3 py-3">
-                        <StatusPill tone={stageTone(deal.stage, awaitingZk)}>{pipelineStage.label}</StatusPill>
+                        <StatusPill tone={stageTone(displayStage, awaitingZk)}>{pipelineStage.label}</StatusPill>
                       </td>
                       <td className="max-w-[120px] px-3 py-3 font-medium text-slate-700">
-                        <p className="truncate" title={actionRequired(deal, awaitingZk)}>{actionRequired(deal, awaitingZk)}</p>
+                        <p className="truncate" title={actionRequired(deal, awaitingZk, displayStage)}>{actionRequired(deal, awaitingZk, displayStage)}</p>
                       </td>
                       <td className="whitespace-nowrap px-3 py-3 font-semibold">{money(deal.total_amount, deal.currency)}</td>
                       <td className="whitespace-nowrap px-3 py-3"><StatusPill tone={approval.tone}>{approval.label}</StatusPill></td>
@@ -902,8 +926,9 @@ export function DealsClient({
           </div>
           <AdminMobileList>
             {sorted.map((deal) => {
+              const displayStage = displayedDealStage(deal.id, deal.stage)
               const awaitingZk = dealNeedsZkApproval(deal.id, deal.stage)
-              const pipelineStage = pipelineStageFor(deal.stage, awaitingZk)
+              const pipelineStage = pipelineStageFor(displayStage, awaitingZk)
               return (
                 <button
                   type="button"
@@ -919,7 +944,7 @@ export function DealsClient({
                   </div>
                   <div className="shrink-0 text-right">
                     <p className="font-semibold">{money(deal.total_amount, deal.currency)}</p>
-                    <div className="mt-1"><StatusPill tone={stageTone(deal.stage, awaitingZk)}>{pipelineStage.label}</StatusPill></div>
+                    <div className="mt-1"><StatusPill tone={stageTone(displayStage, awaitingZk)}>{pipelineStage.label}</StatusPill></div>
                   </div>
                 </button>
               )
@@ -1010,9 +1035,9 @@ export function DealsClient({
                   <dt className="text-slate-400">Source</dt><dd><StatusPill tone={dealSourceTone(selected.source)}>{dealSourceLabel(selected.source)}</StatusPill></dd>
                   <dt className="text-slate-400">Deal owner</dt><dd>{selected.owner_name || "—"}</dd>
                   <dt className="text-slate-400">Sales stage</dt>
-                  <dd><StatusPill tone={stageTone(selected.stage, selectedNeedsZk)}>{pipelineStageFor(selected.stage, selectedNeedsZk).label}</StatusPill></dd>
-                  <dt className="text-slate-400">Workflow status</dt><dd>{DEAL_STAGE_LABELS[selected.stage]}</dd>
-                  <dt className="text-slate-400">Action required</dt><dd className="font-semibold text-primary">{actionRequired(selected, selectedNeedsZk)}</dd>
+                  <dd><StatusPill tone={stageTone(selectedDisplayStage ?? selected.stage, selectedNeedsZk)}>{pipelineStageFor(selectedDisplayStage ?? selected.stage, selectedNeedsZk).label}</StatusPill></dd>
+                  <dt className="text-slate-400">Workflow status</dt><dd>{DEAL_STAGE_LABELS[selectedDisplayStage ?? selected.stage]}</dd>
+                  <dt className="text-slate-400">Action required</dt><dd className="font-semibold text-primary">{actionRequired(selected, selectedNeedsZk, selectedDisplayStage ?? selected.stage)}</dd>
                   <dt className="text-slate-400">Deal value</dt>
                   <dd className="font-semibold">
                     {money(selected.total_amount, selected.currency)}
@@ -1222,6 +1247,7 @@ export function DealsClient({
                 <DealFinancePanel
                   deal={selected}
                   canManageFinance={currentCanManageFinance}
+                  bookingFormStatus={selectedBookingForm?.status ?? null}
                 />
               </div>
             </AdminListPreview>

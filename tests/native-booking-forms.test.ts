@@ -36,6 +36,11 @@ import type { BookingFormSnapshot } from "../lib/booking-forms/types"
 import { paddedInkRect, signatureInkBounds } from "../lib/booking-forms/signature-ink"
 import { bookingFormHandoffStatus } from "../lib/booking-forms/handoff-status"
 import { isTransientStorageError } from "../lib/booking-forms/storage"
+import {
+  bookingFormHasZkCountersign,
+  dealCanCreateOrderFromBookingForm,
+  effectiveDealStageAfterCountersign,
+} from "../lib/booking-forms/advance-deal"
 
 test("secure signer tokens are random and only hashes need persistence", () => {
   const first = generateSigningToken()
@@ -312,16 +317,15 @@ test("booking form CC emails are saved on the snapshot and excluded from the sig
   assert.doesNotMatch(pdfSource, /ccEmails/)
 })
 
-test("new accounts can omit postcode and booking forms still render the rest of the address", () => {
+test("new accounts can omit billing details and booking forms still render whatever address exists", () => {
   const createModal = readFileSync("components/admin/deal-create-modal.tsx", "utf8")
+  assert.match(createModal, /Billing address <span className="font-normal text-slate-500">\(optional\)<\/span>/)
+  assert.match(createModal, /Leave this blank if you only have a name and an email or phone/)
   assert.match(createModal, /Postcode \(optional\)/)
-  assert.match(
-    createModal,
-    /newBillingLine1\.trim\(\) && newBillingCity\.trim\(\) && newBillingCountry\.trim\(\)/,
-  )
+  assert.doesNotMatch(createModal, /Add the billing street, city and country/)
   assert.doesNotMatch(
     createModal,
-    /newBillingLine1\.trim\(\) && newBillingCity\.trim\(\) && newBillingPostcode\.trim\(\) && newBillingCountry\.trim\(\)/,
+    /newBillingLine1\.trim\(\) && newBillingCity\.trim\(\) && newBillingCountry\.trim\(\)/,
   )
   const snapshot = readFileSync("lib/booking-forms/snapshot.ts", "utf8")
   assert.match(snapshot, /account\.billing_postcode/)
@@ -518,8 +522,11 @@ test("booking form signing page uses a product table, colour logo, and client si
   assert.match(panel, /Agreement signed/)
   assert.doesNotMatch(panel, /Notify admins to send/)
   const actions = readFileSync("app/(admin)/admin/deals/booking-form-actions.ts", "utf8")
-  assert.match(actions, /scheduleAfterResponse/)
+  assert.match(actions, /await completeZkSignedBookingForm/)
   assert.match(actions, /completeZkSignedBookingForm/)
+  assert.doesNotMatch(actions, /scheduleAfterResponse/)
+  assert.match(panel, /Create order &amp; send invoice/)
+  assert.match(panel, /Signing and creating the invoice/)
   const overlays = readFileSync("components/admin/admin-list-preview.tsx", "utf8")
   assert.match(overlays, /admin-overlay/)
 })
@@ -647,6 +654,65 @@ test("booking form send and sign refresh the deal page instead of only the deals
   assert.match(pad, /exportCroppedPng/)
   assert.match(signing, /signatureDataUrl/)
   assert.match(signing, /padRef\.current\?\.toDataURL\(\)/)
+})
+
+test("ZK countersign advances the deal immediately and completion can finish a stuck form", () => {
+  const sql = readFileSync(
+    "supabase/migrations/20261027120000_countersign_advances_signed_deal.sql",
+    "utf8",
+  )
+  assert.match(sql, /advance_deal_after_zk_signature/)
+  assert.match(sql, /status in \('zk_signed', 'completed'\)/)
+  assert.match(sql, /set stage = 'signed'/)
+  assert.match(sql, /Create and send invoice/)
+  assert.match(sql, /admin_record_zk_signature/)
+  assert.match(sql, /is_cms_operator/)
+  const complete = readFileSync("lib/booking-forms/complete.ts", "utf8")
+  assert.match(complete, /status !== "zk_signed" && status !== "completed"/)
+  assert.match(complete, /markDealSignedAfterZkCountersign/)
+  assert.match(complete, /ensureNativeDealOrderAndInvoice/)
+  assert.doesNotMatch(complete, /if \(String\(form\.status\) === "completed"\) return/)
+  const automation = readFileSync("lib/crm/deal-order-automation.ts", "utf8")
+  assert.match(automation, /markDealSignedAfterZkCountersign/)
+  const panel = readFileSync("app/(admin)/admin/deals/deal-finance-panel.tsx", "utf8")
+  assert.match(panel, /dealCanCreateOrderFromBookingForm/)
+  const dealsClient = readFileSync("app/(admin)/admin/deals/deals-client.tsx", "utf8")
+  assert.match(dealsClient, /bookingFormHasZkCountersign/)
+  assert.equal(bookingFormHasZkCountersign("awaiting_zk_signature"), false)
+  assert.equal(bookingFormHasZkCountersign("zk_signed"), true)
+  assert.equal(bookingFormHasZkCountersign("completed"), true)
+  assert.equal(
+    effectiveDealStageAfterCountersign("awaiting_zk_signature", "completed"),
+    "signed",
+  )
+  assert.equal(
+    effectiveDealStageAfterCountersign("awaiting_payment", "completed"),
+    "awaiting_payment",
+  )
+  assert.equal(
+    dealCanCreateOrderFromBookingForm({
+      stage: "awaiting_zk_signature",
+      orderId: null,
+      bookingFormStatus: "completed",
+    }),
+    true,
+  )
+  assert.equal(
+    dealCanCreateOrderFromBookingForm({
+      stage: "awaiting_zk_signature",
+      orderId: null,
+      bookingFormStatus: "awaiting_zk_signature",
+    }),
+    false,
+  )
+  assert.equal(
+    dealCanCreateOrderFromBookingForm({
+      stage: "signed",
+      orderId: "ord-1",
+      bookingFormStatus: "completed",
+    }),
+    false,
+  )
 })
 
 test("client signature keeps unsigned deals on Awaiting ZK signature with the form", () => {

@@ -155,10 +155,6 @@ export function DealCreateModal({
         toast.error("Add an email or a phone number.")
         return
       }
-      if (!(newBillingLine1.trim() && newBillingCity.trim() && newBillingCountry.trim())) {
-        toast.error("Add the billing street, city and country.")
-        return
-      }
     } else {
       if (!accountId) {
         toast.error("Select an account / company.")

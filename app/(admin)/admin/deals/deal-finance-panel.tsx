@@ -4,6 +4,7 @@ import { useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { CircleDollarSign, Download, RefreshCcw, Send, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
+import { dealCanCreateOrderFromBookingForm } from "@/lib/booking-forms/advance-deal"
 import { dealConfirmedOffPlatform, type DealListRow } from "@/lib/crm/deal-types"
 import { dealInvoiceCrmNote, parseDealInvoiceCurrency } from "@/lib/crm/deal-invoice-currency"
 import {
@@ -26,9 +27,11 @@ function date(value: string | null): string {
 export function DealFinancePanel({
   deal,
   canManageFinance,
+  bookingFormStatus = null,
 }: {
   deal: DealListRow
   canManageFinance: boolean
+  bookingFormStatus?: string | null
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -64,7 +67,11 @@ export function DealFinancePanel({
   const eligibleAt = deal.cancellation_eligible_at
   const cancellationReady =
     eligibleAt != null && eligibleAt.slice(0, 10) <= new Date().toISOString().slice(0, 10)
-  const canCreateOrder = ["signed", "awaiting_invoice"].includes(deal.stage)
+  const canCreateOrder = dealCanCreateOrderFromBookingForm({
+    stage: deal.stage,
+    orderId: deal.order_id,
+    bookingFormStatus,
+  })
   const activeInvoice = deal.invoice_status && deal.invoice_status !== "cancelled"
   const invoiceCurrency = parseDealInvoiceCurrency(deal.invoice_currency || deal.currency)
   const invoiceNote = dealInvoiceCrmNote(deal)

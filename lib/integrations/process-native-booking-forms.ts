@@ -1,5 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getServerSiteOrigin } from "@/lib/auth/site-origin"
+import { UNSIGNED_STAGES_AFTER_ZK_SIGNATURE } from "@/lib/booking-forms/advance-deal"
+import { completeZkSignedBookingForm } from "@/lib/booking-forms/complete"
 import {
   BOOKING_FORM_FINAL_REMINDER_EVENT,
   BOOKING_FORM_HOLD_RELEASED_NOTICE_EVENT,
@@ -31,6 +33,8 @@ export type NativeBookingFormAutomationResult = {
   finalReminderFailures: number
   holdReleasedNoticesSent: number
   holdReleasedNoticeFailures: number
+  completionsHealed: number
+  completionHealFailures: number
   packagesSynced: string[]
 }
 
@@ -45,6 +49,8 @@ function emptyResult(): NativeBookingFormAutomationResult {
     finalReminderFailures: 0,
     holdReleasedNoticesSent: 0,
     holdReleasedNoticeFailures: 0,
+    completionsHealed: 0,
+    completionHealFailures: 0,
     packagesSynced: [],
   }
 }
@@ -129,6 +135,7 @@ export async function processNativeBookingForms(): Promise<NativeBookingFormAuto
 
   const holdReleased = await sendHoldReleasedNotices(admin, now)
   const reminders = await sendUnsignedReminders(admin, now)
+  const completions = await healStuckSignedBookingForms(admin)
 
   return {
     expired: Number(expiredCount ?? 0),
@@ -138,8 +145,69 @@ export async function processNativeBookingForms(): Promise<NativeBookingFormAuto
     finalReminderFailures: reminders.finalReminderFailures,
     holdReleasedNoticesSent: holdReleased.sent,
     holdReleasedNoticeFailures: holdReleased.failures,
+    completionsHealed: completions.healed,
+    completionHealFailures: completions.failures,
     packagesSynced: [...packagesToSync],
   }
+}
+
+const COMPLETION_HEAL_BATCH = 3
+const COMPLETION_HEAL_LOOKAHEAD = 20
+const COMPLETION_HEAL_ADMIN_EMAIL = "oliver@zk-sports.com"
+const COMPLETION_HEAL_STAGES = new Set<string>([
+  ...UNSIGNED_STAGES_AFTER_ZK_SIGNATURE,
+  "signed",
+  "awaiting_invoice",
+])
+
+async function healStuckSignedBookingForms(
+  admin: AdminClient,
+): Promise<{ healed: number; failures: number }> {
+  const { data: forms, error } = await admin
+    .from("booking_forms")
+    .select("id, deal_id, status, zk_signed_at")
+    .in("status", ["zk_signed", "completed"])
+    .is("order_id", null)
+    .order("zk_signed_at", { ascending: true })
+    .limit(COMPLETION_HEAL_LOOKAHEAD)
+  if (error) throw new Error(error.message)
+  if (!forms?.length) return { healed: 0, failures: 0 }
+
+  const dealIds = [...new Set(forms.map((form) => String(form.deal_id)).filter(Boolean))]
+  const { data: deals, error: dealError } = await admin
+    .from("deals")
+    .select("id, stage, order_id")
+    .in("id", dealIds)
+  if (dealError) throw new Error(dealError.message)
+  const dealById = new Map((deals ?? []).map((deal) => [String(deal.id), deal]))
+
+  const eligible = forms
+    .filter((form) => {
+      const deal = dealById.get(String(form.deal_id))
+      if (!deal || deal.order_id) return false
+      return COMPLETION_HEAL_STAGES.has(String(deal.stage))
+    })
+    .slice(0, COMPLETION_HEAL_BATCH)
+
+  let healed = 0
+  let failures = 0
+  for (const form of eligible) {
+    try {
+      await completeZkSignedBookingForm({
+        bookingFormId: String(form.id),
+        adminEmail: COMPLETION_HEAL_ADMIN_EMAIL,
+      })
+      healed += 1
+    } catch (healError) {
+      failures += 1
+      console.error(
+        "[booking-forms] completion heal failed:",
+        form.id,
+        healError instanceof Error ? healError.message : healError,
+      )
+    }
+  }
+  return { healed, failures }
 }
 
 async function sendHoldReleasedNotices(
