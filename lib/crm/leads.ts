@@ -127,6 +127,12 @@ type DirectoryDealRow = {
   updated_at: string
   stage: string
   order_id: string | null
+  race_id: string | null
+}
+
+type DirectoryInterestRow = {
+  account_id: string
+  race_id: string
 }
 
 type DirectoryOrderRow = {
@@ -139,7 +145,7 @@ type DirectoryOrderRow = {
 export const getClientDirectoryRows = cache(async (): Promise<ClientDirectoryRow[]> => {
   noStore()
   const supabase = await createClient()
-  const [accountsRes, contactsRes, dealsRes] = await Promise.all([
+  const [accountsRes, contactsRes, dealsRes, interestsRes] = await Promise.all([
     fetchAllRows<DirectoryAccountRow>((from, to) =>
       supabase
         .from("crm_accounts")
@@ -161,14 +167,29 @@ export const getClientDirectoryRows = cache(async (): Promise<ClientDirectoryRow
     fetchAllRows<DirectoryDealRow>((from, to) =>
       supabase
         .from("deals")
-        .select("account_id, total_amount, updated_at, stage, order_id")
+        .select("account_id, total_amount, updated_at, stage, order_id, race_id")
         .not("account_id", "is", null)
         .order("id")
+        .range(from, to),
+    ),
+    fetchAllRows<DirectoryInterestRow>((from, to) =>
+      supabase
+        .from("crm_account_event_interests")
+        .select("account_id, race_id")
+        .order("account_id")
+        .order("race_id")
         .range(from, to),
     ),
   ])
 
   if (accountsRes.error || contactsRes.error || dealsRes.error) return []
+
+  const interestsByAccount = new Map<string, string[]>()
+  for (const interest of interestsRes.error ? [] : interestsRes.data) {
+    const list = interestsByAccount.get(interest.account_id) ?? []
+    list.push(interest.race_id)
+    interestsByAccount.set(interest.account_id, list)
+  }
   const data = accountsRes.data
 
   const contactsByAccount = new Map<string, DirectoryContactRow[]>()
@@ -262,6 +283,8 @@ export const getClientDirectoryRows = cache(async (): Promise<ClientDirectoryRow
         standaloneWonDeals.reduce((sum, deal) => sum + Number(deal.total_amount ?? 0), 0) +
         completedOrders.reduce((sum, order) => sum + Number(order.total_amount ?? 0), 0),
       last_activity_at: activityDates.sort().at(-1) ?? account.updated_at,
+      interest_race_ids: interestsByAccount.get(account.id) ?? [],
+      enquiry_race_ids: [...new Set(deals.map((deal) => deal.race_id).filter((id): id is string => Boolean(id)))],
     }
   }).sort((a, b) => {
     return b.last_activity_at.localeCompare(a.last_activity_at) || a.name.localeCompare(b.name)

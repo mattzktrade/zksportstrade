@@ -339,7 +339,7 @@ export async function createCrmAccount(input: {
     }
   }
 
-  const raceIds = [...new Set((input.raceIds ?? []).map((id) => id.trim()).filter((id) => UUID_RE.test(id)))]
+  const raceIds = [...new Set((input.raceIds ?? []).map((id) => id.trim()).filter(Boolean))]
   if (raceIds.length > 0) {
     const { error: interestError } = await gate.supabase.from("crm_account_event_interests").insert(
       raceIds.map((race_id) => ({ account_id: accountId, race_id })),
@@ -458,6 +458,45 @@ export async function updateCrmAccountInterests(input: {
   }
   revalidateCompany(accountId)
   return { ok: true, message: "Event interests saved." }
+}
+
+export async function bulkSetAccountEventInterest(input: {
+  accountIds: string[]
+  raceId: string
+  interested: boolean
+}): Promise<Result> {
+  const gate = await requireAdminAction("accounts.manage")
+  if (!gate.ok) return gate
+  const raceId = input.raceId.trim()
+  if (!raceId) return { ok: false, message: "Choose an event." }
+  const accountIds = [...new Set(input.accountIds.map((id) => id.trim()).filter((id) => UUID_RE.test(id)))]
+  if (accountIds.length === 0) return { ok: false, message: "Select at least one account." }
+
+  const CHUNK = 300
+  for (let offset = 0; offset < accountIds.length; offset += CHUNK) {
+    const chunk = accountIds.slice(offset, offset + CHUNK)
+    const { error } = input.interested
+      ? await gate.supabase
+          .from("crm_account_event_interests")
+          .upsert(
+            chunk.map((account_id) => ({ account_id, race_id: raceId })),
+            { onConflict: "account_id,race_id", ignoreDuplicates: true },
+          )
+      : await gate.supabase
+          .from("crm_account_event_interests")
+          .delete()
+          .eq("race_id", raceId)
+          .in("account_id", chunk)
+    if (error) return { ok: false, message: error.message }
+  }
+
+  revalidatePath("/admin/clients", "layout")
+  revalidatePath("/admin/leads")
+  const count = `${accountIds.length} account${accountIds.length === 1 ? "" : "s"}`
+  return {
+    ok: true,
+    message: input.interested ? `Marked ${count} as interested.` : `Removed the interest from ${count}.`,
+  }
 }
 
 export async function upsertCrmContact(input: {

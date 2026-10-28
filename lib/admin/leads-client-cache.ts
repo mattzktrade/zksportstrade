@@ -13,7 +13,7 @@ export type LeadsClientCache = {
   fetchedAt: number
 }
 
-const CACHE_KEY = "zk-admin-leads-directory-v1"
+const CACHE_KEY = "zk-admin-leads-directory-v2"
 const TTL_MS = 5 * 60 * 1000
 
 function isCache(value: unknown): value is LeadsClientCache {

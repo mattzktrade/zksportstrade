@@ -16,6 +16,7 @@ import {
 import { toast } from "sonner"
 import {
   assignAccountOwner,
+  bulkSetAccountEventInterest,
   createCrmAccount,
 } from "@/app/(admin)/admin/clients/profile-actions"
 import { AccountBulkUploadModal } from "@/app/(admin)/admin/leads/bulk-upload-modal"
@@ -108,6 +109,30 @@ function matchesQuery(client: ClientDirectoryRow, query: string): boolean {
   return haystack.includes(query)
 }
 
+function raceOptionLabel(race: AdminRaceOption): string {
+  return `${race.name} ${race.season}`
+}
+
+function SelectBox({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean
+  onChange: (checked: boolean) => void
+  label: string
+}) {
+  return (
+    <input
+      type="checkbox"
+      aria-label={label}
+      checked={checked}
+      onChange={(e) => onChange(e.target.checked)}
+      className="h-3.5 w-3.5 cursor-pointer accent-primary"
+    />
+  )
+}
+
 export function LeadsClient({
   clients: initialClients,
   staffOptions: initialStaffOptions,
@@ -134,8 +159,11 @@ export function LeadsClient({
     query: "",
     ownerFilter: "all",
     sourceFilter: "",
+    eventFilter: "",
   })
-  const { query, ownerFilter, sourceFilter } = listState
+  const { query, ownerFilter, sourceFilter, eventFilter } = listState
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const [bulkRaceId, setBulkRaceId] = useState("")
   const view: View = listState.view === "contacts" ? "contacts" : "accounts"
   const [showCreate, setShowCreate] = useState(false)
   const [showBulkUpload, setShowBulkUpload] = useState(false)
@@ -198,15 +226,104 @@ export function LeadsClient({
         if (client.owner_profile_id !== ownerFilter) return false
       }
       if (sourceFilter && client.source !== sourceFilter) return false
+      if (
+        eventFilter &&
+        !client.interest_race_ids.includes(eventFilter) &&
+        !client.enquiry_race_ids.includes(eventFilter)
+      ) {
+        return false
+      }
       return matchesQuery(client, q)
     })
-  }, [clients, currentProfileId, ownerFilter, q, sourceFilter])
+  }, [clients, currentProfileId, eventFilter, ownerFilter, q, sourceFilter])
 
   const contactRows = useMemo(() => {
     return filteredClients.flatMap((client) =>
       client.contacts.map((contact) => ({ client, contact })),
     )
   }, [filteredClients])
+
+  const raceLabel = useMemo(
+    () => new Map(races.map((race) => [race.id, `${race.short_name || race.name} ’${String(race.season).slice(-2)}`])),
+    [races],
+  )
+  const selectedVisible = filteredClients.filter((client) => selectedIds.has(client.id))
+  const allVisibleSelected = filteredClients.length > 0 && selectedVisible.length === filteredClients.length
+
+  function toggleSelected(accountId: string, checked: boolean) {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (checked) next.add(accountId)
+      else next.delete(accountId)
+      return next
+    })
+  }
+
+  function toggleAllVisible(checked: boolean) {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      for (const client of filteredClients) {
+        if (checked) next.add(client.id)
+        else next.delete(client.id)
+      }
+      return next
+    })
+  }
+
+  function applyBulkInterest(interested: boolean) {
+    const raceId = bulkRaceId || eventFilter
+    if (!raceId) {
+      toast.error("Choose an event first.")
+      return
+    }
+    const accountIds = selectedVisible.map((client) => client.id)
+    startTransition(async () => {
+      const result = await bulkSetAccountEventInterest({ accountIds, raceId, interested })
+      if (!result.ok) {
+        toast.error(result.message)
+        return
+      }
+      toast.success(result.message)
+      const targets = new Set(accountIds)
+      setClients((current) =>
+        current.map((client) => {
+          if (!targets.has(client.id)) return client
+          const ids = client.interest_race_ids.filter((id) => id !== raceId)
+          return { ...client, interest_race_ids: interested ? [...ids, raceId] : ids }
+        }),
+      )
+      setSelectedIds(new Set())
+      try {
+        applyDirectory(await requestFreshPage())
+      } catch {
+        /* optimistic interest change stays */
+      }
+    })
+  }
+
+  function eventChips(client: ClientDirectoryRow) {
+    const ids = [...new Set([...client.interest_race_ids, ...client.enquiry_race_ids])].filter((id) =>
+      raceLabel.has(id),
+    )
+    if (ids.length === 0) return <span className="text-slate-300">—</span>
+    return (
+      <div className="flex max-w-[200px] flex-wrap gap-1">
+        {ids.slice(0, 3).map((id) => (
+          <span
+            key={id}
+            title={client.interest_race_ids.includes(id) ? "Marked as interested" : "Has an enquiry or deal"}
+            className={cn(
+              "rounded px-1.5 py-0.5 text-[8px]",
+              id === eventFilter ? "bg-primary/10 text-primary" : "bg-slate-100 text-slate-600",
+            )}
+          >
+            {raceLabel.get(id)}
+          </span>
+        ))}
+        {ids.length > 3 ? <span className="text-[8px] text-slate-400">+{ids.length - 3}</span> : null}
+      </div>
+    )
+  }
 
   function updateContact(id: number, patch: Partial<DraftContact>) {
     setContacts((current) => current.map((contact) => (contact.id === id ? { ...contact, ...patch } : contact)))
@@ -363,6 +480,22 @@ export function LeadsClient({
               </option>
             ))}
           </select>
+          <select
+            value={eventFilter}
+            onChange={(e) => setListState((current) => ({ ...current, eventFilter: e.target.value }))}
+            className={cn(
+              "h-9 max-w-[220px] rounded-md border bg-white px-3 text-[9px]",
+              eventFilter && "border-primary/50 text-primary",
+            )}
+            title="Accounts marked as interested, or with an enquiry or deal for this event"
+          >
+            <option value="">All event interests</option>
+            {races.map((race) => (
+              <option key={race.id} value={race.id}>
+                Interested in {raceOptionLabel(race)}
+              </option>
+            ))}
+          </select>
           <div className="relative w-full min-w-0 sm:ml-auto sm:min-w-[240px] sm:max-w-sm sm:flex-1">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
@@ -375,15 +508,66 @@ export function LeadsClient({
           </div>
         </div>
 
+        {selectedVisible.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 border-b border-[#eceef1] bg-primary/5 px-4 py-2.5">
+            <span className="text-[9px] font-semibold text-primary">
+              {selectedVisible.length} account{selectedVisible.length === 1 ? "" : "s"} selected
+            </span>
+            <select
+              value={bulkRaceId || eventFilter}
+              onChange={(e) => setBulkRaceId(e.target.value)}
+              className="h-8 max-w-[240px] rounded-md border bg-white px-2 text-[9px]"
+            >
+              <option value="">Choose event…</option>
+              {races.map((race) => (
+                <option key={race.id} value={race.id}>
+                  {raceOptionLabel(race)}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => applyBulkInterest(true)}
+              className="h-8 rounded-md bg-primary px-3 text-[9px] font-semibold text-white disabled:opacity-50"
+            >
+              Mark interested
+            </button>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => applyBulkInterest(false)}
+              className="h-8 rounded-md border bg-white px-3 text-[9px] font-semibold disabled:opacity-50"
+            >
+              Remove interest
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedIds(new Set())}
+              className="ml-auto text-[9px] text-slate-500 hover:text-primary"
+            >
+              Clear selection
+            </button>
+          </div>
+        ) : null}
+
         {view === "accounts" ? (
           <>
           <AdminDesktopTable>
-            <table className="w-full min-w-[1040px] text-left">
+            <table className="w-full min-w-[1200px] text-left">
               <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
                 <tr>
+                  <th className="w-8 py-2 pl-4">
+                    <SelectBox
+                      label="Select all accounts in this view"
+                      checked={allVisibleSelected}
+                      onChange={toggleAllVisible}
+                    />
+                  </th>
                   <th className="px-4 py-2 font-medium">Company</th>
                   <th className="px-4 py-2 font-medium">Primary contact</th>
                   <th className="px-4 py-2 font-medium">Source</th>
+                  <th className="px-4 py-2 font-medium">Events</th>
                   <th className="px-4 py-2 font-medium">Owner</th>
                   <th className="px-4 py-2 font-medium">Deals</th>
                   <th className="px-4 py-2 font-medium">Lifetime value</th>
@@ -396,13 +580,20 @@ export function LeadsClient({
                   return (
                     <tr
                       key={client.id}
-                      className="hover:bg-slate-50"
+                      className={cn("hover:bg-slate-50", selectedIds.has(client.id) && "bg-primary/5")}
                       onClick={(event) => {
                         if ((event.target as HTMLElement).closest("a,button,input,select,textarea,label")) return
                         if (!isModifiedClick(event)) return
                         openInNewTab(adminAccountPath(client.id))
                       }}
                     >
+                      <td className="py-3 pl-4">
+                        <SelectBox
+                          label={`Select ${client.name}`}
+                          checked={selectedIds.has(client.id)}
+                          onChange={(checked) => toggleSelected(client.id, checked)}
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <Link href={adminAccountPath(client.id)} className="font-semibold text-primary hover:underline">
                           {client.name}
@@ -435,6 +626,7 @@ export function LeadsClient({
                           </StatusPill>
                         </div>
                       </td>
+                      <td className="px-4 py-3">{eventChips(client)}</td>
                       <td className="px-4 py-3">
                         <select
                           value={client.owner_profile_id ?? ""}
@@ -458,7 +650,7 @@ export function LeadsClient({
                 })}
                 {filteredClients.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-14 text-center text-[10px] text-slate-400">
+                    <td colSpan={9} className="px-4 py-14 text-center text-[10px] text-slate-400">
                       No accounts match this view.
                     </td>
                   </tr>
@@ -501,13 +693,21 @@ export function LeadsClient({
         ) : (
           <>
           <AdminDesktopTable>
-            <table className="w-full min-w-[980px] text-left">
+            <table className="w-full min-w-[1140px] text-left">
               <thead className="bg-[#fafbfc] text-[8px] uppercase tracking-wide text-[#92969e]">
                 <tr>
+                  <th className="w-8 py-2 pl-4">
+                    <SelectBox
+                      label="Select all contacts in this view"
+                      checked={allVisibleSelected}
+                      onChange={toggleAllVisible}
+                    />
+                  </th>
                   <th className="px-4 py-2 font-medium">Contact</th>
                   <th className="px-4 py-2 font-medium">Company</th>
                   <th className="px-4 py-2 font-medium">Details</th>
                   <th className="px-4 py-2 font-medium">Source</th>
+                  <th className="px-4 py-2 font-medium">Events</th>
                   <th className="px-4 py-2 font-medium">Owner</th>
                 </tr>
               </thead>
@@ -515,13 +715,20 @@ export function LeadsClient({
                 {contactRows.map(({ client, contact }) => (
                   <tr
                     key={contact.id}
-                    className="hover:bg-slate-50"
+                    className={cn("hover:bg-slate-50", selectedIds.has(client.id) && "bg-primary/5")}
                     onClick={(event) => {
                       if ((event.target as HTMLElement).closest("a,button,input,select,textarea,label")) return
                       if (!isModifiedClick(event)) return
                       openInNewTab(adminContactPath(client.id, contact.id))
                     }}
                   >
+                    <td className="py-3 pl-4">
+                      <SelectBox
+                        label={`Select ${contact.full_name}`}
+                        checked={selectedIds.has(client.id)}
+                        onChange={(checked) => toggleSelected(client.id, checked)}
+                      />
+                    </td>
                     <td className="px-4 py-3">
                       <Link
                         href={adminContactPath(client.id, contact.id)}
@@ -547,6 +754,7 @@ export function LeadsClient({
                         {ACCOUNT_SOURCE_LABELS[client.source]}
                       </StatusPill>
                     </td>
+                    <td className="px-4 py-3">{eventChips(client)}</td>
                     <td className="px-4 py-3">
                       <select
                         value={client.owner_profile_id ?? ""}
@@ -566,7 +774,7 @@ export function LeadsClient({
                 ))}
                 {contactRows.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-14 text-center text-[10px] text-slate-400">
+                    <td colSpan={7} className="px-4 py-14 text-center text-[10px] text-slate-400">
                       No contacts match this view.
                     </td>
                   </tr>

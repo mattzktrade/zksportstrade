@@ -78,6 +78,10 @@ export type ClientDirectoryRow = {
   deal_count: number
   lifetime_spend: number
   last_activity_at: string
+  /** Events staff tagged on the account. */
+  interest_race_ids: string[]
+  /** Events the account has an enquiry or deal for. */
+  enquiry_race_ids: string[]
 }
 
 export type StaffOption = {
