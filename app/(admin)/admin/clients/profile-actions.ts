@@ -280,7 +280,7 @@ export async function createCrmAccount(input: {
       email: blank(input.email) ?? primary?.email ?? null,
       phone: blank(input.phone) ?? primary?.phone ?? null,
       notes: blank(input.notes),
-      owner_profile_id: ownerProfileId,
+      owner_profile_id: ownerProfileId ?? gate.profile.id,
       lifecycle: created.lifecycle,
       lead_stage: created.leadStage,
       billing_address_line1: blank(input.billing?.line1),
@@ -518,6 +518,11 @@ export async function upsertCrmContact(input: {
     .maybeSingle()
   if (error) return { ok: false, message: error.message }
   const createdId = data?.id ? String(data.id) : undefined
+  await gate.supabase
+    .from("crm_accounts")
+    .update({ owner_profile_id: gate.profile.id, updated_at: new Date().toISOString() })
+    .eq("id", accountId)
+    .is("owner_profile_id", null)
   const supplierId = await syncLinkedSupplierFromAccount(gate.supabase, accountId)
   revalidateCompany(accountId, createdId, supplierId)
   return { ok: true, message: "Contact added.", contactId: createdId }

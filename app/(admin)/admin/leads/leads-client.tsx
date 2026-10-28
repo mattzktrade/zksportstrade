@@ -142,7 +142,7 @@ export function LeadsClient({
   const [companyName, setCompanyName] = useState("")
   const [accountTypes, setAccountTypes] = useState<AccountKind[]>([])
   const [source, setSource] = useState<AccountSource>("manual")
-  const [ownerId, setOwnerId] = useState("")
+  const [ownerId, setOwnerId] = useState(currentProfileId)
   const [line1, setLine1] = useState("")
   const [line2, setLine2] = useState("")
   const [city, setCity] = useState("")
@@ -216,7 +216,7 @@ export function LeadsClient({
     setCompanyName("")
     setAccountTypes([])
     setSource("manual")
-    setOwnerId("")
+    setOwnerId(currentProfileId)
     setLine1("")
     setLine2("")
     setCity("")
@@ -675,7 +675,6 @@ export function LeadsClient({
                     onChange={(e) => setOwnerId(e.target.value)}
                     className="h-11 w-full rounded-md border bg-white px-3"
                   >
-                    <option value="">Unassigned — needs allocating</option>
                     {staffOptions.map((owner) => (
                       <option key={owner.id} value={owner.id}>
                         {owner.name}
