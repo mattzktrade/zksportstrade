@@ -1,6 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { sendMarketingOutreachEmail } from "@/lib/email/send-marketing-outreach"
-import { suggestedEnquiryAction } from "@/lib/crm/deal-pipeline"
 import {
   missingOutreachRelation,
   RETRYABLE_OUTREACH_SKIP_REASONS,
@@ -8,7 +7,7 @@ import {
   type OutreachChannelOutcome,
 } from "@/lib/integrations/marketing-leads/outreach-labels"
 import { stopMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-stop"
-import { outreachDueAt } from "@/lib/integrations/marketing-leads/outreach-delay"
+import { outreachDueAt, outreachSendWindowStart } from "@/lib/integrations/marketing-leads/outreach-delay"
 import { resolveOutreachInterestForDeal } from "@/lib/integrations/marketing-leads/outreach-interest"
 import {
   listOutreachPlaceholders,
@@ -288,6 +287,17 @@ async function sendEmailChannel(
   return { status: "failed" }
 }
 
+/** Read separately so the sequence keeps running if the column is not migrated yet. */
+async function whatsappBlocked(admin: AdminClient, enrollmentId: string): Promise<boolean> {
+  const { data, error } = await admin
+    .from("marketing_outreach_enrollments")
+    .select("whatsapp_blocked")
+    .eq("id", enrollmentId)
+    .maybeSingle()
+  if (error) return false
+  return data?.whatsapp_blocked === true
+}
+
 async function sendWhatsAppChannel(
   admin: AdminClient,
   enrollment: MarketingOutreachEnrollment,
@@ -314,6 +324,17 @@ async function sendWhatsAppChannel(
       skipReason: "whatsapp_disabled",
     })
     return { status: "skipped", skipReason: "whatsapp_disabled" }
+  }
+  if (await whatsappBlocked(admin, enrollment.id)) {
+    await recordSend(admin, {
+      enrollmentId: enrollment.id,
+      dealId: enrollment.deal_id,
+      stage,
+      channel: "whatsapp",
+      status: "skipped",
+      skipReason: "whatsapp_blocked",
+    })
+    return { status: "skipped", skipReason: "whatsapp_blocked" }
   }
   const vars = outreachVarsForEnrollment(enrollment, interest)
   const body = renderOutreachTemplate(step.whatsapp_body, vars)
@@ -373,18 +394,6 @@ async function sendWhatsAppChannel(
   return { status: "failed" }
 }
 
-async function markEnquiryContacted(admin: AdminClient, dealId: string) {
-  await admin
-    .from("deals")
-    .update({
-      enquiry_stage: "contacted",
-      next_action: suggestedEnquiryAction("contacted"),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", dealId)
-    .eq("enquiry_stage", "new")
-}
-
 function delayForNextStep(steps: MarketingOutreachStep[], nextStage: MarketingOutreachStage, now: Date): string {
   return outreachDueAt(steps.find((row) => row.stage === nextStage), now)
 }
@@ -417,6 +426,16 @@ async function processEnrollment(
   const step = steps.find((row) => row.stage === nextStage)
   if (!step) return { sent: 0, skipped: 0, failed: 1 }
 
+  const windowStart = outreachSendWindowStart(nextStage, enrollment.phone_digits || enrollment.phone, now)
+  if (windowStart) {
+    await admin
+      .from("marketing_outreach_enrollments")
+      .update({ next_stage_due_at: windowStart.toISOString(), updated_at: now.toISOString() })
+      .eq("id", enrollment.id)
+      .eq("status", "active")
+    return { sent: 0, skipped: 0, failed: 0 }
+  }
+
   const interest = await resolveOutreachInterestForDeal(admin, enrollment.deal_id)
   if (interest.event !== enrollment.interest_event || interest.packageName !== enrollment.interest_package) {
     await admin
@@ -444,9 +463,6 @@ async function processEnrollment(
     (emailStatus.status === "sent" && !emailStatus.unchanged) ||
     (whatsappStatus.status === "sent" && !whatsappStatus.unchanged)
   if (sentNew) {
-    if (nextStage === 1) {
-      await markEnquiryContacted(admin, enrollment.deal_id)
-    }
     const summaryParts = [
       emailStatus.status === "sent" ? "email" : emailStatus.status === "skipped" ? "email skipped" : "email failed",
       whatsappStatus.status === "sent" ? "WhatsApp" : whatsappStatus.status === "skipped" ? "WhatsApp skipped" : "WhatsApp failed",

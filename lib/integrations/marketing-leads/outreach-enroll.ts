@@ -6,6 +6,7 @@ import { firstNameFromFullName } from "@/lib/integrations/marketing-leads/outrea
 import { MARKETING_OUTREACH_SEQUENCE } from "@/lib/integrations/marketing-leads/outreach-types"
 import { normalizeMarketingPhone } from "@/lib/integrations/marketing-leads/parse"
 import { processMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-process"
+import { findActiveOutreachByEmail, findActiveOutreachByPhone } from "@/lib/integrations/marketing-leads/outreach-store"
 
 function one<T>(value: T | T[] | null | undefined): T | null {
   if (value == null) return null
@@ -56,6 +57,29 @@ export async function enrollMarketingOutreach(dealId: string): Promise<{ ok: boo
   const phoneDigits = phone ? normalizeMarketingPhone(phone) : ""
   if (!email && phoneDigits.length < 8) {
     return { ok: true, enrolled: false, message: "No email or phone." }
+  }
+
+  const existing =
+    (email ? await findActiveOutreachByEmail(admin, email) : null) ??
+    (phoneDigits.length >= 8 ? await findActiveOutreachByPhone(admin, phoneDigits) : null)
+  if (existing && existing.deal_id !== dealId) {
+    await admin.from("deal_activities").insert([
+      {
+        deal_id: dealId,
+        actor_profile_id: null,
+        action: "marketing_outreach_duplicate",
+        summary: "Already in marketing follow-up on another enquiry — not enrolled again",
+        metadata: { otherDealId: existing.deal_id },
+      },
+      {
+        deal_id: existing.deal_id,
+        actor_profile_id: null,
+        action: "marketing_outreach_duplicate",
+        summary: "Same person sent another enquiry — follow-up continues here only",
+        metadata: { otherDealId: dealId },
+      },
+    ])
+    return { ok: true, enrolled: false, message: "Already in follow-up on another enquiry." }
   }
 
   const interest = await resolveOutreachInterestForDeal(admin, dealId)

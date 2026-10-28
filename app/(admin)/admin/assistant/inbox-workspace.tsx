@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import {
   channelLabel,
   formatInboxTime,
+  INBOX_NO_CAMPAIGN,
   inboxRowVisible,
   inboxStatusLabel,
   inboxThreadStub,
@@ -36,8 +37,9 @@ async function fetchInboxThread(id: string): Promise<InboxThread> {
 
 const VIEWS: Array<{ id: InboxViewFilter; label: string }> = [
   { id: "all", label: "All" },
-  { id: "replied", label: "They replied" },
-  { id: "waiting", label: "Waiting" },
+  { id: "needs_reply", label: "Needs our reply" },
+  { id: "replied", label: "Have replied" },
+  { id: "waiting", label: "No reply yet" },
   { id: "closed", label: "Done" },
 ]
 
@@ -92,6 +94,11 @@ const InboxListRow = memo(function InboxListRow({
           {channelLabel(row.channel)}
         </span>
         {row.dealReference ? <span className="truncate text-[10px] text-[#80848d]">{row.dealReference}</span> : null}
+        {row.campaignName ? (
+          <span className="truncate rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+            {row.campaignName}
+          </span>
+        ) : null}
       </span>
       <span className="mt-0.5 block truncate text-[12px] text-[#4b5058]">{row.preview}</span>
       <span className={cn("mt-1 block text-[11px]", needsYou ? "font-medium text-emerald-700" : "text-[#80848d]")}>
@@ -107,16 +114,21 @@ export function InboxWorkspace({
   selected: initialThread,
   header,
   footer,
+  initialView = "all",
+  initialCampaign = "",
 }: {
   rows: InboxRow[]
   selectedId: string | null
   selected: InboxThread | null
   header?: ReactNode
   footer?: ReactNode
+  initialView?: InboxViewFilter
+  initialCampaign?: string
 }) {
   const [query, setQuery] = useState("")
-  const [view, setView] = useState<InboxViewFilter>("all")
+  const [view, setView] = useState<InboxViewFilter>(initialView)
   const [channel, setChannel] = useState<InboxChannelFilter>("all")
+  const [campaign, setCampaign] = useState(initialCampaign)
   const [rows, setRows] = useState(initialRows)
   const [selectedId, setSelectedId] = useState(initialSelectedId)
   const [thread, setThread] = useState<InboxThread | null>(initialThread)
@@ -132,9 +144,28 @@ export function InboxWorkspace({
   }, [initialRows])
 
   const visible = useMemo(
-    () => rows.filter((row) => inboxRowVisible(row, { query, channel, view })),
-    [rows, query, channel, view],
+    () => rows.filter((row) => inboxRowVisible(row, { query, channel, view, campaign })),
+    [rows, query, channel, view, campaign],
   )
+  const viewCounts = useMemo(() => {
+    const counts = {} as Record<InboxViewFilter, number>
+    for (const item of VIEWS) {
+      counts[item.id] = rows.filter((row) =>
+        inboxRowVisible(row, { query: "", channel, view: item.id, campaign }),
+      ).length
+    }
+    return counts
+  }, [rows, channel, campaign])
+  const campaignOptions = useMemo(() => {
+    const options = new Map<string, { name: string; needsReply: number }>()
+    for (const row of rows) {
+      if (!row.campaignId) continue
+      const entry = options.get(row.campaignId) ?? { name: row.campaignName || "Campaign", needsReply: 0 }
+      if (row.status !== "closed" && row.wait === "replied") entry.needsReply += 1
+      options.set(row.campaignId, entry)
+    }
+    return [...options.entries()].map(([id, entry]) => ({ id, ...entry }))
+  }, [rows])
 
   const loadThread = useCallback(async (id: string, force = false) => {
     const request = ++requestRef.current
@@ -252,6 +283,26 @@ export function InboxWorkspace({
                 className="h-9 w-full rounded-md border pl-9 pr-3 text-[12px] outline-none focus:border-primary/50"
               />
             </div>
+            {campaignOptions.length > 0 ? (
+              <select
+                value={campaign}
+                onChange={(event) => setCampaign(event.target.value)}
+                aria-label="Campaign"
+                className={cn(
+                  "h-8 w-full rounded-md border bg-white px-2 text-[12px]",
+                  campaign ? "border-slate-900 font-medium text-slate-900" : "text-slate-600",
+                )}
+              >
+                <option value="">All conversations</option>
+                {campaignOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                    {option.needsReply > 0 ? ` (${option.needsReply} need a reply)` : ""}
+                  </option>
+                ))}
+                <option value={INBOX_NO_CAMPAIGN}>Not from a campaign</option>
+              </select>
+            ) : null}
             <div className="flex flex-wrap gap-1">
               {CHANNELS.map((item) => (
                 <button
@@ -275,10 +326,15 @@ export function InboxWorkspace({
                   onClick={() => setView(item.id)}
                   className={cn(
                     "rounded-md px-2 py-1 text-[11px] font-medium",
-                    view === item.id ? "bg-slate-900 text-white" : "text-muted-foreground hover:bg-slate-50",
+                    view === item.id
+                      ? "bg-slate-900 text-white"
+                      : item.id === "needs_reply" && viewCounts.needs_reply > 0
+                        ? "bg-red-50 text-primary"
+                        : "text-muted-foreground hover:bg-slate-50",
                   )}
                 >
                   {item.label}
+                  {item.id !== "all" ? <span className="ml-1 tabular-nums opacity-70">{viewCounts[item.id]}</span> : null}
                 </button>
               ))}
             </div>

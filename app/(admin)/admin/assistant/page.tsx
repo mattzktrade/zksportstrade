@@ -4,13 +4,14 @@ import { hasCmsPermission } from "@/lib/auth/permissions"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 import { AdminPageHeader } from "@/components/admin/admin-page-kit"
-import { inboxWaitState, previewText, type InboxRow } from "@/lib/assistant/inbox"
+import { inboxWaitState, isInboxViewFilter, previewText, type InboxRow } from "@/lib/assistant/inbox"
 import { loadInboxThreadById } from "@/lib/assistant/inbox-load"
 import { mapAssistantSettings } from "@/lib/assistant/settings"
 import { latestMessagePreviews } from "@/lib/assistant/store"
 import { listMarketingOutreachForDeals } from "@/lib/integrations/marketing-leads/outreach-store"
 import { ASSISTANT_KNOWLEDGE_HREF, ASSISTANT_READINESS_HREF } from "@/lib/assistant/types"
 import { isInboundEmailWebhookConfigured } from "@/lib/assistant/email-inbound-config"
+import { UNMATCHED_CAMPAIGN_ID } from "@/lib/crm/marketing-campaigns"
 import { InboxWorkspace } from "./inbox-workspace"
 import { AssistantSettingsForm } from "./settings-form"
 import { EmailRepliesSetup } from "./email-replies-setup"
@@ -20,10 +21,15 @@ export const dynamic = "force-dynamic"
 export default async function AssistantInboxPage({
   searchParams,
 }: {
-  searchParams: Promise<{ c?: string }>
+  searchParams: Promise<{ c?: string; view?: string; status?: string; campaign?: string }>
 }) {
   const profile = await requireAdmin()
-  const { c: selectedId } = await searchParams
+  const { c: selectedId, view: viewParam, status: statusParam, campaign: campaignParam } = await searchParams
+  const initialView = isInboxViewFilter(viewParam)
+    ? viewParam
+    : statusParam === "needs_review"
+      ? "needs_reply"
+      : "all"
   const supabase = await createClient()
   const admin = createAdminClient()
   const conversationSelect =
@@ -62,12 +68,29 @@ export default async function AssistantInboxPage({
       ? listMarketingOutreachForDeals(repliedDealIds)
       : Promise.resolve({} as Awaited<ReturnType<typeof listMarketingOutreachForDeals>>),
     dealChunks.length > 0
-      ? Promise.all(dealChunks.map((chunk) => supabase.from("deals").select("id, reference").in("id", chunk))).then(
-          (results) => results.flatMap((result) => result.data ?? []),
-        )
-      : Promise.resolve([] as Array<{ id: string; reference: string | null }>),
+      ? Promise.all(
+          dealChunks.map((chunk) => supabase.from("deals").select("id, reference, source, race_id").in("id", chunk)),
+        ).then((results) => results.flatMap((result) => result.data ?? []))
+      : Promise.resolve([] as Array<{ id: string; reference: string | null; source: string | null; race_id: string | null }>),
   ])
   const dealRef = new Map(dealRows.map((row) => [String(row.id), String(row.reference ?? "")]))
+  const marketingDeals = dealRows.filter((row) => row.source === "marketing")
+  const campaignRaceIds = [...new Set(marketingDeals.map((row) => row.race_id).filter(Boolean))] as string[]
+  const { data: raceRows } = campaignRaceIds.length
+    ? await supabase.from("races").select("id, name").in("id", campaignRaceIds)
+    : { data: [] as Array<{ id: string; name: string | null }> }
+  const raceName = new Map((raceRows ?? []).map((row) => [String(row.id), String(row.name ?? "Event")]))
+  const dealCampaign = new Map(
+    marketingDeals.map((row) => {
+      const raceId = row.race_id && raceName.has(String(row.race_id)) ? String(row.race_id) : null
+      return [
+        String(row.id),
+        raceId
+          ? { id: raceId, name: raceName.get(raceId) ?? "Event" }
+          : { id: UNMATCHED_CAMPAIGN_ID, name: "No event matched" },
+      ]
+    }),
+  )
 
   const mapped: InboxRow[] = conversations.map((row) => {
     const lastClientMessageAt = row.last_client_message_at ? String(row.last_client_message_at) : null
@@ -94,6 +117,8 @@ export default async function AssistantInboxPage({
       dealId,
       dealReference: dealId ? dealRef.get(dealId) || null : null,
       outreachLabel: dealId ? outreach[dealId]?.label ?? null : null,
+      campaignId: dealId ? dealCampaign.get(dealId)?.id ?? null : null,
+      campaignName: dealId ? dealCampaign.get(dealId)?.name ?? null : null,
     }
   })
 
@@ -116,6 +141,8 @@ export default async function AssistantInboxPage({
       rows={mapped}
       selectedId={selectedId ?? null}
       selected={selected}
+      initialView={initialView}
+      initialCampaign={campaignParam?.trim() || ""}
       header={
         <AdminPageHeader
           title="Inbox"

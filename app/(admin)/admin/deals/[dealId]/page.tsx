@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/admin/require-admin"
 import { getCrmAccountOptions, getDealPackagePicker } from "@/lib/crm/deals"
 import { getDealDetailPageData } from "@/lib/crm/deal-detail"
 import { getSalesStaffOptions } from "@/lib/crm/leads"
+import { listCallAttemptsForDeals } from "@/lib/crm/call-attempts-store"
 import { getSuppliers } from "@/lib/inventory/suppliers"
 import { hasCmsPermission, canSendNativeBookingForm, canSignNativeBookingForm } from "@/lib/auth/permissions"
 import { DealDetailClient } from "./deal-detail-client"
@@ -26,10 +27,12 @@ export default async function AdminDealDetailPage({
   if (!data) notFound()
 
   const { packageOptions } = packagePicker
+  const callsByDeal = await listCallAttemptsForDeals([data.deal.id])
 
   return (
     <DealDetailClient
       data={data}
+      callSummary={callsByDeal[data.deal.id]}
       accountOptions={accountOptions}
       packageOptions={packageOptions}
       staffOptions={staffOptions}

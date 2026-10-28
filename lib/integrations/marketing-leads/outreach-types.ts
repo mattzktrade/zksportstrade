@@ -17,6 +17,9 @@ export const MARKETING_OUTREACH_STOP_REASONS = [
   "stop_keyword",
   "completed",
   "no_channel",
+  "spoke",
+  "purchased",
+  "do_not_contact",
 ] as const
 export type MarketingOutreachStopReason = (typeof MARKETING_OUTREACH_STOP_REASONS)[number]
 
@@ -64,6 +67,7 @@ export type MarketingOutreachEnrollment = {
   updated_at: string
   stopped_at: string | null
   completed_at: string | null
+  whatsapp_blocked?: boolean | null
 }
 
 export type MarketingOutreachSend = {

@@ -15,6 +15,9 @@ const STOP_LABELS: Record<MarketingOutreachStopReason, string> = {
   stop_keyword: "They asked to stop — follow-up stopped",
   completed: "All 3 stages sent",
   no_channel: "No email or phone to send to",
+  spoke: "Spoke on the phone — follow-up stopped",
+  purchased: "Booked — follow-up stopped",
+  do_not_contact: "Do not contact — follow-up stopped",
 }
 
 export function marketingOutreachStopLabel(reason: string | null | undefined): string | null {

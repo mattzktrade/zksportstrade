@@ -1,6 +1,7 @@
 import { enqueuePackageInventoryChannelSyncServer } from "@/lib/integrations/enqueue-server"
 import { sendWebsiteCustomerEmail, sendWebsiteOrderEmail } from "@/lib/email/send-website-order"
 import { getAdgpConfig } from "@/lib/integrations/adgp/config"
+import { stopOutreachForWebsiteBuyer } from "@/lib/integrations/marketing-leads/outreach-purchase"
 import type { AdgpAddress, AdgpBuyer, AdgpOrderResult } from "@/lib/integrations/adgp/types"
 import { createAdminClient } from "@/lib/supabase/admin"
 
@@ -168,6 +169,12 @@ export async function commitAdgpOrder(input: {
       if (!customerMail.ok && !customerMail.skipped) {
         console.error("[adgp] website customer email failed:", customerMail.error)
       }
+      await stopOutreachForWebsiteBuyer(admin, {
+        email: input.buyer.email,
+        phone: input.buyer.phone,
+        orderDealId: fallback.dealId,
+        orderReference: fallback.orderReference,
+      }).catch((error) => console.error("[adgp] stop marketing follow-up failed:", error))
     }
     return fallback
   }
@@ -252,6 +259,12 @@ export async function commitAdgpOrder(input: {
     if (!customerMail.ok && !customerMail.skipped) {
       console.error("[adgp] website customer email failed:", customerMail.error)
     }
+    await stopOutreachForWebsiteBuyer(admin, {
+      email: input.buyer.email,
+      phone: input.buyer.phone,
+      orderDealId: dealId,
+      orderReference: result.orderReference,
+    }).catch((error) => console.error("[adgp] stop marketing follow-up failed:", error))
   }
 
   return result

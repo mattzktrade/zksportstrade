@@ -50,13 +50,15 @@ export function whatsAppReplyNeededEmail(input: {
   preview: string
   href: string
   dealReference?: string | null
+  channel?: "whatsapp" | "email"
 }): { subject: string; text: string } {
   const name = input.clientName.trim() || "A client"
   const deal = input.dealReference?.trim()
+  const via = input.channel === "email" ? "email" : "WhatsApp"
   return {
-    subject: `WhatsApp from ${name} — reply in Inbox`,
+    subject: `${input.channel === "email" ? "Email" : "WhatsApp"} from ${name} — reply in Inbox`,
     text: [
-      `${name} replied on WhatsApp and needs a reply.`,
+      `${name} replied on ${via} and needs a reply.`,
       "",
       input.preview,
       "",

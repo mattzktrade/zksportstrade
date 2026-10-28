@@ -24,6 +24,7 @@ import { isAwaitingZkApprovalDeal, uniqueDealIds } from "@/lib/admin/deal-link"
 import { listMarketingOutreachForDeals, loadMarketingOutreachAdmin } from "@/lib/integrations/marketing-leads/outreach-store"
 import { toEnquiryOutreachBadge } from "@/lib/integrations/marketing-leads/outreach-labels"
 import { expirePastEventEnquiries } from "@/lib/crm/expire-past-event-enquiries"
+import { listCallAttemptsForDeals } from "@/lib/crm/call-attempts-store"
 import { EnquiriesClient } from "./enquiries-client"
 import { AdminRouteShell } from "@/components/admin/admin-route-shell"
 
@@ -50,7 +51,7 @@ function parseOwnerFilter(value: string | undefined): string {
 export default function EnquiriesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ enquiry?: string; stage?: string; owner?: string }>
+  searchParams: Promise<{ enquiry?: string; stage?: string; owner?: string; view?: string; event?: string; source?: string }>
 }) {
   return (
     <AdminRouteShell>
@@ -62,11 +63,11 @@ export default function EnquiriesPage({
 async function EnquiriesPageBody({
   searchParams,
 }: {
-  searchParams: Promise<{ enquiry?: string; stage?: string; owner?: string }>
+  searchParams: Promise<{ enquiry?: string; stage?: string; owner?: string; view?: string; event?: string; source?: string }>
 }) {
   const expiry = expirePastEventEnquiries()
   const profile = await requireAdmin()
-  const { enquiry: initialSelectedId, stage: stageParam, owner: ownerParam } = await searchParams
+  const { enquiry: initialSelectedId, stage: stageParam, owner: ownerParam, view: viewParam, event: eventParam, source: sourceParam } = await searchParams
   const selectedId = initialSelectedId?.trim() || null
   const [allDeals, selectedRows, packagePicker, accountOptions, staffOptions, suppliers, bookingForms, awaitingZkDealIdsRaw, convertedThisMonth] =
     await Promise.all([
@@ -100,9 +101,10 @@ async function EnquiriesPageBody({
       isEnquiryPipelineStage(deal.stage) && !isAwaitingZkApprovalDeal(deal.id, awaitingZkDealIds),
   )
   const { packageOptions, createPackageOptions, eventOptions } = packagePicker
-  const [outreachSummaries, outreachAdmin] = await Promise.all([
+  const [outreachSummaries, outreachAdmin, callsByDeal] = await Promise.all([
     listMarketingOutreachForDeals(enquiryDeals.map((deal) => deal.id)),
     loadMarketingOutreachAdmin(),
+    listCallAttemptsForDeals(enquiryDeals.map((deal) => deal.id)),
   ])
   const outreachByDeal = Object.fromEntries(
     Object.entries(outreachSummaries).map(([id, summary]) => [id, toEnquiryOutreachBadge(summary)]),
@@ -113,6 +115,7 @@ async function EnquiriesPageBody({
       <EnquiriesClient
         deals={enquiryDeals}
         outreachByDeal={outreachByDeal}
+        callsByDeal={callsByDeal}
         outreachSequenceEnabled={outreachAdmin.settings?.enabled === true}
         convertedThisMonth={convertedThisMonth}
         packageOptions={createPackageOptions}
@@ -130,6 +133,9 @@ async function EnquiriesPageBody({
         initialSelectedId={selectedId}
         initialStageTab={parseStageTab(stageParam)}
         initialOwnerFilter={parseOwnerFilter(ownerParam)}
+        initialCallList={viewParam === "calls"}
+        initialEventId={eventParam?.trim() || ""}
+        initialSource={sourceParam === "marketing" ? "marketing" : ""}
       />
     </div>
   )

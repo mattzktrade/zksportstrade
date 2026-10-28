@@ -98,7 +98,7 @@ const navigation: NavItem[] = [
   { name: "Operations", href: "/admin/operations", icon: Wrench },
   { name: "Check-in", href: "/admin/check-in", icon: QrCode },
   { name: "Finance", href: "/admin/finance", icon: CircleDollarSign },
-  { name: "Marketing", icon: Megaphone, disabled: true },
+  { name: "Marketing", href: "/admin/marketing", icon: Megaphone },
   { name: "Help", href: "/admin/help", icon: CircleHelp },
   { name: "Settings", href: "/admin/settings", icon: Settings },
 ]
@@ -112,6 +112,7 @@ const JUMP_KEYWORDS: Record<string, string> = {
   "/admin/sales-tracker": "sales tracker revenue demand conversion event product stock planning",
   "/admin/templates": "templates email whatsapp marketing follow-up sequence messages",
   "/admin/catalog/events": "races calendar",
+  "/admin/marketing": "marketing campaigns meta ads leads results analytics responses abu dhabi mexico",
   "/admin/orders": "bookings invoices portal",
   "/admin/finance": "invoices payments xero",
   "/admin/check-in": "check-in scan qr door tickets arrived guest list",
@@ -159,6 +160,7 @@ function adminPageTitle(pathname: string): string {
   if (pathname.startsWith("/admin/booking-requests")) return "Paddock requests"
   if (pathname.startsWith("/admin/agents")) return "Agents"
   if (pathname.startsWith("/admin/place-order")) return "Place order"
+  if (pathname.startsWith("/admin/marketing")) return "Marketing"
   if (pathname.startsWith("/admin/help")) return "Help"
   if (pathname.startsWith("/admin/settings") || pathname.startsWith("/admin/integrations")) return "Settings"
   return "Admin"

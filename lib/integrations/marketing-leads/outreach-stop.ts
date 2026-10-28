@@ -44,7 +44,13 @@ export async function stopMarketingOutreach(
                 ? "Lead asked to stop marketing follow-up"
                 : reason === "no_channel"
                   ? "No email or phone for marketing follow-up"
-                  : "Marketing follow-up stopped",
+                  : reason === "spoke"
+                    ? "Spoke on the phone — marketing follow-up stopped"
+                    : reason === "purchased"
+                      ? "Booked — marketing follow-up stopped"
+                      : reason === "do_not_contact"
+                        ? "Do not contact — marketing follow-up stopped"
+                        : "Marketing follow-up stopped",
       metadata: { reason },
     })
   }

@@ -25,6 +25,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { requireAdmin } from "@/lib/admin/require-admin"
+import { FollowUpPanel } from "@/components/admin/follow-up-panel"
 import { getSalesDashboardModel } from "@/lib/admin/sales-dashboard-model"
 import { createClient } from "@/lib/supabase/server"
 import { ASSISTANT_REVIEW_HREF } from "@/lib/assistant/types"
@@ -220,9 +221,11 @@ function SalesTrendChart({ months, currency }: { months: SalesMonthBucket[]; cur
 function SalesDashboardView({
   data,
   assistantReviewCount,
+  followUps,
 }: {
   data: SalesDashboardModel
   assistantReviewCount: number
+  followUps: ReactNode
 }) {
   const glance = [
     {
@@ -301,6 +304,8 @@ function SalesDashboardView({
           )
         })}
       </section>
+
+      {followUps}
 
       {assistantReviewCount > 0 ? (
         <Card>
@@ -531,5 +536,15 @@ async function SalesDashboardLoaded() {
     getSalesDashboardModel(profile),
     supabase.from("assistant_conversations").select("id", { count: "exact", head: true }).eq("status", "needs_review"),
   ])
-  return <SalesDashboardView data={data} assistantReviewCount={review.error ? 0 : review.count ?? 0} />
+  return (
+    <SalesDashboardView
+      data={data}
+      assistantReviewCount={review.error ? 0 : review.count ?? 0}
+      followUps={
+        <Suspense fallback={<div className="h-36 animate-pulse rounded-xl bg-muted" />}>
+          <FollowUpPanel ownerProfileId={profile.id} />
+        </Suspense>
+      }
+    />
+  )
 }

@@ -20,6 +20,7 @@ export async function sendAssistantStaffAlert(input: {
   draft?: string
   kind: "review" | "booking_form" | "source" | "reply_needed"
   dealReference?: string | null
+  channel?: "whatsapp" | "email"
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const apiKey = getResendApiKey()
   const from = getResendFromAddress()
@@ -34,6 +35,7 @@ export async function sendAssistantStaffAlert(input: {
           preview: input.draft?.trim() || input.reason,
           href,
           dealReference: input.dealReference,
+          channel: input.channel,
         })
       : null
   const subject = replyNeeded
@@ -55,7 +57,7 @@ export async function sendAssistantStaffAlert(input: {
         .filter(Boolean)
         .join("\n")
   const html = replyNeeded
-    ? `<p>${escapeHtml(input.clientName.trim() || "A client")} replied on WhatsApp and needs a reply.</p><pre style="white-space:pre-wrap;font-family:inherit">${escapeHtml(input.draft?.trim() || input.reason)}</pre>${
+    ? `<p>${escapeHtml(input.clientName.trim() || "A client")} replied on ${input.channel === "email" ? "email" : "WhatsApp"} and needs a reply.</p><pre style="white-space:pre-wrap;font-family:inherit">${escapeHtml(input.draft?.trim() || input.reason)}</pre>${
         input.dealReference?.trim() ? `<p>Enquiry: ${escapeHtml(input.dealReference.trim())}</p>` : ""
       }<p><a href="${escapeHtml(href)}">Reply in Inbox</a></p>`
     : `<p>${escapeHtml(input.reason)}</p>${

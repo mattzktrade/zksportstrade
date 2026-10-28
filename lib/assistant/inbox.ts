@@ -21,7 +21,7 @@ export function inboxWaitLabel(state: InboxWaitState): string {
 
 export function inboxStatusLabel(row: Pick<InboxRow, "status" | "wait" | "hasClientReply">): string {
   if (row.status === "closed") return "Done"
-  if (row.wait === "replied") return "They replied"
+  if (row.wait === "replied") return "Needs our reply"
   if (row.hasClientReply) return "You replied"
   if (row.wait === "waiting") return "Waiting for a reply"
   return "No messages yet"
@@ -61,6 +61,9 @@ export type InboxRow = {
   dealId: string | null
   dealReference: string | null
   outreachLabel: string | null
+  /** Marketing campaign (event) id; only set for Meta leads. */
+  campaignId?: string | null
+  campaignName?: string | null
 }
 
 export type InboxThreadMessage = {
@@ -121,7 +124,19 @@ export function mergeInboxThread(row: InboxRow, thread: InboxThread): InboxThrea
 }
 
 export type InboxChannelFilter = "all" | "whatsapp" | "email"
-export type InboxViewFilter = "all" | "waiting" | "replied" | "closed"
+/** Campaign filter value for conversations that did not come from a Meta campaign. */
+export const INBOX_NO_CAMPAIGN = "none"
+
+export type InboxViewFilter = "all" | "needs_reply" | "waiting" | "replied" | "closed"
+
+export function isInboxViewFilter(value: string | null | undefined): value is InboxViewFilter {
+  return value === "all" || value === "needs_reply" || value === "waiting" || value === "replied" || value === "closed"
+}
+
+/** The client spoke last and the thread is still open, so the next move is ours. */
+export function inboxNeedsOurReply(row: Pick<InboxRow, "status" | "wait">): boolean {
+  return row.status !== "closed" && row.wait === "replied"
+}
 
 export function inboxSearchHaystack(row: InboxRow): string {
   return [
@@ -131,6 +146,7 @@ export function inboxSearchHaystack(row: InboxRow): string {
     row.phone,
     row.dealReference,
     row.outreachLabel,
+    row.campaignName,
     channelLabel(row.channel),
   ]
     .filter(Boolean)
@@ -140,11 +156,15 @@ export function inboxSearchHaystack(row: InboxRow): string {
 
 export function inboxRowVisible(
   row: InboxRow,
-  input: { query: string; channel: InboxChannelFilter; view: InboxViewFilter },
+  input: { query: string; channel: InboxChannelFilter; view: InboxViewFilter; campaign?: string },
 ): boolean {
   if (input.channel !== "all" && row.channel !== input.channel) return false
+  if (input.campaign === INBOX_NO_CAMPAIGN) {
+    if (row.campaignId) return false
+  } else if (input.campaign && (row.campaignId ?? "") !== input.campaign) return false
   if (input.view === "closed") return row.status === "closed"
   if (row.status === "closed") return input.view === "all"
+  if (input.view === "needs_reply" && !inboxNeedsOurReply(row)) return false
   if (input.view === "waiting" && (row.hasClientReply || row.wait !== "waiting")) return false
   if (input.view === "replied" && !row.hasClientReply) return false
   const query = input.query.trim().toLowerCase()

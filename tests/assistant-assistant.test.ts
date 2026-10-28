@@ -414,6 +414,12 @@ test("inbox shows waiting after we send and replied after they write back", () =
   assert.equal(inboxRowVisible(answered, { query: "", channel: "whatsapp", view: "replied" }), true)
   assert.equal(inboxRowVisible(answered, { query: "", channel: "whatsapp", view: "waiting" }), false)
   assert.equal(inboxRowVisible({ ...answered, status: "closed" }, { query: "", channel: "whatsapp", view: "replied" }), false)
+  assert.equal(inboxRowVisible(answered, { query: "", channel: "all", view: "needs_reply" }), false)
+  assert.equal(inboxRowVisible({ ...answered, wait: "replied" }, { query: "", channel: "all", view: "needs_reply" }), true)
+  assert.equal(
+    inboxRowVisible({ ...answered, wait: "replied", status: "closed" }, { query: "", channel: "all", view: "needs_reply" }),
+    false,
+  )
   const stub = inboxThreadStub(answered, Date.parse("2026-10-16T12:16:00.000Z"))
   assert.equal(stub.conversationId, "3")
   assert.equal(stub.displayName, "Raul")

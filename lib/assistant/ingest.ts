@@ -282,7 +282,8 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
     }
   }
 
-  if (event.channel === "whatsapp" && !inserted.duplicate) {
+  const replyChannel = event.channel === "whatsapp" || event.channel === "email" ? event.channel : null
+  if (replyChannel && !inserted.duplicate && event.mediaType !== "reaction") {
     const willAuto = assistantWillAutoReplyFromSettings(
       { ...settings, killSwitch: effectiveKillSwitch(settings) },
       {
@@ -292,29 +293,46 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
       },
     )
     const noticeDue = whatsAppReplyNoticeDue({
-      channel: "whatsapp",
+      channel: replyChannel,
       willAutoReply: willAuto,
       mediaType: event.mediaType,
     })
-    if (noticeDue && !inWhatsAppReplyNotifyBurst(previousLastClientAt, now.getTime())) {
+    if (!inWhatsAppReplyNotifyBurst(previousLastClientAt, now.getTime())) {
       let dealReference: string | null = null
+      let ownerEmail: string | null = null
       if (conversation.dealId) {
-        const { data: deal } = await admin.from("deals").select("reference").eq("id", conversation.dealId).maybeSingle()
+        const { data: deal } = await admin
+          .from("deals")
+          .select("reference, owner_profile_id")
+          .eq("id", conversation.dealId)
+          .maybeSingle()
         dealReference = deal?.reference ? String(deal.reference) : null
+        if (deal?.owner_profile_id) {
+          const { data: owner } = await admin
+            .from("profiles")
+            .select("email")
+            .eq("id", deal.owner_profile_id)
+            .maybeSingle()
+          ownerEmail = owner?.email ? String(owner.email) : null
+        }
       }
-      const sent = await sendAssistantStaffAlert({
-        to: settings.notifyEmails,
-        conversationId: conversation.id,
-        clientName: conversation.displayName,
-        reason: "WhatsApp reply needs a staff response.",
-        draft: whatsAppReplyPreview(event.body, event.mediaType),
-        kind: "reply_needed",
-        dealReference,
-      })
-      if (sent.ok) {
-        await updateConversation(admin, conversation.id, { run_after_at: null })
-      } else {
-        console.error("[assistant-whatsapp] reply notify failed", sent.error)
+      const to = [...(noticeDue ? settings.notifyEmails : []), ...(ownerEmail ? [ownerEmail] : [])]
+      if (to.length > 0) {
+        const sent = await sendAssistantStaffAlert({
+          to,
+          conversationId: conversation.id,
+          clientName: conversation.displayName,
+          reason: `${replyChannel === "email" ? "Email" : "WhatsApp"} reply needs a staff response.`,
+          draft: whatsAppReplyPreview(event.body, event.mediaType),
+          kind: "reply_needed",
+          dealReference,
+          channel: replyChannel,
+        })
+        if (sent.ok && noticeDue) {
+          await updateConversation(admin, conversation.id, { run_after_at: null })
+        } else if (!sent.ok) {
+          console.error("[assistant-inbound] reply notify failed", sent.error)
+        }
       }
     } else if (noticeDue) {
       await updateConversation(admin, conversation.id, { run_after_at: null })

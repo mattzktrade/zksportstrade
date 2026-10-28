@@ -1,3 +1,5 @@
+import { isInsideContactWindow, nextContactWindowTime, timezoneForPhone } from "@/lib/crm/lead-timezone"
+
 export type OutreachDelayStep = {
   delay_hours: number
   delay_minutes: number
@@ -22,4 +24,19 @@ export function outreachDelayMs(step: OutreachDelayStep | null | undefined): num
 
 export function outreachDueAt(step: OutreachDelayStep | null | undefined, now: Date): string {
   return new Date(now.getTime() + outreachDelayMs(step)).toISOString()
+}
+
+/**
+ * Stage 1 always goes straight away. Later stages wait for 9:00–20:00 in the
+ * lead's local time. Returns when to retry, or null when it can send now.
+ */
+export function outreachSendWindowStart(
+  stage: number,
+  phone: string | null | undefined,
+  now: Date,
+): Date | null {
+  if (stage <= 1) return null
+  const zone = timezoneForPhone(phone)
+  if (isInsideContactWindow(now, zone)) return null
+  return nextContactWindowTime(now, zone)
 }

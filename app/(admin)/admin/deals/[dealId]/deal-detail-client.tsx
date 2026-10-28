@@ -8,6 +8,8 @@ import { toast } from "sonner"
 import { updateNativeDealWorkflow } from "@/app/(admin)/actions"
 import { ActionCombobox } from "@/components/admin/action-combobox"
 import { CrmPartySelect } from "@/components/admin/crm-party-select"
+import { EnquiryCallPanel } from "@/components/admin/enquiry-call-panel"
+import type { EnquiryCallSummary } from "@/lib/crm/call-outcomes"
 import { SearchableSelect } from "@/components/admin/searchable-select"
 import {
   DealInvoiceCurrencyToggle,
@@ -257,8 +259,10 @@ export function DealDetailClient({
   currentCanManageFinance,
   canManageOperations,
   canManageDeals,
+  callSummary,
 }: {
   data: DealDetailPageData
+  callSummary?: EnquiryCallSummary
   accountOptions: CrmAccountOption[]
   packageOptions: DealPackageOption[]
   staffOptions: StaffOption[]
@@ -1103,6 +1107,11 @@ export function DealDetailClient({
         </div>
 
         <div className="space-y-3">
+          {deal.source === "marketing" || callSummary ? (
+            <div className="rounded-lg bg-white">
+              <EnquiryCallPanel deal={deal} summary={callSummary} canManage={canManageDeals} />
+            </div>
+          ) : null}
           <AdminPanel>
             <div className="flex items-center justify-between border-b border-[#eceef1] px-4 py-3">
               <h2 className="text-[11px] font-semibold text-[#25272b]">Deal summary</h2>

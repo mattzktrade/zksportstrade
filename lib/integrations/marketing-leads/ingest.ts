@@ -16,6 +16,7 @@ import {
   type MarketingLeadPayload,
 } from "@/lib/integrations/marketing-leads/parse"
 import { enrollMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-enroll"
+import { sendNewLeadAlert } from "@/lib/email/send-new-lead-alert"
 
 export type IngestMarketingLeadResult =
   | { ok: true; dealId: string; dealReference: string; duplicate: boolean }
@@ -532,6 +533,21 @@ export async function ingestMarketingLead(payload: MarketingLeadPayload): Promis
       await enrollMarketingOutreach(String(deal.id))
     } catch (error) {
       console.error("[marketing-outreach] enroll failed", error)
+    }
+
+    try {
+      await sendNewLeadAlert(admin, {
+        dealId: String(deal.id),
+        reference: String(deal.reference ?? ""),
+        ownerProfileId,
+        name: payload.contact.fullName || "New lead",
+        phone: payload.contact.phone,
+        email: payload.contact.email,
+        event: payload.interest.event,
+        packageName: payload.interest.package,
+      })
+    } catch (error) {
+      console.error("[new-lead-alert] failed", error)
     }
 
     return {

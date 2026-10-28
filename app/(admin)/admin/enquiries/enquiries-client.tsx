@@ -101,6 +101,8 @@ import { BookingFormPanel } from "@/app/(admin)/admin/deals/booking-form-panel"
 import type { BookingFormAdminRow, BookingFormEventRow } from "@/lib/booking-forms/types"
 import { stopMarketingOutreachForDeal } from "@/app/(admin)/admin/integrations/marketing-leads/outreach-actions"
 import { marketingFollowUpForEnquiry, type EnquiryOutreachBadge } from "@/lib/integrations/marketing-leads/outreach-labels"
+import { enquiryCallDueAt, enquiryNeedsCall, type EnquiryCallSummary } from "@/lib/crm/call-outcomes"
+import { EnquiryCallLine, EnquiryCallPanel, formatCallDue } from "@/components/admin/enquiry-call-panel"
 
 function sourceIcon(source: string) {
   switch (source) {
@@ -330,6 +332,10 @@ export function EnquiriesClient({
   initialOwnerFilter = "",
   outreachByDeal = {},
   outreachSequenceEnabled = false,
+  callsByDeal = {},
+  initialCallList = false,
+  initialEventId = "",
+  initialSource = "",
 }: {
   deals: DealListRow[]
   convertedThisMonth: number
@@ -350,20 +356,38 @@ export function EnquiriesClient({
   initialOwnerFilter?: string
   outreachByDeal?: Record<string, EnquiryOutreachBadge>
   outreachSequenceEnabled?: boolean
+  callsByDeal?: Record<string, EnquiryCallSummary>
+  initialCallList?: boolean
+  initialEventId?: string
+  initialSource?: string
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const listOverride =
-    initialStageTab || initialOwnerFilter
+  const campaignOverride =
+    initialEventId || initialSource
       ? {
-          ...(initialStageTab ? { stageTab: initialStageTab, kpiFilter: "" as const } : {}),
-          ...(initialOwnerFilter ? { ownerFilter: initialOwnerFilter } : {}),
-          page: 1,
+          query: "",
+          temperatureFilter: "" as const,
+          ownerFilter: "",
+          sourceFilter: initialSource,
+          eventFilter: initialEventId ? [initialEventId] : [],
         }
-      : undefined
+      : {}
+  const listOverride =
+    initialCallList
+      ? { ...campaignOverride, stageTab: "" as const, kpiFilter: "calls" as const, page: 1 }
+      : initialEventId || initialSource
+        ? { ...campaignOverride, stageTab: "" as const, kpiFilter: "" as const, page: 1 }
+        : initialStageTab || initialOwnerFilter
+        ? {
+            ...(initialStageTab ? { stageTab: initialStageTab, kpiFilter: "" as const } : {}),
+            ...(initialOwnerFilter ? { ownerFilter: initialOwnerFilter } : {}),
+            page: 1,
+          }
+        : undefined
   const [listState, setListState] = usePersistedAdminFilters("zk-admin-enquiries-filters-v2", {
     stageTab: "" as EnquiryStageTabId | "",
-    kpiFilter: "" as "" | "attention" | "open",
+    kpiFilter: "" as "" | "attention" | "open" | "calls",
     query: "",
     sourceFilter: "",
     temperatureFilter: "" as "" | EnquiryTemperature,
@@ -423,9 +447,14 @@ export function EnquiriesClient({
   const filtered = useMemo(() => {
     if (kpiFilter === "attention") return scoped.filter(enquiryNeedsAttention)
     if (kpiFilter === "open") return scoped.filter(isOpenEnquiry)
+    if (kpiFilter === "calls") {
+      return scoped
+        .filter((deal) => enquiryNeedsCall(deal, callsByDeal[deal.id]))
+        .sort((a, b) => enquiryCallDueAt(a, callsByDeal[a.id]) - enquiryCallDueAt(b, callsByDeal[b.id]))
+    }
     if (!stageTab || stageTab === "all") return scoped
     return scoped.filter((deal) => enquiryCrmStageFromDeal(deal) === stageTab)
-  }, [scoped, stageTab, kpiFilter])
+  }, [scoped, stageTab, kpiFilter, callsByDeal])
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / ENQUIRY_PAGE_SIZE))
   const currentPage = Math.min(page, pageCount)
@@ -504,6 +533,7 @@ export function EnquiriesClient({
   const warmCount = scoped.filter((deal) => enquiryTemperatureFromDeal(deal) === "warm").length
   const coldCount = scoped.filter((deal) => enquiryTemperatureFromDeal(deal) === "cold").length
   const attentionCount = scoped.filter(enquiryNeedsAttention).length
+  const callListCount = scoped.filter((deal) => enquiryNeedsCall(deal, callsByDeal[deal.id])).length
 
   const eventOptions = useMemo(
     () =>
@@ -721,7 +751,7 @@ export function EnquiriesClient({
         }
       />
 
-      <AdminStats className="sm:grid-cols-2 xl:grid-cols-6">
+      <AdminStats className="sm:grid-cols-2 xl:grid-cols-7">
         <AdminStatCard
           icon={Inbox}
           value={openEnquiries.length}
@@ -784,6 +814,22 @@ export function EnquiriesClient({
             setListState((current) => ({
               ...current,
               kpiFilter: current.kpiFilter === "attention" ? "" : "attention",
+              stageTab: "",
+              page: 1,
+            }))
+          }
+        />
+        <AdminStatCard
+          icon={Phone}
+          value={callListCount}
+          label="Call list"
+          hint="Marketing leads nobody has spoken to yet, by next call due"
+          tone="blue"
+          active={kpiFilter === "calls"}
+          onClick={() =>
+            setListState((current) => ({
+              ...current,
+              kpiFilter: current.kpiFilter === "calls" ? "" : "calls",
               stageTab: "",
               page: 1,
             }))
@@ -1056,6 +1102,7 @@ export function EnquiriesClient({
                           <EnquiryRepliedBadge deal={deal} />
                         </div>
                         <EnquiryOutreachLine outreach={followUpFor(deal)} />
+                        <EnquiryCallLine summary={callsByDeal[deal.id]} />
                       </td>
                       <td className="whitespace-nowrap px-3 py-3">
                         {currentCanManageDeals ? (
@@ -1081,6 +1128,13 @@ export function EnquiriesClient({
                         <p className="truncate" title={suggestedEnquiryAction(enquiryCrmStageFromDeal(deal))}>
                           {suggestedEnquiryAction(enquiryCrmStageFromDeal(deal))}
                         </p>
+                        {kpiFilter === "calls" ? (
+                          <p className="mt-0.5 truncate text-[8px] font-medium text-slate-500">
+                            {callsByDeal[deal.id]?.attempts ? deal.next_action || "Call" : "Call 1"}
+                            {" · "}
+                            {formatCallDue(enquiryCallDueAt(deal, callsByDeal[deal.id])) || "no time set"}
+                          </p>
+                        ) : null}
                       </td>
                     </tr>
                   )
@@ -1150,6 +1204,7 @@ export function EnquiriesClient({
                       <EnquiryRepliedBadge deal={deal} />
                     </div>
                     <EnquiryOutreachLine outreach={followUpFor(deal)} />
+                    <EnquiryCallLine summary={callsByDeal[deal.id]} />
                     {enquiryAttentionReason(deal) ? (
                       <p className="mt-1 text-[8px] font-medium text-red-600">{enquiryAttentionReason(deal)}</p>
                     ) : null}
@@ -1213,6 +1268,12 @@ export function EnquiriesClient({
                   </StatusPill>
                 </div>
 
+                <EnquiryCallPanel
+                  deal={selected}
+                  summary={callsByDeal[selected.id]}
+                  canManage={currentCanManageDeals}
+                />
+
                 {selectedOutreach ? (
                   <div className="rounded-lg border border-slate-200 p-3">
                     <h3 className="text-[9px] font-semibold text-slate-800">Marketing follow-up</h3>
@@ -1229,7 +1290,6 @@ export function EnquiriesClient({
                     ) : null}
                   </div>
                 ) : null}
-
                 <div>
                   <h3 className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Interest</h3>
                   <p className="mt-1 text-[10px] font-medium text-slate-800">{enquiryInterestLabel(selected)}</p>

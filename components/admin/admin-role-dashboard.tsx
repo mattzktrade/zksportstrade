@@ -27,6 +27,7 @@ import {
   type AdminDashboardModel,
   type MonthBucket,
 } from "@/lib/admin/admin-dashboard-metrics"
+import { FollowUpPanel } from "@/components/admin/follow-up-panel"
 import { PURCHASE_ORDERS_AWAITING_BUY_PRICE_HREF } from "@/lib/admin/purchase-order-buy-price"
 import { formatMoneyCompact } from "@/lib/format/money"
 import { SOURCING_REQUIRED_HREF } from "@/lib/crm/sourcing-notifications"
@@ -345,6 +346,10 @@ export function AdminRoleDashboard() {
           <p className="mt-0.5 text-[11px] text-[#80858d]">{ADMIN_DASHBOARD_DESCRIPTION}</p>
         </div>
       </header>
+
+      <Suspense fallback={<div className="h-36 animate-pulse rounded-xl bg-muted" />}>
+        <FollowUpPanel />
+      </Suspense>
 
       <section className="grid gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,0.9fr)]">
         <Suspense fallback={<div className="h-64 animate-pulse rounded-xl bg-muted" />}>
