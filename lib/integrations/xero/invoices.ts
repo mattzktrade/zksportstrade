@@ -51,6 +51,11 @@ function xeroInvoiceEmailOnCreate(): boolean {
   return process.env.XERO_INVOICE_EMAIL_ON_CREATE !== "false"
 }
 
+/** One key per attempt: inline retries inside xeroRequest share it, later attempts get a new one. */
+export function xeroAttemptIdempotencyKey(baseKey: string, now = Date.now()): string {
+  return `${baseKey}-${now.toString(36)}`
+}
+
 function addDays(isoDate: string, days: number): string {
   const d = new Date(isoDate)
   d.setUTCDate(d.getUTCDate() + days)
@@ -503,15 +508,18 @@ export async function createXeroInvoiceForOrder(
     (candidate) => candidate.InvoiceID && !["DELETED", "VOIDED"].includes((candidate.Status ?? "").toUpperCase()),
   )
   if (!xeroInv) {
+    const baseKey = options?.replaceKey
+      ? `zk-invoice-${orderId}-r${options.replaceKey}${splitInvoice ? `-${inv.id}` : ""}`
+      : splitInvoice
+        ? `zk-invoice-${orderId}-${inv.id}`
+        : `zk-invoice-${orderId}`
     const result = await xeroRequest<{ Invoices?: XeroInvoice[] }>(
       "POST",
       "/api.xro/2.0/Invoices",
       {
-        idempotencyKey: options?.replaceKey
-          ? `zk-invoice-${orderId}-r${options.replaceKey}${splitInvoice ? `-${inv.id}` : ""}`
-          : splitInvoice
-            ? `zk-invoice-${orderId}-${inv.id}`
-            : `zk-invoice-${orderId}`,
+        // Xero replays the stored response for a reused key, including a 500 from an outage.
+        // The Reference lookup above is what prevents duplicate invoices across attempts.
+        idempotencyKey: xeroAttemptIdempotencyKey(baseKey),
         body: {
           Invoices: [
             {
@@ -858,7 +866,7 @@ export async function voidXeroInvoiceForOrder(orderId: string): Promise<void> {
         "POST",
         `/api.xro/2.0/Invoices/${encodeURIComponent(invoice.xero_invoice_id)}`,
         {
-          idempotencyKey: `zk-void-${orderId}-${invoice.xero_invoice_id}`,
+          idempotencyKey: xeroAttemptIdempotencyKey(`zk-void-${orderId}-${invoice.xero_invoice_id}`),
           body: {
             Invoices: [{ InvoiceID: invoice.xero_invoice_id, Status: "VOIDED" }],
           },

@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 import { formatXeroApiErrorBody } from "../lib/integrations/xero/format-error"
+import { xeroAttemptIdempotencyKey } from "../lib/integrations/xero/invoices"
 import {
   parseXeroOrgDefaultsCache,
   selectXeroAbuDhabiTaxType,
@@ -106,6 +107,19 @@ test("expired Xero org defaults stay usable so invoice create does not wait on T
   assert.match(defaults, /using env fallbacks/)
   assert.match(defaults, /refreshXeroOrgDefaultsBestEffort/)
   assert.match(defaults, /allowStale/)
+})
+
+test("each Xero invoice attempt sends a new idempotency key so a stored 500 is not replayed", () => {
+  const base = "zk-invoice-cfb31716-689b-45c1-8651-a7883d850f60"
+  const first = xeroAttemptIdempotencyKey(base, 1_000)
+  const retry = xeroAttemptIdempotencyKey(base, 2_000)
+  assert.notEqual(first, retry)
+  assert.ok(first.startsWith(base))
+  assert.ok(xeroAttemptIdempotencyKey(`${base}-r1793181770905-${"x".repeat(36)}`).length <= 128)
+
+  const invoices = readFileSync("lib/integrations/xero/invoices.ts", "utf8")
+  assert.doesNotMatch(invoices, /idempotencyKey: `zk-invoice-\$\{orderId\}`/)
+  assert.ok(invoices.indexOf("Invoices?where=") < invoices.indexOf("xeroAttemptIdempotencyKey(baseKey)"))
 })
 
 test("automatic invoice create drains immediately and Retry Xero requeues stuck jobs", () => {
