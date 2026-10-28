@@ -35,7 +35,10 @@ test("Retry-After is parsed as seconds or an HTTP date", () => {
 
 test("inline Xero retries wait briefly, then back off to the outbox cooldown", () => {
   assert.equal(isRetryableXeroStatus(429), true)
+  assert.equal(isRetryableXeroStatus(500), false)
+  assert.equal(isRetryableXeroStatus(502), true)
   assert.equal(isRetryableXeroStatus(503), true)
+  assert.equal(isRetryableXeroStatus(504), false)
   assert.equal(isRetryableXeroStatus(400), false)
 
   const first = decideXeroInlineRetry({ tryIndex: 0, status: 429, retryAfterHeader: "1" })
@@ -71,6 +74,7 @@ test("cron creates Xero invoices before reconciling overdue invoices", () => {
   const source = readFileSync("lib/integrations/run-integration-cron.ts", "utf8")
   const fn = source.slice(source.indexOf("export async function runIntegrationCronJob"))
   assert.ok(fn.indexOf("await drainIntegrationOutbox") < fn.indexOf("await processNativeInvoiceReminders"))
+  assert.ok(fn.indexOf("await processNativeInvoiceReminders") < fn.indexOf("refreshXeroOrgDefaultsBestEffort"))
 })
 
 test("outbox keeps Xero 429 invoice jobs pending and requeues previously failed ones", () => {
@@ -82,6 +86,7 @@ test("outbox keeps Xero 429 invoice jobs pending and requeues previously failed 
   assert.match(source, /preferOrderId/)
   assert.match(source, /isXeroProcessBudgetExhausted/)
   assert.match(source, /INVOICE_CREATE_EVENT/)
+  assert.match(source, /INVOICE_STALE_PROCESSING_MS/)
   assert.doesNotMatch(source, /isXeroRateLimitError\(e\) \|\|/)
 })
 

@@ -33,6 +33,7 @@ import {
 const MAX_ATTEMPTS = 8
 const BATCH_SIZE = OUTBOX_BATCH_SIZE
 const STALE_PROCESSING_MS = 10 * 60 * 1000
+const INVOICE_STALE_PROCESSING_MS = 2 * 60 * 1000
 const OUTBOX_SELECT = "id, event_type, payload, attempts, created_at"
 
 type OutboxRow = {
@@ -77,15 +78,20 @@ export class OutboxOrphanedError extends Error {
 async function recoverStaleProcessingJobs(
   admin: NonNullable<ReturnType<typeof createAdminClient>>,
 ): Promise<void> {
-  const cutoff = new Date(Date.now() - STALE_PROCESSING_MS).toISOString()
   const { data } = await admin
     .from("integration_outbox")
     .select("id, event_type, payload, attempts, last_error, processed_at")
     .eq("status", "processing")
-    .or(`processed_at.is.null,processed_at.lt.${cutoff}`)
+    .order("processed_at", { ascending: true, nullsFirst: true })
     .limit(BATCH_SIZE)
 
   for (const row of data ?? []) {
+    const staleMs = isInvoiceCreateEvent(row.event_type)
+      ? INVOICE_STALE_PROCESSING_MS
+      : STALE_PROCESSING_MS
+    const processedAt = row.processed_at ? Date.parse(String(row.processed_at)) : NaN
+    if (Number.isFinite(processedAt) && Date.now() - processedAt < staleMs) continue
+
     const attempts = Number(row.attempts ?? 0)
     const message =
       typeof row.last_error === "string" && row.last_error.trim()

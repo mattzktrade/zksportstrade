@@ -18,6 +18,7 @@ type XeroItem = { Code?: string; Name?: string; IsSold?: boolean }
 
 export const XERO_ORG_DEFAULTS_CACHE_KEY = "xero_org_defaults_cache"
 export const XERO_ORG_DEFAULTS_TTL_MS = 6 * 60 * 60 * 1000
+export const XERO_ORG_DEFAULTS_MAX_STALE_MS = 7 * 24 * 60 * 60 * 1000
 
 export type XeroOrgDefaultsCache = {
   accountCode: string
@@ -25,6 +26,7 @@ export type XeroOrgDefaultsCache = {
   itemCode: string | null
   currencies: string[]
   baseCurrency: string | null
+  abuDhabiTaxType?: string | null
   envFingerprint: string
   fetchedAt: string
 }
@@ -35,6 +37,7 @@ type LoadedOrgDefaults = {
   itemCode: string | null
   currencies: Set<string>
   baseCurrency: string | null
+  abuDhabiTaxType?: string | null
 }
 
 let memoryCache: XeroOrgDefaultsCache | null = null
@@ -43,27 +46,71 @@ export function xeroOrgEnvFingerprint(): string {
   return [
     process.env.XERO_SALES_ACCOUNT_CODE?.trim() || "200",
     process.env.XERO_INVOICE_TAX_TYPE?.trim() || "",
+    process.env.XERO_ABU_DHABI_TAX_TYPE?.trim() || "TAX001",
     process.env.XERO_INVOICE_ITEM_CODE?.trim() || "1001",
     process.env.XERO_INVOICE_CURRENCY?.trim() || "",
   ].join("|")
+}
+
+export function preferredXeroAbuDhabiTaxType(): string {
+  return process.env.XERO_ABU_DHABI_TAX_TYPE?.trim() || "TAX001"
+}
+
+/** Resolve the 5% revenue tax used on tax-inclusive Abu Dhabi invoice lines. */
+export function selectXeroAbuDhabiTaxType(input: {
+  rates: TaxRate[]
+  preferred?: string | null
+}): string | null {
+  const active = input.rates.filter(
+    (rate) => rate.Status === "ACTIVE" && rate.CanApplyToRevenue !== false && Boolean(rate.TaxType),
+  )
+  const preferred = input.preferred?.trim()
+  if (preferred && active.some((rate) => rate.TaxType === preferred)) return preferred
+
+  const fivePercent = active.filter((rate) => Number(rate.EffectiveRate) === 5)
+  const namedFive = fivePercent.find((rate) => /dxb|uae|abu\s*dhabi|dubai/i.test(rate.Name ?? ""))
+  if (namedFive?.TaxType) return namedFive.TaxType
+  if (fivePercent[0]?.TaxType) return fivePercent[0].TaxType
+
+  const named = active.find((rate) => /dxb|uae|abu\s*dhabi|dubai/i.test(rate.Name ?? ""))
+  return named?.TaxType ?? null
+}
+
+/** Item codes carry their own tax defaults; omit them on tax-inclusive Abu Dhabi lines. */
+export function xeroInvoiceItemCodeForLine(input: {
+  itemCode?: string | null
+  taxInclusive: boolean
+}): string | undefined {
+  if (input.taxInclusive) return undefined
+  const code = input.itemCode?.trim()
+  return code || undefined
 }
 
 export function parseXeroOrgDefaultsCache(
   value: string | null,
   now = Date.now(),
   fingerprint = xeroOrgEnvFingerprint(),
+  options?: { allowStale?: boolean },
 ): XeroOrgDefaultsCache | null {
   if (!value) return null
   try {
     const parsed = JSON.parse(value) as XeroOrgDefaultsCache
     if (!parsed?.accountCode || !parsed?.taxType || !parsed.fetchedAt) return null
-    if (parsed.envFingerprint !== fingerprint) return null
+    if (!options?.allowStale && parsed.envFingerprint !== fingerprint) return null
     const fetched = Date.parse(parsed.fetchedAt)
-    if (!Number.isFinite(fetched) || now - fetched > XERO_ORG_DEFAULTS_TTL_MS) return null
+    if (!Number.isFinite(fetched)) return null
+    const maxAge = options?.allowStale ? XERO_ORG_DEFAULTS_MAX_STALE_MS : XERO_ORG_DEFAULTS_TTL_MS
+    if (now - fetched > maxAge) return null
     if (!Array.isArray(parsed.currencies)) return null
     return {
       ...parsed,
       baseCurrency: typeof parsed.baseCurrency === "string" ? parsed.baseCurrency : null,
+      abuDhabiTaxType:
+        parsed.abuDhabiTaxType === undefined
+          ? undefined
+          : typeof parsed.abuDhabiTaxType === "string"
+            ? parsed.abuDhabiTaxType
+            : null,
     }
   } catch {
     return null
@@ -79,19 +126,40 @@ function cacheToLoaded(cache: XeroOrgDefaultsCache): LoadedOrgDefaults {
       cache.currencies.map((code) => code.trim().toUpperCase()).filter(Boolean),
     ),
     baseCurrency: cache.baseCurrency?.trim().toUpperCase() || null,
+    abuDhabiTaxType: cache.abuDhabiTaxType,
   }
 }
 
-async function readPersistedOrgDefaults(now = Date.now()): Promise<XeroOrgDefaultsCache | null> {
+async function readPersistedOrgDefaults(
+  now = Date.now(),
+  allowStale = false,
+): Promise<XeroOrgDefaultsCache | null> {
   if (memoryCache) {
-    const stillValid = parseXeroOrgDefaultsCache(JSON.stringify(memoryCache), now)
+    const stillValid = parseXeroOrgDefaultsCache(
+      JSON.stringify(memoryCache),
+      now,
+      xeroOrgEnvFingerprint(),
+      { allowStale },
+    )
     if (stillValid) return stillValid
-    memoryCache = null
+    if (!allowStale) memoryCache = null
   }
   const raw = await getIntegrationSetting(XERO_ORG_DEFAULTS_CACHE_KEY)
-  const parsed = parseXeroOrgDefaultsCache(raw, now)
-  if (parsed) memoryCache = parsed
+  const parsed = parseXeroOrgDefaultsCache(raw, now, xeroOrgEnvFingerprint(), { allowStale })
+  if (parsed && !allowStale) memoryCache = parsed
   return parsed
+}
+
+function envFallbackOrgDefaults(): LoadedOrgDefaults {
+  const itemCode = process.env.XERO_INVOICE_ITEM_CODE?.trim() || null
+  return {
+    accountCode: process.env.XERO_SALES_ACCOUNT_CODE?.trim() || "200",
+    taxType: process.env.XERO_INVOICE_TAX_TYPE?.trim() || "OUTPUT",
+    itemCode,
+    currencies: new Set(["AED", "EUR", "GBP", "USD"]),
+    baseCurrency: null,
+    abuDhabiTaxType: preferredXeroAbuDhabiTaxType(),
+  }
 }
 
 async function persistOrgDefaults(cache: XeroOrgDefaultsCache): Promise<void> {
@@ -103,17 +171,24 @@ async function persistOrgDefaults(cache: XeroOrgDefaultsCache): Promise<void> {
   }
 }
 
-async function fetchTaxDefaults(): Promise<{ accountCode: string; taxType: string }> {
+async function fetchTaxDefaults(): Promise<{
+  accountCode: string
+  taxType: string
+  abuDhabiTaxType: string | null
+}> {
   const accountCode = process.env.XERO_SALES_ACCOUNT_CODE?.trim() || "200"
   const envTax = process.env.XERO_INVOICE_TAX_TYPE?.trim()
   const taxRates = await xeroRequest<{ TaxRates?: TaxRate[] }>("GET", "/api.xro/2.0/TaxRates")
-  const active = (taxRates.TaxRates ?? []).filter(
-    (t) => t.Status === "ACTIVE" && t.CanApplyToRevenue !== false,
-  )
+  const rates = taxRates.TaxRates ?? []
+  const active = rates.filter((t) => t.Status === "ACTIVE" && t.CanApplyToRevenue !== false)
   const activeTaxTypes = new Set(active.map((t) => t.TaxType).filter((t): t is string => Boolean(t)))
+  const abuDhabiTaxType = selectXeroAbuDhabiTaxType({
+    rates,
+    preferred: preferredXeroAbuDhabiTaxType(),
+  })
 
   if (envTax && activeTaxTypes.has(envTax)) {
-    return { accountCode, taxType: envTax }
+    return { accountCode, taxType: envTax, abuDhabiTaxType }
   }
   if (envTax) {
     console.warn(`[xero] Ignoring invalid XERO_INVOICE_TAX_TYPE "${envTax}" for revenue invoices.`)
@@ -132,7 +207,7 @@ async function fetchTaxDefaults(): Promise<{ accountCode: string; taxType: strin
     active[0]?.TaxType ??
     "OUTPUT"
 
-  return { accountCode, taxType }
+  return { accountCode, taxType, abuDhabiTaxType }
 }
 
 async function fetchInvoiceItemCode(): Promise<string | null> {
@@ -170,11 +245,8 @@ async function fetchOrgBaseCurrency(): Promise<string | null> {
   }
 }
 
-async function loadXeroOrgDefaults(): Promise<LoadedOrgDefaults> {
-  const cached = await readPersistedOrgDefaults()
-  if (cached) return cacheToLoaded(cached)
-
-  const { accountCode, taxType } = await fetchTaxDefaults()
+async function refreshOrgDefaults(): Promise<XeroOrgDefaultsCache> {
+  const { accountCode, taxType, abuDhabiTaxType } = await fetchTaxDefaults()
   const [itemCode, currencies, baseCurrency] = await Promise.all([
     fetchInvoiceItemCode(),
     fetchCurrencyCodes(),
@@ -186,11 +258,47 @@ async function loadXeroOrgDefaults(): Promise<LoadedOrgDefaults> {
     itemCode,
     currencies,
     baseCurrency,
+    abuDhabiTaxType,
     envFingerprint: xeroOrgEnvFingerprint(),
     fetchedAt: new Date().toISOString(),
   }
   await persistOrgDefaults(record)
-  return cacheToLoaded(record)
+  return record
+}
+
+async function loadXeroOrgDefaults(): Promise<LoadedOrgDefaults> {
+  const fresh = await readPersistedOrgDefaults()
+  if (fresh) return cacheToLoaded(fresh)
+
+  const stale = await readPersistedOrgDefaults(Date.now(), true)
+  if (stale) {
+    memoryCache = stale
+    return cacheToLoaded(stale)
+  }
+
+  try {
+    return cacheToLoaded(await refreshOrgDefaults())
+  } catch (error) {
+    console.warn(
+      "[xero] Org defaults lookup failed, using env fallbacks:",
+      error instanceof Error ? error.message : error,
+    )
+    return envFallbackOrgDefaults()
+  }
+}
+
+/** Refresh expired Xero tax/account defaults after invoicing, never on the invoice hot path. */
+export async function refreshXeroOrgDefaultsBestEffort(): Promise<void> {
+  const fresh = await readPersistedOrgDefaults()
+  if (fresh) return
+  try {
+    await refreshOrgDefaults()
+  } catch (error) {
+    console.warn(
+      "[xero] Org defaults refresh failed; invoices will keep using cached settings:",
+      error instanceof Error ? error.message : error,
+    )
+  }
 }
 
 /**
@@ -205,6 +313,12 @@ export async function getXeroInvoiceLineDefaults(): Promise<{ accountCode: strin
 export async function getXeroInvoiceItemCode(): Promise<string | undefined> {
   const loaded = await loadXeroOrgDefaults()
   return loaded.itemCode ?? undefined
+}
+
+export async function getXeroAbuDhabiTaxType(): Promise<string | null> {
+  const loaded = await loadXeroOrgDefaults()
+  if (loaded.abuDhabiTaxType !== undefined) return loaded.abuDhabiTaxType
+  return preferredXeroAbuDhabiTaxType()
 }
 
 export function selectXeroInvoiceCurrency(input: {

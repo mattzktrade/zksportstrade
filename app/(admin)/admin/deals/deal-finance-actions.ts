@@ -11,7 +11,7 @@ import {
   resendXeroInvoiceForOrder,
 } from "@/lib/integrations/xero/invoices"
 import { enqueueInvoiceCreateServer, enqueueInvoiceReplaceServer } from "@/lib/integrations/enqueue-server"
-import { scheduleOutboxDrain } from "@/lib/integrations/schedule-drain"
+import { drainOutboxNow, scheduleOutboxDrain } from "@/lib/integrations/schedule-drain"
 import { syncBookingFormDealInventory } from "@/lib/booking-forms/inventory-sync"
 import { prepareOrderCancelRelease } from "@/lib/inventory/prepare-order-cancel-release"
 import {
@@ -75,11 +75,33 @@ export async function retryNativeDealInvoice(dealId: string): Promise<Result> {
           : "Order created and Xero invoice queued.",
       }
     }
-    const queued = await enqueueInvoiceCreateServer(String(deal.order_id))
+    const queued = await enqueueInvoiceCreateServer(String(deal.order_id), { retry: true })
     if (!queued.ok) throw new Error(queued.message)
-    scheduleOutboxDrain({ orderId: String(deal.order_id), maxRounds: 20 })
-    revalidatePath("/admin/deals")
-    return { ok: true, message: "Xero invoice creation queued for retry." }
+    try {
+      const drain = await drainOutboxNow({ orderId: String(deal.order_id), maxRounds: 20 })
+      revalidatePath("/admin/deals")
+      if (drain.failed > 0) {
+        return {
+          ok: false,
+          message: drain.failures?.[0]?.error ?? "Xero invoice retry failed.",
+        }
+      }
+      if (drain.skipped && drain.message) {
+        scheduleOutboxDrain({ orderId: String(deal.order_id), maxRounds: 20 })
+        return { ok: true, message: drain.message }
+      }
+      return {
+        ok: true,
+        message: drain.completed > 0 ? "Xero invoice created." : "Xero invoice creation queued for retry.",
+      }
+    } catch (drainError) {
+      scheduleOutboxDrain({ orderId: String(deal.order_id), maxRounds: 20 })
+      revalidatePath("/admin/deals")
+      return {
+        ok: true,
+        message: `Xero invoice creation queued for retry. ${message(drainError)}`,
+      }
+    }
   } catch (error) {
     return { ok: false, message: message(error) }
   }

@@ -674,6 +674,8 @@ test("ZK countersign advances the deal immediately and completion can finish a s
   assert.doesNotMatch(complete, /if \(String\(form\.status\) === "completed"\) return/)
   const automation = readFileSync("lib/crm/deal-order-automation.ts", "utf8")
   assert.match(automation, /markDealSignedAfterZkCountersign/)
+  assert.match(automation, /drainOutboxNow/)
+  assert.match(automation, /loadOrderInvoices/)
   const panel = readFileSync("app/(admin)/admin/deals/deal-finance-panel.tsx", "utf8")
   assert.match(panel, /dealCanCreateOrderFromBookingForm/)
   const dealsClient = readFileSync("app/(admin)/admin/deals/deals-client.tsx", "utf8")

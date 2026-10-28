@@ -1,4 +1,5 @@
 import { drainIntegrationOutbox } from "@/lib/integrations/drain-outbox"
+import { refreshXeroOrgDefaultsBestEffort } from "@/lib/integrations/xero/invoice-line-defaults"
 import { releaseExpiredInventoryHoldsAndSync } from "@/lib/integrations/release-expired-holds"
 import { releaseExpiredDealReservations } from "@/lib/integrations/release-expired-deal-reservations"
 import { processNativeBookingForms } from "@/lib/integrations/process-native-booking-forms"
@@ -50,6 +51,14 @@ export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {
   const installmentInvoices = await processInstallmentInvoiceCreates()
   const result = await drainIntegrationOutbox({ maxRounds: 10, skipInventoryPull: true })
   const invoiceReminders = await processNativeInvoiceReminders()
+  try {
+    await refreshXeroOrgDefaultsBestEffort()
+  } catch (error) {
+    console.warn(
+      "[xero] Org defaults refresh skipped:",
+      error instanceof Error ? error.message : error,
+    )
+  }
   let expiredEnquiries: Awaited<ReturnType<typeof expirePastEventEnquiries>> = {
     deals: 0,
     packagesSynced: [],

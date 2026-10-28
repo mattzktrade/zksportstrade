@@ -6,8 +6,10 @@ import { xeroFetchInvoicePdf, xeroRequest, xeroCallsUsedThisProcess, XERO_PROCES
 import { isXeroRateLimitCooldownActive } from "@/lib/integrations/xero/settings-store"
 import { bookingFormSnapshotInvoiceLines } from "@/lib/crm/deal-invoice-currency"
 import {
+  getXeroAbuDhabiTaxType,
   getXeroInvoiceItemCode,
   getXeroInvoiceLineDefaults,
+  xeroInvoiceItemCodeForLine,
   resolveXeroInvoiceCurrency,
   resolveXeroInvoiceCurrencyRate,
 } from "@/lib/integrations/xero/invoice-line-defaults"
@@ -85,12 +87,29 @@ function isAbuDhabiEvent(input: {
     })
 }
 
+const XERO_COUNTRY_ALIASES: Record<string, string> = {
+  "kingdom of bahrain": "Bahrain",
+  uae: "United Arab Emirates",
+  "u.a.e.": "United Arab Emirates",
+  "u.a.e": "United Arab Emirates",
+  uk: "United Kingdom",
+  "great britain": "United Kingdom",
+  usa: "United States",
+  "united states of america": "United States",
+}
+
+function sanitizeXeroCountry(country?: string | null): string | undefined {
+  const raw = country?.trim()
+  if (!raw) return undefined
+  return XERO_COUNTRY_ALIASES[raw.toLowerCase()] ?? raw
+}
+
 function buildXeroAddresses(address?: XeroBillingAddress): Array<Record<string, string>> | undefined {
   const line1 = address?.line1?.trim()
   const line2 = address?.line2?.trim()
   const city = address?.city?.trim()
   const postcode = address?.postcode?.trim()
-  const country = address?.country?.trim()
+  const country = sanitizeXeroCountry(address?.country)
   if (!line1 && !line2 && !city && !postcode && !country) return undefined
 
   return [
@@ -121,34 +140,49 @@ async function findOrCreateXeroContact(input: {
   const existingId = found.Contacts?.[0]?.ContactID
   if (existingId) {
     if (addresses) {
-      await xeroRequest("POST", "/api.xro/2.0/Contacts", {
-        body: {
-          Contacts: [
-            {
-              ContactID: existingId,
-              Addresses: addresses,
-            },
-          ],
-        },
-      })
+      try {
+        await xeroRequest("POST", "/api.xro/2.0/Contacts", {
+          body: {
+            Contacts: [
+              {
+                ContactID: existingId,
+                Addresses: addresses,
+              },
+            ],
+          },
+        })
+      } catch (error) {
+        console.warn(
+          "[xero] Contact address update skipped:",
+          error instanceof Error ? error.message : error,
+        )
+      }
     }
     return existingId
   }
 
-  const created = await xeroRequest<{ Contacts?: XeroContact[] }>("POST", "/api.xro/2.0/Contacts", {
-    body: {
-      Contacts: [
-        {
-          Name: input.name.trim() || email,
-          EmailAddress: email,
-          Phones: input.phone?.trim()
-            ? [{ PhoneType: "DEFAULT", PhoneNumber: input.phone.trim() }]
-            : undefined,
-          Addresses: addresses,
-        },
-      ],
-    },
-  })
+  const contactBody = {
+    Name: input.name.trim() || email,
+    EmailAddress: email,
+    Phones: input.phone?.trim()
+      ? [{ PhoneType: "DEFAULT", PhoneNumber: input.phone.trim() }]
+      : undefined,
+  }
+  let created: { Contacts?: XeroContact[] }
+  try {
+    created = await xeroRequest<{ Contacts?: XeroContact[] }>("POST", "/api.xro/2.0/Contacts", {
+      body: { Contacts: [{ ...contactBody, Addresses: addresses }] },
+    })
+  } catch (error) {
+    if (!addresses) throw error
+    console.warn(
+      "[xero] Contact create with address failed, retrying without address:",
+      error instanceof Error ? error.message : error,
+    )
+    created = await xeroRequest<{ Contacts?: XeroContact[] }>("POST", "/api.xro/2.0/Contacts", {
+      body: { Contacts: [contactBody] },
+    })
+  }
   const id = created.Contacts?.[0]?.ContactID
   if (!id) throw new Error("Xero did not return a ContactID.")
   return id
@@ -454,6 +488,12 @@ export async function createXeroInvoiceForOrder(
   })
   const includesAbuDhabiTax = invoiceLines.some((line) => line.abuDhabi)
   const lineAmountTypes = includesAbuDhabiTax ? "Inclusive" : "Exclusive"
+  const abuDhabiTaxType = includesAbuDhabiTax ? await getXeroAbuDhabiTaxType() : null
+  if (includesAbuDhabiTax && !abuDhabiTaxType) {
+    throw new Error(
+      "Xero has no 5% revenue tax rate for Abu Dhabi invoices. Set XERO_ABU_DHABI_TAX_TYPE to a valid TaxType in this organisation.",
+    )
+  }
   const where = encodeURIComponent(`Reference=="${String(invoiceReference).replaceAll('"', '\\"')}"`)
   const existing = await xeroRequest<{ Invoices?: XeroInvoice[] }>(
     "GET",
@@ -485,16 +525,20 @@ export async function createXeroInvoiceForOrder(
               LineAmountTypes: lineAmountTypes,
               Status: autoAuthorise ? "AUTHORISED" : "DRAFT",
               ...(autoAuthorise ? { SentToContact: true } : {}),
-              LineItems: invoiceLines.map((line) => ({
-                ...(itemCode ? { ItemCode: itemCode } : {}),
-                Description: line.description,
-                Quantity: line.quantity,
-                UnitAmount: line.unitAmount,
-                AccountCode: accountCode,
-                TaxType: line.abuDhabi
-                  ? process.env.XERO_ABU_DHABI_TAX_TYPE?.trim() || "TAX001"
-                  : taxType,
-              })),
+              LineItems: invoiceLines.map((line) => {
+                const lineItemCode = xeroInvoiceItemCodeForLine({
+                  itemCode,
+                  taxInclusive: line.abuDhabi,
+                })
+                return {
+                  ...(lineItemCode ? { ItemCode: lineItemCode } : {}),
+                  Description: line.description,
+                  Quantity: line.quantity,
+                  UnitAmount: line.unitAmount,
+                  AccountCode: accountCode,
+                  TaxType: line.abuDhabi ? abuDhabiTaxType : taxType,
+                }
+              }),
             },
           ],
         },

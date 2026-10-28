@@ -29,6 +29,8 @@ let xeroCallMutex: Promise<void> = Promise.resolve()
 let lastXeroCallAt = 0
 let xeroCallsThisProcess = 0
 const XERO_MIN_CALL_GAP_MS = 150
+export const XERO_FETCH_TIMEOUT_MS = Number(process.env.XERO_FETCH_TIMEOUT_MS) || 30_000
+const XERO_TIMEOUT_MESSAGE = "Xero request timed out. The invoice will retry automatically."
 
 /** Stay under Xero's 60 calls/minute even when cron and a new invoice overlap. */
 export const XERO_PROCESS_CALL_BUDGET = 40
@@ -81,6 +83,12 @@ function parseBody(text: string): unknown {
   }
 }
 
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false
+  const name = "name" in error ? String((error as { name?: unknown }).name) : ""
+  return name === "AbortError" || name === "TimeoutError"
+}
+
 function errorMessage(json: unknown, fallback: string): string {
   if (typeof json === "object" && json && "Message" in json) {
     return formatXeroApiErrorBody(json, String((json as { Message: string }).Message) || fallback)
@@ -93,7 +101,16 @@ function errorMessage(json: unknown, fallback: string): string {
 
 async function fetchXeroWithRetry(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
   for (let tryIndex = 0; ; tryIndex++) {
-    const res = await fetch(input, init)
+    let res: Response
+    try {
+      res = await fetch(input, {
+        ...init,
+        signal: AbortSignal.timeout(XERO_FETCH_TIMEOUT_MS),
+      })
+    } catch (error) {
+      if (!isAbortError(error)) throw error
+      throw new XeroApiError(XERO_TIMEOUT_MESSAGE, 504, null)
+    }
     if (!isRetryableXeroStatus(res.status)) return res
 
     const retryAfterHeader = res.headers.get("Retry-After")

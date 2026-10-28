@@ -1,8 +1,8 @@
 import { markDealSignedAfterZkCountersign } from "@/lib/booking-forms/advance-deal"
 import { syncBookingFormDealInventory } from "@/lib/booking-forms/inventory-sync"
 import { enqueueInvoiceCreateServer } from "@/lib/integrations/enqueue-server"
-import { scheduleOutboxDrain } from "@/lib/integrations/schedule-drain"
-import { applyBookingFormPaymentScheduleToOrder } from "@/lib/invoices/order-invoices"
+import { drainOutboxNow, scheduleOutboxDrain } from "@/lib/integrations/schedule-drain"
+import { applyBookingFormPaymentScheduleToOrder, loadOrderInvoices } from "@/lib/invoices/order-invoices"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 export type NativeDealOrderResult = {
@@ -67,19 +67,36 @@ export async function ensureNativeDealOrderAndInvoice(
     }
   }
 
-  scheduleOutboxDrain({ orderId, maxRounds: 20 })
-  await admin
-    .from("deals")
-    .update({
-      next_action: "Await Xero invoice",
-      next_action_due_at: new Date().toISOString(),
-    })
-    .eq("id", dealId)
+  let drainWarning: string | undefined
+  try {
+    const drain = await drainOutboxNow({ orderId, maxRounds: 20 })
+    if (drain.failed > 0) {
+      drainWarning =
+        drain.failures?.[0]?.error ??
+        `Sync queue: ${drain.failed} job(s) failed — retry from the deal if needed.`
+    }
+  } catch (error) {
+    scheduleOutboxDrain({ orderId, maxRounds: 20 })
+    drainWarning = error instanceof Error ? error.message : "Xero invoice drain failed."
+  }
+
+  const invoices = await loadOrderInvoices(admin, orderId)
+  const synced = invoices.some((invoice) => invoice.xero_invoice_id)
+  if (!synced) {
+    await admin
+      .from("deals")
+      .update({
+        next_action: drainWarning ? "Retry failed Xero invoice" : "Await Xero invoice",
+        next_action_due_at: new Date().toISOString(),
+      })
+      .eq("id", dealId)
+  }
   return {
     orderId,
     orderReference,
     alreadyCreated: Boolean(payload.already_created),
     invoiceQueued: true,
+    warning: drainWarning,
   }
 }
 

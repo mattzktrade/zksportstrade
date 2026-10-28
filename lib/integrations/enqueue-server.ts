@@ -20,6 +20,7 @@ type OutboxRowInput = {
  */
 async function enqueueOutboxOnce(
   row: OutboxRowInput,
+  options?: { requeue?: boolean },
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const admin = createAdminClient()
   if (!admin) return { ok: false, message: "Service role not configured." }
@@ -45,11 +46,15 @@ async function enqueueOutboxOnce(
     return { ok: true }
   }
 
-  if (existing.status === "processing" || existing.status === "completed" || existing.status === "pending") {
+  const requeueExisting = Boolean(options?.requeue) && existing.status !== "pending"
+  if (
+    !requeueExisting &&
+    (existing.status === "processing" || existing.status === "completed" || existing.status === "pending")
+  ) {
     return { ok: true }
   }
 
-  if (existing.status === "failed") {
+  if (existing.status === "failed" || requeueExisting) {
     const { error } = await admin
       .from("integration_outbox")
       .update({
@@ -213,6 +218,7 @@ export async function enqueueOrderPlacedServer(
 
 export async function enqueueInvoiceCreateServer(
   orderId: string,
+  options?: { retry?: boolean },
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const id = orderId.trim()
   if (!id) return { ok: false, message: "Order id is missing." }
@@ -239,25 +245,33 @@ export async function enqueueInvoiceCreateServer(
       .is("xero_invoice_id", null)
   }
 
+  const requeue = Boolean(options?.retry)
+
   if (!targets.length) {
-    return enqueueOutboxOnce({
-      event_type: "invoice.create",
-      idempotency_key: `invoice.create:${id}`,
-      payload: { order_id: id, triggered_at: new Date().toISOString() },
-    })
+    return enqueueOutboxOnce(
+      {
+        event_type: "invoice.create",
+        idempotency_key: `invoice.create:${id}`,
+        payload: { order_id: id, triggered_at: new Date().toISOString() },
+      },
+      { requeue },
+    )
   }
 
   for (const invoice of targets) {
     const split = Number(invoice.installment_count ?? 1) > 1
-    const enq = await enqueueOutboxOnce({
-      event_type: "invoice.create",
-      idempotency_key: split ? `invoice.create:${id}:${invoice.id}` : `invoice.create:${id}`,
-      payload: {
-        order_id: id,
-        ...(split ? { invoice_id: invoice.id } : {}),
-        triggered_at: new Date().toISOString(),
+    const enq = await enqueueOutboxOnce(
+      {
+        event_type: "invoice.create",
+        idempotency_key: split ? `invoice.create:${id}:${invoice.id}` : `invoice.create:${id}`,
+        payload: {
+          order_id: id,
+          ...(split ? { invoice_id: invoice.id } : {}),
+          triggered_at: new Date().toISOString(),
+        },
       },
-    })
+      { requeue },
+    )
     if (!enq.ok) return enq
   }
   return { ok: true }

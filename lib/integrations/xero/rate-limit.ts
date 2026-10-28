@@ -10,7 +10,7 @@ export const XERO_RATE_LIMIT_USER_MESSAGE =
   "Xero is temporarily rate-limiting requests. This invoice will retry automatically."
 
 export function isRetryableXeroStatus(status: number): boolean {
-  return status === 429 || status === 503
+  return status === 429 || status === 502 || status === 503
 }
 
 export function isXeroRateLimitMessage(message: string): boolean {
