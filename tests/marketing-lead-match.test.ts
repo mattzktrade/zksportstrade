@@ -9,6 +9,7 @@ import {
 } from "../lib/integrations/marketing-leads/match"
 import { packageQueriesFromNotes } from "../lib/integrations/marketing-leads/outreach-interest"
 import {
+  marketingFormPackageHint,
   parseMarketingLeadQuantity,
   parseMarketingLeadWebhookBody,
 } from "../lib/integrations/marketing-leads/parse"
@@ -166,6 +167,68 @@ describe("marketing catalog matching", () => {
     assert.equal(pkg?.id, "mexico-2026-3-day-paddock-club-club-suite")
   })
 
+  it("reads Marsa Box and Skybridge day options from Choose your tickets", () => {
+    assert.equal(marketingFormPackageHint("Abu Dhabi - marsa box- new"), "3 Day Marsa Box by ZK")
+    assert.equal(marketingFormPackageHint("Abu Dhabi - sky bridge"), "3 Day Skybridge Terrace")
+    assert.equal(
+      marketingFormPackageHint("Abu Dhabi - sky bridge", "Friday = $495"),
+      "Friday Skybridge Terrace",
+    )
+    assert.equal(
+      marketingFormPackageHint("Abu Dhabi - marsa box- new", "Saturday = $2,250"),
+      "Saturday Marsa Box by ZK",
+    )
+
+    const marsa = parseMarketingLeadWebhookBody({
+      leadId: "1972708413692567",
+      first_name: "Farhan",
+      last_name: "Zaidi",
+      email: "farhan.z@outlook.com",
+      phone: "+971504577456",
+      package: "/",
+      quantity: "1",
+      campaignName: "DF | Abu Dhabi",
+      formName: "Abu Dhabi - marsa box- new",
+      "Choose your tickets": "3 day weekend = $3,825",
+    })
+    assert.equal(marsa.ok, true)
+    if (!marsa.ok) return
+    assert.equal(marsa.payload.interest.package, "3 Day Marsa Box by ZK")
+    assert.equal(marsa.payload.interest.quantity, 1)
+    assert.ok(marketingPackageQueries(marsa.payload).includes("3 Day Marsa Box by ZK"))
+
+    const skyFriday = parseMarketingLeadWebhookBody({
+      leadId: "2119830475390119",
+      first_name: "Oliver",
+      last_name: "Fawaz",
+      email: "oliver@zk-sports.com",
+      phone: "+971556089074",
+      package: "Friday = $495",
+      quantity: 1,
+      campaignName: "DF | Abu Dhabi",
+      formName: "Abu Dhabi - sky bridge",
+    })
+    assert.equal(skyFriday.ok, true)
+    if (!skyFriday.ok) return
+    assert.equal(skyFriday.payload.interest.package, "Friday Skybridge Terrace")
+    assert.equal(skyFriday.payload.interest.quantity, 1)
+
+    const skyWeekend = parseMarketingLeadWebhookBody({
+      leadId: "2119830475390120",
+      first_name: "Oliver",
+      last_name: "Fawaz",
+      email: "oliver@zk-sports.com",
+      phone: "+971556089074",
+      campaignName: "DF | Abu Dhabi",
+      formName: "Abu Dhabi - sky bridge",
+      "Choose your tickets": "3 day weekend = $5,500",
+    })
+    assert.equal(skyWeekend.ok, true)
+    if (!skyWeekend.ok) return
+    assert.equal(skyWeekend.payload.interest.package, "3 Day Skybridge Terrace")
+    assert.equal(skyWeekend.payload.interest.quantity, null)
+  })
+
   it("recovers Club Suite from Instant Form notes if the enquiry was linked to a single-ticket SKU", () => {
     const notes = [
       "Marketing lead (Meta)",
@@ -175,5 +238,25 @@ describe("marketing catalog matching", () => {
     ].join("\n")
     const pkg = pickMarketingPackage(packageQueriesFromNotes(notes), mexicoPackages)
     assert.equal(pkg?.id, "mexico-2026-3-day-paddock-club-club-suite")
+  })
+
+  it("recovers Marsa Box from an Abu Dhabi form name in enquiry notes", () => {
+    const notes = [
+      "Marketing lead (Meta)",
+      "Campaign: DF | Abu Dhabi",
+      "Form: Abu Dhabi - marsa box- new",
+      "Tickets: 3",
+      "Choose your tickets: 3 day weekend = $3,825",
+    ].join("\n")
+    assert.ok(packageQueriesFromNotes(notes).includes("3 Day Marsa Box by ZK"))
+    assert.ok(
+      packageQueriesFromNotes(
+        [
+          "Marketing lead (Meta)",
+          "Form: Abu Dhabi - sky bridge",
+          "Choose your tickets: Friday = $495",
+        ].join("\n"),
+      ).includes("Friday Skybridge Terrace"),
+    )
   })
 })

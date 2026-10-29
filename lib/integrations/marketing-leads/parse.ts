@@ -262,6 +262,12 @@ export function parseMarketingLeadWebhookBody(body: unknown): MarketingLeadParse
     return { ok: false, error: "Email or phone is required." }
   }
 
+  const formName =
+    pick(campaignObj, "formName", "form_name") ||
+    pick(root, "formName", "form_name") ||
+    fields.form_name ||
+    null
+  const campaignName = pick(campaignObj, "name") || pick(root, "campaignName", "campaign_name") || fields.campaign_name || null
   const rawPackage =
     pick(interestObj, "package", "product", "product_name", "which_package") ||
     pick(root, "package", "product", "product_name", "which_package") ||
@@ -270,7 +276,6 @@ export function parseMarketingLeadWebhookBody(body: unknown): MarketingLeadParse
     fields.product_name ||
     fields.which_package ||
     null
-  const packageName = rawPackage && !isUselessMarketingPackageLabel(rawPackage) ? rawPackage : null
   const eventName =
     pick(interestObj, "event", "event_name", "which_event", "race", "grand_prix") ||
     pick(root, "event", "event_name", "which_event", "race", "grand_prix") ||
@@ -289,6 +294,16 @@ export function parseMarketingLeadWebhookBody(body: unknown): MarketingLeadParse
     answers.push(extra)
   }
 
+  const ticketChoice =
+    answers.find((row) => isTicketChoiceQuestion(row.question))?.answer ||
+    pick(root, "choose_your_tickets", "chooseYourTickets") ||
+    (looksLikeTicketDayOption(rawPackage) ? rawPackage : "")
+  const labeledPackage =
+    rawPackage && !isUselessMarketingPackageLabel(rawPackage) && !looksLikeTicketDayOption(rawPackage)
+      ? rawPackage
+      : null
+  const packageName = labeledPackage || marketingFormPackageHint(formName, campaignName, ticketChoice)
+
   let quantity =
     parseMarketingLeadQuantity(interestObj?.quantity) ??
     parseMarketingLeadQuantity(root.quantity) ??
@@ -302,6 +317,7 @@ export function parseMarketingLeadWebhookBody(body: unknown): MarketingLeadParse
     for (const row of answers) {
       const hay = `${row.question} ${row.answer}`
       if (!/guest|ticket|quantit|how many|count/i.test(hay)) continue
+      if (looksLikeDurationNotQuantity(row.answer) || looksLikeDurationNotQuantity(row.question)) continue
       quantity = parseMarketingLeadQuantity(row.answer) ?? parseMarketingLeadQuantity(row.question)
       if (quantity != null) break
     }
@@ -322,18 +338,14 @@ export function parseMarketingLeadWebhookBody(body: unknown): MarketingLeadParse
         fields.created_time ||
         null,
       campaign: {
-        name: pick(campaignObj, "name") || pick(root, "campaignName", "campaign_name") || fields.campaign_name || null,
+        name: campaignName,
         id: pick(campaignObj, "id") || pick(root, "campaignId", "campaign_id") || fields.campaign_id || null,
         adsetName:
           pick(campaignObj, "adsetName", "adset_name") ||
           pick(root, "adsetName", "adset_name", "ad_name") ||
           fields.adset_name ||
           null,
-        formName:
-          pick(campaignObj, "formName", "form_name") ||
-          pick(root, "formName", "form_name") ||
-          fields.form_name ||
-          null,
+        formName,
       },
       contact: {
         fullName,
@@ -366,8 +378,81 @@ export function parseMarketingLeadWebhookBody(body: unknown): MarketingLeadParse
 export function isUselessMarketingPackageLabel(value: string | null | undefined): boolean {
   const text = (value ?? "").trim()
   if (!text) return true
+  if (/^[\\/.\-]+$/.test(text)) return true
   if (/^(yes|no|y|n|true|false|ok|okay|sure|none|n\/a|na)(\b|[.!,].*)?$/i.test(text)) return true
   return /works for me|that works/i.test(text) && !/\b(paddock|suite|terrace|hospitality|club)\b/i.test(text)
+}
+
+const MARSA_BY_DAY = {
+  friday: "Friday Marsa Box by ZK",
+  saturday: "Saturday Marsa Box by ZK",
+  sunday: "Sunday Marsa Box by ZK",
+  "2_day": "Saturday & Sunday Marsa Box by ZK",
+  "3_day": "3 Day Marsa Box by ZK",
+} as const
+
+const SKYBRIDGE_BY_DAY = {
+  friday: "Friday Skybridge Terrace",
+  saturday: "Saturday Skybridge Terrace",
+  sunday: "Sunday Skybridge Terrace",
+  "2_day": "Saturday & Sunday Skybridge Terrace",
+  "3_day": "3 Day Skybridge Terrace",
+} as const
+
+type MarketingFormDay = keyof typeof MARSA_BY_DAY
+type MarketingFormFamily = "marsa" | "skybridge"
+
+function marketingFormFamily(text: string): MarketingFormFamily | null {
+  const normalized = normalizeMarketingAlias(text)
+  if (/\bmarsa\s*box\b/.test(normalized) || /\bmarsabox\b/.test(normalized)) return "marsa"
+  if (/\bsky\s*bridge\b/.test(normalized) || /\bskybridge\b/.test(normalized)) return "skybridge"
+  return null
+}
+
+function marketingFormDay(text: string): MarketingFormDay | null {
+  const normalized = normalizeMarketingAlias(text)
+  if (!normalized) return null
+  if (/\bsaturday\s*(and|&)?\s*sunday\b/.test(normalized) || /\bsat\s*sun\b/.test(normalized)) return "2_day"
+  if (/\b3\s*day\b/.test(normalized)) return "3_day"
+  if (/\b2\s*day\b/.test(normalized)) return "2_day"
+  if (/\bfriday\b/.test(normalized)) return "friday"
+  if (/\bsaturday\b/.test(normalized)) return "saturday"
+  if (/\bsunday\b/.test(normalized)) return "sunday"
+  if (/\bweekend\b/.test(normalized)) return "3_day"
+  return null
+}
+
+export function isTicketChoiceQuestion(value: string): boolean {
+  return /choose your tickets|choose_your_tickets|which (day|ticket)|ticket option/i.test(value)
+}
+
+export function looksLikeTicketDayOption(value: string | null | undefined): boolean {
+  const text = (value ?? "").trim()
+  if (!text || marketingFormDay(text) == null) return false
+  const leftover = normalizeMarketingAlias(text)
+    .replace(/\b(friday|saturday|sunday|thursday|weekend|day|days|and)\b/g, " ")
+    .replace(/\d+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  return leftover.length === 0
+}
+
+/** Instant Form name (Marsa Box / Skybridge) plus Choose your tickets day option. */
+export function marketingFormPackageHint(...values: Array<string | null | undefined>): string | null {
+  const text = values.filter((value) => Boolean(value && value.trim())).join(" ")
+  if (!text) return null
+  const family = marketingFormFamily(text)
+  if (!family) return null
+  const day = marketingFormDay(text) ?? "3_day"
+  return family === "marsa" ? MARSA_BY_DAY[day] : SKYBRIDGE_BY_DAY[day]
+}
+
+function looksLikeDurationNotQuantity(value: string): boolean {
+  const text = value.trim()
+  if (!text) return false
+  if (/\b(guests?|tickets?|people|persons?)\b/i.test(text) && !/\b\d+\s*-?\s*day\b/i.test(text)) return false
+  if (/=\s*[$£€]/.test(text)) return true
+  return /^\d+\s*-?\s*day\b/i.test(text)
 }
 
 export function normalizeMarketingAlias(value: string | null | undefined): string {

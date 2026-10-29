@@ -1,5 +1,7 @@
 import { inferPackageDurationFromName } from "@/lib/catalog/package-duration"
 import {
+  isTicketChoiceQuestion,
+  marketingFormPackageHint,
   normalizeMarketingAlias,
   type MarketingLeadPayload,
 } from "@/lib/integrations/marketing-leads/parse"
@@ -97,7 +99,7 @@ const QUERY_STOP = new Set([
 const WEAK_PACKAGE_TOKENS = new Set(["2", "3", "day", "days", "paddock", "club", "package", "gp"])
 
 const PRODUCT_HINT =
-  /\b(paddock|suite|terrace|grandstand|hospitality|hotel|champion|champions|velocity|marina|legend|lounge|experiences|clubhouse|house\s*\d+|club\s*suite|sky\s*suite)\b/i
+  /\b(paddock|suite|terrace|grandstand|hospitality|hotel|champion|champions|velocity|marina|legend|lounge|experiences|clubhouse|house\s*\d+|club\s*suite|sky\s*suite|marsa|skybridge|sky\s*bridge)\b/i
 
 const AFFIRMATIVE =
   /\b(yes|yeah|yep|true|ok|okay|sure|please|interested|definitely|absolutely|works for me|that works|i'?d like|i would|sounds good)\b/i
@@ -180,6 +182,10 @@ export function marketingPackageQueries(payload: MarketingLeadPayload): string[]
   if (labeled && isProductLikeText(labeled) && !looksLikeUselessInterestLabel(labeled)) {
     out.push(labeled)
   }
+  const ticketChoice =
+    payload.answers.find((row) => isTicketChoiceQuestion(row.question))?.answer || payload.interest.package || ""
+  const formHint = marketingFormPackageHint(payload.campaign.formName, payload.campaign.name, ticketChoice)
+  if (formHint) out.push(formHint)
   for (const row of payload.answers) {
     const question = row.question.trim()
     const answer = row.answer.trim()

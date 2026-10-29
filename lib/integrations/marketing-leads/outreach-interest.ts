@@ -7,6 +7,7 @@ import {
   pickMarketingRace,
 } from "@/lib/integrations/marketing-leads/match"
 import { eventAndPackageFromEnquiryNotes } from "@/lib/integrations/marketing-leads/outreach-render"
+import { marketingFormPackageHint } from "@/lib/integrations/marketing-leads/parse"
 import type { createAdminClient } from "@/lib/supabase/admin"
 
 type AdminClient = NonNullable<ReturnType<typeof createAdminClient>>
@@ -50,6 +51,15 @@ export function packageQueriesFromNotes(notes: string | null | undefined): strin
       queries.push(answer)
     }
   }
+  const form = /(?:^|\n)Form:\s*(.+)/i.exec(notes ?? "")?.[1]?.trim() || ""
+  const ticket =
+    notes
+      ?.split("\n")
+      .map((line) => /^(.+?):\s*(.+)$/.exec(line.trim()))
+      .find((row) => row && /choose your tickets/i.test(row[1]))?.[2]
+      ?.trim() || ""
+  const hint = marketingFormPackageHint(form, ticket)
+  if (hint) queries.unshift(hint)
   return queries
 }
 
