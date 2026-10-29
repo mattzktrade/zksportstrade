@@ -64,7 +64,7 @@ import {
 } from "@/lib/crm/deal-types"
 import {
   ENQUIRY_CRM_STAGE_LABELS,
-  ENQUIRY_CRM_STAGES,
+  ACTIVE_ENQUIRY_STAGES,
   ENQUIRY_PAGE_SIZE,
   ENQUIRY_STAGE_TABS,
   adminDealListPath,
@@ -949,7 +949,7 @@ export function EnquiriesClient({
               className="h-8 rounded-md border bg-white px-2 text-[9px]"
             >
               <option value="">Set stage…</option>
-              {ENQUIRY_CRM_STAGES.map((stage) => (
+              {ACTIVE_ENQUIRY_STAGES.map((stage) => (
                 <option key={stage} value={stage}>{ENQUIRY_CRM_STAGE_LABELS[stage]}</option>
               ))}
             </select>
@@ -1370,6 +1370,19 @@ export function EnquiriesClient({
                       className="mt-2 h-11 w-full rounded-md border bg-white px-3 text-[13px] sm:h-10 sm:px-2 sm:text-[9px]"
                     />
                     <p className="mt-2 text-[10px] font-medium text-slate-800">Next: {nextStep}</p>
+                    {workflowStage === "contacted" || workflowStage === "sourcing_complete" ? (
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => {
+                          setWorkflowStage("follow_up")
+                          saveStage("follow_up")
+                        }}
+                        className="mt-2 flex h-10 w-full items-center justify-center rounded-md bg-slate-900 text-[9px] font-semibold text-white disabled:opacity-50"
+                      >
+                        Price sent: move to Deciding
+                      </button>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="rounded-lg border border-slate-200 p-3">

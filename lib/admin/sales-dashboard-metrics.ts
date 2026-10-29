@@ -13,7 +13,7 @@ import {
 import {
   DEAL_BOARD_COLUMNS,
   ENQUIRY_CRM_STAGE_LABELS,
-  ENQUIRY_CRM_STAGES,
+  ACTIVE_ENQUIRY_STAGES,
   adminRecordWorkspacePath,
   dealBoardColumnFor,
   enquiryCrmStageFromDeal,
@@ -49,7 +49,7 @@ export const SALES_PIPELINE_ROWS: ReadonlyArray<{
   href: string
   group: "enquiry" | "deal"
 }> = [
-  ...ENQUIRY_CRM_STAGES.map((id) => ({
+  ...ACTIVE_ENQUIRY_STAGES.map((id) => ({
     id,
     label: ENQUIRY_CRM_STAGE_LABELS[id],
     href: `/admin/enquiries?stage=${id}`,

@@ -43,23 +43,72 @@ export const ENQUIRY_CRM_STAGES = [
 
 export type EnquiryCrmStage = (typeof ENQUIRY_CRM_STAGES)[number]
 
+/**
+ * The funnel staff work with, in order. `responded` and `price_sent` are kept
+ * only so older rows still load; they read as `contacted` and `follow_up`.
+ */
+export const ACTIVE_ENQUIRY_STAGES = [
+  "new",
+  "contacted",
+  "sourcing_required",
+  "sourcing_complete",
+  "follow_up",
+  "not_interested",
+  "expired",
+] as const satisfies readonly EnquiryCrmStage[]
+
+export type ActiveEnquiryStage = (typeof ACTIVE_ENQUIRY_STAGES)[number]
+
 export const ENQUIRY_TEMPERATURES = ["warm", "cold"] as const
 export type EnquiryTemperature = (typeof ENQUIRY_TEMPERATURES)[number]
 
 export const ENQUIRY_CRM_STAGE_LABELS: Record<EnquiryCrmStage, string> = {
   new: "New",
-  contacted: "Contacted",
-  responded: "Responded",
-  sourcing_required: "Sourcing required",
-  sourcing_complete: "Sourcing complete",
-  price_sent: "Price sent",
-  follow_up: "Follow-up",
+  contacted: "In conversation",
+  responded: "In conversation",
+  sourcing_required: "Sourcing",
+  sourcing_complete: "Sourced: send price",
+  price_sent: "Deciding",
+  follow_up: "Deciding",
   not_interested: "Not interested",
   expired: "Expired",
 }
 
 export function isEnquiryCrmStage(value: string | null | undefined): value is EnquiryCrmStage {
   return typeof value === "string" && (ENQUIRY_CRM_STAGES as readonly string[]).includes(value)
+}
+
+/** Folds the retired stages into the ones that replaced them. */
+export function activeEnquiryStage(stage: EnquiryCrmStage): ActiveEnquiryStage {
+  if (stage === "responded") return "contacted"
+  if (stage === "price_sent") return "follow_up"
+  return stage
+}
+
+const ENQUIRY_STAGE_RANK: Record<ActiveEnquiryStage, number> = {
+  new: 0,
+  contacted: 1,
+  sourcing_required: 2,
+  sourcing_complete: 3,
+  follow_up: 4,
+  not_interested: 5,
+  expired: 5,
+}
+
+export function enquiryStageRank(stage: EnquiryCrmStage): number {
+  return ENQUIRY_STAGE_RANK[activeEnquiryStage(stage)]
+}
+
+/**
+ * Automatic moves only go down the funnel. Closing (Not interested, Expired) is
+ * always allowed from an open stage; nothing reopens a closed enquiry by itself.
+ */
+export function isForwardEnquiryMove(current: EnquiryCrmStage, target: EnquiryCrmStage): boolean {
+  const from = activeEnquiryStage(current)
+  const to = activeEnquiryStage(target)
+  if (from === to) return false
+  if (from === "not_interested" || from === "expired") return false
+  return ENQUIRY_STAGE_RANK[to] > ENQUIRY_STAGE_RANK[from]
 }
 
 /** Deal-board stages staff can pick from Enquiries to skip the booking form. */
@@ -83,7 +132,7 @@ export const ENQUIRY_SELECTABLE_STAGE_GROUPS: ReadonlyArray<{
   label: string
   stages: readonly EnquirySelectableStage[]
 }> = [
-  { label: "Enquiry", stages: ENQUIRY_CRM_STAGES },
+  { label: "Enquiry", stages: ACTIVE_ENQUIRY_STAGES },
   { label: "Deal — skip booking form", stages: ENQUIRY_SKIPAHEAD_STAGES },
 ]
 
@@ -121,16 +170,18 @@ export function createdDealPipeline(input: {
 } {
   const requested = input.stage?.trim() || ""
   let selectable: EnquirySelectableStage = isEnquirySelectableStage(requested)
-    ? requested
+    ? isEnquiryCrmStage(requested)
+      ? activeEnquiryStage(requested)
+      : requested
     : input.reserve
-      ? "price_sent"
+      ? "follow_up"
       : "new"
-  if (selectable === "new" && input.reserve) selectable = "price_sent"
+  if (selectable === "new" && input.reserve) selectable = "follow_up"
   const reserve = Boolean(input.reserve) && enquirySelectableStageAllowsHold(selectable)
   if (isEnquirySkipaheadStage(selectable)) {
     return {
       selectableStage: selectable,
-      enquiryStage: reserve ? "price_sent" : "new",
+      enquiryStage: reserve ? "follow_up" : "new",
       dealStage: selectable,
       reserve,
     }
@@ -163,12 +214,12 @@ export function enquiryCrmStageFromDeal(deal: {
   stage: DealStage | string
   enquiry_stage?: string | null
 }): EnquiryCrmStage {
-  if (isEnquiryCrmStage(deal.enquiry_stage)) return deal.enquiry_stage
+  if (isEnquiryCrmStage(deal.enquiry_stage)) return activeEnquiryStage(deal.enquiry_stage)
   switch (canonicalDealStage(deal.stage)) {
     case "sourcing":
       return "sourcing_required"
     case "proposal":
-      return "price_sent"
+      return "follow_up"
     default:
       return "new"
   }
@@ -183,7 +234,12 @@ export function enquiryTemperatureFromDeal(deal: {
 }
 
 export function enquiryStageWarmsLead(stage: EnquiryCrmStage): boolean {
-  return stage === "responded" || stage === "sourcing_required" || stage === "sourcing_complete"
+  return (
+    stage === "contacted" ||
+    stage === "responded" ||
+    stage === "sourcing_required" ||
+    stage === "sourcing_complete"
+  )
 }
 
 export function resolvedEnquiryTemperature(input: {
@@ -249,17 +305,15 @@ export function enquiryStageTone(
     case "new":
       return "gray"
     case "contacted":
-      return "blue"
     case "responded":
-      return "purple"
+      return "blue"
     case "sourcing_required":
       return "amber"
     case "sourcing_complete":
-      return "blue"
+      return "purple"
     case "price_sent":
-      return "green"
     case "follow_up":
-      return "amber"
+      return "green"
     case "not_interested":
       return "red"
     case "expired":
@@ -284,7 +338,7 @@ export const ENQUIRY_STAGE_TABS: ReadonlyArray<{
   label: string
 }> = [
   { id: "all", label: "All" },
-  ...ENQUIRY_CRM_STAGES.map((id) => ({ id, label: ENQUIRY_CRM_STAGE_LABELS[id] })),
+  ...ACTIVE_ENQUIRY_STAGES.map((id) => ({ id, label: ENQUIRY_CRM_STAGE_LABELS[id] })),
 ]
 
 export type DealBoardPipelineId =
@@ -387,20 +441,11 @@ export function nextEnquiryCrmStage(deal: {
     case "new":
       return "contacted"
     case "contacted":
-      return "responded"
-    case "responded":
-      return enquiryNeedsSourcing({ ...deal, enquiry_stage: "responded" })
-        ? "sourcing_required"
-        : "price_sent"
+      return enquiryNeedsSourcing({ ...deal, enquiry_stage: "contacted" }) ? "sourcing_required" : "follow_up"
     case "sourcing_required":
       return "sourcing_complete"
     case "sourcing_complete":
-      return "price_sent"
-    case "price_sent":
       return "follow_up"
-    case "expired":
-    case "not_interested":
-      return null
     default:
       return null
   }
@@ -481,15 +526,13 @@ export function suggestedEnquiryAction(stage: EnquiryCrmStage): string {
     case "new":
       return "Make contact"
     case "contacted":
-      return "Wait for a reply"
     case "responded":
-      return "Source or send a price"
+      return "Confirm what they need"
     case "sourcing_required":
       return "Confirm sourcing"
     case "sourcing_complete":
       return "Send the price"
     case "price_sent":
-      return "Follow up the price"
     case "follow_up":
       return "Follow up"
     case "not_interested":

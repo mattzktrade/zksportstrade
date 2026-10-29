@@ -1,6 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { suggestedEnquiryAction } from "@/lib/crm/deal-pipeline"
-import { markEnquiryClientReplied } from "@/lib/crm/enquiry-replied"
+import { markEnquiryClientReplied, moveRepliedEnquiryForward } from "@/lib/crm/enquiry-replied"
 import { isOutreachStopKeyword } from "@/lib/integrations/marketing-leads/outreach-labels"
 import { findActiveOutreachByEmail } from "@/lib/integrations/marketing-leads/outreach-store"
 import { stopMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-stop"
@@ -45,15 +44,7 @@ export async function handleInboundSalesEmail(body: unknown): Promise<{
     await stopMarketingOutreach(enrollment.deal_id, reason)
     if (reason === "replied") {
       await markEnquiryClientReplied(admin, enrollment.deal_id)
-      await admin
-        .from("deals")
-        .update({
-          enquiry_stage: "responded",
-          next_action: suggestedEnquiryAction("responded"),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", enrollment.deal_id)
-        .in("enquiry_stage", ["new", "contacted"])
+      await moveRepliedEnquiryForward(admin, enrollment.deal_id)
     }
   }
 

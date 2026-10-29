@@ -652,7 +652,7 @@ export function DealCreateModal({
                       onChange={(event) => {
                         const next = event.target.checked
                         setReserve(next)
-                        if (next && createStage === "new") setCreateStage("price_sent")
+                        if (next && createStage === "new") setCreateStage("follow_up")
                       }}
                     />
                     Place a seven-day hold now

@@ -23,3 +23,25 @@ export async function markEnquiryClientReplied(
     console.error("[enquiry-replied]", error.message)
   }
 }
+
+export const ENQUIRY_REPLIED_NEXT_ACTION = "Reply in Inbox"
+
+/** A reply means we are in conversation. Only a New enquiry moves; later stages stay put. */
+export async function moveRepliedEnquiryForward(
+  admin: AdminClient,
+  dealId: string | null | undefined,
+  now = new Date(),
+): Promise<void> {
+  const id = dealId?.trim()
+  if (!id) return
+  const { error } = await admin
+    .from("deals")
+    .update({
+      enquiry_stage: "contacted",
+      next_action: ENQUIRY_REPLIED_NEXT_ACTION,
+      updated_at: now.toISOString(),
+    })
+    .eq("id", id)
+    .eq("enquiry_stage", "new")
+  if (error) console.error("[enquiry-replied] stage", error.message)
+}

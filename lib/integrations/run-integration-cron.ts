@@ -6,6 +6,8 @@ import { processNativeBookingForms } from "@/lib/integrations/process-native-boo
 import { processInstallmentInvoiceCreates } from "@/lib/integrations/process-installment-invoices"
 import { processNativeInvoiceReminders } from "@/lib/integrations/process-native-invoice-reminders"
 import { processMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-process"
+import { processDecidingFollowUps } from "@/lib/integrations/marketing-leads/follow-up-process"
+import { processSalesDigest } from "@/lib/crm/sales-digest-process"
 import { processAssistantInbox } from "@/lib/assistant/process"
 import { expirePastEventEnquiries } from "@/lib/crm/expire-past-event-enquiries"
 import type { SalesforceInventoryPullResult } from "@/lib/integrations/salesforce/pull-inventory-from-salesforce"
@@ -34,6 +36,8 @@ export type IntegrationCronResult = {
   staleOpenOpportunities: null
   linkedInventoryHeal: { groups: number; packagesFixed: number } | null
   marketingOutreach: Awaited<ReturnType<typeof processMarketingOutreach>>
+  decidingFollowUps: Awaited<ReturnType<typeof processDecidingFollowUps>>
+  salesDigest: Awaited<ReturnType<typeof processSalesDigest>>
   expiredEnquiries: Awaited<ReturnType<typeof expirePastEventEnquiries>>
   assistantInbox: Awaited<ReturnType<typeof processAssistantInbox>>
 } & Awaited<ReturnType<typeof drainIntegrationOutbox>>
@@ -89,6 +93,27 @@ export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {
     }
   }
 
+  let decidingFollowUps: Awaited<ReturnType<typeof processDecidingFollowUps>> = {
+    moved: 0,
+    reminded: 0,
+    closed: 0,
+    failed: 0,
+  }
+  try {
+    decidingFollowUps = await processDecidingFollowUps()
+  } catch (error) {
+    decidingFollowUps = { moved: 0, reminded: 0, closed: 0, failed: 1 }
+    console.error("[deciding-follow-up]", error instanceof Error ? error.message : "Deciding follow-ups failed.")
+  }
+
+  let salesDigest: Awaited<ReturnType<typeof processSalesDigest>> = { sent: 0, skipped: 0, failed: 0 }
+  try {
+    salesDigest = await processSalesDigest()
+  } catch (error) {
+    salesDigest = { sent: 0, skipped: 0, failed: 1 }
+    console.error("[sales-digest]", error instanceof Error ? error.message : "Sales digest failed.")
+  }
+
   let assistantInbox: Awaited<ReturnType<typeof processAssistantInbox>> = {
     processed: 0,
     sent: 0,
@@ -120,6 +145,8 @@ export async function runIntegrationCronJob(): Promise<IntegrationCronResult> {
     linkedInventoryHeal: null,
     ...result,
     marketingOutreach,
+    decidingFollowUps,
+    salesDigest,
     expiredEnquiries,
     assistantInbox,
   }

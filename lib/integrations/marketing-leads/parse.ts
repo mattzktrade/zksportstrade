@@ -29,7 +29,7 @@ export type MarketingLeadPayload = {
   }
   /** website = Abu Dhabi GP availability form. Absent means a Meta lead. */
   origin: "website" | null
-  /** Staff profile email. Website leads are assigned to this owner. */
+  /** Staff email sent by the website form. Not used to assign: marketing leads arrive unassigned. */
   ownerEmail: string | null
 }
 

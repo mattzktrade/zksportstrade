@@ -7,9 +7,11 @@ import { adminEnquiryListPath } from "@/lib/crm/deal-pipeline"
 export const INBOX_NEEDS_REPLY_HREF = "/admin/assistant?view=needs_reply"
 export const INBOX_REPLIED_HREF = "/admin/assistant?view=replied"
 export const CALL_LIST_HREF = "/admin/enquiries?view=calls"
+export const FOLLOW_UP_LIST_HREF = "/admin/enquiries?stage=follow_up"
 
 export type FollowUpCallRow = {
   id: string
+  kind: "call" | "follow_up"
   href: string
   reference: string
   name: string
@@ -25,6 +27,7 @@ export type FollowUpSummary = {
   inboxRepliesThisWeek: number
   callsDueNow: number
   callsDueToday: number
+  followUpsDueNow: number
   calls: FollowUpCallRow[]
 }
 
@@ -33,15 +36,22 @@ function one<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value
 }
 
-/** Shared inbox counts plus marketing calls due. Pass an owner to limit calls to theirs and unassigned. */
+/** Shared inbox counts, marketing calls due and Deciding follow-ups for every lead. Pass an owner to limit rows to theirs and unassigned. */
 export async function loadFollowUpSummary(input: { ownerProfileId?: string | null; now?: Date } = {}): Promise<FollowUpSummary> {
-  const empty: FollowUpSummary = { inboxNeedsReply: 0, inboxRepliesThisWeek: 0, callsDueNow: 0, callsDueToday: 0, calls: [] }
+  const empty: FollowUpSummary = {
+    inboxNeedsReply: 0,
+    inboxRepliesThisWeek: 0,
+    callsDueNow: 0,
+    callsDueToday: 0,
+    followUpsDueNow: 0,
+    calls: [],
+  }
   const admin = createAdminClient()
   if (!admin) return empty
   const now = input.now ?? new Date()
   const weekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000
 
-  const [inboxRes, dealsRes] = await Promise.all([
+  const [inboxRes, dealsRes, followUpRes] = await Promise.all([
     admin
       .from("assistant_conversations")
       .select("status, last_client_message_at, last_outbound_at")
@@ -60,6 +70,21 @@ export async function loadFollowUpSummary(input: { ownerProfileId?: string | nul
         .in("stage", ["draft", "sourcing", "proposal"])
         .gte("created_at", new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString())
         .limit(500)
+      if (input.ownerProfileId) {
+        query = query.or(`owner_profile_id.eq.${input.ownerProfileId},owner_profile_id.is.null`)
+      }
+      return query
+    })(),
+    (() => {
+      let query = admin
+        .from("deals")
+        .select("id, reference, next_action_due_at, crm_contacts!primary_contact_id ( full_name, phone ), races ( name )")
+        .eq("enquiry_stage", "follow_up")
+        .in("stage", ["draft", "sourcing", "proposal"])
+        .not("next_action_due_at", "is", null)
+        .lte("next_action_due_at", now.toISOString())
+        .order("next_action_due_at", { ascending: true })
+        .limit(200)
       if (input.ownerProfileId) {
         query = query.or(`owner_profile_id.eq.${input.ownerProfileId},owner_profile_id.is.null`)
       }
@@ -93,13 +118,14 @@ export async function loadFollowUpSummary(input: { ownerProfileId?: string | nul
       next_action_due_at: (deal.next_action_due_at as string | null) ?? null,
     }
     const summary = calls[String(deal.id)]
-    if (!enquiryNeedsCall(shape, summary, now)) continue
+    if (!enquiryNeedsCall(shape, summary)) continue
     const dueAt = enquiryCallDueAt(shape, summary)
     if (dueAt > endOfToday.getTime()) continue
     const contact = one(deal.crm_contacts as { full_name: string | null; phone: string | null } | Array<{ full_name: string | null; phone: string | null }> | null)
     const race = one(deal.races as { name: string | null } | Array<{ name: string | null }> | null)
     rows.push({
       id: String(deal.id),
+      kind: "call",
       href: adminEnquiryListPath(String(deal.id)),
       reference: String(deal.reference ?? ""),
       name: contact?.full_name?.trim() || "Lead",
@@ -110,13 +136,34 @@ export async function loadFollowUpSummary(input: { ownerProfileId?: string | nul
       dueAt,
     })
   }
+  const callsDueNow = rows.filter((row) => row.dueAt <= now.getTime()).length
+  const callsDueToday = rows.length
+
+  const followUps = followUpRes.data ?? []
+  for (const deal of followUps) {
+    const contact = one(deal.crm_contacts as { full_name: string | null; phone: string | null } | Array<{ full_name: string | null; phone: string | null }> | null)
+    const race = one(deal.races as { name: string | null } | Array<{ name: string | null }> | null)
+    rows.push({
+      id: String(deal.id),
+      kind: "follow_up",
+      href: adminEnquiryListPath(String(deal.id)),
+      reference: String(deal.reference ?? ""),
+      name: contact?.full_name?.trim() || "Lead",
+      interest: race?.name?.trim() || "",
+      phone: contact?.phone?.trim() || null,
+      attempts: 0,
+      lastOutcome: null,
+      dueAt: Date.parse(String(deal.next_action_due_at)),
+    })
+  }
+
   rows.sort((a, b) => a.dueAt - b.dueAt)
-  const dueNow = rows.filter((row) => row.dueAt <= now.getTime()).length
   return {
     inboxNeedsReply,
     inboxRepliesThisWeek,
-    callsDueNow: dueNow,
-    callsDueToday: rows.length,
-    calls: rows.slice(0, 6),
+    callsDueNow,
+    callsDueToday,
+    followUpsDueNow: followUps.length,
+    calls: rows.slice(0, 8),
   }
 }

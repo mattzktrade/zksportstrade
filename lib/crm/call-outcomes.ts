@@ -41,7 +41,7 @@ export const CALL_LOST_REASON_LABELS: Record<CallLostReason, string> = {
   other: "Other",
 }
 
-/** After this many unanswered attempts the lead is marked No response. */
+/** After this many unanswered attempts, with nobody ever reaching them, the lead closes as Not interested. */
 export const MAX_CALL_ATTEMPTS = 5
 
 export function isCallOutcome(value: string | null | undefined): value is CallOutcome {
@@ -97,15 +97,7 @@ export function nextCallDueAfterUnanswered(attemptNo: number, now: Date, timeZon
   }
 }
 
-/** Final check seven days before the race, at 10:00 local. Null if that is already past. */
-export function preRaceCheckDue(eventDate: string | null | undefined, now: Date, timeZone: string): Date | null {
-  const raw = eventDate?.trim()
-  if (!raw) return null
-  const event = new Date(`${raw.slice(0, 10)}T12:00:00Z`)
-  if (Number.isNaN(event.getTime())) return null
-  const due = localDayAt(event, timeZone, -7, 10)
-  return due.getTime() > now.getTime() ? due : null
-}
+export const NO_RESPONSE_CLOSED_SUMMARY = "Closed as Not interested: no answer after 5 calls"
 
 export function planCallOutcome(input: {
   outcome: CallOutcome
@@ -113,7 +105,8 @@ export function planCallOutcome(input: {
   now: Date
   timeZone: string
   callbackAt?: Date | null
-  eventDate?: string | null
+  /** Someone has already spoken to this lead on an earlier call. */
+  spokeBefore?: boolean
 }): CallOutcomePlan {
   const { outcome, attemptNo, now, timeZone } = input
   const base: CallOutcomePlan = {
@@ -162,12 +155,16 @@ export function planCallOutcome(input: {
     case "no_answer":
     case "voicemail":
     case "busy": {
+      if (input.spokeBefore) {
+        return { ...base, nextAction: "Try them again", nextActionDueAt: localDayAt(now, timeZone, 1, 10) }
+      }
+      // The automated messages keep running so the last one ("should we close your enquiry?") still goes out.
       if (attemptNo >= MAX_CALL_ATTEMPTS) {
         return {
           ...base,
+          enquiryStage: "not_interested",
           temperature: "cold",
-          nextAction: "Final check, 7 days before race",
-          nextActionDueAt: preRaceCheckDue(input.eventDate, now, timeZone),
+          nextAction: "No further action",
           noResponse: true,
         }
       }
@@ -210,17 +207,13 @@ type CallListDeal = {
   next_action_due_at: string | null
 }
 
-/** Marketing leads nobody has spoken to yet, including the pre-race check once it falls due. */
-export function enquiryNeedsCall(deal: CallListDeal, summary: EnquiryCallSummary | undefined, now = new Date()): boolean {
+/** Marketing leads nobody has spoken to yet, with calls left in the cadence. */
+export function enquiryNeedsCall(deal: CallListDeal, summary: EnquiryCallSummary | undefined): boolean {
   if (deal.source !== "marketing") return false
   if (!isOpenEnquiry(deal)) return false
   if (enquiryCrmStageFromDeal(deal) !== "new") return false
   if (summary?.connected) return false
-  if ((summary?.attempts ?? 0) >= MAX_CALL_ATTEMPTS) {
-    const due = deal.next_action_due_at ? Date.parse(deal.next_action_due_at) : Number.NaN
-    return Number.isFinite(due) && due <= now.getTime()
-  }
-  return true
+  return (summary?.attempts ?? 0) < MAX_CALL_ATTEMPTS
 }
 
 /** First call is due five minutes after the lead lands; later calls follow the logged next step. */

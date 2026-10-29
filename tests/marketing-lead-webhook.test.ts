@@ -117,7 +117,7 @@ describe("marketing lead payload", () => {
     assert.equal(parseMarketingLeadWebhookBody({ leadId: "1", fullName: "A", phone: "07900" }).ok, true)
   })
 
-  it("assigns a website enquiry to the named owner and keeps the day in the notes", () => {
+  it("parses a website enquiry with an owner email and keeps the day in the notes", () => {
     const parsed = parseMarketingLeadWebhookBody({
       leadId: "adgp-1",
       origin: "website",

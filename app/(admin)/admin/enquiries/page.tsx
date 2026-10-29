@@ -13,8 +13,10 @@ import { hasCmsPermission, canSendNativeBookingForm, canSignNativeBookingForm } 
 import { getSuppliers } from "@/lib/inventory/suppliers"
 import {
   DEAL_BOARD_STAGES,
-  ENQUIRY_CRM_STAGES,
+  ACTIVE_ENQUIRY_STAGES,
   ENQUIRY_PIPELINE_STAGES,
+  activeEnquiryStage,
+  isEnquiryCrmStage,
   adminDealListPath,
   isDealBoardStage,
   isEnquiryPipelineStage,
@@ -30,14 +32,16 @@ import { AdminRouteShell } from "@/components/admin/admin-route-shell"
 
 export const dynamic = "force-dynamic"
 
-const STAGE_TABS = new Set<EnquiryStageTabId>(["all", ...ENQUIRY_CRM_STAGES])
+const STAGE_TABS = new Set<EnquiryStageTabId>(["all", ...ACTIVE_ENQUIRY_STAGES])
 
 function parseStageTab(value: string | undefined): EnquiryStageTabId | "" {
   if (!value) return ""
   if (value === "new_enquiry") return "new"
   if (value === "quoting") return "sourcing_required"
   if (value === "all") return ""
-  return STAGE_TABS.has(value as EnquiryStageTabId) ? (value as EnquiryStageTabId) : ""
+  if (!isEnquiryCrmStage(value)) return ""
+  const stage = activeEnquiryStage(value)
+  return STAGE_TABS.has(stage) ? stage : ""
 }
 
 function parseOwnerFilter(value: string | undefined): string {

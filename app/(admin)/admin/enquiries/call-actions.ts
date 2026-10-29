@@ -8,13 +8,15 @@ import { hasCmsPermission } from "@/lib/auth/permissions"
 import {
   CALL_LOST_REASON_LABELS,
   CALL_OUTCOME_LABELS,
+  NO_RESPONSE_CLOSED_SUMMARY,
+  callOutcomeConnected,
   callOutcomeNeedsCallback,
   callOutcomeNeedsLostReason,
   isCallLostReason,
   isCallOutcome,
   planCallOutcome,
 } from "@/lib/crm/call-outcomes"
-import { isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
+import { enquiryCrmStageFromDeal, isEnquiryPipelineStage, isForwardEnquiryMove } from "@/lib/crm/deal-pipeline"
 import { timezoneForPhone } from "@/lib/crm/lead-timezone"
 import { stopMarketingOutreach } from "@/lib/integrations/marketing-leads/outreach-stop"
 
@@ -23,20 +25,6 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 function one<T>(value: T | T[] | null | undefined): T | null {
   if (value == null) return null
   return Array.isArray(value) ? (value[0] ?? null) : value
-}
-
-type RaceRef = { event_date: string | null } | Array<{ event_date: string | null }> | null
-
-function earliestEventDate(deal: {
-  races?: RaceRef
-  deal_line_items?: Array<{ packages?: { races?: RaceRef } | Array<{ races?: RaceRef }> | null }> | null
-}): string | null {
-  const dates = [one(deal.races)?.event_date ?? null]
-  for (const line of deal.deal_line_items ?? []) {
-    dates.push(one(one(line.packages)?.races)?.event_date ?? null)
-  }
-  const valid = dates.filter((value): value is string => Boolean(value)).sort()
-  return valid[0] ?? null
 }
 
 export async function logEnquiryCall(input: {
@@ -82,21 +70,20 @@ export async function logEnquiryCall(input: {
     .select(
       `
       id, stage, enquiry_stage, enquiry_temperature, owner_profile_id,
-      crm_contacts!primary_contact_id ( phone ),
-      races ( event_date ),
-      deal_line_items ( packages ( races ( event_date ) ) )
+      crm_contacts!primary_contact_id ( phone )
     `,
     )
     .eq("id", dealId)
     .maybeSingle()
   if (dealError || !deal) return { ok: false, message: dealError?.message || "Enquiry not found." }
 
-  const { count, error: countError } = await admin
+  const { data: priorCalls, error: countError } = await admin
     .from("enquiry_call_attempts")
-    .select("id", { count: "exact", head: true })
+    .select("outcome")
     .eq("deal_id", dealId)
   if (countError) return { ok: false, message: countError.message }
-  const attemptNo = (count ?? 0) + 1
+  const attemptNo = (priorCalls?.length ?? 0) + 1
+  const spokeBefore = (priorCalls ?? []).some((row) => isCallOutcome(row.outcome) && callOutcomeConnected(row.outcome))
 
   const contact = one(deal.crm_contacts as { phone: string | null } | Array<{ phone: string | null }> | null)
   const now = new Date()
@@ -106,7 +93,7 @@ export async function logEnquiryCall(input: {
     now,
     timeZone: timezoneForPhone(contact?.phone),
     callbackAt,
-    eventDate: earliestEventDate(deal as Parameters<typeof earliestEventDate>[0]),
+    spokeBefore,
   })
 
   const { error: insertError } = await supabase.from("enquiry_call_attempts").insert({
@@ -124,7 +111,13 @@ export async function logEnquiryCall(input: {
   const nextActionDueAt = plan.nextActionDueAt?.toISOString() ?? null
   const inEnquiryPipeline = isEnquiryPipelineStage(String(deal.stage))
 
-  if (plan.enquiryStage && inEnquiryPipeline) {
+  const currentStage = enquiryCrmStageFromDeal({
+    stage: String(deal.stage),
+    enquiry_stage: (deal.enquiry_stage as string | null) ?? null,
+  })
+  const moveStage = Boolean(plan.enquiryStage && isForwardEnquiryMove(currentStage, plan.enquiryStage))
+
+  if (moveStage && plan.enquiryStage && inEnquiryPipeline) {
     const { error } = await supabase.rpc("admin_update_enquiry_pipeline", {
       p_deal_id: dealId,
       p_enquiry_stage: plan.enquiryStage,
@@ -160,7 +153,7 @@ export async function logEnquiryCall(input: {
 
   const summaryParts = [`Call ${attemptNo}: ${CALL_OUTCOME_LABELS[outcome]}`]
   if (lostReason && isCallLostReason(lostReason)) summaryParts.push(CALL_LOST_REASON_LABELS[lostReason])
-  if (plan.noResponse) summaryParts.push("no response after all attempts")
+  if (plan.noResponse) summaryParts.push(NO_RESPONSE_CLOSED_SUMMARY)
   if (notes) summaryParts.push(notes)
   await supabase.from("deal_activities").insert({
     deal_id: dealId,
@@ -183,7 +176,7 @@ export async function logEnquiryCall(input: {
   return {
     ok: true,
     message: plan.noResponse
-      ? "Call logged. No response after 5 attempts — marked Cold."
+      ? "Call logged. No answer after 5 calls, so the lead is now Not interested."
       : plan.stopReason
         ? "Call logged. Automated follow-up stopped."
         : "Call logged.",

@@ -270,18 +270,6 @@ async function resolveAliasPackage(
   return null
 }
 
-async function resolveOwnerProfileId(admin: AdminClient, email: string | null): Promise<string | null> {
-  const ownerEmail = email?.trim().toLowerCase()
-  if (!ownerEmail) return null
-  const { data } = await admin
-    .from("profiles")
-    .select("id")
-    .ilike("email", ownerEmail)
-    .limit(1)
-    .maybeSingle()
-  return data?.id ? String(data.id) : null
-}
-
 async function resolveCatalog(
   admin: AdminClient,
   payload: MarketingLeadPayload,
@@ -450,10 +438,6 @@ export async function ingestMarketingLead(payload: MarketingLeadPayload): Promis
     const quantity = payload.interest.quantity && payload.interest.quantity > 0 ? payload.interest.quantity : 1
     const notes = formatMarketingLeadNotes(payload)
     const currency = packageRow?.currency?.trim() || "USD"
-    const ownerProfileId = await resolveOwnerProfileId(admin, payload.ownerEmail)
-    if (payload.ownerEmail && !ownerProfileId) {
-      console.error("[marketing-lead] owner profile not found", payload.ownerEmail)
-    }
     const fromWebsite = payload.origin === "website"
 
     const { data: deal, error: dealError } = await admin
@@ -471,7 +455,7 @@ export async function ingestMarketingLead(payload: MarketingLeadPayload): Promis
         notes,
         next_action: suggestedEnquiryAction("new"),
         race_id: catalog.raceId,
-        owner_profile_id: ownerProfileId,
+        owner_profile_id: null,
       })
       .select("id, reference")
       .single()
@@ -511,8 +495,6 @@ export async function ingestMarketingLead(payload: MarketingLeadPayload): Promis
         package: payload.interest.package,
         matchedPackageIds: catalog.packages.map((row) => row.id),
         quantity: payload.interest.quantity,
-        ownerEmail: payload.ownerEmail,
-        ownerProfileId,
       },
     })
 
@@ -536,10 +518,9 @@ export async function ingestMarketingLead(payload: MarketingLeadPayload): Promis
     }
 
     try {
-      await sendNewLeadAlert(admin, {
+      await sendNewLeadAlert({
         dealId: String(deal.id),
         reference: String(deal.reference ?? ""),
-        ownerProfileId,
         name: payload.contact.fullName || "New lead",
         phone: payload.contact.phone,
         email: payload.contact.email,

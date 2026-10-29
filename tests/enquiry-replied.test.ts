@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { readFileSync } from "node:fs"
-import { enquiryHasClientReply, markEnquiryClientReplied } from "../lib/crm/enquiry-replied"
+import { enquiryHasClientReply, markEnquiryClientReplied, moveRepliedEnquiryForward } from "../lib/crm/enquiry-replied"
 
 test("replied badge is only on after the first client reply", () => {
   assert.equal(enquiryHasClientReply({ enquiry_replied_at: null }), false)
@@ -53,8 +53,39 @@ test("inbound reply paths stamp replied without changing later-stage rules", () 
   for (const file of files) {
     const src = readFileSync(file, "utf8")
     assert.match(src, /markEnquiryClientReplied/)
-    assert.match(src, /\.in\("enquiry_stage", \["new", "contacted"\]\)/)
+    assert.match(src, /moveRepliedEnquiryForward/)
+    assert.doesNotMatch(src, /enquiry_stage: "responded"/)
   }
+})
+
+test("a reply moves only a New enquiry to In conversation", async () => {
+  const calls: Array<{ values: Record<string, unknown>; eq: Array<[string, unknown]> }> = []
+  const admin = {
+    from: () => ({
+      update: (values: Record<string, unknown>) => {
+        const call = { values, eq: [] as Array<[string, unknown]> }
+        calls.push(call)
+        const chain = {
+          eq: (column: string, value: unknown) => {
+            call.eq.push([column, value])
+            return call.eq.length >= 2 ? Promise.resolve({ error: null }) : chain
+          },
+        }
+        return chain
+      },
+    }),
+  }
+  await moveRepliedEnquiryForward(
+    admin as unknown as Parameters<typeof moveRepliedEnquiryForward>[0],
+    "deal-1",
+    new Date("2026-10-15T14:00:00.000Z"),
+  )
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].values.enquiry_stage, "contacted")
+  assert.deepEqual(calls[0].eq, [
+    ["id", "deal-1"],
+    ["enquiry_stage", "new"],
+  ])
 })
 
 test("replied column stays independent of enquiry stage", () => {

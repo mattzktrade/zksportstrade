@@ -1,4 +1,9 @@
-import { suggestedEnquiryAction } from "@/lib/crm/deal-pipeline"
+import {
+  enquiryCrmStageFromDeal,
+  isEnquiryPipelineStage,
+  isForwardEnquiryMove,
+  suggestedEnquiryAction,
+} from "@/lib/crm/deal-pipeline"
 import { DEFAULT_SALES_POLICY_BODY, DEFAULT_SALES_POLICY_SLUG } from "@/lib/assistant/knowledge"
 import { classifyClientMessage, isLowContentMessage } from "@/lib/assistant/classify"
 import { completeAssistantTurn, buildAssistantSystemPrompt } from "@/lib/assistant/llm"
@@ -74,6 +79,8 @@ async function markSourcingRequired(admin: SupabaseClient, conversation: Assista
     .maybeSingle()
   if (!deal) return
   const previous = { stage: String(deal.stage), enquiry_stage: deal.enquiry_stage as string | null }
+  if (!isEnquiryPipelineStage(previous.stage)) return
+  if (!isForwardEnquiryMove(enquiryCrmStageFromDeal(previous), "sourcing_required")) return
   await admin
     .from("deals")
     .update({

@@ -139,7 +139,7 @@ export function countCampaignLeads(leads: CampaignLead[], now = new Date()): Cam
     }
     if (lead.conversation?.needsOurReply) counts.waitingForOurReply += 1
     const callDeal = { ...lead, source: "marketing" }
-    if (enquiryNeedsCall(callDeal, lead.calls, now) && enquiryCallDueAt(callDeal, lead.calls) <= now.getTime()) {
+    if (enquiryNeedsCall(callDeal, lead.calls) && enquiryCallDueAt(callDeal, lead.calls) <= now.getTime()) {
       counts.callsDueNow += 1
     }
     if (lead.sequence?.status === "active") counts.inSequence += 1

@@ -7,7 +7,6 @@ import {
   enquiryNeedsCall,
   nextCallDueAfterUnanswered,
   planCallOutcome,
-  preRaceCheckDue,
   summarizeCallAttempts,
   type EnquiryCallAttempt,
 } from "../lib/crm/call-outcomes"
@@ -74,11 +73,6 @@ describe("call cadence", () => {
     assert.equal(nextCallDueAfterUnanswered(5, now, DUBAI), null)
   })
 
-  it("books the final check seven days before the race", () => {
-    assert.equal(preRaceCheckDue("2026-12-06", now, DUBAI)?.toISOString(), "2026-11-29T06:00:00.000Z")
-    assert.equal(preRaceCheckDue("2026-10-30", now, DUBAI), null)
-    assert.equal(preRaceCheckDue(null, now, DUBAI), null)
-  })
 })
 
 describe("call outcome rules", () => {
@@ -114,12 +108,31 @@ describe("call outcome rules", () => {
     }
   })
 
-  it("marks Cold with a pre-race check after the fifth unanswered call", () => {
-    const plan = planCallOutcome({ ...base, attemptNo: 5, outcome: "no_answer", eventDate: "2026-12-06" })
-    assert.equal(plan.noResponse, true)
-    assert.equal(plan.temperature, "cold")
-    assert.equal(plan.stopReason, null)
-    assert.equal(plan.nextActionDueAt?.toISOString(), "2026-11-29T06:00:00.000Z")
+  it("closes as Not interested after the fifth unanswered call but lets the last message go out", () => {
+    for (const outcome of ["no_answer", "voicemail", "busy"] as const) {
+      const plan = planCallOutcome({ ...base, attemptNo: 5, outcome })
+      assert.equal(plan.noResponse, true)
+      assert.equal(plan.enquiryStage, "not_interested")
+      assert.equal(plan.temperature, "cold")
+      assert.equal(plan.stopReason, null)
+      assert.equal(plan.nextAction, "No further action")
+      assert.equal(plan.nextActionDueAt, null)
+    }
+    assert.equal(planCallOutcome({ ...base, attemptNo: 4, outcome: "no_answer" }).enquiryStage, null)
+  })
+
+  it("never closes a lead someone has already spoken to", () => {
+    const plan = planCallOutcome({ ...base, attemptNo: 5, outcome: "no_answer", spokeBefore: true })
+    assert.equal(plan.noResponse, false)
+    assert.equal(plan.enquiryStage, null)
+    assert.equal(plan.nextAction, "Try them again")
+    assert.ok(plan.nextActionDueAt)
+  })
+
+  it("checks earlier calls for a conversation before closing", () => {
+    const src = readFileSync("app/(admin)/admin/enquiries/call-actions.ts", "utf8")
+    assert.match(src, /spokeBefore/)
+    assert.match(src, /callOutcomeConnected\(row\.outcome\)/)
   })
 
   it("blocks WhatsApp but keeps email for a wrong number", () => {
@@ -152,13 +165,13 @@ describe("call list", () => {
     assert.equal(enquiryNeedsCall(lead, spoke), false)
   })
 
-  it("drops leads after five unanswered calls until the pre-race check is due", () => {
+  it("drops leads from the call list after five unanswered calls", () => {
     const five = summarizeCallAttempts(
       [1, 2, 3, 4, 5].map((n) => attempt(n, "no_answer", `2026-10-2${n}T06:00:00.000Z`)),
     )
-    const now = new Date("2026-11-01T06:00:00.000Z")
-    assert.equal(enquiryNeedsCall({ ...lead, next_action_due_at: "2026-11-29T06:00:00.000Z" }, five, now), false)
-    assert.equal(enquiryNeedsCall({ ...lead, next_action_due_at: "2026-10-31T06:00:00.000Z" }, five, now), true)
+    assert.equal(enquiryNeedsCall({ ...lead, next_action_due_at: "2026-10-31T06:00:00.000Z" }, five), false)
+    const four = summarizeCallAttempts(five.history.slice(1))
+    assert.equal(enquiryNeedsCall(lead, four), true)
   })
 
   it("puts the first call five minutes after the lead lands", () => {

@@ -2,6 +2,9 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { readFileSync } from "node:fs"
 import {
+  ACTIVE_ENQUIRY_STAGES,
+  activeEnquiryStage,
+  isForwardEnquiryMove,
   DEAL_BOARD_COLUMNS,
   ENQUIRY_CONVERT_STAGE,
   ENQUIRY_CRM_STAGES,
@@ -55,38 +58,83 @@ test("enquiry stages stay off the deals board", () => {
 test("enquiry CRM stages cover the sales progression without using closed lost", () => {
   assert.deepEqual(
     ENQUIRY_STAGE_TABS.map((tab) => tab.id),
-    ["all", ...ENQUIRY_CRM_STAGES],
+    ["all", ...ACTIVE_ENQUIRY_STAGES],
   )
-  assert.deepEqual(ENQUIRY_CRM_STAGES, [
+  assert.deepEqual(ACTIVE_ENQUIRY_STAGES, [
     "new",
     "contacted",
-    "responded",
     "sourcing_required",
     "sourcing_complete",
-    "price_sent",
     "follow_up",
     "not_interested",
     "expired",
   ])
+  assert.ok(ENQUIRY_CRM_STAGES.includes("responded"))
+  assert.ok(ENQUIRY_CRM_STAGES.includes("price_sent"))
   assert.equal(enquiryStageLabel("new"), "New")
-  assert.equal(enquiryStageLabel("contacted"), "Contacted")
-  assert.equal(enquiryStageLabel("responded"), "Responded")
-  assert.equal(enquiryStageLabel("sourcing_required"), "Sourcing required")
-  assert.equal(enquiryStageLabel("sourcing_complete"), "Sourcing complete")
-  assert.equal(enquiryStageLabel("price_sent"), "Price sent")
-  assert.equal(enquiryStageLabel("follow_up"), "Follow-up")
+  assert.equal(enquiryStageLabel("contacted"), "In conversation")
+  assert.equal(enquiryStageLabel("responded"), "In conversation")
+  assert.equal(enquiryStageLabel("sourcing_required"), "Sourcing")
+  assert.equal(enquiryStageLabel("sourcing_complete"), "Sourced: send price")
+  assert.equal(enquiryStageLabel("price_sent"), "Deciding")
+  assert.equal(enquiryStageLabel("follow_up"), "Deciding")
   assert.equal(enquiryStageLabel("not_interested"), "Not interested")
   assert.equal(enquiryStageLabel("expired"), "Expired")
   assert.equal(enquiryDealStage("expired", "proposal"), "proposal")
   assert.equal(suggestedEnquiryAction("expired"), "No further action")
   assert.equal(enquiryStageLabel("draft"), "New")
-  assert.equal(enquiryStageLabel("sourcing"), "Sourcing required")
-  assert.equal(enquiryStageLabel("proposal"), "Price sent")
+  assert.equal(enquiryStageLabel("sourcing"), "Sourcing")
+  assert.equal(enquiryStageLabel("proposal"), "Deciding")
   assert.equal(enquiryDealStage("not_interested", "sourcing"), "sourcing")
   assert.equal(enquiryDealStage("not_interested", "signed"), "draft")
   assert.notEqual(enquiryDealStage("not_interested", "proposal"), "closed_lost")
   assert.equal(enquiryDealStage("follow_up"), "proposal")
   assert.equal(ENQUIRY_CONVERT_STAGE, "awaiting_booking_form_send")
+})
+
+test("automatic moves only go forward through the funnel", () => {
+  assert.equal(isForwardEnquiryMove("new", "contacted"), true)
+  assert.equal(isForwardEnquiryMove("contacted", "sourcing_required"), true)
+  assert.equal(isForwardEnquiryMove("sourcing_complete", "follow_up"), true)
+  assert.equal(isForwardEnquiryMove("follow_up", "not_interested"), true)
+  assert.equal(isForwardEnquiryMove("follow_up", "contacted"), false)
+  assert.equal(isForwardEnquiryMove("follow_up", "follow_up"), false)
+  assert.equal(isForwardEnquiryMove("sourcing_required", "contacted"), false)
+  assert.equal(isForwardEnquiryMove("not_interested", "contacted"), false)
+  assert.equal(isForwardEnquiryMove("expired", "follow_up"), false)
+})
+
+test("retired stages read as the ones that replaced them", () => {
+  assert.equal(activeEnquiryStage("responded"), "contacted")
+  assert.equal(activeEnquiryStage("price_sent"), "follow_up")
+  assert.equal(activeEnquiryStage("sourcing_required"), "sourcing_required")
+  assert.equal(isForwardEnquiryMove("responded", "contacted"), false)
+  assert.equal(isForwardEnquiryMove("price_sent", "follow_up"), false)
+  assert.equal(enquiryCrmStageFromDeal({ stage: "draft", enquiry_stage: "responded" }), "contacted")
+  assert.equal(enquiryCrmStageFromDeal({ stage: "proposal", enquiry_stage: "price_sent" }), "follow_up")
+  assert.equal(enquiryCrmStageFromDeal({ stage: "proposal", enquiry_stage: null }), "follow_up")
+})
+
+test("a Spoke call in Deciding keeps the lead in Deciding", () => {
+  const src = readFileSync("app/(admin)/admin/enquiries/call-actions.ts", "utf8")
+  assert.match(src, /isForwardEnquiryMove\(currentStage, plan\.enquiryStage\)/)
+  assert.match(src, /if \(moveStage &&/)
+})
+
+test("sourcing only starts from an earlier stage", () => {
+  const src = readFileSync("lib/assistant/run.ts", "utf8")
+  assert.match(src, /isForwardEnquiryMove\(enquiryCrmStageFromDeal\(previous\), "sourcing_required"\)/)
+  const notices = readFileSync("lib/crm/sourcing-notifications.ts", "utf8")
+  assert.match(notices, /matt@zk-sports\.com/)
+  assert.match(notices, /samantha@zk-sports\.com/)
+})
+
+test("staff record the price with one tap and land in Deciding", () => {
+  const src = readFileSync("app/(admin)/admin/enquiries/enquiries-client.tsx", "utf8")
+  assert.match(src, /Price sent: move to Deciding/)
+  assert.match(src, /saveStage\("follow_up"\)/)
+  const page = readFileSync("app/(admin)/admin/deals/page.tsx", "utf8")
+  assert.match(page, /redirect\("\/admin\/enquiries\?stage=follow_up"\)/)
 })
 
 test("staff can start or jump an enquiry to later deal stages including won/paid", () => {
@@ -114,8 +162,8 @@ test("staff can start or jump an enquiry to later deal stages including won/paid
     reserve: false,
   })
   assert.deepEqual(createdDealPipeline({ reserve: true }), {
-    selectableStage: "price_sent",
-    enquiryStage: "price_sent",
+    selectableStage: "follow_up",
+    enquiryStage: "follow_up",
     dealStage: "proposal",
     reserve: true,
   })
@@ -133,7 +181,7 @@ test("staff can start or jump an enquiry to later deal stages including won/paid
   })
   assert.deepEqual(createdDealPipeline({ stage: "awaiting_booking_form_send", reserve: true }), {
     selectableStage: "awaiting_booking_form_send",
-    enquiryStage: "price_sent",
+    enquiryStage: "follow_up",
     dealStage: "awaiting_booking_form_send",
     reserve: true,
   })
@@ -146,7 +194,7 @@ test("cold outreach warms when they respond, inbound stays warm", () => {
   )
   assert.equal(
     resolvedEnquiryTemperature({ source: "email", enquiryStage: "contacted", temperature: "cold" }),
-    "cold",
+    "warm",
   )
   assert.equal(
     resolvedEnquiryTemperature({ source: "whatsapp", enquiryStage: "responded", temperature: "cold" }),
@@ -183,7 +231,11 @@ test("advance skips sourcing when stock is already owned", () => {
       enquiry_stage: "responded",
       lines: [{ sourcing_mode: "owned" }],
     }),
-    "price_sent",
+    "follow_up",
+  )
+  assert.equal(
+    nextEnquiryCrmStage({ stage: "sourcing", enquiry_stage: "sourcing_complete", lines: [] }),
+    "follow_up",
   )
   assert.equal(
     nextEnquiryCrmStage({
@@ -267,7 +319,8 @@ test("enquiry helpers describe interest, sourcing, and next action", () => {
     defaultEnquiryAction({ stage: "draft", enquiry_stage: "new", next_action: null }),
     "Make contact",
   )
-  assert.equal(suggestedEnquiryAction("contacted"), "Wait for a reply")
+  assert.equal(suggestedEnquiryAction("contacted"), "Confirm what they need")
+  assert.equal(suggestedEnquiryAction("follow_up"), "Follow up")
   assert.equal(enquiryNotesPreview("Also asked about Paddock Club and Sunday only"), "Also asked about Paddock Club and Sunday only")
   assert.equal(
     enquiryAttentionReason({ owner_profile_id: null, next_action_due_at: null }),

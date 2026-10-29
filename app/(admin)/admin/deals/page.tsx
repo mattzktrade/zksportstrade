@@ -55,7 +55,7 @@ async function DealsPageBody({
     redirect("/admin/enquiries?stage=new")
   }
   if (initialPipeline === "price_sent") {
-    redirect("/admin/enquiries?stage=price_sent")
+    redirect("/admin/enquiries?stage=follow_up")
   }
 
   const selectedId = initialSelectedId?.trim() || null

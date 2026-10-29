@@ -1,9 +1,10 @@
 import { isOpenEnquiry, suggestedEnquiryAction } from "@/lib/crm/deal-pipeline"
-import { markEnquiryClientReplied } from "@/lib/crm/enquiry-replied"
+import { markEnquiryClientReplied, moveRepliedEnquiryForward } from "@/lib/crm/enquiry-replied"
 import {
   findActiveOutreachByEmail,
   findOutreachEnrollmentByPhone,
 } from "@/lib/integrations/marketing-leads/outreach-store"
+import { MARKETING_LEAD_NOTIFY_EMAILS } from "@/lib/integrations/marketing-leads/notify"
 import { sendAssistantStaffAlert } from "@/lib/assistant/notifications"
 import {
   assistantWillAutoReplyFromSettings,
@@ -268,15 +269,7 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
   if (conversation.dealId && !inserted.duplicate) {
     const classified = classifyClientMessage(event.body, isLowContentMessage(event.body, event.mediaType))
     await markEnquiryClientReplied(admin, conversation.dealId, now)
-    await admin
-      .from("deals")
-      .update({
-        enquiry_stage: "responded",
-        next_action: suggestedEnquiryAction("responded"),
-        updated_at: now.toISOString(),
-      })
-      .eq("id", conversation.dealId)
-      .in("enquiry_stage", ["new", "contacted"])
+    await moveRepliedEnquiryForward(admin, conversation.dealId, now)
     if (classified.wantsBooking || classified.sensitive) {
       await updateConversation(admin, conversation.id, { status: "needs_review" })
     }
@@ -300,13 +293,15 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
     if (!inWhatsAppReplyNotifyBurst(previousLastClientAt, now.getTime())) {
       let dealReference: string | null = null
       let ownerEmail: string | null = null
+      let marketingLead = false
       if (conversation.dealId) {
         const { data: deal } = await admin
           .from("deals")
-          .select("reference, owner_profile_id")
+          .select("reference, owner_profile_id, source")
           .eq("id", conversation.dealId)
           .maybeSingle()
         dealReference = deal?.reference ? String(deal.reference) : null
+        marketingLead = deal?.source === "marketing"
         if (deal?.owner_profile_id) {
           const { data: owner } = await admin
             .from("profiles")
@@ -316,7 +311,11 @@ export async function ingestAssistantEvent(event: InboundAssistantEvent): Promis
           ownerEmail = owner?.email ? String(owner.email) : null
         }
       }
-      const to = [...(noticeDue ? settings.notifyEmails : []), ...(ownerEmail ? [ownerEmail] : [])]
+      const to = [
+        ...(noticeDue ? settings.notifyEmails : []),
+        ...(ownerEmail ? [ownerEmail] : []),
+        ...(marketingLead ? MARKETING_LEAD_NOTIFY_EMAILS : []),
+      ]
       if (to.length > 0) {
         const sent = await sendAssistantStaffAlert({
           to,

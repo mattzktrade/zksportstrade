@@ -102,6 +102,7 @@ import {
   isEnquiryTemperature,
   suggestedEnquiryAction,
   suggestedSelectableStageAction,
+  activeEnquiryStage,
   ENQUIRY_CRM_STAGE_LABELS,
 } from "@/lib/crm/deal-pipeline"
 import { canonicalDealSource } from "@/lib/crm/deal-types"
@@ -5811,6 +5812,7 @@ export async function updateEnquiryPipeline(input: {
   if (!isEnquiryCrmStage(input.enquiryStage)) {
     return { ok: false, message: "Selected enquiry stage is not valid." }
   }
+  const enquiryStage = activeEnquiryStage(input.enquiryStage)
   const enquiryTemperature = input.enquiryTemperature?.trim() || null
   if (enquiryTemperature && !isEnquiryTemperature(enquiryTemperature)) {
     return { ok: false, message: "Warm/cold is not valid." }
@@ -5830,10 +5832,10 @@ export async function updateEnquiryPipeline(input: {
 
   const sourcingSnapshots = await loadSourcingEnquirySnapshots(gate.supabase, [dealId])
   const releasedPackageIds =
-    input.enquiryStage === "expired" ? await activeEnquiryReservationPackages(gate.supabase, [dealId]) : []
+    enquiryStage === "expired" ? await activeEnquiryReservationPackages(gate.supabase, [dealId]) : []
   const { error } = await gate.supabase.rpc("admin_update_enquiry_pipeline", {
     p_deal_id: dealId,
-    p_enquiry_stage: input.enquiryStage,
+    p_enquiry_stage: enquiryStage,
     p_enquiry_temperature: enquiryTemperature,
     p_owner_profile_id: ownerProfileId,
     p_next_action: input.nextAction?.trim() || null,
@@ -5849,13 +5851,13 @@ export async function updateEnquiryPipeline(input: {
     }
     return { ok: false, message: error.message }
   }
-  if (input.enquiryStage !== "new") {
+  if (enquiryStage !== "new") {
     const { stopMarketingOutreach } = await import("@/lib/integrations/marketing-leads/outreach-stop")
     await stopMarketingOutreach(
       dealId,
-      input.enquiryStage === "not_interested"
+      enquiryStage === "not_interested"
         ? "not_interested"
-        : input.enquiryStage === "expired"
+        : enquiryStage === "expired"
           ? "expired"
           : "staff",
     ).catch(() => undefined)
@@ -5864,7 +5866,7 @@ export async function updateEnquiryPipeline(input: {
     const { syncReleasedEnquiryPackages } = await import("@/lib/crm/expire-past-event-enquiries")
     await syncReleasedEnquiryPackages(releasedPackageIds)
   }
-  const sourcingEmail = await deliverSourcingStageNotification(sourcingSnapshots.get(dealId), input.enquiryStage)
+  const sourcingEmail = await deliverSourcingStageNotification(sourcingSnapshots.get(dealId), enquiryStage)
   revalidatePath("/admin/deals", "layout")
   revalidatePath("/admin/enquiries", "layout")
   revalidatePath("/admin")
@@ -5889,10 +5891,11 @@ export async function updateEnquiryPipelineBulk(input: {
     return { ok: false, message: "Select up to 80 enquiries at a time." }
   }
 
-  const nextAction = suggestedEnquiryAction(input.enquiryStage)
+  const enquiryStage = activeEnquiryStage(input.enquiryStage)
+  const nextAction = suggestedEnquiryAction(enquiryStage)
   const sourcingSnapshots = await loadSourcingEnquirySnapshots(gate.supabase, dealIds)
   const releasedPackageIds =
-    input.enquiryStage === "expired" ? await activeEnquiryReservationPackages(gate.supabase, dealIds) : []
+    enquiryStage === "expired" ? await activeEnquiryReservationPackages(gate.supabase, dealIds) : []
   let updated = 0
   let emailFailed = 0
   let firstError = ""
@@ -5908,7 +5911,7 @@ export async function updateEnquiryPipelineBulk(input: {
     }
     const { error } = await gate.supabase.rpc("admin_update_enquiry_pipeline", {
       p_deal_id: dealId,
-      p_enquiry_stage: input.enquiryStage,
+      p_enquiry_stage: enquiryStage,
       p_enquiry_temperature:
         deal.enquiry_temperature === "warm" || deal.enquiry_temperature === "cold"
           ? deal.enquiry_temperature
@@ -5929,7 +5932,7 @@ export async function updateEnquiryPipelineBulk(input: {
     updated += 1
     const sourcingEmail = await deliverSourcingStageNotification(
       sourcingSnapshots.get(dealId),
-      input.enquiryStage,
+      enquiryStage,
     )
     if (sourcingEmail === "failed") emailFailed += 1
   }
@@ -5939,15 +5942,15 @@ export async function updateEnquiryPipelineBulk(input: {
     await syncReleasedEnquiryPackages(releasedPackageIds)
   }
 
-  if (input.enquiryStage !== "new") {
+  if (enquiryStage !== "new") {
     const { stopMarketingOutreach } = await import("@/lib/integrations/marketing-leads/outreach-stop")
     await Promise.all(
       dealIds.map((dealId) =>
         stopMarketingOutreach(
           dealId,
-          input.enquiryStage === "not_interested"
+          enquiryStage === "not_interested"
             ? "not_interested"
-            : input.enquiryStage === "expired"
+            : enquiryStage === "expired"
               ? "expired"
               : "staff",
         ).catch(() => undefined),
@@ -5973,7 +5976,7 @@ export async function updateEnquiryPipelineBulk(input: {
     message:
       (dealIds.length === 1
         ? "Enquiry stage updated."
-        : `${updated} enquiries moved to ${ENQUIRY_CRM_STAGE_LABELS[input.enquiryStage]}.`) + emailNote,
+        : `${updated} enquiries moved to ${ENQUIRY_CRM_STAGE_LABELS[enquiryStage]}.`) + emailNote,
   }
 }
 

@@ -1,8 +1,7 @@
 import { createHmac } from "crypto"
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { suggestedEnquiryAction } from "@/lib/crm/deal-pipeline"
-import { markEnquiryClientReplied } from "@/lib/crm/enquiry-replied"
+import { markEnquiryClientReplied, moveRepliedEnquiryForward } from "@/lib/crm/enquiry-replied"
 import { getWhatsAppAppSecret, getWhatsAppWebhookVerifyToken } from "@/lib/integrations/marketing-leads/outreach-config"
 import { isOutreachStopKeyword } from "@/lib/integrations/marketing-leads/outreach-labels"
 import { findActiveOutreachByPhone } from "@/lib/integrations/marketing-leads/outreach-store"
@@ -59,15 +58,7 @@ export async function POST(request: Request) {
     await stopMarketingOutreach(enrollment.deal_id, reason)
     if (reason === "replied") {
       await markEnquiryClientReplied(admin, enrollment.deal_id)
-      await admin
-        .from("deals")
-        .update({
-          enquiry_stage: "responded",
-          next_action: suggestedEnquiryAction("responded"),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", enrollment.deal_id)
-        .in("enquiry_stage", ["new", "contacted"])
+      await moveRepliedEnquiryForward(admin, enrollment.deal_id)
     }
   }
 

@@ -1,7 +1,8 @@
 import Link from "next/link"
-import { ChevronRight, MessageSquare, Phone, PhoneCall } from "lucide-react"
+import { ChevronRight, MessageSquare, Phone, PhoneCall, RotateCcw } from "lucide-react"
 import {
   CALL_LIST_HREF,
+  FOLLOW_UP_LIST_HREF,
   INBOX_NEEDS_REPLY_HREF,
   INBOX_REPLIED_HREF,
   loadFollowUpSummary,
@@ -62,7 +63,7 @@ function Tile({
   )
 }
 
-/** "Your follow-ups" on the sales and director dashboards: inbox replies waiting on us and calls due. */
+/** "Your follow-ups" on the sales and director dashboards: inbox replies waiting on us, calls due and leads to follow up. */
 export async function FollowUpPanel({ ownerProfileId }: { ownerProfileId?: string | null }) {
   const summary = await loadFollowUpSummary({ ownerProfileId })
   const now = Date.now()
@@ -71,13 +72,15 @@ export async function FollowUpPanel({ ownerProfileId }: { ownerProfileId?: strin
       <div className="flex items-start justify-between gap-3 px-4 pt-3">
         <div>
           <h2 className="text-[13px] font-semibold text-[#1b1c1f]">Follow-ups</h2>
-          <p className="mt-0.5 text-[11px] text-[#8b9198]">Reply to anyone waiting on us, then work through the calls due.</p>
+          <p className="mt-0.5 text-[11px] text-[#8b9198]">
+            Reply to anyone waiting on us, then work through the calls and follow-ups due.
+          </p>
         </div>
         <Link href={CAMPAIGNS_HREF} className="shrink-0 text-[11px] font-medium text-primary hover:underline">
           Campaign results
         </Link>
       </div>
-      <div className="grid gap-2 p-4 sm:grid-cols-3">
+      <div className="grid gap-2 p-4 sm:grid-cols-2 xl:grid-cols-4">
         <Tile
           href={INBOX_NEEDS_REPLY_HREF}
           value={summary.inboxNeedsReply}
@@ -101,6 +104,14 @@ export async function FollowUpPanel({ ownerProfileId }: { ownerProfileId?: strin
           urgent={summary.callsDueNow > 0}
           Icon={PhoneCall}
         />
+        <Tile
+          href={FOLLOW_UP_LIST_HREF}
+          value={summary.followUpsDueNow}
+          label="Deciding: follow-ups due"
+          hint="Leads with the price who need a check-in"
+          urgent={summary.followUpsDueNow > 0}
+          Icon={RotateCcw}
+        />
       </div>
       {summary.calls.length > 0 ? (
         <div className="divide-y divide-[#f2f4f6] border-t border-[#f2f4f6]">
@@ -114,7 +125,7 @@ export async function FollowUpPanel({ ownerProfileId }: { ownerProfileId?: strin
                     <span className="font-normal text-[#8b9198]"> · {row.reference}</span>
                   </span>
                   <span className="mt-0.5 block truncate text-[11px] text-[#8b9198]">
-                    Call {row.attempts + 1}
+                    {row.kind === "follow_up" ? "Deciding: follow up" : `Call ${row.attempts + 1}`}
                     {row.lastOutcome ? ` · last: ${row.lastOutcome}` : ""}
                     {row.interest ? ` · ${row.interest}` : ""}
                   </span>

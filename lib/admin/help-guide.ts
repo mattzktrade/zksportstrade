@@ -3,6 +3,7 @@ export const HELP_TOPIC_IDS = [
   "pages",
   "rules",
   "sales",
+  "sales-process",
   "assistant",
   "inventory",
   "portal",
@@ -246,7 +247,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             title: "Enquiries",
-            body: "Warm and cold enquiries through contact, sourcing, price sent, and follow-up. Meta marketing leads arrive here automatically and can get a three-stage email and WhatsApp follow-up until they reply. Create a booking form on the enquiry. Sending it for approval, or sending it to the client, moves it to Deals. Not interested stays here, not on Deals Lost. Expired is for an enquiry whose events have all taken place: staff can set it, and it is applied automatically once every event on that enquiry is in the past. An enquiry that still has a future event stays on its current stage.",
+            body: "Every enquiry moves forward through New, In conversation, Sourcing, Sourced and Deciding (see Sales process). Meta marketing leads arrive here automatically and can get a three-stage email and WhatsApp follow-up until they reply. Create a booking form on the enquiry. Sending it for approval, or sending it to the client, moves it to Deals. Not interested stays here, not on Deals Lost. Expired is for an enquiry whose events have all taken place: staff can set it, and it is applied automatically once every event on that enquiry is in the past. An enquiry that still has a future event stays on its current stage.",
             href: "/admin/enquiries",
           },
           {
@@ -459,7 +460,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         type: "bullets",
         title: "Pipeline columns",
         items: [
-          "Enquiries — New, quoting / sourcing, and price sent.",
+          "Enquiries — New, In conversation, Sourcing, Sourced: send price, and Deciding.",
           "Ready to send — sent for approval, waiting for an admin to email the client.",
           "Booking form — form sent, waiting for the client or for ZK to sign.",
           "Form Expired — the unsigned form timed out. Send a new form or follow up; it does not go back to Enquiries.",
@@ -492,6 +493,183 @@ export const HELP_TOPICS: HelpTopic[] = [
           {
             q: "Where do Facebook / Meta marketing leads go?",
             a: "They appear on Sales → Enquiries with source Marketing, the form notes, and the person's email and phone. They can get a three-stage email and WhatsApp follow-up until they reply or someone on the team takes over. Edit the messages in Sales → Templates.",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "sales-process",
+    nav: "Sales process",
+    title: "Sales process: from enquiry to booking",
+    summary: "How every lead moves through the stages, what the CRM does for you, and what you need to do.",
+    keywords: [
+      "process",
+      "stages",
+      "funnel",
+      "new",
+      "in conversation",
+      "sourcing",
+      "sourced",
+      "deciding",
+      "price sent",
+      "follow up",
+      "follow-up",
+      "reminder",
+      "not interested",
+      "call schedule",
+      "call now",
+      "digest",
+      "marketing",
+      "whatsapp",
+      "automated messages",
+    ],
+    blocks: [
+      {
+        type: "p",
+        text: "Every enquiry, from any source, moves through the same stages in the same order: New, In conversation, Sourcing and Sourced (only if we need to find stock), Deciding, then Booking. Leads only ever move forward. At any point a lead can close as Not interested, and it closes as Expired once the race has passed.",
+      },
+      {
+        type: "callout",
+        tone: "info",
+        title: "Three rules",
+        text: "1. Log everything: every call (answered or not), every price you send. If you don't log it, the CRM doesn't know it happened. 2. Whoever logs the first call owns the lead. 3. Let the CRM chase you: it emails you when something is due and the dashboard shows what's overdue.",
+      },
+      {
+        type: "cards",
+        title: "The stages",
+        items: [
+          {
+            title: "1. New",
+            body: "Nobody has spoken to them yet. Your job: call them and log what happened.",
+            href: "/admin/enquiries?stage=new",
+          },
+          {
+            title: "2. In conversation",
+            body: "You've spoken on the phone, or they replied by WhatsApp or email. The lead moves here by itself. Your job: find out what they need, then send the price.",
+            href: "/admin/enquiries?stage=contacted",
+          },
+          {
+            title: "3. Sourcing (only if we don't hold the stock)",
+            body: "Move the lead here within a day of speaking to them. Matt gets an email to find the stock.",
+            href: "/admin/enquiries?stage=sourcing_required",
+          },
+          {
+            title: "4. Sourced: send price",
+            body: "Stock found. Sam gets an email to send the quote. Leads here never move on by themselves.",
+            href: "/admin/enquiries?stage=sourcing_complete",
+          },
+          {
+            title: "5. Deciding",
+            body: "They have the price and are thinking it over. The CRM reminds you to check in (see below).",
+            href: "/admin/enquiries?stage=follow_up",
+          },
+          {
+            title: "6. Booking",
+            body: "They said yes. Send the booking form and the lead moves to Deals: form sent, signed, invoiced, paid.",
+            href: "/admin/deals",
+          },
+        ],
+      },
+      {
+        type: "steps",
+        title: "Getting a lead to Deciding",
+        items: [
+          "Once you've sent the price, open the enquiry and click Price sent: move to Deciding.",
+          "If you forget, a lead in In conversation moves to Deciding by itself 24 hours after the first conversation (or once a callback you booked has passed).",
+          "Leads in Sourcing or Sourced: send price wait for you to click Price sent.",
+        ],
+      },
+      {
+        type: "bullets",
+        title: "Deciding: the follow-up reminders",
+        items: [
+          "Reminder 1: the day the lead reaches Deciding (between 9am and 8pm Dubai). Email: \"Still deciding: [name]\".",
+          "Reminder 2: two days later at 10am.",
+          "Reminder 3: four days later at 10am (day 7). This is the last reminder.",
+          "Seven days after reminder 3, with no call or reply, the lead closes as Not interested and is marked Cold.",
+          "Reminders go to the lead's owner. A marketing lead with no owner sends them to Sam and Oliver.",
+          "If you speak to them or they reply, log it. The lead stays in Deciding and the reminders start again, with the next one a day later.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "tip",
+        title: "Reminders are for us, not the client",
+        text: "\"Still deciding\" emails only go to our team. They prompt you to check in by call, WhatsApp or email. The client receives nothing automatic while they're in Deciding.",
+      },
+      {
+        type: "bullets",
+        title: "Marketing leads only: call schedule",
+        items: [
+          "As soon as a marketing lead arrives, Sam and Oliver get a \"Call now\" email. The lead lands in New, unassigned.",
+          "Call 1: 5 minutes after the lead comes in.",
+          "Call 2: 3 hours later (kept between 9am and 8pm, the lead's local time).",
+          "Call 3: the next day at 6pm.",
+          "Call 4: two days later at 10am.",
+          "Call 5: three days later at 2pm.",
+          "If call 5 goes unanswered, the lead closes as Not interested. Any automated message still to come (usually message 3) still goes out. This only happens if nobody has ever spoken to them.",
+          "Log each attempt as No answer, Voicemail left or Busy / declined so the next call gets scheduled.",
+        ],
+      },
+      {
+        type: "bullets",
+        title: "Marketing leads only: what the client receives",
+        items: [
+          "Message 1 (email and WhatsApp), 5 minutes after the lead comes in: thanks for their interest, they can book on the page or reply with guest numbers and days, and we'll call shortly.",
+          "Message 2, 24 hours later: we've tried to reach you, race weekend is getting close, reply with guest numbers and a good time to call.",
+          "Message 3, 3 days after message 2: we'll close this off for now; reply and we'll pick it up straight away (WhatsApp: reply YES, or STOP).",
+          "Messages 2 and 3 only send between 9am and 8pm in the lead's local time. Edit the wording in Sales → Templates.",
+          "The messages stop as soon as the lead replies, you log a call where you spoke to them, they book, or someone stops them on the enquiry.",
+        ],
+      },
+      {
+        type: "cards",
+        title: "Emails the team receives",
+        items: [
+          { title: "Call now", body: "A marketing lead arrives. Goes to Sam and Oliver." },
+          { title: "Reply alert", body: "A marketing lead replies. Goes to Sam and Oliver. The reply is in Sales → Inbox." },
+          {
+            title: "Daily digest",
+            body: "9am every day, only if there's something to do: unclaimed leads, your calls today, In conversation next steps, Deciding follow-ups due, and Inbox messages waiting. Marketing leads.",
+          },
+          { title: "Sourcing required", body: "A lead moves to Sourcing. Goes to Matt." },
+          { title: "Send the quote", body: "A lead moves to Sourced: send price. Goes to Sam." },
+          { title: "Still deciding", body: "Days 1, 3 and 7 in Deciding. Goes to the lead's owner." },
+        ],
+      },
+      {
+        type: "steps",
+        title: "Your daily routine",
+        items: [
+          "At 9am, read the digest email and open the Dashboard.",
+          "Clear what's due: calls, Inbox replies, and the Deciding: follow-ups due list.",
+          "Log as you go. When you've sent a price, click Price sent: move to Deciding.",
+          "That's it. The CRM handles timing, reminders and closing old leads.",
+        ],
+      },
+      {
+        type: "qa",
+        items: [
+          {
+            q: "Do the follow-up reminders go to the client?",
+            a: "No. \"Still deciding\" reminders only go to our team, to prompt you to check in.",
+          },
+          {
+            q: "Can a lead go backwards?",
+            a: "Not by itself. Calls and replies never move a lead back. You can change a stage by hand on the enquiry to fix a mistake.",
+          },
+          {
+            q: "A Deciding lead called back. What do I do?",
+            a: "Log the call. The lead stays in Deciding and the reminders start again from a day later.",
+          },
+          {
+            q: "A lead closed as Not interested but has got back in touch.",
+            a: "Open the enquiry, move it back to In conversation by hand, and carry on.",
+          },
+          {
+            q: "The lead needs stock we don't have.",
+            a: "Move it to Sourcing straight after speaking to them. Otherwise it moves to Deciding on its own after 24 hours.",
           },
         ],
       },

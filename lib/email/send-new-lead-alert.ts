@@ -2,43 +2,25 @@ import { Resend } from "resend"
 import { getServerSiteOrigin } from "@/lib/auth/site-origin"
 import { getResendApiKey, getResendFromAddress } from "@/lib/email/config"
 import { adminEnquiryListPath } from "@/lib/crm/deal-pipeline"
-import type { createAdminClient } from "@/lib/supabase/admin"
-
-type AdminClient = NonNullable<ReturnType<typeof createAdminClient>>
+import { MARKETING_LEAD_NOTIFY_EMAILS } from "@/lib/integrations/marketing-leads/notify"
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`)
 }
 
-/** Owner gets it; an unassigned lead goes to every sales user so someone calls within five minutes. */
-async function alertRecipients(admin: AdminClient, ownerProfileId: string | null): Promise<string[]> {
-  if (ownerProfileId) {
-    const { data } = await admin.from("profiles").select("email").eq("id", ownerProfileId).maybeSingle()
-    const email = typeof data?.email === "string" ? data.email.trim() : ""
-    if (email) return [email]
-  }
-  const { data } = await admin.from("profiles").select("email").eq("role", "sales")
-  return [...new Set((data ?? []).map((row) => String(row.email ?? "").trim()).filter(Boolean))]
-}
-
-export async function sendNewLeadAlert(
-  admin: AdminClient,
-  input: {
-    dealId: string
-    reference: string
-    ownerProfileId: string | null
-    name: string
-    phone: string | null
-    email: string | null
-    event: string | null
-    packageName: string | null
-  },
-): Promise<void> {
+export async function sendNewLeadAlert(input: {
+  dealId: string
+  reference: string
+  name: string
+  phone: string | null
+  email: string | null
+  event: string | null
+  packageName: string | null
+}): Promise<void> {
   const apiKey = getResendApiKey()
   const from = getResendFromAddress()
   if (!apiKey || !from) return
-  const to = await alertRecipients(admin, input.ownerProfileId)
-  if (to.length === 0) return
+  const to = [...MARKETING_LEAD_NOTIFY_EMAILS]
 
   const link = `${getServerSiteOrigin()}${adminEnquiryListPath(input.dealId)}`
   const interest = [input.packageName, input.event].filter(Boolean).join(" · ") || "Marketing lead"
