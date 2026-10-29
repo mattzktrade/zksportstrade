@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { validateSignupInput } from "../lib/auth/signup"
+import { mapSignupError, validateSignupInput } from "../lib/auth/signup"
 
 describe("validateSignupInput", () => {
   it("accepts a complete trade access request", () => {
@@ -51,5 +51,26 @@ describe("validateSignupInput", () => {
       }).ok,
       false,
     )
+    assert.equal(
+      validateSignupInput({
+        fullName: "A".repeat(201),
+        companyName: "Apex",
+        companyType: "other",
+        email: "a@b.co",
+        password: "longenough",
+      }).ok,
+      false,
+    )
+  })
+})
+
+describe("mapSignupError", () => {
+  it("replaces Supabase rate-limit errors with launch-safe copy", () => {
+    assert.match(mapSignupError("email rate limit exceeded"), /a lot of registrations/)
+    assert.match(mapSignupError("Too Many Requests"), /a lot of registrations/)
+  })
+
+  it("passes other messages through", () => {
+    assert.equal(mapSignupError("User already registered"), "User already registered")
   })
 })

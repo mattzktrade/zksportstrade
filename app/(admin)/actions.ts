@@ -27,6 +27,8 @@ import {
   resolvePackageCircuitInput,
 } from "@/lib/catalog/race-circuit"
 import { sendBookingApprovalRejectedEmail } from "@/lib/email/send-booking-approval-rejected"
+import { sendAgentApprovedEmail } from "@/lib/email/send-agent-approved"
+import { getServerSiteOrigin } from "@/lib/auth/site-origin"
 import { deliverSourcingStageNotification, sourcingEmailWarning } from "@/lib/email/send-sourcing-notification"
 import { loadSourcingEnquirySnapshots } from "@/lib/crm/sourcing-notifications"
 import { executeBookingApproval } from "@/lib/booking-approval/execute-approval"
@@ -710,6 +712,11 @@ export async function setProfileApproval(
   if (!gate.ok) return gate
   const { supabase } = gate
   const note = approval_note?.trim() ? approval_note.trim() : null
+  const { data: before } = await supabase
+    .from("profiles")
+    .select("email, full_name, company_name, role, approval_status")
+    .eq("id", profileId)
+    .maybeSingle()
   const { error } = await supabase
     .from("profiles")
     .update({ approval_status, approval_note: note, updated_at: new Date().toISOString() })
@@ -718,6 +725,26 @@ export async function setProfileApproval(
   revalidatePath("/admin/pending-users")
   revalidatePath("/admin")
   revalidatePath("/admin/agents")
+
+  if (
+    approval_status === "approved" &&
+    before?.email &&
+    before.role === "agent" &&
+    before.approval_status !== "approved"
+  ) {
+    const email = String(before.email)
+    const sent = await sendAgentApprovedEmail({
+      agentEmail: email,
+      agentName: String(before.full_name ?? "").trim() || email.split("@")[0] || "Partner",
+      companyName: String(before.company_name ?? ""),
+      siteOrigin: getServerSiteOrigin(),
+    }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : "email failed" }))
+    if (!sent.ok) {
+      console.error("[approval] agent approved but welcome email not sent:", sent)
+      return { ok: true, message: `User approved, but the welcome email could not be sent to ${email}.` }
+    }
+    return { ok: true, message: `User approved. Welcome email sent to ${email}.` }
+  }
   return { ok: true }
 }
 

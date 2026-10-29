@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server"
 import { checkRateLimit, clientIpFromHeaders } from "@/lib/auth/rate-limit"
 import { getServerSiteOrigin } from "@/lib/auth/site-origin"
 import { normalizeSignInEmail } from "@/lib/auth/sign-in-email"
-import { validateSignupInput } from "@/lib/auth/signup"
+import { mapSignupError, validateSignupInput } from "@/lib/auth/signup"
 
 export type SignupResult =
   | { ok: true; needsEmailConfirm: boolean }
@@ -47,7 +47,7 @@ export async function signUpAction(input: {
   })
 
   if (error) {
-    return { ok: false, message: error.message }
+    return { ok: false, message: mapSignupError(error.message) }
   }
 
   return { ok: true, needsEmailConfirm: Boolean(data.user && !data.session) }
@@ -76,6 +76,6 @@ export async function resendSignupConfirmationAction(email: string): Promise<Sig
       emailRedirectTo: `${getServerSiteOrigin()}/auth/callback`,
     },
   })
-  if (error) return { ok: false, message: error.message }
+  if (error) return { ok: false, message: mapSignupError(error.message) }
   return { ok: true, needsEmailConfirm: true }
 }

@@ -18,7 +18,7 @@ export function PendingUsersTable({ profiles }: { profiles: PortalProfile[] }) {
         toast.error(res.message)
         return
       }
-      toast.success(status === "approved" ? "User approved." : "User rejected.")
+      toast.success(res.message ?? (status === "approved" ? "User approved." : "User rejected."))
       router.refresh()
     })
   }
