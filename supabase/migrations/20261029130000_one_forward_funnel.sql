@@ -7,12 +7,6 @@ with moved as (
   set
     enquiry_stage = case d.enquiry_stage when 'responded' then 'contacted' else 'follow_up' end,
     stage = case d.enquiry_stage when 'price_sent' then 'proposal' else d.stage end,
-    -- Deciding leads with no date would never be reminded; give them one check-in at 10:00 Dubai tomorrow.
-    next_action_due_at = case
-      when d.enquiry_stage = 'price_sent' and d.next_action_due_at is null
-        then (date_trunc('day', now() at time zone 'Asia/Dubai') + interval '1 day 10 hours') at time zone 'Asia/Dubai'
-      else d.next_action_due_at
-    end,
     next_action = case
       when d.enquiry_stage = 'price_sent' and nullif(btrim(d.next_action), '') is null then 'Follow up'
       else d.next_action

@@ -7,7 +7,9 @@ import { adminEnquiryListPath } from "@/lib/crm/deal-pipeline"
 export const INBOX_NEEDS_REPLY_HREF = "/admin/assistant?view=needs_reply"
 export const INBOX_REPLIED_HREF = "/admin/assistant?view=replied"
 export const CALL_LIST_HREF = "/admin/enquiries?view=calls"
-export const FOLLOW_UP_LIST_HREF = "/admin/enquiries?stage=follow_up"
+export function followUpListHref(ownerProfileId?: string | null): string {
+  return ownerProfileId ? `/admin/enquiries?stage=follow_up&owner=${ownerProfileId}` : "/admin/enquiries?stage=follow_up"
+}
 
 export type FollowUpCallRow = {
   id: string
@@ -36,7 +38,10 @@ function one<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value
 }
 
-/** Shared inbox counts, marketing calls due and Deciding follow-ups for every lead. Pass an owner to limit rows to theirs and unassigned. */
+/**
+ * Shared inbox counts, marketing calls due and Deciding follow-ups. Pass an owner to limit follow-ups
+ * to their own leads and calls to theirs plus unclaimed marketing leads (someone has to claim those).
+ */
 export async function loadFollowUpSummary(input: { ownerProfileId?: string | null; now?: Date } = {}): Promise<FollowUpSummary> {
   const empty: FollowUpSummary = {
     inboxNeedsReply: 0,
@@ -85,9 +90,7 @@ export async function loadFollowUpSummary(input: { ownerProfileId?: string | nul
         .lte("next_action_due_at", now.toISOString())
         .order("next_action_due_at", { ascending: true })
         .limit(200)
-      if (input.ownerProfileId) {
-        query = query.or(`owner_profile_id.eq.${input.ownerProfileId},owner_profile_id.is.null`)
-      }
+      if (input.ownerProfileId) query = query.eq("owner_profile_id", input.ownerProfileId)
       return query
     })(),
   ])
@@ -164,6 +167,6 @@ export async function loadFollowUpSummary(input: { ownerProfileId?: string | nul
     callsDueNow,
     callsDueToday,
     followUpsDueNow: followUps.length,
-    calls: rows.slice(0, 8),
+    calls: rows.slice(0, 5),
   }
 }

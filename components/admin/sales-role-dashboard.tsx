@@ -542,7 +542,7 @@ async function SalesDashboardLoaded() {
       assistantReviewCount={review.error ? 0 : review.count ?? 0}
       followUps={
         <Suspense fallback={<div className="h-36 animate-pulse rounded-xl bg-muted" />}>
-          <FollowUpPanel ownerProfileId={profile.id} />
+          <FollowUpPanel />
         </Suspense>
       }
     />
