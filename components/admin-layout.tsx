@@ -34,9 +34,12 @@ import {
   CircleHelp,
   Mail,
   MessagesSquare,
+  ListTodo,
+  KeyRound,
+  Map as MapIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { LOGO_WHITE } from "@/lib/branding"
 import { AdminJumpSearch, type AdminJumpItem } from "@/components/admin/admin-jump-search"
@@ -162,6 +165,7 @@ function adminPageTitle(pathname: string): string {
   if (pathname.startsWith("/admin/place-order")) return "Place order"
   if (pathname.startsWith("/admin/marketing")) return "Marketing"
   if (pathname.startsWith("/admin/help")) return "Help"
+  if (pathname.startsWith("/admin/profile")) return "My profile"
   if (pathname.startsWith("/admin/settings") || pathname.startsWith("/admin/integrations")) return "Settings"
   return "Admin"
 }
@@ -187,14 +191,113 @@ function navigationFor(canManageSettings: boolean): NavItem[] {
   })
 }
 
+function ProfileMenu({
+  profileName,
+  profileEmail,
+  showRoadmap,
+  onSignOut,
+}: {
+  profileName: string
+  profileEmail?: string
+  showRoadmap: boolean
+  onSignOut: () => void
+}) {
+  const pathname = usePathname()
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setOpen(false)
+  }, [pathname])
+
+  useEffect(() => {
+    if (!open) return
+    function onPointerDown(event: PointerEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false)
+    }
+    document.addEventListener("pointerdown", onPointerDown)
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown)
+      document.removeEventListener("keydown", onKeyDown)
+    }
+  }, [open])
+
+  const items = [
+    { label: "My to-do list", href: "/admin/profile", icon: ListTodo },
+    ...(showRoadmap ? [{ label: "Roadmap", href: "/admin/profile?tab=roadmap", icon: MapIcon }] : []),
+    { label: "Change password", href: "/admin/profile?tab=password", icon: KeyRound },
+  ]
+
+  return (
+    <div ref={menuRef} className="relative border-l border-slate-200 pl-3">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex items-center gap-2 rounded-md py-1 pl-1 pr-1.5 hover:bg-slate-50"
+      >
+        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-[10px] font-semibold text-white">
+          {profileName.trim().charAt(0).toUpperCase() || "A"}
+        </span>
+        <span className="hidden max-w-[160px] truncate text-[11px] font-semibold text-slate-800 sm:block">
+          {profileName}
+        </span>
+        <ChevronDown className={cn("h-3.5 w-3.5 text-slate-400 transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-50 mt-2 w-60 overflow-hidden rounded-lg border border-[#eceef1] bg-white py-1 shadow-lg"
+        >
+          <div className="border-b border-[#f0f1f3] px-3 py-2.5">
+            <p className="truncate text-[12px] font-semibold text-slate-900">{profileName}</p>
+            {profileEmail ? <p className="truncate text-[11px] text-slate-500">{profileEmail}</p> : null}
+          </div>
+          {items.map((item) => (
+            <NavLink
+              key={item.href}
+              href={item.href}
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2.5 px-3 py-2 text-[12px] text-slate-700 hover:bg-slate-50"
+            >
+              <item.icon className="h-3.5 w-3.5 text-slate-400" />
+              {item.label}
+            </NavLink>
+          ))}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onSignOut}
+            className="flex w-full items-center gap-2.5 border-t border-[#f0f1f3] px-3 py-2 text-[12px] text-slate-700 hover:bg-slate-50"
+          >
+            <LogOut className="h-3.5 w-3.5 text-slate-400" />
+            Sign out
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export function AdminLayout({
   children,
   profileName = "Admin",
+  profileEmail,
   canManageSettings = false,
+  showRoadmap = false,
 }: {
   children: React.ReactNode
   profileName?: string
+  profileEmail?: string
   canManageSettings?: boolean
+  showRoadmap?: boolean
 }) {
   const visibleNavigation = navigationFor(canManageSettings)
   const adminJumpDestinations = jumpDestinationsFor(visibleNavigation)
@@ -393,14 +496,12 @@ export function AdminLayout({
               {adminPageTitle(pathname)}
             </p>
             <AdminJumpSearch destinations={adminJumpDestinations} />
-            <div className="flex items-center gap-2 border-l border-slate-200 pl-3">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-[10px] font-semibold text-white">
-                {profileName.trim().charAt(0).toUpperCase() || "A"}
-              </div>
-              <p className="hidden max-w-[160px] truncate text-[11px] font-semibold text-slate-800 sm:block">
-                {profileName}
-              </p>
-            </div>
+            <ProfileMenu
+              profileName={profileName}
+              profileEmail={profileEmail}
+              showRoadmap={showRoadmap}
+              onSignOut={() => void handleSignOut()}
+            />
           </div>
         </header>
 
