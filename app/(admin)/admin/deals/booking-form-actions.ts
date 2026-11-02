@@ -72,7 +72,12 @@ type PdfPreviewResult =
   | { ok: false; message: string }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Unexpected booking-form error."
+  const message = error instanceof Error ? error.message : "Unexpected booking-form error."
+  const detail = message.toLowerCase()
+  if (detail.includes("statement timeout") || detail.includes("canceling statement")) {
+    return "The database timed out while finishing this agreement. Refresh the deal — if the ZK signature is recorded, use Finish generating document or Create order & send invoice."
+  }
+  return message
 }
 
 function totalLabel(snapshot: BookingFormSnapshot): string {

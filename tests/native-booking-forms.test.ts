@@ -717,6 +717,33 @@ test("ZK countersign advances the deal immediately and completion can finish a s
   )
 })
 
+test("ZK countersign does not reshuffle weekend inventory in the signature statement", () => {
+  const sql = readFileSync(
+    "supabase/migrations/20261102130000_countersign_skips_slow_inventory.sql",
+    "utf8",
+  )
+  assert.match(sql, /inventory\.skip_stage_sync/)
+  assert.match(sql, /deals_skip_inventory_on_zk_countersign/)
+  assert.match(sql, /before update of stage on public.deals/)
+  assert.match(sql, /admin_record_zk_signature/)
+  assert.match(sql, /advance_deal_after_zk_signature/)
+  assert.match(sql, /inventory_skip_weekend_rebalance/)
+  assert.match(sql, /if not public\.inventory_skip_weekend_rebalance\(\) then/)
+  assert.match(
+    sql,
+    /elsif v_new_holds then\s+begin\s+perform set_config\('inventory\.skip_weekend_rebalance'/,
+  )
+  assert.match(sql, /inventory_allocate_deal_line_remainder/)
+  assert.match(sql, /else\s+perform public\.inventory_reassign_deal_line/)
+  assert.match(
+    sql,
+    /perform set_config\('inventory\.skip_stage_sync', 'on', true\);\s*update public\.deals\s+set order_id = v_order_id, stage = 'awaiting_invoice'/,
+  )
+  const actions = readFileSync("app/(admin)/admin/deals/booking-form-actions.ts", "utf8")
+  assert.match(actions, /statement timeout/)
+  assert.match(actions, /Finish generating document/)
+})
+
 test("client signature keeps unsigned deals on Awaiting ZK signature with the form", () => {
   const sql = readFileSync(
     "supabase/migrations/20260909130000_sync_deal_stage_awaiting_zk_signature.sql",

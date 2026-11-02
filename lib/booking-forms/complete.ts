@@ -10,7 +10,12 @@ import { revalidateNativeBookingFormPages } from "@/lib/booking-forms/revalidate
 import { markDealSignedAfterZkCountersign } from "@/lib/booking-forms/advance-deal"
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Unexpected booking-form error."
+  const message = error instanceof Error ? error.message : "Unexpected booking-form error."
+  const detail = message.toLowerCase()
+  if (detail.includes("statement timeout") || detail.includes("canceling statement")) {
+    return "Inventory took too long after signing. Refresh and use Create order & send invoice if the agreement is already signed."
+  }
+  return message
 }
 
 export async function completeZkSignedBookingForm(input: {
@@ -88,12 +93,16 @@ export async function completeZkSignedBookingForm(input: {
     }
   }
 
-  await markDealSignedAfterZkCountersign(admin, String(form.deal_id))
-
   let invoiceWarning: string | null = null
   try {
+    await markDealSignedAfterZkCountersign(admin, String(form.deal_id))
+  } catch (advanceError) {
+    invoiceWarning = errorMessage(advanceError)
+  }
+
+  try {
     const orderResult = await ensureNativeDealOrderAndInvoice(String(form.deal_id))
-    invoiceWarning = orderResult.warning ?? null
+    invoiceWarning = orderResult.warning ?? invoiceWarning
   } catch (automationError) {
     invoiceWarning = errorMessage(automationError)
     await admin
