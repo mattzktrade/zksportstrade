@@ -235,6 +235,16 @@ describe("enquiry catalog actions stay restricted", () => {
     assert.match(sql, /Skipping races_name_season_unique_idx/)
   })
 
+  it("does not export non-async values from the use-server actions file", () => {
+    const src = readFileSync("app/(admin)/admin/enquiries/enquiry-catalog-actions.ts", "utf8")
+    assert.match(src, /^"use server"/m)
+    assert.doesNotMatch(
+      src,
+      /^export const /m,
+      "Next.js rejects object/array exports from \"use server\" files and that crash shows up as React #441 on catalog and enquiries",
+    )
+  })
+
   it("creates hidden standalone products without Salesforce or Wix sync", () => {
     const src = readFileSync("app/(admin)/admin/enquiries/enquiry-catalog-actions.ts", "utf8")
     assert.match(src, /requireAdminAction\("deals.manage"\)/)

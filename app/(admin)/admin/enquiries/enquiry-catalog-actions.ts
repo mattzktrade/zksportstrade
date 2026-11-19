@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache"
 import { requireAdminAction } from "@/app/(admin)/actions"
 import { createAdminClient } from "@/lib/supabase/admin"
 import {
-  ENQUIRY_EVENT_CATEGORIES,
   isEnquiryEventCategory,
   isEventCategory,
   type EventCategory,
@@ -662,5 +661,3 @@ export async function createEnquiryProduct(input: {
     return { ok: false, message: error instanceof Error ? error.message : "Could not create the product." }
   }
 }
-
-export const ENQUIRY_CREATE_EVENT_CATEGORIES = ENQUIRY_EVENT_CATEGORIES
