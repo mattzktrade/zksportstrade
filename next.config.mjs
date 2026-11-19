@@ -15,6 +15,7 @@ const nextConfig = {
   poweredByHeader: false,
   serverExternalPackages: ["exceljs", "sharp"],
   experimental: {
+    agentUpgrade: "security",
     optimizePackageImports: ["lucide-react"],
     // Keep a just-visited tab in the client router so going back is instant.
     // Mutations still call router.refresh(). Checkout re-checks stock on submit.
