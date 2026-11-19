@@ -26,7 +26,7 @@ export default async function AdminDealDetailPage({
   ])
   if (!data) notFound()
 
-  const { packageOptions } = packagePicker
+  const { packageOptions, eventOptions } = packagePicker
   const callsByDeal = await listCallAttemptsForDeals([data.deal.id])
 
   return (
@@ -35,6 +35,7 @@ export default async function AdminDealDetailPage({
       callSummary={callsByDeal[data.deal.id]}
       accountOptions={accountOptions}
       packageOptions={packageOptions}
+      eventOptions={eventOptions}
       staffOptions={staffOptions}
       supplierOptions={suppliers.map((supplier) => ({ id: supplier.id, name: supplier.name }))}
       currentCanSendBookingForm={canSendNativeBookingForm(profile)}

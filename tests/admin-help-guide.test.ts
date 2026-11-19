@@ -73,6 +73,10 @@ describe("admin help guide", () => {
 
     const walkUp = searchHelp("walk-up")
     assert.ok(walkUp.questions.some((item) => /last-minute ticket/i.test(item.q)))
+
+    const missingEvent = searchHelp("event we do not sell")
+    assert.ok(missingEvent.topics.some((topic) => topic.id === "sales"))
+    assert.ok(missingEvent.questions.some((item) => /enquiry for an event we do not sell/i.test(item.q)))
   })
 
   it("ignores unknown hashes", () => {

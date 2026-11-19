@@ -247,7 +247,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             title: "Enquiries",
-            body: "Every enquiry moves forward through New, In conversation, Sourcing, Sourced and Deciding (see Sales process). Meta marketing leads arrive here automatically and can get a three-stage email and WhatsApp follow-up until they reply. Create a booking form on the enquiry. Sending it for approval, or sending it to the client, moves it to Deals. Not interested stays here, not on Deals Lost. Expired is for an enquiry whose events have all taken place: staff can set it, and it is applied automatically once every event on that enquiry is in the past. An enquiry that still has a future event stays on its current stage.",
+            body: "Every enquiry moves forward through New, In conversation, Sourcing, Sourced and Deciding (see Sales process). Meta marketing leads arrive here automatically and can get a three-stage email and WhatsApp follow-up until they reply. If they ask about an event we do not list, create the event or product on the enquiry after searching — duplicates are blocked. Create a booking form on the enquiry. Sending it for approval, or sending it to the client, moves it to Deals. Not interested stays here, not on Deals Lost. Expired is for an enquiry whose events have all taken place: staff can set it, and it is applied automatically once every event on that enquiry is in the past. An enquiry that still has a future event stays on its current stage.",
             href: "/admin/enquiries",
           },
           {
@@ -417,7 +417,7 @@ export const HELP_TOPICS: HelpTopic[] = [
         items: [
           "Open Sales list and click the product.",
           "Choose Create deal. Search for the company or a person — companies that start with what you typed appear first, and you can pick a contact in the same list. Only create a new account if it is not there.",
-          "Add the contact, quantity, and sale price. You can add more than one product, including from different events.",
+          "Add the contact, quantity, and sale price. You can add more than one product, including from different events. If the event or product is not in the list, create it on the enquiry — any non-F1 category, or a new product on an existing race, including F1. Duplicates are blocked. New rows stay off the portal until inventory publishes them.",
           "Optional: tick Reserve stock for 7 days if you need to lock places before the form goes out.",
           "Save, then open it from Sales → Enquiries. Create a booking form there. Sending it for approval, or sending it to the client, moves it to Deals.",
         ],
@@ -493,6 +493,10 @@ export const HELP_TOPICS: HelpTopic[] = [
           {
             q: "Where do Facebook / Meta marketing leads go?",
             a: "They appear on Sales → Enquiries with source Marketing, the form notes, and the person's email and phone. They can get a three-stage email and WhatsApp follow-up until they reply or someone on the team takes over. Edit the messages in Sales → Templates.",
+          },
+          {
+            q: "Can I log an enquiry for an event we do not sell yet?",
+            a: "Yes. On New enquiry, search first. If nothing matches, create the event (not Formula 1) and/or a product. The system blocks duplicates and keeps the new product off the portal and website. Booking forms and invoices work like any other product. Buy stock or mark the line as brokered before you send a booking form.",
           },
         ],
       },

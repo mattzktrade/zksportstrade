@@ -14,6 +14,7 @@ import {
   DealInvoiceCurrencyToggle,
   useDealInvoiceFxRates,
 } from "@/components/admin/deal-invoice-currency-toggle"
+import { EnquiryCatalogCreate } from "@/components/admin/enquiry-catalog-create"
 import {
   DealLineBasket,
   isPricedDealBasketLine,
@@ -85,6 +86,9 @@ export function DealCreateModal({
   const [interest, setInterest] = useState<"event" | "package">("package")
   const [eventId, setEventId] = useState("")
   const [createLines, setCreateLines] = useState<DealBasketLine[]>([])
+  const [extraProducts, setExtraProducts] = useState<DealBasketProduct[]>([])
+  const [extraEvents, setExtraEvents] = useState<DealEventOption[]>([])
+  const [creatingEvent, setCreatingEvent] = useState(false)
   const [invoiceCurrency, setInvoiceCurrency] = useState<DealInvoiceCurrency>("USD")
   const invoiceFxRates = useDealInvoiceFxRates()
   const [notes, setNotes] = useState("")
@@ -111,12 +115,32 @@ export function DealCreateModal({
     return [...byId.values()]
   }, [accountOptions, createdAccounts])
 
+  const catalogProducts = useMemo(() => {
+    const byId = new Map(products.map((product) => [product.id, product]))
+    for (const product of extraProducts) {
+      if (!byId.has(product.id)) byId.set(product.id, product)
+    }
+    return [...byId.values()]
+  }, [extraProducts, products])
+  const catalogEvents = useMemo(() => {
+    const byId = new Map(events.map((event) => [event.id, event]))
+    for (const event of extraEvents) {
+      if (!byId.has(event.id)) byId.set(event.id, event)
+    }
+    return [...byId.values()]
+  }, [events, extraEvents])
   const selectedAccount = clientAccounts.find((account) => account.id === accountId) ?? null
   const addingNewContact =
     newAccountMode || newContactMode || Boolean(selectedAccount && selectedAccount.contacts.length === 0)
   const hasNewContactDetails = Boolean(
     newContactName.trim() && (newContactEmail.trim() || newContactPhone.trim()),
   )
+  const ownedLineNeedsStock = createLines.some((line) => {
+    if (line.sourcingMode !== "owned") return false
+    const product = catalogProducts.find((option) => option.id === line.packageId)
+    return (product?.stockLeft ?? 0) < numericDealField(line.quantity)
+  })
+  const canHoldNow = holdAllowed && !ownedLineNeedsStock
   const hasInterest = interest === "event" ? Boolean(eventId) : createLines.length > 0
   const canSubmitDeal =
     hasInterest &&
@@ -280,7 +304,7 @@ export function DealCreateModal({
               supplierQuoteAt: line.supplierQuoteAt || null,
             })),
         notes,
-        reserve: eventOnly ? false : createdDealPipeline({ stage: createStage, reserve }).reserve,
+        reserve: eventOnly ? false : createdDealPipeline({ stage: createStage, reserve: reserve && canHoldNow }).reserve,
         stage: createStage,
         source: createSource,
         enquiryTemperature: inboundEnquirySource(createSource) ? "warm" : enquiryTemperature,
@@ -612,21 +636,45 @@ export function DealCreateModal({
           ) : null}
 
           {interest === "event" ? (
-            <label className="mt-4 block text-sm">
-              <span className="mb-1 block font-medium">Event</span>
-              <SearchableSelect
-                value={eventId}
-                onChange={setEventId}
-                options={events.map((event) => ({ value: event.id, label: event.label }))}
-                placeholder="Search events, e.g. 2026 Abu Dhabi"
-                emptyLabel="No events match"
-                optionClassName="py-2 text-sm"
-                className="h-11 w-full rounded-md border bg-white px-3 text-sm"
-              />
-              <span className="mt-1.5 block text-xs text-slate-500">
-                No package or price yet. Add a package on the enquiry once they decide.
-              </span>
-            </label>
+            <div className="mt-4">
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">Event</span>
+                <SearchableSelect
+                  value={eventId}
+                  onChange={setEventId}
+                  options={catalogEvents.map((event) => ({ value: event.id, label: event.label }))}
+                  placeholder="Search events, e.g. 2026 Abu Dhabi"
+                  emptyLabel="No events match"
+                  optionClassName="py-2 text-sm"
+                  className="h-11 w-full rounded-md border bg-white px-3 text-sm"
+                />
+                <span className="mt-1.5 block text-xs text-slate-500">
+                  No package or price yet. Add a package on the enquiry once they decide.
+                </span>
+              </label>
+              {creatingEvent ? (
+                <div className="mt-3">
+                  <EnquiryCatalogCreate
+                    mode="event"
+                    events={catalogEvents}
+                    onClose={() => setCreatingEvent(false)}
+                    onEventChosen={(event) => {
+                      setExtraEvents((current) => current.some((item) => item.id === event.id) ? current : [...current, event])
+                      setEventId(event.id)
+                      setCreatingEvent(false)
+                    }}
+                  />
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setCreatingEvent(true)}
+                  className="mt-2 text-xs font-medium text-primary hover:underline"
+                >
+                  Can’t find it? Create a new event
+                </button>
+              )}
+            </div>
           ) : (
             <>
               <p className="mt-3 text-xs text-slate-500">
@@ -634,12 +682,18 @@ export function DealCreateModal({
               </p>
               <div className="mt-3">
                 <DealLineBasket
-                  products={products}
+                  products={catalogProducts}
                   suppliers={suppliers}
                   lines={createLines}
                   onChange={setCreateLines}
                   invoiceCurrency={invoiceCurrency}
                   fxRate={invoiceFxRates[invoiceCurrency]}
+                  events={catalogEvents}
+                  allowCreate
+                  onCatalogCreated={({ product, event }) => {
+                    setExtraProducts((current) => current.some((item) => item.id === product.id) ? current : [...current, product])
+                    setExtraEvents((current) => current.some((item) => item.id === event.id) ? current : [...current, event])
+                  }}
                 />
               </div>
               <div className="mt-4 flex items-center justify-between gap-4 border-t pt-3">
@@ -647,8 +701,8 @@ export function DealCreateModal({
                   <label className="flex items-center gap-2 text-sm font-medium">
                     <input
                       type="checkbox"
-                      checked={reserve && holdAllowed}
-                      disabled={!holdAllowed}
+                      checked={reserve && canHoldNow}
+                      disabled={!canHoldNow}
                       onChange={(event) => {
                         const next = event.target.checked
                         setReserve(next)
@@ -660,6 +714,10 @@ export function DealCreateModal({
                   {!holdAllowed ? (
                     <p className="mt-1 text-xs text-slate-500">
                       Signed and won deals take purchased stock instead of a short hold.
+                    </p>
+                  ) : ownedLineNeedsStock ? (
+                    <p className="mt-1 text-xs text-slate-500">
+                      New products have no stock yet. Add a purchase or mark the line as brokered before holding or sending a booking form.
                     </p>
                   ) : null}
                 </div>

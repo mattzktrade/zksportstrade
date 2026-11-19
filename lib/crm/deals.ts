@@ -138,10 +138,11 @@ export async function getDealPackagePicker(): Promise<{
       season: number | null
       event_date: string | null
       is_archived: boolean | null
+      category: string | null
     }>((from, to) =>
       supabase
         .from("races")
-        .select("id, name, season, event_date, is_archived")
+        .select("id, name, season, event_date, is_archived, category")
         .order("id")
         .range(from, to),
     ),
@@ -195,6 +196,7 @@ export async function getDealPackagePicker(): Promise<{
         id: race.id,
         label: eventSeasonLabel(race.name, race.season),
         eventDate: race.event_date,
+        category: race.category,
       })),
   )
 

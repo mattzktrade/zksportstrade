@@ -144,6 +144,9 @@ describe("package brochures", () => {
 
   it("builds cover headlines from the race, not the package price", () => {
     assert.equal(brochureEventFamily("Abu Dhabi Grand Prix 2026", "formula_1"), "FORMULA 1")
+    assert.equal(brochureEventFamily("Wimbledon", "tennis"), "TENNIS")
+    assert.equal(brochureEventFamily("Super Bowl", "nfl"), "NFL")
+    assert.equal(brochureEventFamily("Glastonbury", "concert"), "CONCERTS")
     assert.equal(brochurePlaceHeadline("Abu Dhabi Grand Prix 2026", "Abu Dhabi", "UAE"), "ABU DHABI")
     assert.equal(brochureDateHeadline("4-6 Dec 2026"), "4-6 December 2026")
     assert.equal(brochureVenueLine("Yas Marina Circuit", "Abu Dhabi", "Abu Dhabi Grand Prix 2026"), "Yas Marina Circuit")

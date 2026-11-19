@@ -77,7 +77,16 @@ export function brochureEventFamily(raceName: string, category?: string | null):
   if (/\bformula\s*1\b|\bf1\b|grand prix/.test(blob)) return "FORMULA 1"
   if (/\btennis\b|\bwimbledon\b|\bus open\b/.test(blob)) return "TENNIS"
   if (/\bfootball\b|\bsoccer\b|\bworld cup\b/.test(blob)) return "FOOTBALL"
-  if (/\bconcert\b|\bfestival\b/.test(blob)) return "CONCERT"
+  if (/\bcricket\b/.test(blob)) return "CRICKET"
+  if (/\brugby\b/.test(blob)) return "RUGBY"
+  if (/\bnfl\b|\bsuper bowl\b/.test(blob)) return "NFL"
+  if (/\bbasketball\b|\bnba\b/.test(blob)) return "BASKETBALL"
+  if (/\bbaseball\b|\bmlb\b|\bworld series\b/.test(blob)) return "BASEBALL"
+  if (/\bhorse racing\b|\bascot\b|\bmelbourne cup\b|\bcheltenham\b/.test(blob)) return "HORSE RACING"
+  if (/\bmotorsport|\bmoto ?gp\b|\bwec\b/.test(blob)) return "MOTORSPORTS"
+  if (/\bboxing\b|\bprize fight\b/.test(blob)) return "BOXING"
+  if (/\bgolf\b|\bthe open\b|\bmasters\b|\bryder cup\b/.test(blob)) return "GOLF"
+  if (/\bconcert\b|\bfestival\b/.test(blob)) return "CONCERTS"
   return "HOSPITALITY"
 }
 

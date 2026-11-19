@@ -305,6 +305,7 @@ export type DealEventOption = {
   id: string
   label: string
   eventDate: string | null
+  category?: string | null
 }
 
 export type DealLineEditorRow = {

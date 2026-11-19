@@ -19,6 +19,12 @@ import { isPaddockClubPackageName } from "@/lib/catalog/paddock-club"
 import { inferPackageDurationFromName, isValidPackageDuration } from "@/lib/catalog/package-duration"
 import { parsePackageFaqs } from "@/lib/catalog/package-faqs"
 import { isEventCategory, type EventCategory } from "@/lib/catalog/event-categories"
+import { nativeEventId } from "@/lib/catalog/event-id"
+import {
+  catalogMatchMessage,
+  findEventCatalogMatches,
+  findProductCatalogMatches,
+} from "@/lib/catalog/enquiry-catalog-match"
 import {
   eventSharedFieldsChanged,
   isMissingRaceCircuitColumnError,
@@ -1715,6 +1721,24 @@ export async function createPackage(input: {
   }
   if (duration && !isValidPackageDuration(duration)) {
     return { ok: false, message: "Invalid package duration." }
+  }
+  const { data: siblingPackages, error: siblingError } = await supabase
+    .from("packages")
+    .select("id, name, duration, shell_parent_package_id, race_id")
+    .eq("race_id", raceId)
+  if (siblingError) return { ok: false, message: siblingError.message }
+  const productMatches = findProductCatalogMatches(
+    { raceId, name: input.name.trim(), duration: duration || null },
+    (siblingPackages ?? []).map((row) => ({
+      id: String(row.id),
+      raceId: String(row.race_id),
+      name: String(row.name ?? ""),
+      duration: (row.duration as string | null) ?? null,
+      shellParentPackageId: (row.shell_parent_package_id as string | null) ?? null,
+    })),
+  )
+  if (productMatches.length > 0) {
+    return { ok: false, message: catalogMatchMessage("product", productMatches) }
   }
   const cap = Math.floor(Number(input.total_capacity))
   if (!Number.isFinite(cap) || cap < 0) return { ok: false, message: "Total capacity must be a non-negative whole number." }
@@ -4764,18 +4788,6 @@ export type NativeEventInput = {
   season: number
 }
 
-function nativeEventId(name: string, season: number): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 100)
-  return `${slug}-${season}`
-}
-
 function validateNativeEvent(
   input: NativeEventInput,
   raceId?: string,
@@ -4863,8 +4875,41 @@ export async function createNativeEvent(
   const id = nativeEventId(value.name, value.season)
   if (!id || id.length < 3) return { ok: false, message: "Could not generate a valid event ID." }
 
-  const { data: existing } = await gate.supabase.from("races").select("id").eq("id", id).maybeSingle()
-  if (existing) return { ok: false, message: "An event with this name and season already exists." }
+  const existingSelect = await gate.supabase
+    .from("races")
+    .select("id, name, short_name, circuit, location, event_date, season, is_archived, category")
+  if (existingSelect.error && !isMissingRaceCircuitColumnError(existingSelect.error.message)) {
+    return { ok: false, message: existingSelect.error.message }
+  }
+  const existingRows =
+    existingSelect.error && isMissingRaceCircuitColumnError(existingSelect.error.message)
+      ? ((await gate.supabase.from("races").select("id, name, short_name, location, event_date, season, is_archived, category")).data ?? []).map((row) => ({
+          ...row,
+          circuit: null as string | null,
+        }))
+      : existingSelect.data ?? []
+  const eventMatches = findEventCatalogMatches(
+    {
+      name: value.name,
+      season: value.season,
+      circuit: value.circuit,
+      eventDate: value.eventDate,
+    },
+    existingRows.map((row) => ({
+      id: String(row.id),
+      name: String(row.name ?? ""),
+      shortName: (row as { short_name?: string | null }).short_name ?? null,
+      season: typeof row.season === "number" ? row.season : Number(row.season) || null,
+      circuit: (row as { circuit?: string | null }).circuit ?? null,
+      location: (row as { location?: string | null }).location ?? null,
+      eventDate: row.event_date ? String(row.event_date).slice(0, 10) : null,
+      isArchived: Boolean((row as { is_archived?: boolean | null }).is_archived),
+      category: (row as { category?: string | null }).category ?? null,
+    })),
+  )
+  if (eventMatches.length > 0) {
+    return { ok: false, message: catalogMatchMessage("event", eventMatches) }
+  }
 
   const insertRow = {
     id,
@@ -4888,7 +4933,12 @@ export async function createNativeEvent(
     const retry = await gate.supabase.from("races").insert(withoutCircuit)
     error = retry.error
   }
-  if (error) return { ok: false, message: error.message }
+  if (error) {
+    if (error.code === "23505" || /duplicate key|unique constraint/i.test(error.message)) {
+      return { ok: false, message: "An event with this name and season already exists." }
+    }
+    return { ok: false, message: error.message }
+  }
 
   revalidateNativeEventPaths(id)
   return { ok: true, message: "Event created.", eventId: id }

@@ -26,9 +26,18 @@ const NEW_EVENT_ID = "__new__"
 
 const NAME_PLACEHOLDERS: Record<EventCategory, string> = {
   formula_1: "3 Day Legend Paddock Club",
-  tennis: "Centre Court Hospitality",
   football: "Hospitality suite",
+  tennis: "Centre Court Hospitality",
+  cricket: "Pavilion hospitality",
+  rugby: "Hospitality suite",
   concert: "VIP experience",
+  nfl: "Suite hospitality",
+  basketball: "Courtside hospitality",
+  baseball: "Suite hospitality",
+  horse_racing: "Owners enclosure",
+  motorsports: "Paddock hospitality",
+  boxing: "Ringside hospitality",
+  golf: "Hospitality chalet",
   other: "Hospitality package",
 }
 

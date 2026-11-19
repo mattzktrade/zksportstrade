@@ -11,6 +11,7 @@ import { CrmPartySelect } from "@/components/admin/crm-party-select"
 import { EnquiryCallPanel } from "@/components/admin/enquiry-call-panel"
 import type { EnquiryCallSummary } from "@/lib/crm/call-outcomes"
 import { SearchableSelect } from "@/components/admin/searchable-select"
+import { EnquiryCatalogCreate } from "@/components/admin/enquiry-catalog-create"
 import {
   DealInvoiceCurrencyToggle,
   useDealInvoiceFxRates,
@@ -18,7 +19,7 @@ import {
 import { AdminPageHeader, AdminPanel, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { AdminModalScrim } from "@/components/admin/admin-list-preview"
 import type { DealBasketSupplier } from "@/components/admin/deal-line-basket"
-import { DEAL_NEXT_ACTION_OPTIONS, DEAL_SOURCE_LABELS, DEAL_SOURCES, DEAL_STAGES, DEAL_STAGE_LABELS, canonicalDealSource, canonicalDealStage, dealConfirmedOffPlatform, dealSourceLabel, dealSourceTone, friendlyDealActivitySummary, type CrmAccountOption, type DealPackageOption, type DealStage } from "@/lib/crm/deal-types"
+import { DEAL_NEXT_ACTION_OPTIONS, DEAL_SOURCE_LABELS, DEAL_SOURCES, DEAL_STAGES, DEAL_STAGE_LABELS, canonicalDealSource, canonicalDealStage, dealConfirmedOffPlatform, dealSourceLabel, dealSourceTone, friendlyDealActivitySummary, type CrmAccountOption, type DealEventOption, type DealPackageOption, type DealStage } from "@/lib/crm/deal-types"
 import { adminPipelineHome, enquiryStageLabel, enquiryStageTone, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
 import { enquiryHasClientReply } from "@/lib/crm/enquiry-replied"
 import { effectiveDealStageAfterCountersign } from "@/lib/booking-forms/advance-deal"
@@ -251,6 +252,7 @@ export function DealDetailClient({
   data,
   accountOptions,
   packageOptions,
+  eventOptions = [],
   staffOptions,
   supplierOptions,
   currentCanSendBookingForm,
@@ -265,6 +267,7 @@ export function DealDetailClient({
   callSummary?: EnquiryCallSummary
   accountOptions: CrmAccountOption[]
   packageOptions: DealPackageOption[]
+  eventOptions: DealEventOption[]
   staffOptions: StaffOption[]
   supplierOptions: DealBasketSupplier[]
   currentCanSendBookingForm: boolean
@@ -305,6 +308,23 @@ export function DealDetailClient({
   )
   const invoiceFxRates = useDealInvoiceFxRates()
   const [editLines, setEditLines] = useState<EditLineState[]>([])
+  const [extraPackageOptions, setExtraPackageOptions] = useState<DealPackageOption[]>([])
+  const [extraEventOptions, setExtraEventOptions] = useState<DealEventOption[]>([])
+  const [creatingProduct, setCreatingProduct] = useState(false)
+  const catalogPackageOptions = useMemo(() => {
+    const byId = new Map(packageOptions.map((option) => [option.id, option]))
+    for (const option of extraPackageOptions) {
+      if (!byId.has(option.id)) byId.set(option.id, option)
+    }
+    return [...byId.values()]
+  }, [extraPackageOptions, packageOptions])
+  const catalogEventOptions = useMemo(() => {
+    const byId = new Map(eventOptions.map((option) => [option.id, option]))
+    for (const option of extraEventOptions) {
+      if (!byId.has(option.id)) byId.set(option.id, option)
+    }
+    return [...byId.values()]
+  }, [eventOptions, extraEventOptions])
   const invoiceCurrencyLocked = dealInvoiceCurrencyIsLocked({
     order_id: deal.order_id,
     stage: deal.stage,
@@ -1502,7 +1522,7 @@ export function DealDetailClient({
                 <div>
                   <h3 className="text-sm font-semibold">Products and pricing</h3>
                   <p className="text-[9px] text-slate-500">
-                    Create missing events/products in Manage Inventory first, then return here.
+                    If the event or product is not listed, create it here. New rows stay off the portal.
                   </p>
                 </div>
                 <button
@@ -1515,7 +1535,7 @@ export function DealDetailClient({
               </div>
               <div className="divide-y">
                 {editLines.map((line, index) => {
-                  const product = packageOptions.find((option) => option.id === line.packageId)
+                  const product = catalogPackageOptions.find((option) => option.id === line.packageId)
                   return (
                     <div
                       key={line.id ?? `new-${index}`}
@@ -1526,7 +1546,7 @@ export function DealDetailClient({
                         <SearchableSelect
                           value={line.packageId}
                           onChange={(packageId) => {
-                            const nextProduct = packageOptions.find((option) => option.id === packageId)
+                            const nextProduct = catalogPackageOptions.find((option) => option.id === packageId)
                             setEditLines((current) =>
                               current.map((item, itemIndex) =>
                                 itemIndex === index
@@ -1549,7 +1569,7 @@ export function DealDetailClient({
                               ),
                             )
                           }}
-                          options={packageOptions.map((option) => ({ value: option.id, label: option.label }))}
+                          options={catalogPackageOptions.map((option) => ({ value: option.id, label: option.label }))}
                           placeholder="Search product…"
                           className="mt-1 h-10 w-full rounded-md border bg-white px-2 text-[10px]"
                         />
@@ -1683,6 +1703,48 @@ export function DealDetailClient({
                     </div>
                   )
                 })}
+              </div>
+              <div className="border-t px-4 py-3">
+                {creatingProduct ? (
+                  <EnquiryCatalogCreate
+                    mode="product"
+                    events={catalogEventOptions}
+                    onClose={() => setCreatingProduct(false)}
+                    onProductChosen={(product, event) => {
+                      setExtraPackageOptions((current) =>
+                        current.some((item) => item.id === product.id) ? current : [...current, product],
+                      )
+                      setExtraEventOptions((current) =>
+                        current.some((item) => item.id === event.id) ? current : [...current, event],
+                      )
+                      setEditLines((current) => {
+                        const emptyIndex = current.findIndex((line) => !line.packageId)
+                        const nextLine = {
+                          packageId: product.id,
+                          quantity: "1",
+                          unitPrice: "",
+                          expectedUnitCost: "",
+                          sourcingMode: "owned" as const,
+                          supplierId: "",
+                          supplierQuoteAt: "",
+                        }
+                        if (emptyIndex >= 0) {
+                          return current.map((line, index) => (index === emptyIndex ? { ...line, ...nextLine } : line))
+                        }
+                        return [...current, nextLine]
+                      })
+                      setCreatingProduct(false)
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setCreatingProduct(true)}
+                    className="text-[10px] font-medium text-primary hover:underline"
+                  >
+                    Can’t find it? Create a new event or product
+                  </button>
+                )}
               </div>
             </div>
             <div className="mt-5 flex justify-end gap-2">

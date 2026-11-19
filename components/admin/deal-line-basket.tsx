@@ -3,6 +3,9 @@
 import { useMemo, useState } from "react"
 import { Plus, Trash2 } from "lucide-react"
 import { searchAdminProductOptions } from "@/lib/admin/option-search"
+import { EnquiryCatalogCreate } from "@/components/admin/enquiry-catalog-create"
+import type { EnquiryCreatedEvent, EnquiryCreatedProduct } from "@/app/(admin)/admin/enquiries/enquiry-catalog-actions"
+import type { DealEventOption } from "@/lib/crm/deal-types"
 import {
   catalogPriceInInvoiceCurrency,
   isNonUsdInvoiceCurrency,
@@ -93,6 +96,9 @@ export function DealLineBasket({
   compact = false,
   invoiceCurrency = "USD",
   fxRate,
+  events = [],
+  allowCreate = false,
+  onCatalogCreated,
 }: {
   products: DealBasketProduct[]
   suppliers: DealBasketSupplier[]
@@ -101,8 +107,12 @@ export function DealLineBasket({
   compact?: boolean
   invoiceCurrency?: DealInvoiceCurrency
   fxRate?: number | null
+  events?: DealEventOption[]
+  allowCreate?: boolean
+  onCatalogCreated?: (input: { product: EnquiryCreatedProduct; event: EnquiryCreatedEvent }) => void
 }) {
   const [search, setSearch] = useState("")
+  const [creating, setCreating] = useState(false)
   const results = useMemo(
     () => searchAdminProductOptions(products, search),
     [products, search],
@@ -272,9 +282,51 @@ export function DealLineBasket({
             <p className={cn("px-3 py-2 text-slate-400", compact ? "text-[8px]" : "text-sm")}>
               No matching products
             </p>
+            {allowCreate ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setCreating(true)
+                  setSearch("")
+                }}
+                className={cn("block w-full rounded px-3 py-2 text-left font-medium text-primary hover:bg-slate-50", compact ? "text-[9px]" : "text-sm")}
+              >
+                Create a new product
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
+      {allowCreate && !creating ? (
+        <button
+          type="button"
+          onClick={() => setCreating(true)}
+          className={cn("font-medium text-primary hover:underline", compact ? "text-[8px]" : "text-xs")}
+        >
+          Can’t find it? Create a new event or product
+        </button>
+      ) : null}
+      {allowCreate && creating ? (
+        <EnquiryCatalogCreate
+          mode="product"
+          events={events}
+          compact={compact}
+          onClose={() => setCreating(false)}
+          onProductChosen={(product, event) => {
+            addProduct({
+              id: product.id,
+              eventName: product.eventName,
+              packageName: product.packageName,
+              label: product.label,
+              price: product.price,
+              currency: product.currency,
+              stockLeft: product.stockLeft,
+            })
+            onCatalogCreated?.({ product, event })
+            setCreating(false)
+          }}
+        />
+      ) : null}
     </div>
   )
 }

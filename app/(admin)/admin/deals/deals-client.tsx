@@ -34,6 +34,7 @@ import {
   useDealInvoiceFxRates,
 } from "@/components/admin/deal-invoice-currency-toggle"
 import { SearchableSelect } from "@/components/admin/searchable-select"
+import { EnquiryCatalogCreate } from "@/components/admin/enquiry-catalog-create"
 import { EventFilter, uniqueEventFilterOptions } from "@/components/admin/event-filter"
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { AdminListPreview, AdminModalScrim } from "@/components/admin/admin-list-preview"
@@ -346,6 +347,23 @@ export function DealsClient({
   const [editInvoiceCurrency, setEditInvoiceCurrency] = useState<DealInvoiceCurrency>("USD")
   const invoiceFxRates = useDealInvoiceFxRates()
   const [editLines, setEditLines] = useState<EditLineState[]>([])
+  const [extraPackageOptions, setExtraPackageOptions] = useState<DealPackageOption[]>([])
+  const [extraEventOptions, setExtraEventOptions] = useState<DealEventOption[]>([])
+  const [creatingProduct, setCreatingProduct] = useState(false)
+  const catalogPackageOptions = useMemo(() => {
+    const byId = new Map(packageOptions.map((option) => [option.id, option]))
+    for (const option of extraPackageOptions) {
+      if (!byId.has(option.id)) byId.set(option.id, option)
+    }
+    return [...byId.values()]
+  }, [extraPackageOptions, packageOptions])
+  const catalogEventOptions = useMemo(() => {
+    const byId = new Map(createEventOptions.map((option) => [option.id, option]))
+    for (const option of extraEventOptions) {
+      if (!byId.has(option.id)) byId.set(option.id, option)
+    }
+    return [...byId.values()]
+  }, [createEventOptions, extraEventOptions])
 
   const awaitingZkDealIdSet = new Set(awaitingZkDealIds)
   const latestBookingByDeal = useMemo(() => {
@@ -1360,7 +1378,7 @@ export function DealsClient({
               <div className="flex items-center justify-between border-b px-4 py-3">
                 <div>
                   <h3 className="text-sm font-semibold">Products and pricing</h3>
-                  <p className="text-[9px] text-slate-500">Create missing events/products in Manage Inventory first, then return here.</p>
+                  <p className="text-[9px] text-slate-500">If the event or product is not listed, create it here. New rows stay off the portal.</p>
                 </div>
                 <button
                   type="button"
@@ -1380,7 +1398,7 @@ export function DealsClient({
               </div>
               <div className="divide-y">
                 {editLines.map((line, index) => {
-                  const product = packageOptions.find((option) => option.id === line.packageId)
+                  const product = catalogPackageOptions.find((option) => option.id === line.packageId)
                   return (
                     <div key={line.id ?? `new-${index}`} className="grid gap-3 p-4 md:grid-cols-[minmax(240px,1fr)_90px_120px_120px_130px_40px]">
                       <label className="text-[9px] font-medium text-slate-500">
@@ -1388,14 +1406,14 @@ export function DealsClient({
                         <SearchableSelect
                           value={line.packageId}
                           onChange={(packageId) => {
-                            const nextProduct = packageOptions.find((option) => option.id === packageId)
+                            const nextProduct = catalogPackageOptions.find((option) => option.id === packageId)
                             setEditLines((lines) => lines.map((item, itemIndex) => itemIndex === index ? {
                               ...item,
                               packageId,
                               unitPrice: item.unitPrice || (nextProduct?.price == null ? "" : String(catalogPriceInInvoiceCurrency(nextProduct.price, editInvoiceCurrency, editFxRate))),
                             } : item))
                           }}
-                          options={packageOptions.map((option) => ({ value: option.id, label: option.label }))}
+                          options={catalogPackageOptions.map((option) => ({ value: option.id, label: option.label }))}
                           placeholder="Search product…"
                           className="mt-1 h-10 w-full rounded-md border bg-white px-2 text-[10px]"
                         />
@@ -1431,6 +1449,48 @@ export function DealsClient({
                   )
                 })}
               </div>
+              <div className="border-t px-4 py-3">
+                {creatingProduct ? (
+                  <EnquiryCatalogCreate
+                    mode="product"
+                    events={catalogEventOptions}
+                    onClose={() => setCreatingProduct(false)}
+                    onProductChosen={(product, event) => {
+                      setExtraPackageOptions((current) =>
+                        current.some((item) => item.id === product.id) ? current : [...current, product],
+                      )
+                      setExtraEventOptions((current) =>
+                        current.some((item) => item.id === event.id) ? current : [...current, event],
+                      )
+                      setEditLines((lines) => {
+                        const emptyIndex = lines.findIndex((line) => !line.packageId)
+                        const nextLine = {
+                          packageId: product.id,
+                          quantity: "1",
+                          unitPrice: "",
+                          expectedUnitCost: "",
+                          sourcingMode: "owned" as const,
+                          supplierId: "",
+                          supplierQuoteAt: "",
+                        }
+                        if (emptyIndex >= 0) {
+                          return lines.map((line, index) => (index === emptyIndex ? { ...line, ...nextLine } : line))
+                        }
+                        return [...lines, nextLine]
+                      })
+                      setCreatingProduct(false)
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setCreatingProduct(true)}
+                    className="text-[10px] font-medium text-primary hover:underline"
+                  >
+                    Can’t find it? Create a new event or product
+                  </button>
+                )}
+              </div>
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" onClick={() => setShowEdit(false)} className="h-10 rounded-md border px-4 text-[10px] font-semibold">Cancel</button>
@@ -1443,7 +1503,7 @@ export function DealsClient({
         <DealCreateModal
           accountOptions={accountOptions}
           products={createPackageOptions}
-          events={createEventOptions}
+          events={catalogEventOptions}
           suppliers={supplierOptions}
           title="Create new enquiry"
           description="Log the client, then either an event or a specific package. A later deal stage such as won / paid needs a package and skips the booking form."
