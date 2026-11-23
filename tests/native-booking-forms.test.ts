@@ -227,6 +227,52 @@ test("matching account and contact names print once on the booking form", async 
   assert.equal(differentPlacements.filter((item) => item.text === "Roisin McCarthy").length, 1)
 })
 
+test("signed booking form PDFs fold WinAnsi-unsafe letters instead of failing", async () => {
+  const snapshot = testSnapshot({
+    billTo: {
+      accountId: "account-1",
+      accountName: "RU Sport Private Limited",
+      contactId: "contact-1",
+      contactName: "Utkarsh Bhatia",
+      contactEmail: "utkarsh@fantagsport.co",
+      addressLines: ["A1/85 Janakpuri", "New Delhi, 110058, India"],
+    },
+    paymentTerms: "Balance due on signing.\nLocation note: Ahmedābād hold.",
+  })
+  const client = {
+    signerRole: "client" as const,
+    signerName: "Rāja Kumar",
+    signerEmail: "raja@example.com",
+    signaturePath: "sig-client.png",
+    signedAt: "2026-11-23T08:36:00.000Z",
+    ipAddress: "1.2.3.4",
+    location: "Ahmedābād, IN",
+    userAgent: "Mozilla/5.0",
+    evidenceHash: "a".repeat(64),
+    pngBytes: new Uint8Array(),
+  }
+  const zkAdmin = {
+    signerRole: "zk_admin" as const,
+    signerName: "Ollie Kent",
+    signerEmail: "oliver@zk-sports.com",
+    signaturePath: "sig-admin.png",
+    signedAt: "2026-11-23T08:38:00.000Z",
+    ipAddress: "5.6.7.8",
+    location: "Dubai, AE",
+    userAgent: "Mozilla/5.0",
+    evidenceHash: "b".repeat(64),
+    pngBytes: new Uint8Array(),
+  }
+  const bytes = await generateBookingFormPdf(snapshot, { client, zkAdmin })
+  assert.equal(Buffer.from(bytes).subarray(0, 4).toString(), "%PDF")
+  const text = allPageText(await PDFDocument.load(bytes))
+  assert.match(text, /Raja Kumar/)
+  assert.match(text, /Ahmedabad/)
+  assert.match(text, /Balance due on signing/)
+  assert.match(text, /ELECTRONIC SIGNATURE CERTIFICATE/)
+  assert.match(text, /Quote No ZK-TEST-0001/)
+})
+
 test("booking form edits can rename parties, products and terms without changing locked ids", () => {
   const snapshot: BookingFormSnapshot = {
     schemaVersion: 1,

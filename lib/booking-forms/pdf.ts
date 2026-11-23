@@ -42,11 +42,78 @@ function snapshotShowsVat(snapshot: BookingFormSnapshot): boolean {
   return snapshot.taxAmountIncluded > 0
 }
 
+/** Windows-1252 extras Helvetica can draw. Latin-1 (0xA0-0xFF) is handled separately. */
+const WIN_ANSI_EXTRA = new Set([
+  0x0152, 0x0153, 0x0160, 0x0161, 0x0178, 0x017d, 0x017e, 0x0192, 0x02c6, 0x02dc,
+  0x2013, 0x2014, 0x2018, 0x2019, 0x201a, 0x201c, 0x201d, 0x201e, 0x2020, 0x2021,
+  0x2022, 0x2026, 0x2030, 0x2039, 0x203a, 0x20ac, 0x2122,
+])
+
+function isWinAnsiChar(char: string): boolean {
+  const code = char.charCodeAt(0)
+  if (code >= 32 && code <= 126) return true
+  if (code >= 0xa0 && code <= 0xff) return true
+  return WIN_ANSI_EXTRA.has(code)
+}
+
+/**
+ * Helvetica uses WinAnsi. Fold letters such as ā into ASCII, keep quotes/dashes
+ * already in the encoding, and replace anything else so drawText cannot throw.
+ */
 function safeText(value: string): string {
-  return value
-    .replaceAll("\u00a0", " ")
-    .replaceAll("\u202f", " ")
-    .replaceAll("\u200b", "")
+  if (!value) return ""
+  let out = ""
+  for (const char of value) {
+    if (char === "\n") {
+      out += char
+      continue
+    }
+    if (char === "\t" || char === "\u00a0" || char === "\u202f") {
+      out += " "
+      continue
+    }
+    if (char === "\r" || char === "\u200b" || char === "\u2060" || char === "\ufeff") continue
+    if (isWinAnsiChar(char)) {
+      out += char
+      continue
+    }
+    const folded = char.normalize("NFKD").replace(/\p{M}/gu, "")
+    let usedFold = false
+    for (const part of folded) {
+      if (part === char) continue
+      if (isWinAnsiChar(part)) {
+        out += part
+        usedFold = true
+      }
+    }
+    if (!usedFold) out += " "
+  }
+  return out.replace(/[^\S\n]+/g, " ").replace(/ *\n */g, "\n").trim()
+}
+
+function textForFont(value: string, font: PDFFont): string {
+  const prepared = safeText(value)
+  if (!prepared) return ""
+  const probe = prepared.replace(/\n/g, " ")
+  try {
+    if (probe) font.widthOfTextAtSize(probe, 8)
+    return prepared
+  } catch {
+    let out = ""
+    for (const char of prepared) {
+      if (char === "\n") {
+        out += char
+        continue
+      }
+      try {
+        font.widthOfTextAtSize(char, 8)
+        out += char
+      } catch {
+        out += " "
+      }
+    }
+    return out.replace(/[^\S\n]+/g, " ").replace(/ *\n */g, "\n").trim()
+  }
 }
 
 function splitLongToken(token: string, font: PDFFont, size: number, maxWidth: number): string[] {
@@ -66,7 +133,7 @@ function splitLongToken(token: string, font: PDFFont, size: number, maxWidth: nu
 
 function wrap(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
   const output: string[] = []
-  for (const paragraph of safeText(text).split("\n")) {
+  for (const paragraph of textForFont(text, font).split("\n")) {
     const words = paragraph.split(/\s+/).filter(Boolean)
     let line = ""
     for (const rawWord of words) {
@@ -164,8 +231,9 @@ function drawRight(
   size: number,
   color: ReturnType<typeof rgb>,
 ) {
-  const width = font.widthOfTextAtSize(text, size)
-  page.drawText(text, {
+  const safe = textForFont(text, font)
+  const width = font.widthOfTextAtSize(safe, size)
+  page.drawText(safe, {
     x: A4[0] - MARGIN - width,
     y,
     size,
@@ -230,7 +298,7 @@ function drawLetterhead(writer: Writer, snapshot: BookingFormSnapshot, logo: PDF
     })
     logoBottom = top - height
   } else {
-    writer.page.drawText(safeText(snapshot.seller.legalName), {
+    writer.page.drawText(textForFont(snapshot.seller.legalName, writer.bold), {
       x: MARGIN,
       y: top - 14,
       size: 16,
@@ -243,13 +311,13 @@ function drawLetterhead(writer: Writer, snapshot: BookingFormSnapshot, logo: PDF
   const address = [...snapshot.seller.addressLines, `TRN ${snapshot.seller.trn}`]
   let addressY = top - 8
   for (const line of address) {
-    drawRight(writer.page, safeText(line), addressY, writer.regular, 8, BLACK)
+    drawRight(writer.page, line, addressY, writer.regular, 8, BLACK)
     addressY -= 11
   }
 
   writer.y = Math.min(logoBottom, addressY) - 28
   const quoteY = writer.y
-  writer.page.drawText(`Quote No ${safeText(snapshot.documentRef)}`, {
+  writer.page.drawText(`Quote No ${textForFont(snapshot.documentRef, writer.bold)}`, {
     x: MARGIN,
     y: quoteY,
     size: 16,
@@ -270,7 +338,7 @@ function drawDateAndBillTo(writer: Writer, snapshot: BookingFormSnapshot, quoteY
     color: BLACK,
   })
 
-  const quoteLabel = `Quote No ${safeText(snapshot.documentRef)}`
+  const quoteLabel = `Quote No ${textForFont(snapshot.documentRef, writer.bold)}`
   const quoteWidth = writer.bold.widthOfTextAtSize(quoteLabel, 16)
   const billMaxWidth = Math.max(140, A4[0] - MARGIN * 2 - quoteWidth - 24)
   const billEntries: Array<{ text: string; font: PDFFont; size: number; color: ReturnType<typeof rgb>; lineHeight: number }> = [
@@ -294,7 +362,7 @@ function drawDateAndBillTo(writer: Writer, snapshot: BookingFormSnapshot, quoteY
 
   let billY = quoteY
   for (const entry of billEntries) {
-    const text = safeText(entry.text).trim()
+    const text = textForFont(entry.text, entry.font).trim()
     if (!text) continue
     billY = drawRightWrapped(
       writer.page,
@@ -408,9 +476,10 @@ function drawProductTable(writer: Writer, snapshot: BookingFormSnapshot) {
       const cellLines = values[index]
       const font = index === 0 ? writer.regular : writer.bold
       cellLines.forEach((value, lineIndex) => {
-        const labelWidth = font.widthOfTextAtSize(value, 9)
+        const safe = textForFont(value, font)
+        const labelWidth = font.widthOfTextAtSize(safe, 9)
         const textX = col.align === "right" ? x + col.width - pad - labelWidth : x + pad
-        writer.page.drawText(value, {
+        writer.page.drawText(safe, {
           x: textX,
           y: writer.y - 21 - lineIndex * 13,
           size: 9,
@@ -455,15 +524,17 @@ function drawTotals(writer: Writer, snapshot: BookingFormSnapshot) {
   for (const row of rows) {
     const font = row.bold ? writer.bold : writer.regular
     const size = row.size ?? 9
-    writer.page.drawText(row.label, {
+    const label = textForFont(row.label, font)
+    const value = textForFont(row.value, font)
+    writer.page.drawText(label, {
       x,
       y: writer.y,
       size,
       font,
       color: BLACK,
     })
-    const valueWidth = font.widthOfTextAtSize(row.value, size)
-    writer.page.drawText(row.value, {
+    const valueWidth = font.widthOfTextAtSize(value, size)
+    writer.page.drawText(value, {
       x: A4[0] - MARGIN - valueWidth,
       y: writer.y,
       size,
@@ -514,7 +585,7 @@ function drawAcknowledgementAndClientSignature(
     thickness: 0.8,
     color: BLACK,
   })
-  writer.page.drawText(signature ? safeText(signature.signerName) : "Client signature", {
+  writer.page.drawText(signature ? textForFont(signature.signerName, writer.bold) : "Client signature", {
     x: boxX,
     y: boxY + 12,
     size: 8,
@@ -563,14 +634,14 @@ function drawSignatureBlock(
       width: scaled.width,
       height: scaled.height,
     })
-    writer.page.drawText(safeText(signature.signerName), {
+    writer.page.drawText(textForFont(signature.signerName, writer.bold), {
       x: x + 12,
       y: yTop - 94,
       size: 8,
       font: writer.bold,
       color: BLACK,
     })
-    writer.page.drawText(safeText(signature.signerEmail), {
+    writer.page.drawText(textForFont(signature.signerEmail, writer.regular), {
       x: x + 12,
       y: yTop - 106,
       size: 7,
@@ -707,7 +778,7 @@ export async function generateBookingFormPdf(
 
   const pages = pdf.getPages()
   pages.forEach((page, index) => {
-    page.drawText(`Document Ref: ${snapshot.documentRef}`, {
+    page.drawText(`Document Ref: ${textForFont(snapshot.documentRef, regular)}`, {
       x: MARGIN,
       y: FOOTER_Y,
       size: 7,
