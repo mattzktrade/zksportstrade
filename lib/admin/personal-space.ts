@@ -126,3 +126,32 @@ export function cleanDate(value: unknown): string | null {
   const trimmed = value.trim()
   return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) && Number.isFinite(Date.parse(`${trimmed}T00:00:00Z`)) ? trimmed : null
 }
+
+export const ROADMAP_SORTS = ["manual", "due_soonest", "due_latest"] as const
+export type RoadmapSort = (typeof ROADMAP_SORTS)[number]
+
+export const ROADMAP_SORT_LABELS: Record<RoadmapSort, string> = {
+  manual: "Your order",
+  due_soonest: "Deadline (soonest first)",
+  due_latest: "Deadline (latest first)",
+}
+
+export function isRoadmapSort(value: unknown): value is RoadmapSort {
+  return typeof value === "string" && (ROADMAP_SORTS as readonly string[]).includes(value)
+}
+
+/** Dated projects first by deadline; projects with no deadline stay at the end in their saved order. */
+export function sortRoadmapProjects<T extends { due_date: string | null; position: number }>(
+  projects: T[],
+  sort: RoadmapSort,
+): T[] {
+  if (sort === "manual") return [...projects]
+  const dated = projects.filter((project) => project.due_date)
+  const undated = projects.filter((project) => !project.due_date).sort((a, b) => a.position - b.position)
+  dated.sort((a, b) => {
+    const dateOrder = (a.due_date as string).localeCompare(b.due_date as string)
+    if (dateOrder !== 0) return sort === "due_soonest" ? dateOrder : -dateOrder
+    return a.position - b.position
+  })
+  return [...dated, ...undated]
+}

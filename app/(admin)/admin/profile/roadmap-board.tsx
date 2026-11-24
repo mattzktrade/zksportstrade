@@ -19,13 +19,18 @@ import { cn } from "@/lib/utils"
 import {
   ROADMAP_AREAS,
   ROADMAP_AREA_LABELS,
+  ROADMAP_SORTS,
+  ROADMAP_SORT_LABELS,
   ROADMAP_STATUSES,
   ROADMAP_STATUS_LABELS,
   dueState,
   groupTasksByPhase,
+  isRoadmapSort,
   roadmapProgress,
+  sortRoadmapProjects,
   type RoadmapArea,
   type RoadmapProject,
+  type RoadmapSort,
   type RoadmapStatus,
   type RoadmapTask,
 } from "@/lib/admin/personal-space"
@@ -59,6 +64,7 @@ export function RoadmapBoard({ initialProjects }: { initialProjects: RoadmapProj
   const [projects, setProjects] = useState(initialProjects)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("open")
   const [areaFilter, setAreaFilter] = useState<RoadmapArea | "all">("all")
+  const [sort, setSort] = useState<RoadmapSort>("manual")
   const [query, setQuery] = useState("")
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [creating, setCreating] = useState(false)
@@ -74,7 +80,7 @@ export function RoadmapBoard({ initialProjects }: { initialProjects: RoadmapProj
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    return projects.filter((project) => {
+    const filtered = projects.filter((project) => {
       if (statusFilter === "open" && project.status === "done") return false
       if (statusFilter !== "all" && statusFilter !== "open" && project.status !== statusFilter) return false
       if (areaFilter !== "all" && project.area !== areaFilter) return false
@@ -85,7 +91,8 @@ export function RoadmapBoard({ initialProjects }: { initialProjects: RoadmapProj
         project.tasks.some((task) => task.title.toLowerCase().includes(needle))
       )
     })
-  }, [projects, statusFilter, areaFilter, query])
+    return sortRoadmapProjects(filtered, sort)
+  }, [projects, statusFilter, areaFilter, query, sort])
 
   const usedAreas = ROADMAP_AREAS.filter((area) => projects.some((project) => project.area === area))
   const allExpanded = visible.length > 0 && visible.every((project) => expanded.has(project.id))
@@ -243,6 +250,20 @@ export function RoadmapBoard({ initialProjects }: { initialProjects: RoadmapProj
               </option>
             ))}
           </select>
+          <select
+            value={sort}
+            onChange={(event) => {
+              if (isRoadmapSort(event.target.value)) setSort(event.target.value)
+            }}
+            className={cn(inputClass, "h-9 sm:w-[210px]")}
+            aria-label="Sort roadmap"
+          >
+            {ROADMAP_SORTS.map((option) => (
+              <option key={option} value={option}>
+                {ROADMAP_SORT_LABELS[option]}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
             onClick={() => setCreating(true)}
@@ -308,6 +329,7 @@ export function RoadmapBoard({ initialProjects }: { initialProjects: RoadmapProj
               expanded={expanded.has(project.id)}
               isFirst={index === 0}
               isLast={index === visible.length - 1}
+              canReorder={sort === "manual"}
               onToggle={() => toggleExpanded(project.id)}
               onPatch={(changes) => patchProject(project, changes)}
               onDelete={() => void removeProject(project)}
@@ -368,6 +390,7 @@ function ProjectCard({
   expanded,
   isFirst,
   isLast,
+  canReorder,
   onToggle,
   onPatch,
   onDelete,
@@ -381,6 +404,7 @@ function ProjectCard({
   expanded: boolean
   isFirst: boolean
   isLast: boolean
+  canReorder: boolean
   onToggle: () => void
   onPatch: (changes: Parameters<typeof updateRoadmapProject>[1]) => Promise<boolean>
   onDelete: () => void
@@ -523,24 +547,28 @@ function ProjectCard({
                   <Pencil className="h-3.5 w-3.5" />
                   Edit project
                 </button>
-                <button
-                  type="button"
-                  disabled={isFirst}
-                  onClick={() => onMove(-1)}
-                  className="flex items-center gap-1 rounded px-2 py-1 text-[12px] text-[#5f636b] hover:bg-white disabled:opacity-40"
-                >
-                  <ArrowUp className="h-3.5 w-3.5" />
-                  Move up
-                </button>
-                <button
-                  type="button"
-                  disabled={isLast}
-                  onClick={() => onMove(1)}
-                  className="flex items-center gap-1 rounded px-2 py-1 text-[12px] text-[#5f636b] hover:bg-white disabled:opacity-40"
-                >
-                  <ArrowDown className="h-3.5 w-3.5" />
-                  Move down
-                </button>
+                {canReorder ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isFirst}
+                      onClick={() => onMove(-1)}
+                      className="flex items-center gap-1 rounded px-2 py-1 text-[12px] text-[#5f636b] hover:bg-white disabled:opacity-40"
+                    >
+                      <ArrowUp className="h-3.5 w-3.5" />
+                      Move up
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isLast}
+                      onClick={() => onMove(1)}
+                      className="flex items-center gap-1 rounded px-2 py-1 text-[12px] text-[#5f636b] hover:bg-white disabled:opacity-40"
+                    >
+                      <ArrowDown className="h-3.5 w-3.5" />
+                      Move down
+                    </button>
+                  </>
+                ) : null}
                 <button
                   type="button"
                   onClick={onDelete}

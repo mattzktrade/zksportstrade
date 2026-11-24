@@ -10,6 +10,7 @@ import {
   isRoadmapArea,
   isRoadmapStatus,
   roadmapProgress,
+  sortRoadmapProjects,
 } from "../lib/admin/personal-space"
 
 test("roadmap is only for Matt's login", () => {
@@ -60,6 +61,28 @@ test("cleanDate only keeps real YYYY-MM-DD dates", () => {
   assert.equal(cleanDate("02/11/2026"), null)
   assert.equal(cleanDate(""), null)
   assert.equal(cleanDate(null), null)
+})
+
+test("sortRoadmapProjects puts dated items first and keeps undated last", () => {
+  const projects = [
+    { id: "c", due_date: "2026-12-01", position: 3 },
+    { id: "a", due_date: "2026-11-01", position: 1 },
+    { id: "none-late", due_date: null, position: 9 },
+    { id: "b", due_date: "2026-11-15", position: 2 },
+    { id: "none-early", due_date: null, position: 4 },
+  ]
+  assert.deepEqual(
+    sortRoadmapProjects(projects, "due_soonest").map((project) => project.id),
+    ["a", "b", "c", "none-early", "none-late"],
+  )
+  assert.deepEqual(
+    sortRoadmapProjects(projects, "due_latest").map((project) => project.id),
+    ["c", "b", "a", "none-early", "none-late"],
+  )
+  assert.deepEqual(
+    sortRoadmapProjects(projects, "manual").map((project) => project.id),
+    ["c", "a", "none-late", "b", "none-early"],
+  )
 })
 
 test("seeded roadmap uses valid areas and statuses and leaves deadlines blank", () => {
