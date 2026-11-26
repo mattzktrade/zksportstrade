@@ -13,11 +13,29 @@ type HoldRpc = {
   currency?: string
 }
 
+/** Website promo codes may lower the hold price; they must never raise it above the catalog. */
+export function resolveHoldUnitPrice(
+  catalogPrice: number,
+  requested?: number | null,
+): { ok: true; unitPrice: number } | { ok: false; message: string } {
+  const list = Math.round(Number(catalogPrice) * 100) / 100
+  if (!(list > 0)) return { ok: false, message: "That package is not available for online checkout." }
+  if (requested == null || requested === undefined || Number(requested) === 0) {
+    return { ok: true, unitPrice: list }
+  }
+  const unitPrice = Math.round(Number(requested) * 100) / 100
+  if (!Number.isFinite(unitPrice) || unitPrice <= 0 || unitPrice > list + 0.001) {
+    return { ok: false, message: "That price is not valid." }
+  }
+  return { ok: true, unitPrice }
+}
+
 export async function createAdgpHold(input: {
   slug: string
   day: string
   guests: number
   agentProfileId: string
+  unitPrice?: number | null
 }): Promise<{ ok: true; hold: AdgpHoldResult } | { ok: false; message: string }> {
   const guests = Math.floor(input.guests)
   if (!Number.isFinite(guests) || guests < 1 || guests > 200) {
@@ -35,6 +53,9 @@ export async function createAdgpHold(input: {
     return { ok: false, message: "There are not enough seats left for that guest count." }
   }
 
+  const priced = resolveHoldUnitPrice(item.unitPrice, input.unitPrice)
+  if (!priced.ok) return priced
+
   const admin = createAdminClient()
   if (!admin) return { ok: false, message: "Service role is not configured." }
 
@@ -43,7 +64,7 @@ export async function createAdgpHold(input: {
     p_slug: item.slug,
     p_day: item.day,
     p_guests: guests,
-    p_unit_price: item.unitPrice,
+    p_unit_price: priced.unitPrice,
     p_currency: item.currency,
     p_agent_profile_id: input.agentProfileId,
     p_hold_minutes: ADGP_HOLD_MINUTES,
@@ -53,7 +74,7 @@ export async function createAdgpHold(input: {
   const row = data as HoldRpc
   const holdId = String(row.hold_id ?? "")
   if (!holdId) return { ok: false, message: "Could not reserve those seats." }
-  const unitPrice = Number(row.unit_price ?? item.unitPrice)
+  const unitPrice = Number(row.unit_price ?? priced.unitPrice)
   const currency = String(row.currency ?? item.currency)
   return {
     ok: true,

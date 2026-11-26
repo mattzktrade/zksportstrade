@@ -46,7 +46,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "ADGP agent profile is not configured" }, { status: 503 })
   }
 
-  const result = await createAdgpHold({ slug, day, guests, agentProfileId })
+  let unitPrice: number | undefined
+  if (payload.unitPrice != null && payload.unitPrice !== "") {
+    const parsed = Number(payload.unitPrice)
+    if (!Number.isFinite(parsed)) {
+      return NextResponse.json({ error: "unitPrice must be a number" }, { status: 400 })
+    }
+    unitPrice = parsed
+  }
+
+  const result = await createAdgpHold({ slug, day, guests, agentProfileId, unitPrice })
   if (!result.ok) {
     const status = /sold out|enough seats|insufficient/i.test(result.message) ? 409 : 400
     return NextResponse.json({ error: result.message }, { status })

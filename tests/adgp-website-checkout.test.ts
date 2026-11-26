@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { describe, it } from "node:test"
 import { adgpUnitPrice, catalogItemFor } from "../lib/integrations/adgp/catalog"
+import { resolveHoldUnitPrice } from "../lib/integrations/adgp/holds"
 import { verifyAdgpApiSecret } from "../lib/integrations/adgp/auth"
 import {
   ADGP_API_SECRET_HEADER,
@@ -68,6 +69,20 @@ describe("ADGP website checkout mapping", () => {
     assert.equal(catalogItemFor([friday], "skybridge-terrace", "Friday")?.packageId, friday.packageId)
     assert.equal(catalogItemFor([friday], "skybridge-terrace", "Saturday"), null)
     assert.equal(catalogItemFor([friday], "paddock-club", "Friday"), null)
+  })
+})
+
+describe("ADGP discounted holds", () => {
+  it("keeps the catalog price when no discount is sent", () => {
+    assert.deepEqual(resolveHoldUnitPrice(495), { ok: true, unitPrice: 495 })
+    assert.deepEqual(resolveHoldUnitPrice(495, null), { ok: true, unitPrice: 495 })
+  })
+
+  it("accepts a lower website promo price and rejects a higher one", () => {
+    assert.deepEqual(resolveHoldUnitPrice(495, 200), { ok: true, unitPrice: 200 })
+    assert.deepEqual(resolveHoldUnitPrice(495, 420.75), { ok: true, unitPrice: 420.75 })
+    assert.equal(resolveHoldUnitPrice(495, 496).ok, false)
+    assert.deepEqual(resolveHoldUnitPrice(495, 0), { ok: true, unitPrice: 495 })
   })
 })
 
