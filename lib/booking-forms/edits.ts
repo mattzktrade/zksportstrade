@@ -1,12 +1,14 @@
 import { normalizeClientCcEmails } from "@/lib/booking-forms/cc-emails"
 import { applyInclusiveVat, defaultNoVat } from "@/lib/booking-forms/line-tax"
 import {
+  defaultPaymentSchedule,
   formatPaymentTermsText,
   scheduleFromSnapshot,
   validatePaymentSchedule,
   type BookingFormPaymentSchedule,
 } from "@/lib/booking-forms/payment-schedule"
 import { BOOKING_TERMS } from "@/lib/booking-forms/template"
+import { stableJson } from "@/lib/booking-forms/snapshot"
 import type { BookingFormSnapshot } from "@/lib/booking-forms/types"
 import {
   buildDealInvoiceReporting,
@@ -127,6 +129,50 @@ export function snapshotToEdits(snapshot: BookingFormSnapshot): BookingFormEdits
     })),
     noVat: snapshot.taxAmountIncluded <= 0,
   }
+}
+
+export function bookingFormEditsFingerprint(edits: BookingFormEdits): string {
+  return stableJson({
+    currency: edits.currency.trim().toUpperCase(),
+    dealTitle: edits.dealTitle.trim(),
+    billToAccountName: edits.billToAccountName.trim(),
+    billToContactName: edits.billToContactName.trim(),
+    billToContactEmail: edits.billToContactEmail.trim().toLowerCase(),
+    ccEmails: [...(edits.ccEmails ?? [])]
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean)
+      .sort(),
+    billToAddress: edits.billToAddress.replace(/\r\n/g, "\n").trim(),
+    sellerLegalName: edits.sellerLegalName.trim(),
+    sellerAddress: edits.sellerAddress.replace(/\r\n/g, "\n").trim(),
+    sellerTrn: edits.sellerTrn.trim(),
+    lines: edits.lines.map((line) => ({
+      eventName: line.eventName.trim(),
+      packageName: line.packageName.trim(),
+      description: line.description.trim(),
+      quantity: Number(line.quantity),
+      unitPrice: Number(line.unitPrice),
+    })),
+    paymentMethod: edits.paymentMethod.trim(),
+    paymentSchedule: edits.paymentSchedule ?? defaultPaymentSchedule(),
+    bankDetails: edits.bankDetails.map((bank) => ({
+      currency: bank.currency.trim().toUpperCase(),
+      recipient: bank.recipient.trim(),
+      bank: bank.bank.trim(),
+      iban: bank.iban.trim(),
+      swift: bank.swift.trim(),
+    })),
+    acknowledgement: edits.acknowledgement.trim(),
+    terms: edits.terms.map((section) => ({
+      heading: section.heading.trim(),
+      body: section.body.replace(/\r\n/g, "\n").trim(),
+    })),
+    noVat: Boolean(edits.noVat),
+  })
+}
+
+export function bookingFormEditsUnchanged(stored: BookingFormEdits, next: BookingFormEdits): boolean {
+  return bookingFormEditsFingerprint(stored) === bookingFormEditsFingerprint(next)
 }
 
 export function standardTermEdits(): BookingFormTermEdit[] {

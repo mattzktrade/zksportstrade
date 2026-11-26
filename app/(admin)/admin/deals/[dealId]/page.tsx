@@ -1,43 +1,43 @@
 import { notFound } from "next/navigation"
 import { requireAdmin } from "@/lib/admin/require-admin"
-import { getCrmAccountOptions, getDealPackagePicker } from "@/lib/crm/deals"
 import { getDealDetailPageData } from "@/lib/crm/deal-detail"
-import { getSalesStaffOptions } from "@/lib/crm/leads"
 import { listCallAttemptsForDeals } from "@/lib/crm/call-attempts-store"
-import { getSuppliers } from "@/lib/inventory/suppliers"
 import { hasCmsPermission, canSendNativeBookingForm, canSignNativeBookingForm } from "@/lib/auth/permissions"
+import { AdminRouteShell } from "@/components/admin/admin-route-shell"
 import { DealDetailClient } from "./deal-detail-client"
 
 export const dynamic = "force-dynamic"
 
-export default async function AdminDealDetailPage({
+export default function AdminDealDetailPage({
+  params,
+}: {
+  params: Promise<{ dealId: string }>
+}) {
+  return (
+    <AdminRouteShell>
+      <AdminDealDetailBody params={params} />
+    </AdminRouteShell>
+  )
+}
+
+async function AdminDealDetailBody({
   params,
 }: {
   params: Promise<{ dealId: string }>
 }) {
   const profile = await requireAdmin()
   const { dealId } = await params
-  const [data, packagePicker, accountOptions, staffOptions, suppliers] = await Promise.all([
-    getDealDetailPageData(decodeURIComponent(dealId)),
-    getDealPackagePicker(),
-    getCrmAccountOptions(),
-    getSalesStaffOptions(),
-    getSuppliers(),
+  const id = decodeURIComponent(dealId)
+  const [data, callsByDeal] = await Promise.all([
+    getDealDetailPageData(id),
+    listCallAttemptsForDeals([id]),
   ])
   if (!data) notFound()
-
-  const { packageOptions, eventOptions } = packagePicker
-  const callsByDeal = await listCallAttemptsForDeals([data.deal.id])
 
   return (
     <DealDetailClient
       data={data}
       callSummary={callsByDeal[data.deal.id]}
-      accountOptions={accountOptions}
-      packageOptions={packageOptions}
-      eventOptions={eventOptions}
-      staffOptions={staffOptions}
-      supplierOptions={suppliers.map((supplier) => ({ id: supplier.id, name: supplier.name }))}
       currentCanSendBookingForm={canSendNativeBookingForm(profile)}
       currentCanSignBookingForm={canSignNativeBookingForm(profile)}
       currentProfileName={profile.full_name || "ZK Admin"}

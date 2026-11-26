@@ -53,6 +53,7 @@ export function DealCreateModal({
   title = "Create new deal",
   description = "Choose the client, then an event or a specific package.",
   submitLabel = "Create deal",
+  catalogLoading = false,
   onCreated,
   onClose,
 }: {
@@ -63,6 +64,7 @@ export function DealCreateModal({
   title?: string
   description?: string
   submitLabel?: string
+  catalogLoading?: boolean
   onCreated?: (dealId?: string, stage?: string) => void
   onClose: () => void
 }) {
@@ -680,6 +682,9 @@ export function DealCreateModal({
               <p className="mt-3 text-xs text-slate-500">
                 Add products from any event. Each line can use your stock or a fresh broker quote, and its sale price can be changed.
               </p>
+              {catalogLoading ? (
+                <p className="mt-2 text-xs text-slate-500">Loading the product catalogue…</p>
+              ) : null}
               <div className="mt-3">
                 <DealLineBasket
                   products={catalogProducts}

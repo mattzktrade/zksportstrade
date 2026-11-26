@@ -85,3 +85,18 @@ export async function createBookingDocumentUrl(path: string, expiresIn = 300): P
   return data.signedUrl
 }
 
+export async function bookingDocumentExists(path: string): Promise<boolean> {
+  const admin = createAdminClient()
+  if (!admin) return false
+  const slash = path.lastIndexOf("/")
+  const folder = slash >= 0 ? path.slice(0, slash) : ""
+  const name = slash >= 0 ? path.slice(slash + 1) : path
+  if (!name) return false
+  const { data, error } = await admin.storage.from(BOOKING_DOCUMENT_BUCKET).list(folder, {
+    search: name,
+    limit: 20,
+  })
+  if (error || !data) return false
+  return data.some((entry) => entry.name === name)
+}
+

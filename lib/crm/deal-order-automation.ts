@@ -15,6 +15,7 @@ export type NativeDealOrderResult = {
 
 export async function ensureNativeDealOrderAndInvoice(
   dealId: string,
+  options?: { waitForInvoiceSync?: boolean },
 ): Promise<NativeDealOrderResult> {
   const admin = createAdminClient()
   if (!admin) throw new Error("Supabase service role is not configured.")
@@ -64,6 +65,16 @@ export async function ensureNativeDealOrderAndInvoice(
       alreadyCreated: Boolean(payload.already_created),
       invoiceQueued: false,
       warning: queued.message,
+    }
+  }
+
+  if (options?.waitForInvoiceSync === false) {
+    scheduleOutboxDrain({ orderId, maxRounds: 20 })
+    return {
+      orderId,
+      orderReference,
+      alreadyCreated: Boolean(payload.already_created),
+      invoiceQueued: true,
     }
   }
 

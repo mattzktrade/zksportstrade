@@ -1,6 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
+import { ADMIN_READ_TTL_MS, rememberTtl } from "@/lib/server/ttl-cache"
 
 export type SupplierRow = {
   id: string
@@ -22,9 +23,16 @@ export async function getSuppliers(options?: {
   activeOnly?: boolean
 }): Promise<SupplierRow[]> {
   noStore()
+  const activeOnly = options?.activeOnly !== false
+  return rememberTtl(`suppliers:${activeOnly ? "active" : "all"}`, ADMIN_READ_TTL_MS, () =>
+    loadSuppliers(activeOnly),
+  )
+}
+
+async function loadSuppliers(activeOnly: boolean): Promise<SupplierRow[]> {
   const supabase = await createClient()
   let query = supabase.from("suppliers").select(SUPPLIER_COLUMNS).order("name", { ascending: true })
-  if (options?.activeOnly !== false) {
+  if (activeOnly) {
     query = query.eq("active", true)
   }
   const { data, error } = await query

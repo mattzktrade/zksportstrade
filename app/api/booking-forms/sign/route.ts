@@ -9,7 +9,10 @@ import {
   parseSignaturePng,
   uploadBookingDocument,
 } from "@/lib/booking-forms/storage"
-import { writeClientSignedBookingPdf } from "@/lib/booking-forms/signed-document"
+import {
+  clientSignedBookingPdfPath,
+  writeClientSignedBookingPdf,
+} from "@/lib/booking-forms/signed-document"
 import { BOOKING_SIGNATURE_CONSENT } from "@/lib/booking-forms/template"
 import type { BookingFormSnapshot } from "@/lib/booking-forms/types"
 import { sendClientSignedBookingFormNotification } from "@/lib/email/send-booking-form"
@@ -129,10 +132,12 @@ export async function POST(request: NextRequest) {
           .eq("booking_form_id", formId)
           .eq("signer_role", "client")
           .maybeSingle()
-        if (clientSignature && unsignedPath) {
+        if (clientSignature) {
+          const clientSignedPath = clientSignedBookingPdfPath(documentRef)
           await writeClientSignedBookingPdf({
             snapshot,
-            unsignedPath,
+            unsignedPath: unsignedPath || clientSignedPath,
+            clientSignedPath,
             clientSignature,
           })
         }

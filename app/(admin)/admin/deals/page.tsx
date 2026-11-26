@@ -1,13 +1,11 @@
 import { redirect } from "next/navigation"
 import { requireAdmin } from "@/lib/admin/require-admin"
-import { getCrmAccountOptions, getDealListRows, getDealPackagePicker, type DealListRow } from "@/lib/crm/deals"
-import { getSalesStaffOptions } from "@/lib/crm/leads"
+import { getDealListRows, type DealListRow } from "@/lib/crm/deals"
 import {
   getBookingFormsForDeals,
   listNativeBookingFormsAwaitingApprovalDealIds,
 } from "@/lib/booking-forms/queries"
 import { hasCmsPermission, canSendNativeBookingForm, canSignNativeBookingForm } from "@/lib/auth/permissions"
-import { getSuppliers } from "@/lib/inventory/suppliers"
 import { DEAL_BOARD_STAGES, adminEnquiryListPath, isDealBoardStage, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
 import { isAwaitingZkApprovalDeal, uniqueDealIds } from "@/lib/admin/deal-link"
 import { DealsClient } from "./deals-client"
@@ -59,15 +57,11 @@ async function DealsPageBody({
   }
 
   const selectedId = initialSelectedId?.trim() || null
-  const [initialDeals, selectedRows, packagePicker, accountOptions, staffOptions, bookingForms, suppliers, awaitingZkDealIdsRaw] =
+  const [initialDeals, selectedRows, bookingForms, awaitingZkDealIdsRaw] =
     await Promise.all([
       getDealListRows({ stages: DEAL_BOARD_STAGES, summary: true, includeFinance: true }),
       selectedId ? getDealListRows({ ids: [selectedId] }) : Promise.resolve([] as DealListRow[]),
-      getDealPackagePicker(),
-      getCrmAccountOptions(),
-      getSalesStaffOptions(),
       getBookingFormsForDeals(),
-      getSuppliers(),
       listNativeBookingFormsAwaitingApprovalDealIds(),
     ])
 
@@ -94,17 +88,10 @@ async function DealsPageBody({
     (deal) => isDealBoardStage(deal.stage) || isAwaitingZkApprovalDeal(deal.id, awaitingZkDealIds),
   )
 
-  const { packageOptions, createPackageOptions, eventOptions } = packagePicker
-
   return (
     <div className="mx-auto max-w-[1540px] p-3 sm:p-5 lg:p-7">
       <DealsClient
         deals={boardDeals}
-        packageOptions={packageOptions}
-        createPackageOptions={createPackageOptions}
-        createEventOptions={eventOptions}
-        accountOptions={accountOptions}
-        staffOptions={staffOptions}
         currentProfileId={profile.id}
         currentProfileName={profile.full_name || "ZK Admin"}
         currentCanSendBookingForm={canSendNativeBookingForm(profile)}
@@ -114,7 +101,6 @@ async function DealsPageBody({
         bookingForms={bookingForms.forms}
         bookingFormEvents={bookingForms.events}
         awaitingZkDealIds={awaitingZkDealIds}
-        supplierOptions={suppliers.map((supplier) => ({ id: supplier.id, name: supplier.name }))}
         initialSelectedId={initialSelectedId ?? null}
         initialPipelineFilter={isDealBoardFilter(initialPipeline) ? initialPipeline : ""}
       />

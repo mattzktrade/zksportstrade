@@ -1,6 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache"
 import { chunkList, fetchAllRows } from "@/lib/supabase/fetch-all-rows"
 import { createClient } from "@/lib/supabase/server"
+import { ADMIN_READ_TTL_MS, rememberTtl } from "@/lib/server/ttl-cache"
 import type { CrmAccountOption, DealEventOption, DealListRow, DealPackageOption, PackageDealSaleRow } from "@/lib/crm/deal-types"
 import { canonicalDealSource, canonicalDealStage, dealStageCountsAsSold } from "@/lib/crm/deal-types"
 import {
@@ -38,6 +39,10 @@ type AccountOptionContactRow = {
 
 export async function getCrmAccountOptions(): Promise<CrmAccountOption[]> {
   noStore()
+  return rememberTtl("crm-account-options", ADMIN_READ_TTL_MS, loadCrmAccountOptions)
+}
+
+async function loadCrmAccountOptions(): Promise<CrmAccountOption[]> {
   const supabase = await createClient()
   const [accountsRes, contactsRes] = await Promise.all([
     fetchAllRows<AccountOptionRow>((from, to) =>
@@ -116,6 +121,14 @@ export async function getDealPackagePicker(): Promise<{
   eventOptions: DealEventOption[]
 }> {
   noStore()
+  return rememberTtl("deal-package-picker", ADMIN_READ_TTL_MS, loadDealPackagePicker)
+}
+
+async function loadDealPackagePicker(): Promise<{
+  packageOptions: DealPackageOption[]
+  createPackageOptions: DealPackageOption[]
+  eventOptions: DealEventOption[]
+}> {
   const supabase = await createClient()
   const [packagesResult, racesResult, inventoryResult] = await Promise.all([
     fetchAllRows<{

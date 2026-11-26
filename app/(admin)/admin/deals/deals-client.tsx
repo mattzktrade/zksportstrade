@@ -39,7 +39,6 @@ import { EventFilter, uniqueEventFilterOptions } from "@/components/admin/event-
 import { AdminPageHeader, AdminPanel, AdminStatCard, AdminStats, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { AdminListPreview, AdminModalScrim } from "@/components/admin/admin-list-preview"
 import { useAdminListSelection } from "@/lib/admin/use-admin-list-selection"
-import { type DealBasketSupplier } from "@/components/admin/deal-line-basket"
 import {
   DEAL_NEXT_ACTION_OPTIONS,
   DEAL_SOURCE_LABELS,
@@ -67,7 +66,6 @@ import {
   parseDealInvoiceCurrency,
   type DealInvoiceCurrency,
 } from "@/lib/crm/deal-invoice-currency"
-import type { StaffOption } from "@/lib/crm/lead-types"
 import { isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
 import { nextActionForDealStage } from "@/lib/crm/deal-workflow"
 import type { BookingFormAdminRow, BookingFormEventRow } from "@/lib/booking-forms/types"
@@ -80,6 +78,7 @@ import {
 import { adminDealPath, isAwaitingZkApprovalDeal } from "@/lib/admin/deal-link"
 import { isModifiedClick, openInNewTab, pageSearchProps } from "@/lib/browser/laptop-qol"
 import { adminAccountPath, adminContactPath } from "@/lib/crm/profile-links"
+import { useDealWorkspaceOptions } from "@/lib/admin/use-deal-workspace-options"
 import Link from "next/link"
 import { BookingFormPanel, BookingFormHandoffCallout } from "./booking-form-panel"
 import { DealFinancePanel } from "./deal-finance-panel"
@@ -269,11 +268,6 @@ function actionRequired(
 
 export function DealsClient({
   deals,
-  packageOptions,
-  createPackageOptions,
-  createEventOptions,
-  accountOptions,
-  staffOptions,
   currentProfileId,
   currentProfileName,
   currentCanSendBookingForm,
@@ -283,16 +277,10 @@ export function DealsClient({
   bookingForms,
   bookingFormEvents,
   awaitingZkDealIds = [],
-  supplierOptions,
   initialSelectedId = null,
   initialPipelineFilter = "",
 }: {
   deals: DealListRow[]
-  packageOptions: DealPackageOption[]
-  createPackageOptions: DealPackageOption[]
-  createEventOptions: DealEventOption[]
-  accountOptions: CrmAccountOption[]
-  staffOptions: StaffOption[]
   currentProfileId: string
   currentProfileName: string
   currentCanSendBookingForm: boolean
@@ -302,10 +290,18 @@ export function DealsClient({
   bookingForms: BookingFormAdminRow[]
   bookingFormEvents: BookingFormEventRow[]
   awaitingZkDealIds?: string[]
-  supplierOptions: DealBasketSupplier[]
   initialSelectedId?: string | null
   initialPipelineFilter?: PipelineStageId | ""
 }) {
+  const {
+    packageOptions,
+    createPackageOptions,
+    eventOptions: createEventOptions,
+    accountOptions,
+    staffOptions,
+    supplierOptions,
+    optionsLoaded,
+  } = useDealWorkspaceOptions()
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [listState, setListState] = usePersistedAdminFilters("zk-admin-deals-filters-v1", {
@@ -1414,7 +1410,7 @@ export function DealsClient({
                             } : item))
                           }}
                           options={catalogPackageOptions.map((option) => ({ value: option.id, label: option.label }))}
-                          placeholder="Search product…"
+                          placeholder={optionsLoaded ? "Search product…" : "Loading products…"}
                           className="mt-1 h-10 w-full rounded-md border bg-white px-2 text-[10px]"
                         />
                         {product ? <span className="mt-1 block text-[8px] text-slate-400">{product.stockLeft} currently available</span> : null}
@@ -1505,6 +1501,7 @@ export function DealsClient({
           products={createPackageOptions}
           events={catalogEventOptions}
           suppliers={supplierOptions}
+          catalogLoading={!optionsLoaded}
           title="Create new enquiry"
           description="Log the client, then either an event or a specific package. A later deal stage such as won / paid needs a package and skips the booking form."
           submitLabel="Create enquiry"

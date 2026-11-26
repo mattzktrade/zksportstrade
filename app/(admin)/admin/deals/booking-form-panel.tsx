@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   CheckCircle2,
@@ -53,6 +53,13 @@ const STATUS_LABELS: Record<BookingFormAdminRow["status"], string> = {
   failed: "Failed",
 }
 
+const PREFETCHED_PDF_TTL_MS = 240_000
+
+function freshPrefetchedPdfUrl(entry: { url: string; at: number } | null): string | null {
+  if (!entry) return null
+  return Date.now() - entry.at < PREFETCHED_PDF_TTL_MS ? entry.url : null
+}
+
 export function BookingFormHandoffCallout({
   form,
   events,
@@ -87,10 +94,12 @@ function AdminSignatureModal({
   form,
   defaultName,
   onClose,
+  initialPdf = null,
 }: {
   form: BookingFormAdminRow
   defaultName: string
   onClose: () => void
+  initialPdf?: { url: string; at: number } | null
 }) {
   const router = useRouter()
   const padRef = useRef<SignatureCaptureHandle | null>(null)
@@ -100,6 +109,52 @@ function AdminSignatureModal({
   const [name, setName] = useState(defaultName)
   const [consent, setConsent] = useState(false)
   const [hasInk, setHasInk] = useState(false)
+  const [pdf, setPdf] = useState<{ url: string; at: number } | null>(
+    freshPrefetchedPdfUrl(initialPdf) ? initialPdf : null,
+  )
+  const [pdfLoading, setPdfLoading] = useState(!freshPrefetchedPdfUrl(initialPdf))
+
+  useEffect(() => {
+    if (freshPrefetchedPdfUrl(initialPdf)) {
+      setPdf(initialPdf)
+      setPdfLoading(false)
+      return
+    }
+    let cancelled = false
+    setPdfLoading(true)
+    getNativeBookingFormDownloadUrl(form.id)
+      .then((result) => {
+        if (cancelled) return
+        if (result.ok) setPdf({ url: result.url, at: Date.now() })
+        setPdfLoading(false)
+      })
+      .catch(() => {
+        if (!cancelled) setPdfLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [form.id, initialPdf])
+
+  async function openPdf() {
+    const ready = freshPrefetchedPdfUrl(pdf)
+    if (ready) {
+      window.open(ready, "_blank", "noopener,noreferrer")
+      return
+    }
+    setPdfLoading(true)
+    try {
+      const result = await getNativeBookingFormDownloadUrl(form.id)
+      if (!result.ok) {
+        toast.error(result.message)
+        return
+      }
+      setPdf({ url: result.url, at: Date.now() })
+      window.open(result.url, "_blank", "noopener,noreferrer")
+    } finally {
+      setPdfLoading(false)
+    }
+  }
 
   async function submit() {
     if (inFlight.current) return
@@ -147,9 +202,9 @@ function AdminSignatureModal({
       {pending ? (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-white/95 px-6 text-center">
           <Loader2 className="h-8 w-8 animate-spin text-slate-800" />
-          <p className="text-base font-semibold">Signing and creating the invoice…</p>
+          <p className="text-base font-semibold">Recording your signature…</p>
           <p className="text-sm text-slate-500">
-            The deal will move to Signed and the invoice will be sent once this finishes.
+            The final document and invoice will be generated in the background.
           </p>
         </div>
       ) : null}
@@ -158,7 +213,8 @@ function AdminSignatureModal({
           <CheckCircle2 className="h-12 w-12 text-emerald-600" />
           <h2 className="mt-4 text-xl font-bold">Agreement signed</h2>
           <p className="mt-2 max-w-sm text-sm leading-6 text-slate-600">
-            Both signatures are recorded. The deal is signed and the invoice has been queued.
+            Both signatures are recorded. The deal is signed and the invoice is being created in the
+            background.
           </p>
           <button
             type="button"
@@ -184,6 +240,15 @@ function AdminSignatureModal({
               Review the PDF before signing. Completing this step locks the final agreement, moves the
               deal to Signed, and sends the invoice.
             </div>
+            <button
+              type="button"
+              disabled={pdfLoading && !freshPrefetchedPdfUrl(pdf)}
+              onClick={() => void openPdf()}
+              className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-md border text-sm font-semibold disabled:opacity-50"
+            >
+              {pdfLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {pdfLoading ? "Loading PDF…" : "Open PDF"}
+            </button>
             <label className="mt-5 block text-sm font-semibold">
               Admin full name
               <input value={name} onChange={(event) => setName(event.target.value)} className="mt-2 h-11 w-full rounded-md border px-3" />
@@ -244,9 +309,38 @@ export function BookingFormPanel({
   const router = useRouter()
   const inFlight = useRef(false)
   const [pending, setPending] = useState(false)
+  const [downloading, setDownloading] = useState(false)
   const [showSignature, setShowSignature] = useState(false)
   const [editorMode, setEditorMode] = useState<"create" | "edit" | "reissue" | null>(null)
   const [localPreviewUrl, setLocalPreviewUrl] = useState("")
+  const [prefetchedPdf, setPrefetchedPdf] = useState<{ url: string; at: number } | null>(null)
+
+  useEffect(() => {
+    if (!form) {
+      setPrefetchedPdf(null)
+      return
+    }
+    if (!["sent", "viewed", "awaiting_zk_signature", "zk_signed", "completed"].includes(form.status)) {
+      setPrefetchedPdf(null)
+      return
+    }
+    let cancelled = false
+    setPrefetchedPdf(null)
+    const load = () =>
+      getNativeBookingFormDownloadUrl(form.id)
+        .then((result) => {
+          if (!cancelled && result.ok) setPrefetchedPdf({ url: result.url, at: Date.now() })
+        })
+        .catch(() => {})
+    load()
+    const retryMs =
+      form.status === "awaiting_zk_signature" || form.status === "zk_signed" ? 2500 : 0
+    const retry = retryMs ? window.setTimeout(load, retryMs) : 0
+    return () => {
+      cancelled = true
+      if (retry) window.clearTimeout(retry)
+    }
+  }, [form?.id, form?.status])
 
   async function run(
     action: () => Promise<{ ok: boolean; message: string; previewUrl?: string }>,
@@ -276,10 +370,21 @@ export function BookingFormPanel({
   }
 
   async function download() {
-    if (!form) return
-    const result = await getNativeBookingFormDownloadUrl(form.id)
-    if (!result.ok) return toast.error(result.message)
-    window.open(result.url, "_blank", "noopener,noreferrer")
+    if (!form || downloading) return
+    const readyUrl = freshPrefetchedPdfUrl(prefetchedPdf)
+    if (readyUrl) {
+      window.open(readyUrl, "_blank", "noopener,noreferrer")
+      return
+    }
+    setDownloading(true)
+    try {
+      const result = await getNativeBookingFormDownloadUrl(form.id)
+      if (!result.ok) return toast.error(result.message)
+      setPrefetchedPdf({ url: result.url, at: Date.now() })
+      window.open(result.url, "_blank", "noopener,noreferrer")
+    } finally {
+      setDownloading(false)
+    }
   }
 
   async function copySigningLink() {
@@ -463,8 +568,16 @@ export function BookingFormPanel({
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <button type="button" onClick={download} className="h-9 rounded-md border text-[9px] font-semibold">
-              <span className="inline-flex items-center gap-1"><Download className="h-3.5 w-3.5" /> View PDF</span>
+            <button
+              type="button"
+              disabled={downloading}
+              onClick={() => void download()}
+              className="h-9 rounded-md border text-[9px] font-semibold disabled:opacity-50"
+            >
+              <span className="inline-flex items-center gap-1">
+                {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                {downloading ? "Opening PDF…" : "View PDF"}
+              </span>
             </button>
             {["sent", "viewed"].includes(form.status) && currentCanSend ? (
               <button type="button" disabled={pending} onClick={() => void copySigningLink()} className="h-9 rounded-md border text-[9px] font-semibold disabled:opacity-50">
@@ -554,7 +667,12 @@ export function BookingFormPanel({
       )}
 
       {showSignature && form ? (
-        <AdminSignatureModal form={form} defaultName={currentProfileName} onClose={() => setShowSignature(false)} />
+        <AdminSignatureModal
+          form={form}
+          defaultName={currentProfileName}
+          initialPdf={prefetchedPdf}
+          onClose={() => setShowSignature(false)}
+        />
       ) : null}
       {editorMode ? (
         <BookingFormEditor

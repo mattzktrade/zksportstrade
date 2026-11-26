@@ -261,9 +261,22 @@ function drawRightWrapped(
   return currentY
 }
 
-async function embedBrandLogo(pdf: PDFDocument): Promise<PDFImage | null> {
+let brandLogoBytes: Uint8Array | null | undefined
+
+async function loadBrandLogoBytes(): Promise<Uint8Array | null> {
+  if (brandLogoBytes !== undefined) return brandLogoBytes
   try {
-    const bytes = await readFile(join(process.cwd(), "public", "images", "image.png"))
+    brandLogoBytes = new Uint8Array(await readFile(join(process.cwd(), "public", "images", "image.png")))
+  } catch {
+    brandLogoBytes = null
+  }
+  return brandLogoBytes
+}
+
+async function embedBrandLogo(pdf: PDFDocument): Promise<PDFImage | null> {
+  const bytes = await loadBrandLogoBytes()
+  if (!bytes) return null
+  try {
     return await pdf.embedPng(bytes)
   } catch {
     return null

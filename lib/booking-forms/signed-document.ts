@@ -32,12 +32,22 @@ export async function storedSignatureToPdf(
   }
 }
 
+export function clientSignedBookingPdfPath(documentRef: string): string {
+  return `forms/${documentRef}/client-signed.pdf`
+}
+
 export async function writeClientSignedBookingPdf(input: {
   snapshot: BookingFormSnapshot
   unsignedPath: string
   clientSignature: StoredBookingSignature
+  clientSignedPath?: string
 }): Promise<void> {
   const client = await storedSignatureToPdf(input.clientSignature)
   const pdf = await generateBookingFormPdf(input.snapshot, { client })
-  await uploadBookingDocument(input.unsignedPath, pdf, "application/pdf", true)
+  const uploads = [uploadBookingDocument(input.unsignedPath, pdf, "application/pdf", true)]
+  const extraPath = input.clientSignedPath?.trim()
+  if (extraPath && extraPath !== input.unsignedPath) {
+    uploads.push(uploadBookingDocument(extraPath, pdf, "application/pdf", true))
+  }
+  await Promise.all(uploads)
 }

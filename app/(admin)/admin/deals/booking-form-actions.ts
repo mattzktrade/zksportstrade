@@ -14,6 +14,7 @@ import {
 import { getServerSiteOrigin } from "@/lib/auth/site-origin"
 import { generateBookingFormPdf } from "@/lib/booking-forms/pdf"
 import { completeZkSignedBookingForm } from "@/lib/booking-forms/complete"
+import { scheduleAfterResponse } from "@/lib/booking-forms/schedule"
 import { syncBookingFormDealInventory } from "@/lib/booking-forms/inventory-sync"
 import { getRequestEvidence } from "@/lib/booking-forms/request-evidence"
 import {
@@ -24,12 +25,16 @@ import {
   stableJson,
 } from "@/lib/booking-forms/snapshot"
 import {
+  bookingDocumentExists,
   createBookingDocumentUrl,
   downloadBookingDocument,
   parseSignaturePng,
   uploadBookingDocument,
 } from "@/lib/booking-forms/storage"
-import { writeClientSignedBookingPdf } from "@/lib/booking-forms/signed-document"
+import {
+  clientSignedBookingPdfPath,
+  writeClientSignedBookingPdf,
+} from "@/lib/booking-forms/signed-document"
 import {
   readBookingFormSigningToken,
   saveBookingFormSigningToken,
@@ -40,6 +45,7 @@ import {
 } from "@/lib/booking-forms/template"
 import {
   applyBookingFormEdits,
+  bookingFormEditsUnchanged,
   snapshotToEdits,
   type BookingFormEdits,
   type BookingFormSendMode,
@@ -62,13 +68,12 @@ type UrlResult = { ok: true; url: string } | { ok: false; message: string }
 type SnapshotResult =
   | {
       ok: true
-      snapshot: BookingFormSnapshot
       edits: BookingFormEdits
       accountEmails: BookingFormAccountEmailOption[]
     }
   | { ok: false; message: string }
 type PdfPreviewResult =
-  | { ok: true; pdfBase64: string; filename: string }
+  | { ok: true; url: string; filename: string }
   | { ok: false; message: string }
 
 function errorMessage(error: unknown): string {
@@ -159,10 +164,16 @@ async function persistDraftForm(
   }
 
   let draftId: string | null = null
+  let existingMeta: {
+    document_ref: string | null
+    snapshot_hash: string | null
+    unsigned_pdf_path: string | null
+    snapshot_data: BookingFormSnapshot | null
+  } | null = null
   if (input.reissueFromId?.trim()) {
     const { data: existing, error: existingError } = await gate.supabase
       .from("booking_forms")
-      .select("id, deal_id, status")
+      .select("id, deal_id, status, document_ref, snapshot_hash, unsigned_pdf_path, snapshot_data")
       .eq("id", input.reissueFromId.trim())
       .maybeSingle()
     if (existingError || !existing) throw new Error(existingError?.message ?? "Booking form not found.")
@@ -182,26 +193,49 @@ async function persistDraftForm(
       await syncBookingFormDealInventory(id, "booking_form_voided")
     } else {
       draftId = String(existing.id)
+      existingMeta = {
+        document_ref: existing.document_ref ? String(existing.document_ref) : null,
+        snapshot_hash: existing.snapshot_hash ? String(existing.snapshot_hash) : null,
+        unsigned_pdf_path: existing.unsigned_pdf_path ? String(existing.unsigned_pdf_path) : null,
+        snapshot_data: existing.snapshot_data
+          ? (existing.snapshot_data as BookingFormSnapshot)
+          : null,
+      }
     }
   }
 
   if (!draftId) {
     const { data: drafts } = await gate.supabase
       .from("booking_forms")
-      .select("id")
+      .select("id, document_ref, snapshot_hash, unsigned_pdf_path, snapshot_data")
       .eq("deal_id", id)
       .in("status", ["draft", "failed"])
       .order("revision", { ascending: false })
       .limit(1)
-    draftId = drafts?.[0] ? String(drafts[0].id) : null
+    if (drafts?.[0]) {
+      draftId = String(drafts[0].id)
+      existingMeta = {
+        document_ref: drafts[0].document_ref ? String(drafts[0].document_ref) : null,
+        snapshot_hash: drafts[0].snapshot_hash ? String(drafts[0].snapshot_hash) : null,
+        unsigned_pdf_path: drafts[0].unsigned_pdf_path ? String(drafts[0].unsigned_pdf_path) : null,
+        snapshot_data: drafts[0].snapshot_data
+          ? (drafts[0].snapshot_data as BookingFormSnapshot)
+          : null,
+      }
+    }
   }
 
   const now = new Date()
-  const documentRef = draftId
-    ? ((
-        await gate.supabase.from("booking_forms").select("document_ref").eq("id", draftId).maybeSingle()
-      ).data?.document_ref as string | undefined) ?? generateDocumentRef(now)
-    : generateDocumentRef(now)
+  const documentRef = existingMeta?.document_ref || generateDocumentRef(now)
+  if (draftId && existingMeta?.unsigned_pdf_path && existingMeta.snapshot_data) {
+    try {
+      if (bookingFormEditsUnchanged(snapshotToEdits(existingMeta.snapshot_data), input.edits)) {
+        return { formId: draftId, snapshot: existingMeta.snapshot_data }
+      }
+    } catch {
+      // Rebuild from the live deal if the stored snapshot cannot accept these edits.
+    }
+  }
   const { snapshot: base } = await buildBookingFormSnapshot(gate.supabase, id, documentRef, now)
   const snapshot = applyBookingFormEdits(base, input.edits)
   const snapshotHash = sha256(stableJson(snapshot))
@@ -342,7 +376,6 @@ export async function previewNativeBookingFormSnapshot(input: {
       const snapshot = form.snapshot_data as BookingFormSnapshot
       return {
         ok: true,
-        snapshot,
         edits: snapshotToEdits(snapshot),
         accountEmails: await loadAccountEmailOptions(gate.supabase, snapshot.billTo.accountId),
       }
@@ -356,7 +389,6 @@ export async function previewNativeBookingFormSnapshot(input: {
     )
     return {
       ok: true,
-      snapshot,
       edits: snapshotToEdits(snapshot),
       accountEmails: await loadAccountEmailOptions(gate.supabase, snapshot.billTo.accountId),
     }
@@ -368,23 +400,57 @@ export async function previewNativeBookingFormSnapshot(input: {
 export async function previewNativeBookingFormPdf(input: {
   dealId: string
   edits: BookingFormEdits
+  bookingFormId?: string
 }): Promise<PdfPreviewResult> {
   const gate = await bookingFormGate("prepare")
   if (!gate) return permissionDenied("prepare")
   try {
-    const now = new Date()
-    const { snapshot: base } = await buildBookingFormSnapshot(
-      gate.supabase,
-      input.dealId.trim(),
-      generateDocumentRef(now),
-      now,
-    )
-    const snapshot = applyBookingFormEdits(base, input.edits)
+    const dealId = input.dealId.trim()
+    let snapshot: BookingFormSnapshot
+    let previewPath: string
+    const filenameFor = (documentRef: string) => `Booking-Form-${documentRef}.pdf`
+
+    if (input.bookingFormId?.trim()) {
+      const { data: form, error } = await gate.supabase
+        .from("booking_forms")
+        .select("id, deal_id, document_ref, snapshot_data, snapshot_hash, unsigned_pdf_path")
+        .eq("id", input.bookingFormId.trim())
+        .maybeSingle()
+      if (error || !form) throw new Error(error?.message ?? "Booking form not found.")
+      if (String(form.deal_id) !== dealId) {
+        throw new Error("That booking form does not belong to this deal.")
+      }
+      const stored = form.snapshot_data as BookingFormSnapshot
+      if (
+        form.unsigned_pdf_path &&
+        bookingFormEditsUnchanged(snapshotToEdits(stored), input.edits)
+      ) {
+        return {
+          ok: true,
+          url: await createBookingDocumentUrl(String(form.unsigned_pdf_path)),
+          filename: filenameFor(stored.documentRef),
+        }
+      }
+      snapshot = applyBookingFormEdits(stored, input.edits)
+      previewPath = `forms/${form.document_ref}/preview.pdf`
+    } else {
+      const now = new Date()
+      const { snapshot: base } = await buildBookingFormSnapshot(
+        gate.supabase,
+        dealId,
+        generateDocumentRef(now),
+        now,
+      )
+      snapshot = applyBookingFormEdits(base, input.edits)
+      previewPath = `previews/${dealId}/draft.pdf`
+    }
+
     const pdf = await generateBookingFormPdf(snapshot)
+    await uploadBookingDocument(previewPath, pdf, "application/pdf", true)
     return {
       ok: true,
-      pdfBase64: Buffer.from(pdf).toString("base64"),
-      filename: `Booking-Form-${snapshot.documentRef}.pdf`,
+      url: await createBookingDocumentUrl(previewPath),
+      filename: filenameFor(snapshot.documentRef),
     }
   } catch (error) {
     return { ok: false, message: errorMessage(error) }
@@ -629,7 +695,7 @@ export async function signNativeBookingFormAsAdmin(input: {
 
     const { data: form, error: formError } = await gate.supabase
       .from("booking_forms")
-      .select("id, deal_id, document_ref, status, snapshot_hash, snapshot_data")
+      .select("id, deal_id, document_ref, status, snapshot_hash")
       .eq("id", input.bookingFormId)
       .maybeSingle()
     if (formError || !form) throw new Error(formError?.message ?? "Booking form not found.")
@@ -672,8 +738,25 @@ export async function signNativeBookingFormAsAdmin(input: {
     const adminEmail = signerEmail
     const formId = String(form.id)
     const actorProfileId = gate.profile.id
-    await completeZkSignedBookingForm({ bookingFormId: formId, adminEmail, actorProfileId })
-    revalidateNativeBookingFormPages(String(form.deal_id))
+    const dealId = String(form.deal_id)
+    revalidateNativeBookingFormPages(dealId)
+    scheduleAfterResponse(async () => {
+      try {
+        await completeZkSignedBookingForm({
+          bookingFormId: formId,
+          adminEmail,
+          actorProfileId,
+          waitForInvoiceSync: false,
+        })
+      } catch (completeError) {
+        const admin = createAdminClient()
+        await admin
+          ?.from("booking_forms")
+          .update({ last_error: errorMessage(completeError).slice(0, 1000) })
+          .eq("id", formId)
+        throw completeError
+      }
+    })
     return {
       ok: true,
       message: "Agreement signed. The deal is signed and the invoice is being sent.",
@@ -741,7 +824,7 @@ export async function getNativeBookingFormDownloadUrl(bookingFormId: string): Pr
   if (!gate) return permissionDenied("prepare")
   const { data: form, error } = await gate.supabase
     .from("booking_forms")
-    .select("document_ref, status, snapshot_data, final_pdf_path, unsigned_pdf_path")
+    .select("document_ref, status, final_pdf_path, unsigned_pdf_path")
     .eq("id", bookingFormId)
     .maybeSingle()
   if (error || !form) return { ok: false, message: error?.message ?? "Booking form not found." }
@@ -752,6 +835,10 @@ export async function getNativeBookingFormDownloadUrl(bookingFormId: string): Pr
     }
 
     if (["awaiting_zk_signature", "zk_signed"].includes(String(form.status))) {
+      const clientSignedPath = clientSignedBookingPdfPath(String(form.document_ref))
+      if (await bookingDocumentExists(clientSignedPath)) {
+        return { ok: true, url: await createBookingDocumentUrl(clientSignedPath) }
+      }
       const { data: signatures, error: signaturesError } = await gate.supabase
         .from("booking_form_signatures")
         .select(
@@ -761,10 +848,16 @@ export async function getNativeBookingFormDownloadUrl(bookingFormId: string): Pr
       if (signaturesError) throw new Error(signaturesError.message)
       const clientRow = (signatures ?? []).find((row) => row.signer_role === "client")
       if (clientRow) {
-        const snapshot = form.snapshot_data as BookingFormSnapshot
-        const clientSignedPath = `forms/${form.document_ref}/client-signed.pdf`
+        const { data: snapshotRow, error: snapshotError } = await gate.supabase
+          .from("booking_forms")
+          .select("snapshot_data")
+          .eq("id", bookingFormId)
+          .maybeSingle()
+        if (snapshotError || !snapshotRow) {
+          throw new Error(snapshotError?.message ?? "Booking form not found.")
+        }
         await writeClientSignedBookingPdf({
-          snapshot,
+          snapshot: snapshotRow.snapshot_data as BookingFormSnapshot,
           unsignedPath: clientSignedPath,
           clientSignature: clientRow,
         })

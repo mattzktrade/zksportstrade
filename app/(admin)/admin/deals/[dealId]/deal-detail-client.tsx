@@ -18,14 +18,12 @@ import {
 } from "@/components/admin/deal-invoice-currency-toggle"
 import { AdminPageHeader, AdminPanel, AdminDesktopTable, AdminMobileList, StatusPill } from "@/components/admin/admin-page-kit"
 import { AdminModalScrim } from "@/components/admin/admin-list-preview"
-import type { DealBasketSupplier } from "@/components/admin/deal-line-basket"
 import { DEAL_NEXT_ACTION_OPTIONS, DEAL_SOURCE_LABELS, DEAL_SOURCES, DEAL_STAGES, DEAL_STAGE_LABELS, canonicalDealSource, canonicalDealStage, dealConfirmedOffPlatform, dealSourceLabel, dealSourceTone, friendlyDealActivitySummary, type CrmAccountOption, type DealEventOption, type DealPackageOption, type DealStage } from "@/lib/crm/deal-types"
 import { adminPipelineHome, enquiryStageLabel, enquiryStageTone, isEnquiryPipelineStage } from "@/lib/crm/deal-pipeline"
 import { enquiryHasClientReply } from "@/lib/crm/enquiry-replied"
 import { effectiveDealStageAfterCountersign } from "@/lib/booking-forms/advance-deal"
 import { nextActionForDealStage } from "@/lib/crm/deal-workflow"
 import type { DealAddressDraft, DealDetailPageData, DealFulfilmentClient } from "@/lib/crm/deal-detail"
-import type { StaffOption } from "@/lib/crm/lead-types"
 import {
   catalogPriceInInvoiceCurrency,
   convertInvoiceSalePrice,
@@ -40,6 +38,7 @@ import { formatMoney } from "@/lib/format/money"
 import { adminPackagePath } from "@/lib/admin/package-link"
 import { adminAccountPath, adminContactPath, adminSupplierPath } from "@/lib/crm/profile-links"
 import { mergeCrmAccountOptions } from "@/lib/crm/party-search"
+import { useDealWorkspaceOptions } from "@/lib/admin/use-deal-workspace-options"
 import { deleteOrderGuest, saveOrderGuests } from "@/app/(admin)/admin/operations/actions"
 import { OperationsGuestEditor, type GuestDraft } from "@/app/(admin)/admin/operations/guest-editor"
 import { updateDealClientDetails, updateDealCommercials, updateDealLineSupplier, addDealNote, deleteDeal } from "../deal-edit-actions"
@@ -250,11 +249,6 @@ function AddressInputs({
 
 export function DealDetailClient({
   data,
-  accountOptions,
-  packageOptions,
-  eventOptions = [],
-  staffOptions,
-  supplierOptions,
   currentCanSendBookingForm,
   currentCanSignBookingForm,
   currentProfileName,
@@ -265,11 +259,6 @@ export function DealDetailClient({
 }: {
   data: DealDetailPageData
   callSummary?: EnquiryCallSummary
-  accountOptions: CrmAccountOption[]
-  packageOptions: DealPackageOption[]
-  eventOptions: DealEventOption[]
-  staffOptions: StaffOption[]
-  supplierOptions: DealBasketSupplier[]
   currentCanSendBookingForm: boolean
   currentCanSignBookingForm: boolean
   currentProfileName: string
@@ -277,6 +266,14 @@ export function DealDetailClient({
   canManageOperations: boolean
   canManageDeals: boolean
 }) {
+  const {
+    packageOptions,
+    eventOptions,
+    accountOptions,
+    staffOptions,
+    supplierOptions,
+    optionsLoaded,
+  } = useDealWorkspaceOptions()
   const router = useRouter()
   const { deal, client, guests, lines, notes, bookingForm, bookingEvents, operationsEmails, operationsContact } = data
   const [pending, startTransition] = useTransition()
@@ -1570,7 +1567,7 @@ export function DealDetailClient({
                             )
                           }}
                           options={catalogPackageOptions.map((option) => ({ value: option.id, label: option.label }))}
-                          placeholder="Search product…"
+                          placeholder={optionsLoaded ? "Search product…" : "Loading products…"}
                           className="mt-1 h-10 w-full rounded-md border bg-white px-2 text-[10px]"
                         />
                         {product ? (

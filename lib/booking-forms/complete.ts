@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { generateBookingFormPdf } from "@/lib/booking-forms/pdf"
-import { uploadBookingDocument } from "@/lib/booking-forms/storage"
+import { downloadBookingDocument, uploadBookingDocument } from "@/lib/booking-forms/storage"
 import { storedSignatureToPdf, type StoredBookingSignature } from "@/lib/booking-forms/signed-document"
 import { snapshotClientCcEmails } from "@/lib/booking-forms/cc-emails"
 import type { BookingFormSnapshot } from "@/lib/booking-forms/types"
@@ -8,6 +8,12 @@ import { sendCompletedBookingFormEmail } from "@/lib/email/send-booking-form"
 import { ensureNativeDealOrderAndInvoice } from "@/lib/crm/deal-order-automation"
 import { revalidateNativeBookingFormPages } from "@/lib/booking-forms/revalidate"
 import { markDealSignedAfterZkCountersign } from "@/lib/booking-forms/advance-deal"
+
+function preservedCompletionEmailError(lastError: string): string | null {
+  if (/completion email pending/i.test(lastError)) return "Completion email pending."
+  const failed = lastError.match(/Completion email failed\.[^\n]*/i)
+  return failed ? failed[0].trim() : null
+}
 
 function errorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "Unexpected booking-form error."
@@ -22,13 +28,14 @@ export async function completeZkSignedBookingForm(input: {
   bookingFormId: string
   adminEmail: string
   actorProfileId?: string | null
+  waitForInvoiceSync?: boolean
 }): Promise<void> {
   const admin = createAdminClient()
   if (!admin) throw new Error("Supabase service role is not configured.")
 
   const { data: form, error: formError } = await admin
     .from("booking_forms")
-    .select("id, deal_id, document_ref, status, snapshot_data")
+    .select("id, deal_id, document_ref, status, snapshot_data, last_error")
     .eq("id", input.bookingFormId)
     .maybeSingle()
   if (formError || !form) throw new Error(formError?.message ?? "Booking form not found.")
@@ -75,6 +82,7 @@ export async function completeZkSignedBookingForm(input: {
         final_pdf_path: finalPath,
         completed_at: now,
         updated_at: now,
+        last_error: "Completion email pending.",
       })
       .eq("id", form.id)
       .eq("status", "zk_signed")
@@ -89,7 +97,35 @@ export async function completeZkSignedBookingForm(input: {
         actor_profile_id: input.actorProfileId ?? null,
         metadata: { final_pdf_path: finalPath },
       })
-      if (eventError) throw new Error(eventError.message)
+      if (eventError) {
+        console.error(
+          "[booking-forms] completed event insert failed:",
+          form.id,
+          eventError.message,
+        )
+      }
+    }
+  }
+
+  let emailNotice: string | null = justFinalized
+    ? null
+    : preservedCompletionEmailError(String(form.last_error ?? ""))
+  if (justFinalized && finalPdf) {
+    try {
+      const email = await sendCompletedBookingFormEmail({
+        clientEmail: snapshot.billTo.contactEmail,
+        clientName: snapshot.billTo.contactName,
+        adminEmail: input.adminEmail,
+        documentRef: snapshot.documentRef,
+        eventName: snapshot.deal.title,
+        pdf: finalPdf,
+        ccEmails: snapshotClientCcEmails(snapshot),
+      })
+      emailNotice = email.ok
+        ? null
+        : `Completion email failed. ${email.error ?? email.skipped ?? "Completion email failed."}`
+    } catch (emailError) {
+      emailNotice = `Completion email failed. ${errorMessage(emailError)}`
     }
   }
 
@@ -101,7 +137,9 @@ export async function completeZkSignedBookingForm(input: {
   }
 
   try {
-    const orderResult = await ensureNativeDealOrderAndInvoice(String(form.deal_id))
+    const orderResult = await ensureNativeDealOrderAndInvoice(String(form.deal_id), {
+      waitForInvoiceSync: input.waitForInvoiceSync,
+    })
     invoiceWarning = orderResult.warning ?? invoiceWarning
   } catch (automationError) {
     invoiceWarning = errorMessage(automationError)
@@ -114,25 +152,41 @@ export async function completeZkSignedBookingForm(input: {
       .eq("id", form.deal_id)
   }
 
-  let emailFailed: string | null = null
-  if (justFinalized && finalPdf) {
-    const email = await sendCompletedBookingFormEmail({
-      clientEmail: snapshot.billTo.contactEmail,
-      clientName: snapshot.billTo.contactName,
-      adminEmail: input.adminEmail,
-      documentRef: snapshot.documentRef,
-      eventName: snapshot.deal.title,
-      pdf: finalPdf,
-      ccEmails: snapshotClientCcEmails(snapshot),
-    })
-    if (!email.ok) {
-      emailFailed = email.error ?? email.skipped ?? "Completion email failed."
-    }
-  }
-
-  const lastError = invoiceWarning
-    ? `Order/invoice automation needs attention: ${invoiceWarning}`
-    : emailFailed
-  await admin.from("booking_forms").update({ last_error: lastError }).eq("id", form.id)
+  const lastErrorParts = [
+    emailNotice,
+    invoiceWarning ? `Order/invoice automation needs attention: ${invoiceWarning}` : null,
+  ].filter(Boolean)
+  await admin.from("booking_forms").update({ last_error: lastErrorParts.join(" ") || null }).eq("id", form.id)
   revalidateNativeBookingFormPages(String(form.deal_id))
+}
+
+export async function retryCompletedBookingFormEmail(bookingFormId: string): Promise<boolean> {
+  const admin = createAdminClient()
+  if (!admin) return false
+  const { data: form, error } = await admin
+    .from("booking_forms")
+    .select("id, status, snapshot_data, final_pdf_path, last_error")
+    .eq("id", bookingFormId)
+    .maybeSingle()
+  if (error || !form || String(form.status) !== "completed" || !form.final_pdf_path) return false
+  const lastError = String(form.last_error ?? "")
+  if (!/completion email (failed|pending)/i.test(lastError)) return false
+  const snapshot = form.snapshot_data as BookingFormSnapshot
+  const pdf = await downloadBookingDocument(String(form.final_pdf_path))
+  const email = await sendCompletedBookingFormEmail({
+    clientEmail: snapshot.billTo.contactEmail,
+    clientName: snapshot.billTo.contactName,
+    documentRef: snapshot.documentRef,
+    eventName: snapshot.deal.title,
+    pdf,
+    ccEmails: snapshotClientCcEmails(snapshot),
+  })
+  if (!email.ok) return false
+  const remaining = lastError
+    .replace(/Completion email pending\./gi, "")
+    .replace(/Completion email failed\.[^\n]*/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+  await admin.from("booking_forms").update({ last_error: remaining || null }).eq("id", form.id)
+  return true
 }

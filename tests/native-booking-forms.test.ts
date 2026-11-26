@@ -5,6 +5,7 @@ import { decodePDFRawStream, PDFDocument, PDFRawStream, StandardFonts } from "pd
 import { generateBookingFormPdf } from "../lib/booking-forms/pdf"
 import {
   applyBookingFormEdits,
+  bookingFormEditsUnchanged,
   snapshotToEdits,
 } from "../lib/booking-forms/edits"
 import {
@@ -570,9 +571,11 @@ test("booking form signing page uses a product table, colour logo, and client si
   const actions = readFileSync("app/(admin)/admin/deals/booking-form-actions.ts", "utf8")
   assert.match(actions, /await completeZkSignedBookingForm/)
   assert.match(actions, /completeZkSignedBookingForm/)
-  assert.doesNotMatch(actions, /scheduleAfterResponse/)
+  assert.match(actions, /scheduleAfterResponse/)
+  assert.match(actions, /waitForInvoiceSync: false/)
   assert.match(panel, /Create order &amp; send invoice/)
-  assert.match(panel, /Signing and creating the invoice/)
+  assert.match(panel, /Recording your signature/)
+  assert.match(panel, /Open PDF/)
   const overlays = readFileSync("components/admin/admin-list-preview.tsx", "utf8")
   assert.match(overlays, /admin-overlay/)
 })
@@ -596,8 +599,107 @@ test("booking form PDF upload retries Supabase storage database timeouts", () =>
   const storage = readFileSync("lib/booking-forms/storage.ts", "utf8")
   assert.match(storage, /STORAGE_UPLOAD_ATTEMPTS/)
   assert.match(storage, /upsert: upsert \|\| attempt > 0/)
+  assert.match(storage, /bookingDocumentExists/)
   const actions = readFileSync("app/(admin)/admin/deals/booking-form-actions.ts", "utf8")
   assert.match(actions, /uploadBookingDocument\(unsignedPath, unsignedPdf, "application\/pdf", true\)/)
+})
+
+test("director review and countersign reuse stored PDFs and do not block on Xero", () => {
+  const actions = readFileSync("app/(admin)/admin/deals/booking-form-actions.ts", "utf8")
+  const signedDocument = readFileSync("lib/booking-forms/signed-document.ts", "utf8")
+  const signRoute = readFileSync("app/api/booking-forms/sign/route.ts", "utf8")
+  const editor = readFileSync("app/(admin)/admin/deals/booking-form-editor.tsx", "utf8")
+  const pdf = readFileSync("lib/booking-forms/pdf.ts", "utf8")
+  const complete = readFileSync("lib/booking-forms/complete.ts", "utf8")
+  const automation = readFileSync("lib/crm/deal-order-automation.ts", "utf8")
+  const panel = readFileSync("app/(admin)/admin/deals/booking-form-panel.tsx", "utf8")
+  const queries = readFileSync("lib/booking-forms/queries.ts", "utf8")
+  const dealDetail = readFileSync("app/(admin)/admin/deals/[dealId]/page.tsx", "utf8")
+
+  assert.match(signedDocument, /clientSignedBookingPdfPath/)
+  assert.match(actions, /bookingDocumentExists\(clientSignedPath\)/)
+  assert.match(actions, /bookingFormEditsUnchanged\(snapshotToEdits/)
+  assert.match(actions, /createBookingDocumentUrl\(previewPath\)/)
+  assert.doesNotMatch(actions, /pdfBase64/)
+  assert.match(editor, /bookingFormId: reissueFromId/)
+  assert.match(editor, /result\.url/)
+  assert.match(signRoute, /clientSignedPath/)
+  assert.match(pdf, /loadBrandLogoBytes/)
+  assert.match(complete, /waitForInvoiceSync/)
+  assert.match(automation, /waitForInvoiceSync === false/)
+  assert.match(actions, /scheduleAfterResponse/)
+  assert.match(panel, /Opening PDF/)
+  assert.match(panel, /freshPrefetchedPdfUrl/)
+  assert.match(panel, /initialPdf/)
+  assert.match(queries, /chunkList\(formIds, 80\)\.map/)
+  assert.match(dealDetail, /AdminRouteShell/)
+  const emailAt = complete.indexOf("sendCompletedBookingFormEmail")
+  const orderAt = complete.indexOf("ensureNativeDealOrderAndInvoice")
+  assert.ok(emailAt > 0 && emailAt < orderAt)
+  assert.match(complete, /Completion email pending/)
+  assert.match(complete, /retryCompletedBookingFormEmail/)
+  assert.match(complete, /preservedCompletionEmailError/)
+  const dealsPage = readFileSync("app/(admin)/admin/deals/page.tsx", "utf8")
+  assert.doesNotMatch(dealsPage, /getDealPackagePicker/)
+  assert.doesNotMatch(dealsPage, /getCrmAccountOptions/)
+  assert.doesNotMatch(dealDetail, /getDealPackagePicker/)
+  const dealsClient = readFileSync("app/(admin)/admin/deals/deals-client.tsx", "utf8")
+  assert.match(dealsClient, /useDealWorkspaceOptions/)
+  const workspaceAction = readFileSync(
+    "app/(admin)/admin/deals/deal-workspace-options-actions.ts",
+    "utf8",
+  )
+  assert.match(workspaceAction, /deals\.view/)
+  assert.match(workspaceAction, /loadDealWorkspaceOptions/)
+})
+
+test("unchanged booking-form edits skip derived payment terms", () => {
+  const snapshot: BookingFormSnapshot = {
+    schemaVersion: 1,
+    template: {
+      key: "zk-standard-booking-form",
+      version: 1,
+      legalContentVersion: "2026-08-11",
+    },
+    documentRef: "ZK-TEST-0001",
+    createdAt: "2026-08-11T12:00:00.000Z",
+    deal: { id: "deal-1", title: "Abu Dhabi F1 GP 2026" },
+    seller: BOOKING_SELLER,
+    billTo: {
+      accountId: "account-1",
+      accountName: "Example Agent",
+      contactId: "contact-1",
+      contactName: "Example Signer",
+      contactEmail: "signer@example.com",
+      addressLines: ["Dubai", "UAE"],
+    },
+    lines: [
+      {
+        dealLineItemId: "line-1",
+        packageId: "package-1",
+        eventName: "Abu Dhabi F1 GP 2026",
+        packageName: "House 44 Paddock Club",
+        description: "Abu Dhabi F1 GP 2026 — House 44 Paddock Club",
+        quantity: 2,
+        unitPrice: 22525,
+        lineTotal: 45050,
+        currency: "USD",
+      },
+    ],
+    currency: "USD",
+    subtotal: 45050,
+    taxRate: 0.05,
+    taxAmountIncluded: 2145.24,
+    total: 45050,
+    paymentTerms: "USD 45050.00 (100.00%) due upon signing, all tax included.",
+    paymentMethod: "Wire Transfer",
+    bankDetails: BOOKING_BANK_DETAILS,
+    acknowledgement: BOOKING_ACKNOWLEDGEMENT,
+    terms: BOOKING_TERMS,
+  }
+  const edits = snapshotToEdits(snapshot)
+  assert.equal(bookingFormEditsUnchanged(edits, { ...edits, paymentTerms: "rewritten copy" }), true)
+  assert.equal(bookingFormEditsUnchanged(edits, { ...edits, dealTitle: "Other title" }), false)
 })
 
 test("saving a booking form draft is CMS-staff work; sending to the client is admin-only", () => {
@@ -717,6 +819,8 @@ test("ZK countersign advances the deal immediately and completion can finish a s
   assert.match(complete, /status !== "zk_signed" && status !== "completed"/)
   assert.match(complete, /markDealSignedAfterZkCountersign/)
   assert.match(complete, /ensureNativeDealOrderAndInvoice/)
+  assert.match(complete, /waitForInvoiceSync: input.waitForInvoiceSync/)
+  assert.match(complete, /preservedCompletionEmailError/)
   assert.doesNotMatch(complete, /if \(String\(form\.status\) === "completed"\) return/)
   const automation = readFileSync("lib/crm/deal-order-automation.ts", "utf8")
   assert.match(automation, /markDealSignedAfterZkCountersign/)

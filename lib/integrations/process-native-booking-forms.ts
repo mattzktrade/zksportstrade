@@ -1,7 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getServerSiteOrigin } from "@/lib/auth/site-origin"
 import { UNSIGNED_STAGES_AFTER_ZK_SIGNATURE } from "@/lib/booking-forms/advance-deal"
-import { completeZkSignedBookingForm } from "@/lib/booking-forms/complete"
+import { completeZkSignedBookingForm, retryCompletedBookingFormEmail } from "@/lib/booking-forms/complete"
 import {
   BOOKING_FORM_FINAL_REMINDER_EVENT,
   BOOKING_FORM_HOLD_RELEASED_NOTICE_EVENT,
@@ -136,6 +136,7 @@ export async function processNativeBookingForms(): Promise<NativeBookingFormAuto
   const holdReleased = await sendHoldReleasedNotices(admin, now)
   const reminders = await sendUnsignedReminders(admin, now)
   const completions = await healStuckSignedBookingForms(admin)
+  const completionEmails = await healFailedCompletionEmails(admin)
 
   return {
     expired: Number(expiredCount ?? 0),
@@ -145,8 +146,8 @@ export async function processNativeBookingForms(): Promise<NativeBookingFormAuto
     finalReminderFailures: reminders.finalReminderFailures,
     holdReleasedNoticesSent: holdReleased.sent,
     holdReleasedNoticeFailures: holdReleased.failures,
-    completionsHealed: completions.healed,
-    completionHealFailures: completions.failures,
+    completionsHealed: completions.healed + completionEmails.healed,
+    completionHealFailures: completions.failures + completionEmails.failures,
     packagesSynced: [...packagesToSync],
   }
 }
@@ -202,6 +203,37 @@ async function healStuckSignedBookingForms(
       failures += 1
       console.error(
         "[booking-forms] completion heal failed:",
+        form.id,
+        healError instanceof Error ? healError.message : healError,
+      )
+    }
+  }
+  return { healed, failures }
+}
+
+async function healFailedCompletionEmails(
+  admin: AdminClient,
+): Promise<{ healed: number; failures: number }> {
+  const { data: forms, error } = await admin
+    .from("booking_forms")
+    .select("id")
+    .eq("status", "completed")
+    .not("final_pdf_path", "is", null)
+    .ilike("last_error", "%completion email%")
+    .limit(5)
+  if (error || !forms?.length) return { healed: 0, failures: error ? 1 : 0 }
+
+  let healed = 0
+  let failures = 0
+  for (const form of forms) {
+    try {
+      const ok = await retryCompletedBookingFormEmail(String(form.id))
+      if (ok) healed += 1
+      else failures += 1
+    } catch (healError) {
+      failures += 1
+      console.error(
+        "[booking-forms] completion email heal failed:",
         form.id,
         healError instanceof Error ? healError.message : healError,
       )

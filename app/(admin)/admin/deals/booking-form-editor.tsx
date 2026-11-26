@@ -264,15 +264,16 @@ export function BookingFormEditor({
     if (!edits) return
     setPreviewing(true)
     try {
-      const result = await previewNativeBookingFormPdf({ dealId, edits })
+      const result = await previewNativeBookingFormPdf({
+        dealId,
+        edits,
+        bookingFormId: reissueFromId,
+      })
       if (!result.ok) {
         toast.error(result.message)
         return
       }
-      const binary = atob(result.pdfBase64)
-      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
-      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
-      window.open(url, "_blank", "noopener,noreferrer")
+      window.open(result.url, "_blank", "noopener,noreferrer")
     } finally {
       setPreviewing(false)
     }
@@ -306,7 +307,12 @@ export function BookingFormEditor({
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
           {loading || !edits ? (
-            <p className="text-sm text-slate-500">Loading booking form…</p>
+            <div className="space-y-3" aria-busy="true">
+              <p className="text-sm text-slate-500">Loading booking form…</p>
+              <div className="h-24 animate-pulse rounded-lg bg-slate-100" />
+              <div className="h-40 animate-pulse rounded-lg bg-slate-100" />
+              <div className="h-32 animate-pulse rounded-lg bg-slate-100" />
+            </div>
           ) : (
             <>
               <Section title="Bill to" hint="This is who the form is addressed to and who receives the email. Use CC for extra recipients.">
