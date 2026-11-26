@@ -20,8 +20,10 @@ describe("session-guard paths", () => {
     assert.equal(isSessionlessApiPath("/api/webhooks/whatsapp"), true)
     assert.equal(isSessionlessApiPath("/api/webhooks/marketing-outreach-email"), true)
     assert.equal(isSessionlessApiPath("/api/adgp/catalog"), true)
+    assert.equal(isSessionlessApiPath("/mcp"), true)
     assert.equal(isSessionlessApiPath("/api/integrations/xero/connect"), false)
     assert.equal(isSessionlessApiPath("/admin/catalog/spain-test"), false)
+    assert.equal(isSessionlessApiPath("/admin/mcp"), false)
   })
 
   it("keeps login, auth callbacks, and booking sign links public", () => {
@@ -38,6 +40,7 @@ describe("session-guard paths", () => {
     assert.equal(isPublicPath("/api/guest-details/token"), true)
     assert.equal(isPublicPath("/api/tickets/token/pdf"), true)
     assert.equal(isPublicPath("/api/tickets/token/wallet/apple"), true)
+    assert.equal(isPublicPath("/mcp"), true)
     assert.equal(isPublicPath("/admin/catalog/spain-test"), false)
     assert.equal(isPublicPath("/"), false)
   })

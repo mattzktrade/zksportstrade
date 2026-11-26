@@ -45,6 +45,13 @@ export default async function SettingsPage({
       status: wix ? "API keys configured" : "Disconnected",
       connected: wix,
     },
+    {
+      href: "/admin/mcp",
+      title: "MCP keys",
+      description: "Bearer keys for Grok Bot and other MCP clients at /mcp. Create, name, and revoke keys here.",
+      status: "Streamable HTTP · /mcp",
+      connected: true,
+    },
   ]
 
   return (

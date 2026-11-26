@@ -25,8 +25,13 @@ export type GateDecision =
   | GateRedirect
   | { type: "clear_session"; then: "next" | Omit<GateRedirect, "type"> }
 
+export function isMcpPath(path: string): boolean {
+  return path === "/mcp" || path.startsWith("/mcp/")
+}
+
 export function isPublicApiPath(path: string): boolean {
   return (
+    isMcpPath(path) ||
     path.startsWith("/api/webhooks/") ||
     path.startsWith("/api/cron/") ||
     path.startsWith("/api/adgp/") ||
@@ -40,6 +45,7 @@ export function isPublicApiPath(path: string): boolean {
 
 export function isSessionlessApiPath(path: string): boolean {
   return (
+    isMcpPath(path) ||
     path.startsWith("/api/cron/") ||
     path.startsWith("/api/webhooks/") ||
     path.startsWith("/api/adgp/")

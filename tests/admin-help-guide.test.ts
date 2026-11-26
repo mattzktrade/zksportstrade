@@ -64,6 +64,10 @@ describe("admin help guide", () => {
     assert.ok(emailReplies.topics.some((topic) => topic.id === "assistant"))
     assert.ok(emailReplies.questions.some((item) => /email replies/i.test(item.q)))
 
+    const grok = searchHelp("Grok Bot")
+    assert.ok(grok.topics.some((topic) => topic.id === "assistant" || topic.id === "pages"))
+    assert.ok(grok.questions.some((item) => /Grok Bot/i.test(item.q)))
+
     const checkIn = searchHelp("check-in")
     assert.ok(checkIn.topics.some((topic) => topic.id === "after-sale" || topic.id === "questions"))
     assert.ok(checkIn.questions.some((item) => /check guests in/i.test(item.q)))

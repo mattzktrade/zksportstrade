@@ -152,7 +152,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     nav: "What each page does",
     title: "What each page does",
     summary: "One-line explanations of the left menu, so you know where to click.",
-    keywords: ["menu", "navigation", "pages", "what does", "where", "dashboard", "marketing", "templates"],
+    keywords: ["menu", "navigation", "pages", "what does", "where", "dashboard", "marketing", "templates", "mcp", "grok"],
     blocks: [
       {
         type: "p",
@@ -310,7 +310,7 @@ export const HELP_TOPICS: HelpTopic[] = [
           },
           {
             title: "Settings",
-            body: "Team logins and connections to Xero and the website. Most people never need this.",
+            body: "Team logins, Xero, the website, and MCP keys for Grok Bot. Most people never need this.",
             href: "/admin/settings",
           },
         ],
@@ -698,6 +698,8 @@ export const HELP_TOPICS: HelpTopic[] = [
       "outlook",
       "power automate",
       "notify",
+      "mcp",
+      "grok",
     ],
     blocks: [
       {
@@ -759,6 +761,10 @@ export const HELP_TOPICS: HelpTopic[] = [
           {
             q: "Do email replies come into Inbox?",
             a: "Yes, once the one-time Outlook Power Automate flow is on. Replies to sales@ from someone we already emailed, or a unique CRM contact, land in the same email thread. You reply from Inbox. Random sales@ mail stays in Outlook only.",
+          },
+          {
+            q: "How do I connect Grok Bot to the CRM?",
+            a: "An admin opens Settings → MCP keys, creates a named sales-agent key, and pastes it into Grok as a Bearer token for https://zk-sports.trade/mcp. The bot can look up stock and contacts, draft deals, and send a booking form to directors. It cannot send the form to the client, countersign, or delete anything.",
           },
         ],
       },

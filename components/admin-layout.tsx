@@ -103,7 +103,14 @@ const navigation: NavItem[] = [
   { name: "Finance", href: "/admin/finance", icon: CircleDollarSign },
   { name: "Marketing", href: "/admin/marketing", icon: Megaphone },
   { name: "Help", href: "/admin/help", icon: CircleHelp },
-  { name: "Settings", href: "/admin/settings", icon: Settings },
+  {
+    name: "Settings",
+    icon: Settings,
+    children: [
+      { name: "Team & integrations", href: "/admin/settings", icon: Settings },
+      { name: "MCP keys", href: "/admin/mcp", icon: KeyRound },
+    ],
+  },
 ]
 
 const JUMP_KEYWORDS: Record<string, string> = {
@@ -119,6 +126,8 @@ const JUMP_KEYWORDS: Record<string, string> = {
   "/admin/orders": "bookings invoices portal",
   "/admin/finance": "invoices payments xero",
   "/admin/check-in": "check-in scan qr door tickets arrived guest list",
+  "/admin/mcp": "mcp grok bot api keys assistant streamable http",
+  "/admin/settings": "settings team users integrations xero wix mcp",
 }
 
 function jumpDestinationsFor(items: NavItem[]): AdminJumpItem[] {
@@ -166,6 +175,7 @@ function adminPageTitle(pathname: string): string {
   if (pathname.startsWith("/admin/marketing")) return "Marketing"
   if (pathname.startsWith("/admin/help")) return "Help"
   if (pathname.startsWith("/admin/profile")) return "My profile"
+  if (pathname.startsWith("/admin/mcp")) return "MCP keys"
   if (pathname.startsWith("/admin/settings") || pathname.startsWith("/admin/integrations")) return "Settings"
   return "Admin"
 }
@@ -175,18 +185,23 @@ function itemIsActive(pathname: string, href: string): boolean {
   const path = href.split("?")[0]
   if (path === "/admin/catalog" && pathname.startsWith("/admin/catalog/events")) return false
   if (path === "/admin/settings" && pathname.startsWith("/admin/integrations")) return true
+  if (path === "/admin/settings" && pathname.startsWith("/admin/mcp")) return false
   return pathname === path || pathname.startsWith(`${path}/`)
 }
 
 function navigationFor(canManageSettings: boolean): NavItem[] {
   return navigation.flatMap((item) => {
+    if (item.name === "Settings" && !canManageSettings) return []
     if (item.href === "/admin/settings" && !canManageSettings) return []
     if (!item.children) return [item]
     const children = item.children.filter((child) => {
       if (child.hidden) return false
       if (child.href === "/admin/imports" && !canManageSettings) return false
+      if (child.href === "/admin/mcp" && !canManageSettings) return false
+      if (child.href === "/admin/settings" && !canManageSettings) return false
       return true
     })
+    if (children.length === 0) return []
     return [{ ...item, children }]
   })
 }
