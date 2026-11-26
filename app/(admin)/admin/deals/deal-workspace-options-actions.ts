@@ -1,7 +1,8 @@
 "use server"
 
 import { hasCmsPermission } from "@/lib/auth/permissions"
-import { loadDealWorkspaceOptions, type DealWorkspaceOptions } from "@/lib/crm/deal-workspace-options"
+import type { DealWorkspaceOptions } from "@/lib/crm/deal-workspace-options"
+import { loadDealWorkspaceOptions } from "@/lib/crm/load-deal-workspace-options"
 import { getPortalProfile } from "@/lib/supabase/profile"
 
 export async function loadDealWorkspaceOptionsAction(): Promise<

@@ -651,6 +651,13 @@ test("director review and countersign reuse stored PDFs and do not block on Xero
   )
   assert.match(workspaceAction, /deals\.view/)
   assert.match(workspaceAction, /loadDealWorkspaceOptions/)
+  const workspaceHook = readFileSync("lib/admin/use-deal-workspace-options.ts", "utf8")
+  assert.match(workspaceHook, /loadDealWorkspaceOptionsAction/)
+  assert.doesNotMatch(workspaceHook, /lib\/crm\/load-deal-workspace-options/)
+  assert.doesNotMatch(workspaceHook, /lib\/inventory\/suppliers/)
+  const workspaceTypes = readFileSync("lib/crm/deal-workspace-options.ts", "utf8")
+  assert.doesNotMatch(workspaceTypes, /getSuppliers/)
+  assert.doesNotMatch(workspaceTypes, /lib\/supabase\/server/)
 })
 
 test("unchanged booking-form edits skip derived payment terms", () => {
